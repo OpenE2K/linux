@@ -2186,6 +2186,9 @@ static long snd_seq_ioctl(struct file *file, unsigned int cmd,
 #else
 #define snd_seq_ioctl_compat	NULL
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#include "seq_ptr128.c"
+#endif
 
 /* -------------------------------------------------------- */
 
@@ -2511,6 +2514,9 @@ static const struct file_operations snd_seq_f_ops =
 	.poll =		snd_seq_poll,
 	.unlocked_ioctl =	snd_seq_ioctl,
 	.compat_ioctl =	snd_seq_ioctl_compat,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl =	snd_seq_ioctl_ptr128,
+#endif
 };
 
 static struct device seq_dev;

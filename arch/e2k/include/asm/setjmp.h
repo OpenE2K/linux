@@ -15,7 +15,6 @@ struct jump_buf_e2k {
 	e2k_sbr_t sbr;
 };
 
-#pragma unknown_control_flow(e2k_setjmp)
-extern noinline int e2k_setjmp(struct jump_buf_e2k *jb);
+extern noinline __attribute__((returns_twice)) int e2k_setjmp(struct jump_buf_e2k *jb);
 
 extern noinline void e2k_longjmp(const struct jump_buf_e2k *jb, int value);

@@ -9,20 +9,20 @@
 #include <asm/syscalls.h>
 #include <asm/trap_table.h>
 
-#define	SYSTEM_CALL_TBL_ENTRY(sysname)	(system_call_func) sysname
+#define	SYSTEM_CALL_TBL_ENTRY(sysname)	((system_call_func) (void *) sysname)
 
 #ifdef CONFIG_PROTECTED_MODE
-#define	PROT_SYSCALL_TBL_ENTRY(sysname)	((protected_system_call_func) sysname)
+#define	PROT_SYSCALL_TBL_ENTRY(sysname)	((protected_system_call_func) (void *) sysname)
 #else
-#define	PROT_SYSCALL_TBL_ENTRY(sysname)	((protected_system_call_func) sys_ni_syscall)
+#define	PROT_SYSCALL_TBL_ENTRY(sysname)	((protected_system_call_func) (void *) sys_ni_syscall)
 #endif
 
 #ifdef CONFIG_COMPAT
 # define COMPAT_SYSTEM_CALL_TBL_ENTRY(sysname) \
-		(system_call_func) compat_##sysname
+		((system_call_func) (void *) compat_##sysname)
 #else
 # define COMPAT_SYSTEM_CALL_TBL_ENTRY(sysname) \
-		(system_call_func) sys_ni_syscall
+		((system_call_func) (void *) sys_ni_syscall)
 #endif
 
 
@@ -30,7 +30,7 @@ static asmlinkage long sys_deprecated(void)
 {
 	pr_info_ratelimited("System call #%d/%s is obsolete\n",
 			    current_pt_regs()->sys_num,
-			    SYSCALL_NAME(current_pt_regs()->sys_num));
+			    SYSCALL_NAME_ON_ID(current_pt_regs()->sys_num));
 	return -ENOSYS;
 }
 
@@ -1357,7 +1357,7 @@ const protected_system_call_func sys_call_table_entry8[NR_syscalls] = {
 	PROT_SYSCALL_TBL_ENTRY(sys_clock_getres),
 	PROT_SYSCALL_TBL_ENTRY(sys_clock_nanosleep),
 	PROT_SYSCALL_TBL_ENTRY(sys_msgget),		/* 270 */
-	PROT_SYSCALL_TBL_ENTRY(sys_msgctl),
+	PROT_SYSCALL_TBL_ENTRY(protected_sys_msgctl),
 	PROT_SYSCALL_TBL_ENTRY(sys_msgrcv),
 	PROT_SYSCALL_TBL_ENTRY(sys_msgsnd),
 	PROT_SYSCALL_TBL_ENTRY(sys_semget),
@@ -1372,7 +1372,7 @@ const protected_system_call_func sys_call_table_entry8[NR_syscalls] = {
 	PROT_SYSCALL_TBL_ENTRY(sys_move_mount),
 	PROT_SYSCALL_TBL_ENTRY(sys_ni_syscall),
 	PROT_SYSCALL_TBL_ENTRY(sys_ni_syscall),		/* 285 */
-	PROT_SYSCALL_TBL_ENTRY(sys_accept4),
+	PROT_SYSCALL_TBL_ENTRY(protected_sys_accept4),
 	PROT_SYSCALL_TBL_ENTRY(sys_sched_setattr),
 	PROT_SYSCALL_TBL_ENTRY(sys_sched_getattr),
 	PROT_SYSCALL_TBL_ENTRY(sys_ioprio_set),
@@ -1414,7 +1414,7 @@ const protected_system_call_func sys_call_table_entry8[NR_syscalls] = {
 	PROT_SYSCALL_TBL_ENTRY(protected_sys_keyctl),	/* 325 */
 	PROT_SYSCALL_TBL_ENTRY(sys_ni_syscall),		/* old sys_mcst_rt */
 	PROT_SYSCALL_TBL_ENTRY(sys_getcpu),
-	PROT_SYSCALL_TBL_ENTRY(sys_move_pages),
+	PROT_SYSCALL_TBL_ENTRY(protected_sys_move_pages),
 	PROT_SYSCALL_TBL_ENTRY(sys_splice),
 	PROT_SYSCALL_TBL_ENTRY(protected_sys_vmsplice),	/* 330 */
 	PROT_SYSCALL_TBL_ENTRY(sys_tee),
@@ -1504,18 +1504,18 @@ const protected_system_call_func sys_call_table_entry8[NR_syscalls] = {
 	/* added for compatibility with x86_64 */
 	PROT_SYSCALL_TBL_ENTRY(sys_socket),
 	PROT_SYSCALL_TBL_ENTRY(sys_connect),
-	PROT_SYSCALL_TBL_ENTRY(sys_accept),		/* 405 */
+	PROT_SYSCALL_TBL_ENTRY(protected_sys_accept),		/* 405 */
 	PROT_SYSCALL_TBL_ENTRY(sys_sendto),
-	PROT_SYSCALL_TBL_ENTRY(sys_recvfrom),
+	PROT_SYSCALL_TBL_ENTRY(protected_sys_recvfrom),
 	PROT_SYSCALL_TBL_ENTRY(protected_sys_sendmsg),
 	PROT_SYSCALL_TBL_ENTRY(protected_sys_recvmsg),
 	PROT_SYSCALL_TBL_ENTRY(sys_bind),		/* 410 */
 	PROT_SYSCALL_TBL_ENTRY(sys_listen),
-	PROT_SYSCALL_TBL_ENTRY(sys_getsockname),
-	PROT_SYSCALL_TBL_ENTRY(sys_getpeername),
+	PROT_SYSCALL_TBL_ENTRY(protected_sys_getsockname),
+	PROT_SYSCALL_TBL_ENTRY(protected_sys_getpeername),
 	PROT_SYSCALL_TBL_ENTRY(sys_socketpair),
-	PROT_SYSCALL_TBL_ENTRY(sys_setsockopt),		/* 415 */
-	PROT_SYSCALL_TBL_ENTRY(sys_getsockopt),
+	PROT_SYSCALL_TBL_ENTRY(protected_sys_setsockopt), /* 415 */
+	PROT_SYSCALL_TBL_ENTRY(protected_sys_getsockopt),
 
 	PROT_SYSCALL_TBL_ENTRY(sys_ni_syscall),
 	PROT_SYSCALL_TBL_ENTRY(sys_ni_syscall),

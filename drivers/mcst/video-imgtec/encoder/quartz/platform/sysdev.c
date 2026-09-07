@@ -478,17 +478,25 @@ IMG_RESULT SYSDEVU_RegisterDriver(SYSDEVU_sInfo *sysdev) {
 	if (NO_DEVICES_REGISTERED == registered_devices)
 	{
 		ret = pci_register_driver(&(img_pci_driver.pci_driver));
+#if !defined(CONFIG_MCST)
 		BUG_ON(ret != 0);
+#endif
 		if(ret != 0)
 		{
+#if !defined(CONFIG_MCST)
 			pci_unregister_driver(&(img_pci_driver.pci_driver));
+#endif
 			return IMG_ERROR_DEVICE_UNAVAILABLE;
 		}
 	}
 
 	dev = img_pci_driver.pci_dev;
+#if defined(CONFIG_MCST)
+	if (dev == IMG_NULL)
+		return IMG_ERROR_DEVICE_UNAVAILABLE;
+#else
 	BUG_ON(dev == IMG_NULL);
-
+#endif
 	data = (struct imgpci_prvdata *)pci_get_drvdata(dev);
 
 	if (data->memmap[2].size > MAP_MEM_SIZE)

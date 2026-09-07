@@ -127,13 +127,7 @@ native_collapse_kernel_pcs(u64 *dst, const u64 *src, u64 spilled_size)
 	e2k_pcsp_t k_pcsp;
 	u64 size;
 	int i;
-	long flags = 0;
 
-	DebugUST("current host chain stack index 0x%llx, PCSHTP 0x%x\n",
-		PCSP_IND(native_read_PCSP_reg()),
-		native_read_PCSHTP_reg().ind);
-
-	raw_all_v7_irq_save(flags);
 	NATIVE_FLUSHC;
 	k_pcsp = native_read_PCSP_reg();
 	size = PCSP_IND(k_pcsp) - spilled_size;
@@ -154,7 +148,6 @@ native_collapse_kernel_pcs(u64 *dst, const u64 *src, u64 spilled_size)
 
 	k_pcsp = set_pcsp_ind(k_pcsp, size);
 	native_write_PCSP_reg(k_pcsp);
-	raw_all_v7_irq_restore(flags);
 
 	DebugUST("move spilled chain part from host top %px to\n"
 		 "bottom %px, size 0x%llx\n", src, dst, size);
@@ -167,11 +160,6 @@ native_collapse_kernel_ps(u64 *dst, const u64 *src, u64 spilled_size)
 {
 	e2k_psp_t k_psp;
 	u64 size;
-
-	BUG_ON(!raw_all_irqs_disabled());
-
-	DebugUST("current host procedure stack index 0x%llx, PSHTP 0x%x\n",
-		 PSP_IND(native_read_PSP_reg()), native_read_PSHTP_reg().ind);
 
 	NATIVE_FLUSHR;
 	k_psp = native_read_PSP_reg();
@@ -448,16 +436,20 @@ static __always_inline int user_psp_stack_copy(e2k_psp_t u_psp, s64 u_pshtp_size
 	dst = (void __user *) (PSP_PTR(u_psp) - u_pshtp_size);
 	src = (void *) PSP_BASE(k_psp);
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (host_test_intc_emul_mode(regs) && trace_host_copy_hw_stack_enabled())
 		trace_host_copy_hw_stack(dst, src, copy_size, false);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	ret = user_hw_stack_frames_copy(dst, src, copy_size,
 					regs, PSP_IND(k_psp), false);
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (host_test_intc_emul_mode(regs) && trace_host_proc_stack_frame_enabled())
 		trace_proc_stack_frames((kernel_mem_ps_t __user *) dst,
 					(kernel_mem_ps_t *) src, copy_size,
 					trace_host_proc_stack_frame);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	return ret;
 
@@ -473,15 +465,19 @@ static __always_inline int user_pcsp_stack_copy(e2k_pcsp_t u_pcsp, s64 u_pcshtp_
 	dst = (void __user *)(PCSP_PTR(u_pcsp) - u_pcshtp_size);
 	src = (void *)PCSP_BASE(k_pcsp);
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (host_test_intc_emul_mode(regs) && trace_host_copy_hw_stack_enabled())
 		trace_host_copy_hw_stack(dst, src, copy_size, true);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	ret = user_hw_stack_frames_copy(dst, src, copy_size,
 					regs, PCSP_IND(k_pcsp), true);
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (host_test_intc_emul_mode(regs) && trace_host_chain_stack_frame_enabled())
 		trace_chain_stack_frames((e2k_mem_crs_t __user *) dst,
 					 (e2k_mem_crs_t *) src, copy_size,
 					 trace_host_chain_stack_frame);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	return ret;
 }
@@ -534,9 +530,10 @@ native_user_hw_stacks_copy(struct e2k_stacks *stacks,
 	}
 
 	if (pcs_copy_size > 0) {
-		raw_all_v7_irq_disable();
+		unsigned long flags;
+		raw_all_irq_save(flags);
 		e2k_pcsp_t k_pcsp = native_read_PCSP_reg();
-		raw_all_v7_irq_enable();
+		raw_all_irq_restore(flags);
 
 		/* Since not all user data has been SPILL'ed it is possible
 		 * that we have already overflown user's hardware stack. */
@@ -558,9 +555,10 @@ native_user_hw_stacks_copy(struct e2k_stacks *stacks,
 	}
 
 	if (ps_copy_size > 0) {
-		raw_all_v7_irq_disable();
+		unsigned long flags;
+		raw_all_irq_save(flags);
 		e2k_psp_t k_psp = native_read_PSP_reg();
-		raw_all_v7_irq_enable();
+		raw_all_irq_restore(flags);
 
 		/* Since not all user data has been SPILL'ed it is possible
 		 * that we have already overflowed user's hardware stack. */
@@ -588,7 +586,7 @@ static inline void collapse_kernel_hw_stacks(pt_regs_t *regs, e2k_stacks_t *stac
 {
 	e2k_pcsp_t k_pcsp = current_thread_info()->k_pcsp;
 	e2k_psp_t k_psp = current_thread_info()->k_psp;
-	unsigned long flags, spilled_pc_size, spilled_p_size;
+	unsigned long spilled_pc_size, spilled_p_size, flags;
 	e2k_pshtp_t pshtp = stacks->pshtp;
 	u64 *dst;
 	const u64 *src;
@@ -612,28 +610,28 @@ static inline void collapse_kernel_hw_stacks(pt_regs_t *regs, e2k_stacks_t *stac
 			spilled_pc_size);
 	}
 
-	raw_all_irq_save(flags);
-
 	if (spilled_pc_size) {
 		dst = (u64 *) PCSP_BASE(k_pcsp);
 		src = (u64 *) (PCSP_BASE(k_pcsp) + spilled_pc_size);
-		collapse_kernel_pcs(regs, dst, src, spilled_pc_size);
 
+		raw_all_irq_save(flags);
+		collapse_kernel_pcs(regs, dst, src, spilled_pc_size);
 		stacks->pcshtp.ind = SZ_OF_CR;
 
 		apply_graph_tracer_delta(-spilled_pc_size);
+		raw_all_irq_restore(flags);
 	}
 
 	if (spilled_p_size) {
 		dst = (u64 *) PSP_BASE(k_psp);
 		src = (u64 *) (PSP_BASE(k_psp) + spilled_p_size);
-		collapse_kernel_ps(regs, dst, src, spilled_p_size);
 
+		raw_all_irq_save(flags);
+		collapse_kernel_ps(regs, dst, src, spilled_p_size);
 		pshtp.ind = 0;
 		stacks->pshtp = pshtp;
+		raw_all_irq_restore(flags);
 	}
-
-	raw_all_irq_restore(flags);
 }
 
 /**
@@ -695,10 +693,13 @@ static __always_inline void native_user_hw_stacks_prepare(struct e2k_stacks *sta
 
 		k_crs = (e2k_mem_crs_t *) PCSP_BASE(current_thread_info()->k_pcsp);
 		u_cframe = (e2k_mem_crs_t __priv *) PCSP_PTR(u_pcsp);
-		u_cbase = ((from & FROM_RETURN_PV_VCPU_TRAP) ||
-				host_test_intc_emul_mode(regs)) ?
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+		u_cbase = ((from & FROM_RETURN_PV_VCPU_TRAP) || host_test_intc_emul_mode(regs)) ?
 					PCSP_BASE(u_pcsp) :
 					(unsigned long) CURRENT_PCS_BASE();
+#else
+		u_cbase = (unsigned long) CURRENT_PCS_BASE();
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 		if ((unsigned long) u_cframe > u_cbase) {
 			ret = copy_priv_to_current_hw_stack(k_crs, u_cframe - 1,
 							    sizeof(*k_crs), regs, true);

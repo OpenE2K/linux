@@ -137,26 +137,6 @@ static __always_inline long AP_OBJ_SIZE(e2k_ap_t p)
 }
 
 
-
-static __always_inline e2k_ap_t
-new_ap(u64 base, u64 size, u64 ind, u64 rw)
-{
-	if (cpu_has(CPU_FEAT_V7_CPU_REGS)) {
-		e2k_ap_t ap = (e2k_ap_t){.qword = NEW_V7_CPU_REG(base, ind, size)};
-		ap.rw_v7 = rw;
-		ap.itag_v7 = ITAG_AP;
-		return ap;
-	} else {
-		e2k_ap_t ap = (e2k_ap_t) {.Base	= base, .Size	= size, .Curptr	= ind};
-		ap.rw_v6 = rw;
-		ap.itag_v6 = E2K_AP_ITAG;
-		return ap;
-	}
-}
-
-#define MAKE_AP(base, len)	new_ap((u64)(base), (u64)(len), 0, RW_ENABLE)
-
-
 /*
  * Procedure Label (PL)
  */

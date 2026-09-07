@@ -142,6 +142,9 @@ const struct file_operations nilfs_file_operations = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= nilfs_compat_ioctl,
 #endif	/* CONFIG_COMPAT */
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	= nilfs_ioctl,
+#endif
 	.mmap		= nilfs_file_mmap,
 	.open		= generic_file_open,
 	/* .release	= nilfs_release_file, */

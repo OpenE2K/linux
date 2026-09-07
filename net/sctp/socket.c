@@ -1382,7 +1382,13 @@ struct compat_sctp_getaddrs_old {
 	compat_uptr_t	addrs;		/* struct sockaddr * */
 };
 #endif
-
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+struct ptr128_sctp_getaddrs_old {
+	sctp_assoc_t            assoc_id;
+	int                     addr_num;
+	e2k_ap_t		addrs;  /* (struct sockaddr         __user *) */
+};
+#endif
 static int sctp_getsockopt_connectx3(struct sock *sk, int len,
 				     char __user *optval,
 				     int __user *optlen)
@@ -1391,7 +1397,9 @@ static int sctp_getsockopt_connectx3(struct sock *sk, int len,
 	sctp_assoc_t assoc_id = 0;
 	struct sockaddr *kaddrs;
 	int err = 0;
-
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	u64 saved_ub = get_u_border();
+#endif
 #ifdef CONFIG_COMPAT
 	if (in_compat_syscall()) {
 		struct compat_sctp_getaddrs_old param32;
@@ -1404,6 +1412,22 @@ static int sctp_getsockopt_connectx3(struct sock *sk, int len,
 		param.assoc_id = param32.assoc_id;
 		param.addr_num = param32.addr_num;
 		param.addrs = compat_ptr(param32.addrs);
+	} else
+#endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	if (in_ptr128_syscall()) {
+		struct ptr128_sctp_getaddrs_old __user *u128 =
+			(struct ptr128_sctp_getaddrs_old __user *)optval;
+		e2k_ap_t ap;
+		int tag;
+		if (len < sizeof(struct ptr128_sctp_getaddrs_old))
+			return -EINVAL;
+		if (copy_from_user(&param, u128, offsetof(struct sctp_getaddrs_old, addrs)))
+			return -EFAULT;
+		if (get_user_tagged_16(ap.qword, tag, &u128->addrs) || !IS_AP(ap, tag))
+			return -EFAULT;
+		param.addrs = (struct sockaddr  __user *)AP_PTR(ap);
+		set_ap_u_border(ap);
 	} else
 #endif
 	{
@@ -1420,6 +1444,9 @@ static int sctp_getsockopt_connectx3(struct sock *sk, int len,
 	err = __sctp_setsockopt_connectx(sk, kaddrs, param.addr_num, &assoc_id);
 	kfree(kaddrs);
 	if (err == 0 || err == -EINPROGRESS) {
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+		set_u_border(saved_ub);
+#endif
 		if (copy_to_user(optval, &assoc_id, sizeof(assoc_id)))
 			return -EFAULT;
 		if (put_user(sizeof(assoc_id), optlen))

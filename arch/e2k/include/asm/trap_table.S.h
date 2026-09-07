@@ -55,93 +55,35 @@
  * Important: the first memory access in kernel is store, not load.
  * This is needed to flush SLT before trying to load anything.
  */
-#define SWITCH_HW_STACKS_SYSCALL(tmp_pred) \
-	KERNEL_ENTRY(TSK_TI_, %r0 /* syscall number */, 0 /* hw_trap */, tmp_pred)
+#define SWITCH_HW_STACKS_SYSCALL(pred) \
+	KERNEL_ENTRY(TSK_U_, %r0 /* syscall number */, 0 /* hw_trap */, pred)
 
-/**
- * SWITCH_HW_STACKS - switch p[c]sp.{lo/hi} registers to kernel values
- * @pred: temporary predicate; will be set for user mode
- * @check_switch: set this to cmp instruction that indicates whether hardware
- *		  stacks are switched already
- *
- * Does the following:
- *
- * 1) Saves global registers either to 'thread_info.tmp_k_gregs' or to
- * 'thread_info.k_gregs'. The first area is used for trap handler since
- * we do not know whether it is from user or from kernel and whether
- * global registers have been saved already to 'thread_info.k_gregs'.
- *
- * 2) Saves stack registers to 'thread_info.tmp_user_stacks'. If this is
- * not a kernel trap then these values will be copied to pt_regs later.
- *
- * 3) Updates global and stack registers with kernel values
- */
-#define SWITCH_HW_STACKS(pred, check_switch...) \
+#ifdef CONFIG_KVM_HOST_MODE
+# define CHECK_HWBUG_HCALL_EXC_ILL_INSTR_ADDR(pred) \
+	ALTERNATIVE_1_ALTINSTR \
+		/* CPU_HWBUG_HCALL_EXC_ILL_INSTR_ADDR version */ \
+		{ \
+			nop 1; /* rrd -> usage */ \
+			rrd %cr0.hi, %g18; \
+		} \
+		{ \
+			andd %g18, CR0_IP_MASK, %g18; \
+		} \
+		{ \
+			cmpedb,0 %g18, [hcall_entry0], pred; \
+		} \
+	ALTERNATIVE_2_OLDINSTR \
+		/* Default version - do nothing */ \
+		{ \
+			cmpedb,0 0, 1, pred; \
+		} \
+	ALTERNATIVE_3_FEATURE(CPU_HWBUG_HCALL_EXC_ILL_INSTR_ADDR) \
 	{ \
-		rrd %psp.hi, GCURTASK; \
-		check_switch, pred; \
-		ldgdd,2 0, TSK_TI_K_PSP_LO, GCPUOFFSET; \
-		ldgdd,3 0, TSK_TI_K_PCSP_LO, GCPUID_PREEMPT; \
-		ldgdd,5 0, TSK_TI_K_PSP_HI, GVCPUSTATE; \
-	} \
-	{ \
-		rrd %psp.lo, GCURTASK; \
-		stgdd,2 GCURTASK, 0, TSK_TI_TMP_U_PSP_HI; \
-	} \
-	{ \
-		rrd %pcsp.hi, GCURTASK ? pred; \
-		stgdd,2 GCURTASK, 0, TSK_TI_TMP_U_PSP_LO ? pred; \
- \
-		/* Restore my_cpu_offset as it was when entering kernel trap */ \
-		SMP_ONLY(ldgdd,5 0, TSK_TI_TMP_G_MY_CPU_OFFSET, GCPUOFFSET ? ~ pred;) \
-	} \
-	{ \
-		rrd %pcsp.lo, GCURTASK ? pred; \
-		stgdd,2 GCURTASK, 0, TSK_TI_TMP_U_PCSP_HI ? pred; \
- \
-		/* Restore preemption counter as it was when entering kernel trap */ \
-		ldgdd,5 0, TSK_TI_TMP_G_CPU_ID_PREEMPT, GCPUID_PREEMPT ? ~ pred; \
-	} \
-	{ \
-		rrd %pshtp, GCURTASK ? pred; \
-		stgdd,2 GCURTASK, 0, TSK_TI_TMP_U_PCSP_LO ? pred; \
- \
-		/* Executing all instructions below conditionally would \
-		 * be faster but putting rwd of a privileged register \
-		 * under predicate is disallowed and %ctpr's are not \
-		 * available yet. */ \
-		ibranch 0f ? ~ pred; \
-	} \
-	{ \
-		rwd GCPUOFFSET, %psp.lo; \
-		stgdd,2 GCURTASK, 0, TSK_TI_TMP_U_PSHTP; \
-		ldgdd,5 0, TSK_TI_K_PCSP_HI, GCPUOFFSET; \
-	} \
-	{ \
-		/* `rwd %psp -> setwd` delay is 6 cycles with at least one \
-		 * instruction without `nop X, X > 0`("Scheduling" 1.3.10) */ \
-		rwd GVCPUSTATE, %psp.hi; \
-	} \
-	ALTERNATIVE "", "{ nop 2 }", CPU_FEAT_ISET_V7; \
-	{ \
-		rwd GCPUID_PREEMPT, %pcsp.lo; \
-		SMP_ONLY(ldgdw,3 0, TSK_TI_CPU_DELTA, GCPUID_PREEMPT;) \
-		NOT_SMP_ONLY(addd,3 0, 0, GCPUID_PREEMPT;) \
-	} \
-	{ \
-		rrd %pcshtp, GCURTASK; \
-	} \
-	{ \
-		rrd CURRENT_REG, GCURTASK; \
-		stgdd,2 GCURTASK, 0, TSK_TI_TMP_U_PCSHTP; \
-	} \
-	{ \
-		rwd GCPUOFFSET, %pcsp.hi; \
-	} \
-0: /* skip_stacks_switch */ \
-	{ \
-		rrd CURRENT_REG, GCURTASK ? ~ pred; \
+		ibranch done_to_hcall ? pred; \
 	}
+#else	/* !CONFIG_KVM_HOST_MODE */
+# define CHECK_HWBUG_HCALL_EXC_ILL_INSTR_ADDR(pred)	;
+#endif	/* CONFIG_KVM_HOST_MODE */
 
 #define KERNEL_ENTRY_OSR0(prefix, nr_syscall, hw_trap, pred) \
 .ifnb nr_syscall; .ifne hw_trap; .error "@nr_syscall set with @hw_trap"; .endif; .endif; \
@@ -149,50 +91,158 @@
 	 * Important: the first memory access in kernel is store, not load. \
 	 * This is needed to flush SLT before trying to load anything. \
 	 */ \
-	{ \
-.ifnb nr_syscall; \
-		disp %ctpr1, 0f; \
-		/* This check must correspond with the check in \
-		 * arch_ptrace_stop() before clearing saved %g. */ \
-		cmpesb nr_syscall, __NR_sigreturn, pred; \
-.endif; \
-	} \
 	ALTERNATIVE_1_ALTINSTR \
-		/* iset v5 version - save qp registers extended part */ \
+		/* CPU_FEAT_QPREG - save qp registers extended part */ \
 		{ \
-			stgdq,sm %qg18, 0, prefix##G_MY_CPU_OFFSET; \
-			qpswitchd,1,sm GCPUOFFSET, GCPUOFFSET; \
-			qpswitchd,4,sm GCPUID_PREEMPT, GCPUID_PREEMPT; \
+			stgdq,sm %qg16, 0, TSK_G_TMP_TAG; \
 		} \
 		{ \
-			stgdq,sm %qg16, 0, prefix##G_VCPU_STATE; \
-			qpswitchd,1,sm GVCPUSTATE, GVCPUSTATE; \
-			qpswitchd,4,sm GCURTASK, GCURTASK; \
+			nop 1; \
+			rrd CURRENT_REG, GCURTASK; \
+			stgdqp,sm %qpg17, 0, prefix##G17; \
+		} \
+		/* Bug 116851 - all strqp must be speculative if dealing with tags */ \
+		{ \
+			strqp,2,sm %qpg16, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G16; \
+			ldrd,5 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | (TSK_G_TMP_TAG + 8), %dg16; \
+		} \
+		{ \
+			strqp,2,sm %qpg18, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G18; \
+			strqp,5,sm %qpg19, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G19; \
+		} \
+		{ \
+			strqp,2,sm %qpg20, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G20; \
+			strqp,5,sm %qpg21, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G21; \
+		} \
+		{ \
+			strqp,2,sm %qpg22, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G22; \
+			strqp,5,sm %qpg23, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G23; \
+		} \
+		{ \
+			strqp,2,sm %qpg24, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G24; \
+			strqp,5,sm %qpg25, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G25; \
+		} \
+		{ \
+			strqp,2,sm %qpg26, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G26; \
+			strqp,5,sm %qpg27, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G27; \
+		} \
+		{ \
+			strqp,2,sm %qpg28, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G28; \
+			strqp,5,sm %qpg29, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G29; \
+		} \
+		{ \
+			strqp,2,sm %qpg30, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G30; \
+			strqp,5,sm %qpg31, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G31; \
+		} \
+		{ \
+			rrs %bgr, %g16; \
+			strd,2,sm %dg16, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G17; \
 		} \
 	ALTERNATIVE_2_OLDINSTR \
 		/* Original instruction - save only 16 bits */ \
 		{ \
-			stgdq,sm %qg18, 0, prefix##G_MY_CPU_OFFSET; \
-			movfi,1 GCPUOFFSET, GCPUOFFSET; \
-			movfi,4 GCPUID_PREEMPT, GCPUID_PREEMPT; \
+			nop 3; \
+			stgdq,sm %qg16, 0, prefix##G16; \
+			movfi,1 %xg16, %dg16; \
+			movfi,4 %xg17, %dg17; \
 		} \
 		{ \
-			stgdq,sm %qg16, 0, prefix##G_VCPU_STATE; \
-			movfi,1 GVCPUSTATE, GVCPUSTATE; \
-			movfi,4 GCURTASK, GCURTASK; \
+			rrd CURRENT_REG, GCURTASK; \
+			stgdq,sm %qg16, 0, prefix##G17; \
+		} \
+		{ \
+			strd,2 %dg18, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G18; \
+			strd,5 %dg19, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G19; \
+			movfi,1 %xg18, %dg18; \
+			movfi,4 %xg19, %dg19; \
+		} \
+		{ \
+			strd,2 %dg20, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G20; \
+			strd,5 %dg21, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G21; \
+			movfi,1 %xg20, %dg20; \
+			movfi,4 %xg21, %dg21; \
+		} \
+		{ \
+			strd,2 %dg22, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G22; \
+			strd,5 %dg23, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G23; \
+			movfi,1 %xg22, %dg22; \
+			movfi,4 %xg23, %dg23; \
+		} \
+		{ \
+			strd,2 %dg24, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G24; \
+			strd,5 %dg25, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G25; \
+			movfi,1 %xg24, %dg24; \
+			movfi,4 %xg25, %dg25; \
+		} \
+		{ \
+			strd,2 %dg18, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G18_EXT; \
+			strd,5 %dg19, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G19_EXT; \
+		} \
+		{ \
+			ldrd,0 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | prefix##G16_EXT, %dg18; \
+			ldrd,3 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | prefix##G17, %dg19; \
+		} \
+		{ \
+			strd,2 %dg26, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G26; \
+			strd,5 %dg27, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G27; \
+			movfi,1 %xg26, %dg26; \
+			movfi,4 %xg27, %dg27; \
+		} \
+		{ \
+			strd,2 %dg28, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G28; \
+			strd,5 %dg29, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G29; \
+			movfi,1 %xg28, %dg28; \
+			movfi,4 %xg29, %dg29; \
+		} \
+		{ \
+			strd,2 %dg30, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G30; \
+			strd,5 %dg31, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G31; \
+			movfi,1 %xg30, %dg30; \
+			movfi,4 %xg31, %dg31; \
+		} \
+		{ \
+			strd,2 %dg20, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G20_EXT; \
+			strd,5 %dg21, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G21_EXT; \
+		} \
+		{ \
+			strd,2 %dg22, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G22_EXT; \
+			strd,5 %dg23, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G23_EXT; \
+		} \
+		{ \
+			strd,2 %dg24, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G24_EXT; \
+			strd,5 %dg25, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G25_EXT; \
+		} \
+		{ \
+			strd,2 %dg26, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G26_EXT; \
+			strd,5 %dg27, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G27_EXT; \
+		} \
+		{ \
+			strd,2 %dg28, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G28_EXT; \
+			strd,5 %dg29, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G29_EXT; \
+		} \
+		{ \
+			strd,2 %dg30, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G30_EXT; \
+			strd,5 %dg31, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G31_EXT; \
+		} \
+		{ \
+			rrs %bgr, %g16; \
+			strd,2 %dg18, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G17; \
+			strd,5 %dg19, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G16_EXT; \
 		} \
 	ALTERNATIVE_3_FEATURE(CPU_FEAT_QPREG) \
+.ifne hw_trap; \
+	/* Assumes that only %g16-%g17 has been modified with kernel \
+	 * values above in CPU_FEAT_QPREG case.  Will modify %g18. */ \
+	CHECK_HWBUG_HCALL_EXC_ILL_INSTR_ADDR(%pred3); \
+.endif; \
 	{ \
-		rrd CURRENT_REG, %dg18; \
-		stgdq,sm %qg18, 0, prefix##G_CPU_ID_PREEMPT; \
+		rws 0xff, %bgr; \
+		strd,2 %g16, GCURTASK, LDST_REC_W | prefix##BGR; \
 	} \
 	{ \
 		/* 'crp' instruction also clears %rpr besides the generations \
 		 * table, so make sure we preserve %rpr value. */ \
 		.ifeq hw_trap; rrd %rpr.lo, %dg16; .endif; \
-		stgdq,sm %qg16, 0, prefix##G_TASK; \
-	} \
-	{ \
 		/* #144498: wait for activity in DTLB/AAU to stop, which \
 		 * must be done before accessing MMU registers (e.g. writing \
 		 * %pid/%pptb right here) or flushing TLB. \
@@ -202,13 +252,16 @@
 		 *  - since iset v6 waiting is implemented in hardware. \
 		 * For syscalls: \
 		 *  - `wait all_e` is enough, but not earlier then 5th \
-		 *     (before v7) or 7th (since v7) handler's instruction. */ \
+		 *     (before v7) or 7th (since v7) handler's instruction. \
+		 * For running older guests under virtualization must assume \
+		 * the worst scheduling. */ \
 		aaurr,2 %aasr, %empty; \
 	} \
 .ifeq hw_trap; \
 	{ \
-		/* See comment for `aaurr %aasr` above.  This also  waits \
-		 * for FPU exceptions before switching stacks and CLW. */ \
+		/* See comment for `aaurr %aasr` above.  This also \
+		 * waits for FPU exceptions before switching stacks \
+		 * and CLW, and for %bgr write completion. */ \
 		wait all_e=1; \
 		rrd %rpr.hi, %dg19; \
 		/* Disable load/store generations */ \
@@ -219,53 +272,105 @@
 	} \
 	{ \
 		rwd %dg19, %rpr.hi; \
-		.ifnb nr_syscall; ct %ctpr1 ? ~ pred; .endif; \
 	} \
 .else; \
 	/* CPU_HWBUG_INTERSECTING_L1_ACCESSES - \
 	 * between `strd` above and `ldrd` below */ \
 	{ \
-		/* See comment for `aaurr %aasr` above.  This also  waits \
-		 * for FPU exceptions before switching stacks and CLW. */ \
+		/* See comment for `aaurr %aasr` above.  This also waits \
+		 * for FPU exceptions before switching stacks and CLW, \
+		 * and for %bgr write completion. */ \
 		wait all_e=1; \
+ \
+		nop 1; \
+		rrd %sbr, %dg16; \
 	} \
-.ifnb nr_syscall; .error "@nr_syscall set without @issue_crp"; .endif; \
 .endif; \
 	{ \
-		ldrd,0 %dg18, TAGGED_MEM_LOAD_REC_OPC | prefix##G_VCPU_STATE_EXT, %dg16; \
-		ldrd,2 %dg18, TAGGED_MEM_LOAD_REC_OPC | prefix##G_TASK, %dg17; \
+.ifne hw_trap; \
+		/* Switch hardware stacks only if we are on user stacks (sbr <= TASK_SIZE) */ \
+		cmpbedb,1 %dg16, TASK_SIZE, pred; \
+.else; \
+		/* Switch unconditionally */ \
+		cmpesb,1 0, 0, pred; \
+.endif; \
+		ldgdd,0 0, TSK_TI_K_PCSP_LO, %dg22; \
+		ldgdd,2 0, TSK_TI_K_PCSP_HI, %dg23; \
+		ldgdd,3 0, TSK_TI_K_PSP_LO, %dg24; \
+		ldgdd,5 0, TSK_TI_K_PSP_HI, %dg25; \
 	} \
-	ALTERNATIVE "{ nop 2 }", "{ nop 3 }", CPU_FEAT_ISET_V6; \
 	{ \
-		addd,1 %dg18, 0, GCURTASK; \
-		strd,2 %dg16, %dg18, TAGGED_MEM_STORE_REC_OPC | prefix##G_TASK; \
-		strd,5 %dg17, %dg18, TAGGED_MEM_STORE_REC_OPC | prefix##G_VCPU_STATE_EXT; \
+		rrd %psp.lo, %dg26; \
 	} \
 	{ \
-		ldrd,0 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | prefix##G_MY_CPU_OFFSET_EXT, %dg18; \
-		ldrd,2 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | prefix##G_CPU_ID_PREEMPT, %dg19; \
+		rrd %psp.hi, %dg27 ? pred; \
 	} \
-	ALTERNATIVE "{ nop 2 }", "{ nop 3 }", CPU_FEAT_ISET_V6; \
 	{ \
-		strd,2 %dg18, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G_CPU_ID_PREEMPT; \
-		strd,5 %dg19, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G_MY_CPU_OFFSET_EXT; \
+		rrd %pcsp.lo, %dg28 ? pred; \
 	} \
-0: \
+	{ \
+		rrd %pcsp.hi, %dg29 ? pred; \
+	} \
+	{ \
+		rrd %pshtp, %dg31 ? pred; \
+	} \
 .ifne hw_trap; \
 	{ \
-		nop 1; \
-		rrd %sbr, GCURTASK \
+		/* Restore my_cpu_offset and preemption counter as they \
+		 * were when entering kernel trap. \
+		 *
+		 * Executing all instructions after this conditionally \
+		 * would be faster but putting rwd of a privileged \
+		 * register under predicate is disallowed and %ctpr's \
+		 * are not available yet. */ \
+		SMP_ONLY(ldgdd,0 0, TSK_TMP_G18, GCPUOFFSET ? ~ pred;) \
+		ldgdd,2 0, TSK_TMP_G19, GCPUID_PREEMPT ? ~ pred; \
+		ldgdd,3 0, TSK_TMP_G20, %dg20 ? ~ pred; \
+		ldgdd,5 0, TSK_TMP_G21, %dg21 ? ~ pred; \
+		ibranch 0f ? ~ pred; \
 	} \
-	SWITCH_HW_STACKS(pred, \
-		/* Switch only if we are on user stacks (sbr <= TASK_SIZE) */ \
-		cmpbedb,1 GCURTASK, TASK_SIZE \
-	) \
-.else; \
-	SWITCH_HW_STACKS(pred, \
-		/* switch unconditionally */ \
-		cmpesb 0, 0 \
-	) \
-.endif;
+.endif; \
+	{ \
+		rwd %dg24, %psp.lo; \
+		mmurr %root_ptb, %dg21; \
+		SMP_ONLY(ldgdw,3 0, TSK_TI_CPU_DELTA, GCPUID_PREEMPT;) \
+		NOT_SMP_ONLY(addd,3 0, 0, GCPUID_PREEMPT;) \
+	} \
+	{ \
+		rwd %dg25, %psp.hi; \
+	} \
+	{ \
+		rwd %dg22, %pcsp.lo; \
+	} \
+	{ \
+		rwd %dg23, %pcsp.hi; \
+	} \
+	{ \
+		rrd %pcshtp, %dg30; \
+	} \
+	{ \
+		stgdd,2 %dg26, 0, TSK_TMP_U_PSP_LO; \
+		stgdd,5 %dg27, 0, TSK_TMP_U_PSP_HI; \
+	} \
+	{ \
+		stgdd,2 %dg28, 0, TSK_TMP_U_PCSP_LO; \
+		stgdd,5 %dg29, 0, TSK_TMP_U_PCSP_HI; \
+	} \
+	{ \
+		stgdd,2 %dg30, 0, TSK_TMP_U_PCSHTP; \
+		stgdd,5 %dg31, 0, TSK_TMP_U_PSHTP; \
+	} \
+	{ \
+		wait all_e=1; /* rwd %psp -> setwd */ \
+	} \
+0: /* skip_stacks_switch */ \
+.ifne hw_trap; \
+	{ \
+		/* Restore cpuhas gregs as they were when entering kernel trap. */ \
+		ldgdd 0, TSK_TMP_G23, %dg23 ? ~ pred; \
+		ldgdd 0, TSK_TMP_G24, %dg24 ? ~ pred; \
+	} \
+.endif; \
 
 /*
  * On v7 we can simplify kernel entry a lot thanks to
@@ -278,107 +383,156 @@
 	 * This is needed to flush SLT before trying to load anything. \
 	 */ \
 	{ \
-		.ifne hw_trap; rrd %sbr, GCURTASK; .endif; \
-		stosrrqp,2,sm GVCPUSTATE, 0, LDST_REC_QP_Q | prefix##G_VCPU_STATE; \
-		stosrrqp,5,sm GCURTASK, 0, LDST_REC_QP_Q | prefix##G_TASK; \
+		rrs %bgr, %g16; \
+		stosrrqp,2,sm %qpg16, 0, LDST_REC_QP_Q | prefix##G16; \
+		stosrrqp,5,sm %qpg17, 0, LDST_REC_QP_Q | prefix##G17; \
 	} \
 	{ \
-		stosrrqp,2,sm GCPUOFFSET, 0, LDST_REC_QP_Q | prefix##G_MY_CPU_OFFSET; \
-		stosrrqp,5,sm GCPUID_PREEMPT, 0, LDST_REC_QP_Q | prefix##G_CPU_ID_PREEMPT; \
+		rws 0xff, %bgr; \
+		stosrrqp,2,sm %qpg18, 0, LDST_REC_QP_Q | prefix##G18; \
 	} \
 .ifne hw_trap; \
 	{ \
+		rrd %sbr, %dg17; \
+		stosrrd,2 %g16, 0, LDST_REC_W | prefix##BGR; \
+		stosrrqp,5,sm %qpg19, 0, LDST_REC_QP_Q | prefix##G19; \
+	} \
+	{ \
+		stosrrqp,2,sm %qpg20, 0, LDST_REC_QP_Q | prefix##G20; \
+		stosrrqp,5,sm %qpg21, 0, LDST_REC_QP_Q | prefix##G21; \
+	} \
+	{ \
 		/* Switch only if we are on user stacks (sbr <= TASK_SIZE) */ \
-		cmpbedb,1 GCURTASK, TASK_SIZE, pred; \
-		ldosrrd 0, LDST_REC_D | TSK_TI_K_PSP_LO, GCPUOFFSET; \
+		cmpbedb,1 %dg17, TASK_SIZE, pred; \
 	} \
 	{ \
-		/* Restore my_cpu_offset and preemption counter as they were \
-		 * when entering kernel trap */ \
-		SMP_ONLY(ldosrrd,0 0, LDST_REC_D | TSK_TI_TMP_G_MY_CPU_OFFSET, GCPUOFFSET ? ~ pred;) \
-		ldosrrd,2 0, LDST_REC_D | TSK_TI_TMP_G_CPU_ID_PREEMPT, GCPUID_PREEMPT ? ~ pred; \
+		ldosrrd,0 0, LDST_REC_D | TSK_TI_K_PSP_LO, %dg18 ? pred; \
+		ldosrrd,2 0, LDST_REC_D | TSK_TI_K_PSP_HI, %dg19 ? pred; \
 	} \
 	{ \
+		ldosrrd,0 0, LDST_REC_D | TSK_TI_K_PCSP_LO, %dg20 ? pred; \
+		ldosrrd,2 0, LDST_REC_D | TSK_TI_K_PCSP_HI, %dg21 ? pred; \
+	} \
+	{ \
+		stosrrqp,2,sm %qpg22, 0, LDST_REC_QP_Q | prefix##G22; \
+		stosrrqp,5,sm %qpg23, 0, LDST_REC_QP_Q | prefix##G23; \
+	} \
+	{ \
+		/* Wait after %bgr write */ \
+		wait all_e=1; \
+		stosrrqp,2,sm %qpg24, 0, LDST_REC_QP_Q | prefix##G24; \
+		stosrrqp,5,sm %qpg25, 0, LDST_REC_QP_Q | prefix##G25; \
+	} \
+	{ \
+		stosrrqp,2,sm %qpg26, 0, LDST_REC_QP_Q | prefix##G26; \
+		stosrrqp,5,sm %qpg27, 0, LDST_REC_QP_Q | prefix##G27; \
+	} \
+	{ \
+		stosrrqp,2,sm %qpg28, 0, LDST_REC_QP_Q | prefix##G28; \
+		stosrrqp,5,sm %qpg29, 0, LDST_REC_QP_Q | prefix##G29; \
+	} \
+	{ \
+		stosrrqp,2,sm %qpg30, 0, LDST_REC_QP_Q | prefix##G30; \
+		stosrrqp,5,sm %qpg31, 0, LDST_REC_QP_Q | prefix##G31; \
+		/* Restore %dg17 as it was when entering kernel trap */ \
 		rrd CURRENT_REG, GCURTASK ? ~ pred; \
-		/* Note that %ctpr's are not available yet for traps. */ \
+		/* Note that %ctpr's are not available yet */ \
 		ibranch 0f ? ~ pred; \
-		ldosrrd,3 0, LDST_REC_D | TSK_TI_K_PCSP_LO, GCPUID_PREEMPT ? pred; \
-		ldosrrd,5 0, LDST_REC_D | TSK_TI_K_PSP_HI, GVCPUSTATE ? pred; \
 	} \
 .else; \
 	{ \
 		/* 'crp' instruction also clears %rpr besides the generations \
 		 * table, so make sure we preserve %rpr value. */ \
-		rrd %rpr.lo, GVCPUSTATE; \
-		ldosrrd 0, LDST_REC_D | TSK_TI_K_PSP_LO, GCPUOFFSET; \
-		/* System calls and trampolines are always from user */ \
-		cmpesb 0, 0, pred; \
+		rrd %rpr.lo, %dg16; \
+		stosrrd,2 %g16, 0, LDST_REC_W | prefix##BGR; \
+		ldosrrd,5 0, LDST_REC_D | TSK_TI_K_PSP_LO, %dg18; \
 	} \
-	/* See comment before `aaurr %aasr` in KERNEL_ENTRY_OSR0(). */ \
-	{ nop } { nop } { nop } \
+	{ \
+		stosrrqp,2,sm %qpg19, 0, LDST_REC_QP_Q | prefix##G19; \
+		ldosrrd,5 0, LDST_REC_D | TSK_TI_K_PSP_HI, %dg19; \
+	} \
+	{ \
+		stosrrqp,2,sm %qpg20, 0, LDST_REC_QP_Q | prefix##G20; \
+		ldosrrd,5 0, LDST_REC_D | TSK_TI_K_PCSP_LO, %dg20; \
+	} \
+	{ \
+		stosrrqp,2,sm %qpg21, 0, LDST_REC_QP_Q | prefix##G21; \
+		ldosrrd,5 0, LDST_REC_D | TSK_TI_K_PCSP_HI, %dg21; \
+	} \
+	{ \
+		stosrrqp,2,sm %qpg22, 0, LDST_REC_QP_Q | prefix##G22; \
+		stosrrqp,5,sm %qpg23, 0, LDST_REC_QP_Q | prefix##G23; \
+	} \
 	{ \
 		/* See comment before `aaurr %aasr` in KERNEL_ENTRY_OSR0(). \
 		 * This also waits for FPU exceptions before switching \
-		 * stacks and CLW. */ \
+		 * stacks and CLW, and for %bgr write completion. */ \
 		wait all_e=1; \
-		rrd %rpr.hi, GCPUID_PREEMPT; \
+		rrd %rpr.hi, %dg17; \
 		/* Disable load/store generations */ \
 		crp; \
 	} \
 	{ \
-		rwd GVCPUSTATE, %rpr.lo; \
-		ldosrrd,5 0, LDST_REC_D | TSK_TI_K_PSP_HI, GVCPUSTATE; \
+		rwd %dg16, %rpr.lo; \
+		stosrrqp,5,sm %qpg24, 0, LDST_REC_QP_Q | prefix##G24; \
 	} \
 	{ \
-		rwd GCPUID_PREEMPT, %rpr.hi; \
-		ldosrrd,3 0, LDST_REC_D | TSK_TI_K_PCSP_LO, GCPUID_PREEMPT; \
+		rwd %dg17, %rpr.hi; \
+		stosrrqp,5,sm %qpg25, 0, LDST_REC_QP_Q | prefix##G25; \
 	} \
 .endif; \
 	{ \
-		rrd %psp.hi, GCURTASK; \
+		rrd %psp.hi, %dg17; \
 	} \
 	{ \
-		rrd %psp.lo, GCURTASK; \
-		stosrrd,2 GCURTASK, 0, LDST_REC_D | TSK_TI_TMP_U_PSP_HI; \
+		rrd %psp.lo, %dg17; \
+		stosrrd,2 %dg17, 0, LDST_REC_D | TSK_TMP_U_PSP_HI; \
 	} \
 	{ \
-		rrd %pshtp, GCURTASK; \
-		stosrrd,2 GCURTASK, 0, LDST_REC_D | TSK_TI_TMP_U_PSP_LO; \
+		rwd %dg18, %psp.lo; \
+		stosrrd,2 %dg17, 0, LDST_REC_D | TSK_TMP_U_PSP_LO; \
 	} \
 	{ \
-		rwd GCPUOFFSET, %psp.lo; \
-		stosrrd,2 GCURTASK, 0,LDST_REC_D |  TSK_TI_TMP_U_PSHTP; \
-		ldosrrd,5 0, LDST_REC_D | TSK_TI_K_PCSP_HI, GCPUOFFSET; \
+		rwd %dg19, %psp.hi; \
+		stosrrqp,2,sm %qpg26, 0, LDST_REC_QP_Q | prefix##G26; \
+		stosrrqp,5,sm %qpg27, 0, LDST_REC_QP_Q | prefix##G27; \
 	} \
 	{ \
-		/* `rwd %psp -> setwd` delay is 6/8 cycles with at least one \
-		 * instruction without `nop X, X > 0`("Scheduling" 1.3.10) */ \
-		rwd GVCPUSTATE, %psp.hi; \
+		rrd %pcsp.lo, %dg17; \
+		stosrrqp,2,sm %qpg28, 0, LDST_REC_QP_Q | prefix##G28; \
+		stosrrqp,5,sm %qpg29, 0, LDST_REC_QP_Q | prefix##G29; \
 	} \
 	{ \
-		rrd %pcsp.lo, GCURTASK; \
+		rrd %pcsp.hi, %dg17; \
+		stosrrd,2 %dg17, 0, LDST_REC_D | TSK_TMP_U_PCSP_LO; \
 	} \
 	{ \
-		rrd %pcsp.hi, GCURTASK; \
-		stosrrd,2 GCURTASK, 0, LDST_REC_D | TSK_TI_TMP_U_PCSP_LO; \
-	} \
-	{ \
-		rwd GCPUID_PREEMPT, %pcsp.lo; \
+		rwd %dg20, %pcsp.lo; \
 		SMP_ONLY(ldosrrd,3 0, LDST_REC_W | TSK_TI_CPU_DELTA, GCPUID_PREEMPT;) \
 		NOT_SMP_ONLY(addd,3 0, 0, GCPUID_PREEMPT;) \
 	} \
 	{ \
-		rrd %pcshtp, GCURTASK; \
-		stosrrd,2 GCURTASK, 0, LDST_REC_D | TSK_TI_TMP_U_PCSP_HI; \
+		rrd %pcshtp, %dg17; \
+		stosrrd,2 %dg17, 0, LDST_REC_D | TSK_TMP_U_PCSP_HI; \
+	} \
+	{ \
+		rrd %pshtp, %dg17; \
+		stosrrd,2 %dg17, 0, LDST_REC_D | TSK_TMP_U_PCSHTP; \
+	} \
+	{ \
+		rwd %dg21, %pcsp.hi; \
+		stosrrd,2 %dg17, 0, LDST_REC_D |  TSK_TMP_U_PSHTP; \
+		stosrrqp,5,sm %qpg30, 0, LDST_REC_QP_Q | prefix##G30; \
 	} \
 	{ \
 		rrd CURRENT_REG, GCURTASK; \
-		stosrrd,2 GCURTASK, 0, LDST_REC_D | TSK_TI_TMP_U_PCSHTP; \
+		mmurr,2 %root_ptb, %dg21; \
+		stosrrqp,5,sm %qpg31, 0, LDST_REC_QP_Q | prefix##G31; \
 	} \
 	{ \
-		rwd GCPUOFFSET, %pcsp.hi; \
+		wait all_e=1; /* rwd %psp -> setwd */ \
 	} \
-0: /* skip_stacks_switch */ \
+0: /* skip_stacks_switch */
 
 /**
  * KERNEL_ENTRY - prepare to switch hardware stacks and issue necessary barriers
@@ -390,12 +544,18 @@
  * @pred: temporary predicate; if @hw_trap==1 then it'll be set for user mode
  *
  * This will:
- *  - save some %g to memory so that we have registers to execute upon and
- *    switch hardware stacks (this is skipped for all syscalls except sigreturn)
  *  - flush SLT by issuing a store before any loads;
  *  - flush generations table with `crp`;
  *  - wait for AAU/DTLB buffer to flush so that we can write MMU regs in kernel;
- *  - invoke SWITCH_HW_STACKS().
+ *  - set %g17 (current) and %g18 (cpu and preempt_offset), leave %g19 (percpu
+ *    offset) for later since it must be loaded from memory;
+ *  - save %g16-%g31 to memory so that we have registers to execute upon and
+ *    switch hardware stacks and can enable -fglobal-regs;
+ *  - for traps they are saved to temporary 'tmp_k_gregs' since we do not know
+ *    yet whether trap is from user or kernel;
+ *  - save stack registers to temporary 'tmp_user_stacks' since pt_regs are
+ *    not allocated yet;
+ *  - update global and stack registers with kernel values.
  *
  * Note that for syscalls %ctpr2 is not used so you can prefetch necessary
  * functions to it before invoking KERNEL_ENTRY().  For traps %ctpr registers
@@ -418,20 +578,27 @@
 	{ \
 		disp ctprN, fn; \
 	} \
+	/* %pred5 == cpu_has(CPU_FEAT_SVSC) */ \
+	ALTERNATIVE_1_ALTINSTR \
+	/* CPU_FEAT_SVSC version */ \
+		{ cmpesb 0, 0, %pred5 } \
+	ALTERNATIVE_2_OLDINSTR \
+	/* Default version */ \
+		{ cmpesb 0, 1, %pred5 } \
+	ALTERNATIVE_3_FEATURE(CPU_FEAT_SVSC) \
 	/* \
 	 * Important: the first memory access in kernel is store, not load. \
 	 * This is needed to flush SLT before trying to load anything. \
 	 */ \
-	KERNEL_ENTRY(TSK_TI_, /* not a syscall */, 0 /* hw_trap */, %pred0) \
+	KERNEL_ENTRY(TSK_U_, /* not a syscall */, 0 /* hw_trap */, %pred0) \
 	ALTERNATIVE_1_ALTINSTR \
 		/* CPU_FEAT_SEP_VIRT_SPACE version - get kernel PT root from %os_pptb */ \
 		{ \
-			addd 0, 0, GVCPUSTATE; \
 			mmurr %os_pptb, GVCPUSTATE; \
 		} \
 		{ \
 			addd 0, E2K_KERNEL_CONTEXT, GVCPUSTATE; \
-			mmurw GVCPUSTATE, %u_pptb; \
+			mmurw GVCPUSTATE, %u_pptb ? ~ %pred5; \
 		} \
 	ALTERNATIVE_2_OLDINSTR \
 		/* Original instruction - get kernel PT root from memory */ \
@@ -440,11 +607,11 @@
 		} \
 		{ \
 			addd 0, E2K_KERNEL_CONTEXT, GVCPUSTATE; \
-			mmurw GVCPUSTATE, %root_ptb; \
+			mmurw GVCPUSTATE, %root_ptb ? ~ %pred5; \
 		} \
 	ALTERNATIVE_3_FEATURE(CPU_FEAT_SEP_VIRT_SPACE) \
 	{ \
-		mmurw GVCPUSTATE, %cont; \
+		mmurw GVCPUSTATE, %cont ? ~ %pred5; \
 	} \
 	{ \
 		/* mmurw -> memory access */ \

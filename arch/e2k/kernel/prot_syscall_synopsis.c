@@ -21,12 +21,14 @@
 #include <linux/uio.h>
 #include <linux/capability.h>
 #include <linux/futex.h>
+#include <linux/landlock.h>
 #include <uapi/asm/stat.h>
 #include <uapi/linux/aio_abi.h>
 #include <uapi/linux/io_uring.h>
 #include <uapi/linux/msg.h>
 #include <uapi/linux/sched/types.h>
 #include <uapi/linux/time.h>
+#include <uapi/linux/mount.h>
 
 /*
  * Following table specifies types (or masks) of protected syscall arguments.
@@ -61,7 +63,7 @@
  *		    '?' - 'Pointer' or 'Long'.
  *     o bits 4..7: flags
  *       - bit #4: this is non-empty argument (mandatory);
- *       - bit #5: unused;
+ *       - bit #5: ARG is AP and its size to be stored by set_ap_u_border(AP);
  *       - bit #6: unused;
  *       - bit #7: this is optional argument (may be empty/uninitialized).
  * NB> Legend describes type of signal call arguments; left-to-right;
@@ -140,6 +142,9 @@ const struct prot_syscall_arg_attrs prot_syscall_arg_masks[NR_syscalls + 1] = {
 	[__NR_lseek] =
 		{ 0xFFFFFF04000400,	/*	lseek	19	ILI	*/
 					0, 0, 0, 0, 0, 0 },
+	[__NR_getpid] =
+		{ 0xFFFFFFFFFFFF00,	/*	getpid	20	XX	*/
+					0, 0, 0, 0, 0, 0 },
 	[__NR_mount] =
 		{ 0xFF010003030300,	/*	mount	21	SSSLP	*/
 					0, 0, 0, 0, 0, 0 },
@@ -148,6 +153,9 @@ const struct prot_syscall_arg_attrs prot_syscall_arg_masks[NR_syscalls + 1] = {
 					0, 0, 0, 0, 0, 0 },
 	[__NR_setuid] =
 		{ 0xFFFFFFFFFF0400,	/*	setuid	23	IX	*/
+					0, 0, 0, 0, 0, 0 },
+	[__NR_getuid] =
+		{ 0xFFFFFFFFFFFF00,	/*	getuid	24	XX	*/
 					0, 0, 0, 0, 0, 0 },
 	[__NR_stime] =
 		{ 0xFFFFFFFFFF0100,	/*	stime	25	PX	*/
@@ -483,6 +491,9 @@ const struct prot_syscall_arg_attrs prot_syscall_arg_masks[NR_syscalls + 1] = {
 	[__NR_mlockall] =
 		{ 0xFFFFFFFFFF0400,	/*	mlockall 152		IX	*/
 					0, 0, 0, 0, 0, 0 },
+	[__NR_munlockall] =
+		{ 0xFFFFFFFFFFFF00,	/*	munlockall 153		XX	*/
+					0, 0, 0, 0, 0, 0 },
 	[__NR_sched_setparam] =
 		{ 0xFFFFFFFF010400,	/* sched_setparam 154		IP	*/
 					0, sizeof(struct sched_param), 0, 0, 0, 0 },
@@ -618,7 +629,12 @@ const struct prot_syscall_arg_attrs prot_syscall_arg_masks[NR_syscalls + 1] = {
 		{ 0xFFFFFFFF040400,	/*	pidfd_open 206		II	*/
 					0, 0, 0, 0, 0, 0 },
 
-	/* NB> Temporal stuff; remove it as soon as syscall numbers get fixed in glibc */
+	/*
+	 * NB> Old versions of glibc used compat syscall numbers.
+	 *	We still support these for now just for a case.
+	 *	Protected applications should use 64-bit syscall numbers only.
+	 *	This is temporal stuff; to be removed some time.
+	 */
 	[198] =	{ 0xFFFFFF04040300,	/*	lchown32	198	Sii	*/},
 	[199] =	{ 0xFFFFFFFFFFFF00,	/*	getuid32	199	XX	*/},
 	[200] =	{ 0xFFFFFFFFFFFF00,	/*	getgid32	200	XX	*/},
@@ -705,8 +721,11 @@ const struct prot_syscall_arg_attrs prot_syscall_arg_masks[NR_syscalls + 1] = {
 		{ 0xFFFFFFFF030300,	/*	lremovexattr	242	SS	*/
 					0, 0, 0, 0, 0, 0 },
 	[__NR_fremovexattr] =
-		{ 0xFFFFFFFF030400,	/*	fremovexattr	243	IS	*/
-					0, 0, 0, 0, 0, 0 },
+		{ 0xFFFFFFFF030400,	/*	fremovexattr	243	IS	*/},
+
+	[__NR_gettid] =
+		{ 0xFFFFFFFFFFFF00,	/*	gettid		244	XX	*/},
+
 	[__NR_readahead] =
 		{ 0xFFFFFF00000400,	/*	readahead	245	ILL	*/
 					0, 0, 0, 0, 0, 0 },
@@ -794,7 +813,7 @@ const struct prot_syscall_arg_attrs prot_syscall_arg_masks[NR_syscalls + 1] = {
 					0, 0, 0, 0, 0, 0 },
 	[__NR_msgctl] =
 		{ 0xFFFFFF01040400,	/*	msgctl	271		IIP	*/
-					0, 0, sizeof(struct msqid_ds), 0, 0, 0 },
+					0, 0, 0, 0, 0, 0 },
 	[__NR_msgrcv] =
 		{ 0xFF040000010400,	/*	msgrcv	272		IPLLI	*/
 					0, sizeof(struct msgbuf), 0, 0, 0, 0 },
@@ -819,8 +838,8 @@ const struct prot_syscall_arg_attrs prot_syscall_arg_masks[NR_syscalls + 1] = {
 		{ 0xFFFFFF04000400,	/*	shmget	278		ILI	*/
 					0, 0, 0, 0, 0, 0 },
 	[__NR_shmctl] =
-		{ 0xFFFFFF01040400,	/*	shmctl	279		IIP	*/
-					0, 0, sizeof(struct shmid_ds), 0, 0, 0 },
+		{ 0xFFFFFF21040400,	/*	shmctl	279		IIP	*/
+					0, 0, 0, 0, 0, 0 },
 	[__NR_shmat] =
 		{ 0xFFFFFF04020400,	/*	shmat	280		i?i	*/
 					0, 0, 0, 0, 0, 0 },
@@ -849,6 +868,8 @@ const struct prot_syscall_arg_attrs prot_syscall_arg_masks[NR_syscalls + 1] = {
 	[__NR_ioprio_get] =
 		{ 0xFFFFFFFF040400,	/* ioprio_get	290		II	*/
 					0, 0, 0, 0, 0, 0 },
+	[__NR_inotify_init] =
+		{ 0xFFFFFFFFFFFF00,	/* inotify_init	291		XX	*/},
 
 	[__NR_inotify_add_watch] =
 		{ 0xFFFFFF04030400,	/* inotify_add_watch 292	ISI	*/
@@ -958,7 +979,7 @@ const struct prot_syscall_arg_attrs prot_syscall_arg_masks[NR_syscalls + 1] = {
 		{ 0xFFFFFF01010100,	/*	getcpu	327		PPP	*/
 					0, 0, 0, 0, 0, 0 },
 	[__NR_move_pages] =
-		{ 0x04010101000000,	/*	move_pages 328		LLPPPI	*/
+		{ 0x04010101000400,	/*	move_pages 328		iLPPPi	*/
 					0, 0, 0, 0, 0, 0 },
 	[__NR_splice] =
 		{ 0x04000104010400,	/*	splice	329		IPIPLI	*/
@@ -1034,10 +1055,10 @@ const struct prot_syscall_arg_attrs prot_syscall_arg_masks[NR_syscalls + 1] = {
 					0, 0, 0, 0, 0, 0 },
 	[__NR_preadv] =
 		{ 0xFF000000010000,	/*	preadv	354		LPLLL	*/
-					0, 32, 0, 0, 0, 0 },
+					0, 0, 0, 0, 0, 0 },
 	[__NR_pwritev] =
 		{ 0xFF000000010000,	/*	pwritev	355		LPLLL	*/
-					0, 32, 0, 0, 0, 0 },
+					0, 0, 0, 0, 0, 0 },
 	[__NR_fallocate] =
 		{ 0xFFFF0000040400,	/*	fallocate 356		IILL	*/
 					0, 0, 0, 0, 0, 0 },
@@ -1197,7 +1218,7 @@ const struct prot_syscall_arg_attrs prot_syscall_arg_masks[NR_syscalls + 1] = {
 					0, 0, 0, 0, 0, 0 },
 	[__NR_recvfrom] =
 		{ 0x01010400010400,	/*	recvfrom 407		IPLIPP	*/
-					0, 0, 0, 0, 0, 0 },
+					0, -3, 0, 0, 0, 0 },
 	[__NR_sendmsg] =
 		{ 0xFFFFFF04010400,	/*	sendmsg	408		IPI	*/
 					0, sizeof(struct protected_user_msghdr),
@@ -1208,7 +1229,7 @@ const struct prot_syscall_arg_attrs prot_syscall_arg_masks[NR_syscalls + 1] = {
 					0, 0, 0, 0 },
 	[__NR_bind] =
 		{ 0xFFFFFF04010400,	/*	bind	410		IPI	*/
-					0, 0, 0, 0, 0, 0 },
+					0, -3, 0, 0, 0, 0 },
 	[__NR_listen] =
 		{ 0xFFFFFFFF040400,	/*	listen	411		II	*/
 					0, 0, 0, 0, 0, 0 },
@@ -1220,10 +1241,10 @@ const struct prot_syscall_arg_attrs prot_syscall_arg_masks[NR_syscalls + 1] = {
 					0, 0, 0, 0, 0, 0 },
 	[__NR_socketpair] =
 		{ 0xFFFF0104040400,	/*	socketpair	414	IIIP	*/
-					0, 0, 0, 0, 0, 0 },
+					0, 0, 0, 8, 0, 0 },
 	[__NR_setsockopt] =
 		{ 0xFF040104040400,	/*	setsockopt	415	IIIPI	*/
-					0, 0, 0, 0, 0, 0 },
+					0, 0, 0, -5, 0, 0 },
 	[__NR_getsockopt] =
 		{ 0xFF010104040400,	/*	getsockopt	416	IIIPP	*/
 					0, 0, 0, 0, 0, 0 },
@@ -1259,26 +1280,44 @@ const struct prot_syscall_arg_attrs prot_syscall_arg_masks[NR_syscalls + 1] = {
 		{ 0xFFFFFF04040400,	/*	fsmount	429		III	*/
 					0, 0, 0, 0, 0, 0 },
 	[__NR_fspick] =
-		{ 0xFFFFFF04030400,	/*	fspick	430		ISI	*/
+		{ 0xFFFFFF04030400,	/*	fspick		430	ISI	*/
 					0, 0, 0, 0, 0, 0 },
 	[__NR_close_range] =
-		{ 0xFFFFFF04040400,	/*	close_range 431		III	*/
+		{ 0xFFFFFF04040400,	/*	close_range	431	III	*/
 					0, 0, 0, 0, 0, 0 },
 	[__NR_openat2] =
-		{ 0xFFFF0001030400,	/*	openat2 432		ISPL	*/
+		{ 0xFFFF0001030400,	/*	openat2		432	ISPL	*/
 					0, 0, 0, 0, 0, 0 },
 	[__NR_pidfd_getfd] =
-		{ 0xFFFFFF04040400,	/*	pidfd_getfd 433		III	*/
+		{ 0xFFFFFF04040400,	/*	pidfd_getfd	433	III	*/
 					0, 0, 0, 0, 0, 0 },
 	[__NR_faccessat2] =
-		{ 0xFFFF0404030400,	/*	faccessat2 434		ISII	*/
+		{ 0xFFFF0404030400,	/*	faccessat2	434	ISII	*/
 					0, 0, 0, 0, 0, 0 },
 	[__NR_process_madvise] =
-		{ 0xFF040400010400,	/* process_madvise 435		IPLII	*/
+		{ 0xFF040400010400,	/* process_madvise	435	IPLII	*/
 					0, 0, 0, 0, 0, 0 },
 	[__NR_epoll_pwait2] =
-		{ 0x00010104010400,	/*	epoll_pwait2 436	IPIPPL	*/
+		{ 0x00010104010400,	/*	epoll_pwait2	436	IPIPPL	*/
 					0, 0, 0, 0, 0, 0 },
+	[__NR_mount_setattr] =
+		{ 0xFF000104030400,	/*	mount_setattr	437	ISIPL	*/
+					0, 0, 0, sizeof(struct mount_attr), 0, 0 },
+	[__NR_quotactl_fd] =
+		{ 0xFFFF8481030400,	/*	mount_setattr	438	ISip	*/},
+
+	[__NR_landlock_create_ruleset] =
+		{ 0xFF000104030400,	/* landlock_create_ruleset 439	PLI	*/
+					sizeof(struct landlock_ruleset_attr), 0, 0, 0, 0, 0 },
+	[__NR_landlock_add_rule] =
+		{ 0xFFFF0401040400,	/* landlock_add_rule	440	IIPI	*/},
+
+	[__NR_landlock_restrict_self] =
+		{ 0xFFFFFFFF040400,	/* landlock_restrict_self 441	II	*/},
+
+	[__NR_process_mrelease] =
+		{ 0xFFFFFFFF040400,	/* process_mrelease	442	II	*/},
+
 	[__NR_futex_waitv] =
 		{ 0xFF040104040100,	/* futex_waitv 443		PIIPI	*/
 					sizeof(struct prot_futex_waitv), 0, 0,

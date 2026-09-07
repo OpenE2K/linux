@@ -302,7 +302,11 @@ PVRSRV_ERROR SysDevInit(void *pvOSDevice, PVRSRV_DEVICE_CONFIG **ppsDevConfig)
 
 	dma_set_mask(pvOSDevice, DMA_BIT_MASK(40));
 
+#if defined(CONFIG_MCST)
+	err = e2c3_gpu_enable_4991288(psSysData->pdev->dev.parent);
+#else
 	err = e2c3_gpu_enable(psSysData->pdev->dev.parent);
+#endif
 	if (err) {
 		PVR_DPF((PVR_DBG_ERROR, "%s: Failed to enable PCI device (%d)",
 			 __func__, err));
@@ -372,7 +376,11 @@ ErrorReleaseMemRegion:
 	release_mem_region(psSysData->registers->start,
 			   resource_size(psSysData->registers));
 ErrorDevDisable:
+#if defined(CONFIG_MCST)
+	e2c3_gpu_disable_4991288(psSysData->pdev->dev.parent);
+#else
 	e2c3_gpu_disable(psSysData->pdev->dev.parent);
+#endif
 ErrFreeSysData:
 	OSFreeMem(psSysData);
 	return eError;
@@ -386,7 +394,11 @@ void SysDevDeInit(PVRSRV_DEVICE_CONFIG *psDevConfig)
 
 	release_mem_region(psSysData->registers->start,
 			   resource_size(psSysData->registers));
+#if defined(CONFIG_MCST)
+	e2c3_gpu_disable_4991288(psSysData->pdev->dev.parent);
+#else
 	e2c3_gpu_disable(psSysData->pdev->dev.parent);
+#endif
 
 	OSFreeMem(psSysData);
 }
@@ -437,7 +449,11 @@ PVRSRV_ERROR SysInstallDeviceLISR(IMG_HANDLE hSysData, IMG_UINT32 ui32IRQ,
 	psLISRData->pvData = pvData;
 	psLISRData->psDev = psSysData->pdev->dev.parent;
 
+#if defined(CONFIG_MCST)
+	err = e2c3_gpu_set_interrupt_handler_4991288(
+#else
 	err = e2c3_gpu_set_interrupt_handler(
+#endif
 		psLISRData->psDev, E2C3_GPU_InterruptHandler, psLISRData);
 	if (err) {
 		PVR_DPF((PVR_DBG_ERROR,
@@ -447,7 +463,11 @@ PVRSRV_ERROR SysInstallDeviceLISR(IMG_HANDLE hSysData, IMG_UINT32 ui32IRQ,
 		goto err_free_data;
 	}
 
+#if defined(CONFIG_MCST)
+	err = e2c3_gpu_enable_interrupt_4991288(psLISRData->psDev);
+#else
 	err = e2c3_gpu_enable_interrupt(psLISRData->psDev);
+#endif
 	if (err) {
 		PVR_DPF((PVR_DBG_ERROR,
 			 "%s: e2c3_gpu_enable_interrupt() failed (%d)",
@@ -464,7 +484,11 @@ PVRSRV_ERROR SysInstallDeviceLISR(IMG_HANDLE hSysData, IMG_UINT32 ui32IRQ,
 err_out:
 	return eError;
 err_unset_interrupt_handler:
+#if defined(CONFIG_MCST)
+	e2c3_gpu_set_interrupt_handler_4991288(psLISRData->psDev, NULL, NULL);
+#else
 	e2c3_gpu_set_interrupt_handler(psLISRData->psDev, NULL, NULL);
+#endif
 err_free_data:
 	OSFreeMem(psLISRData);
 	goto err_out;
@@ -475,14 +499,22 @@ PVRSRV_ERROR SysUninstallDeviceLISR(IMG_HANDLE hLISRData)
 	LISR_DATA *psLISRData = (LISR_DATA *)hLISRData;
 	int err;
 
+#if defined(CONFIG_MCST)
+	err = e2c3_gpu_disable_interrupt_4991288(psLISRData->psDev);
+#else
 	err = e2c3_gpu_disable_interrupt(psLISRData->psDev);
+#endif
 	if (err) {
 		PVR_DPF((PVR_DBG_ERROR,
 			 "%s: e2c3_gpu_disable_interrupt() failed (%d)",
 			 __func__, err));
 	}
 
+#if defined(CONFIG_MCST)
+	err = e2c3_gpu_set_interrupt_handler_4991288(psLISRData->psDev, NULL, NULL);
+#else
 	err = e2c3_gpu_set_interrupt_handler(psLISRData->psDev, NULL, NULL);
+#endif
 	if (err) {
 		PVR_DPF((PVR_DBG_ERROR,
 			 "%s: e2c3_gpu_set_interrupt_handler() failed (%d)",

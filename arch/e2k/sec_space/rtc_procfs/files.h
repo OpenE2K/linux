@@ -22,6 +22,7 @@ ssize_t rtcfs_pagemap_read(struct file *file, char __user *buf,
 			    size_t count, loff_t *ppos);
 int rtcfs_cpuinfo_open(struct inode *inode, struct file *file);
 ssize_t rtcfs_seq_read(struct file *file, char __user *buf, size_t size, loff_t *ppos);
+int rtcfs_misc_open(struct inode *inode, struct file *file);
 loff_t rtcfs_seq_lseek(struct file *file, loff_t offset, int whence);
 
 

@@ -10,7 +10,7 @@
 
 #ifdef __KERNEL__
 
-typedef struct e2k_global_regs e2k_global_regs_t;
+typedef struct e2k_gregs e2k_global_regs_t;
 typedef struct kernel_gregs kernel_gregs_t;
 
 
@@ -52,10 +52,8 @@ extern void kvm_guest_save_local_gregs_v3(struct local_gregs *gregs, bool is_sig
 extern void kvm_guest_save_local_gregs_v5(struct local_gregs *gregs, bool is_signal);
 extern void kvm_guest_save_kernel_gregs_v3(kernel_gregs_t *gregs);
 extern void kvm_guest_save_kernel_gregs_v5(kernel_gregs_t *gregs);
-extern void kvm_guest_save_gregs_v3(struct e2k_global_regs *gregs);
-extern void kvm_guest_save_gregs_v5(struct e2k_global_regs *gregs);
-extern void kvm_guest_save_gregs_dirty_bgr_v3(struct e2k_global_regs *gregs);
-extern void kvm_guest_save_gregs_dirty_bgr_v5(struct e2k_global_regs *gregs);
+extern void kvm_guest_save_gregs_v3(struct e2k_gregs *gregs);
+extern void kvm_guest_save_gregs_v5(struct e2k_gregs *gregs);
 extern void kvm_guest_restore_gregs_v3(const e2k_global_regs_t *gregs);
 extern void kvm_guest_restore_gregs_v5(const e2k_global_regs_t *gregs);
 extern void kvm_guest_restore_kernel_gregs_v3(e2k_global_regs_t *gregs);

@@ -55,10 +55,13 @@
 #define	CTX_VERSION_NO(ctx)	(CTX_VERSION(ctx) >> CTX_VERSION_SHIFT)
 
 DECLARE_PER_CPU(u64, last_mmu_context);
-DECLARE_PER_CPU(u64, current_mmu_context);
-DECLARE_PER_CPU(u64, u_root_ptb);
+/* This is the current context value - i.e. the value that
+ * should go into %pid before trying to access userspace. */
+register u64 current_mmu_context ASM_GREG(CURRENT_MMU_CONTEXT_GREG);
+/* User PT base cached for fast retrieval in uaccess_enable() */
+register u64 u_root_ptb ASM_GREG(U_ROOT_PTB_GREG);
 
-extern u64 get_new_mmu_pid_irqs_off(mm_context_t *context, int cpu);
+extern u64 get_new_mmu_pid_irqs_off(mm_context_t *context);
 
 /*
  * Force a context reload. This is needed when context is changed
@@ -79,17 +82,9 @@ enum reload_pid_mode {
 	MMU_PID_RELOAD_CHECK__NO_UPDATE,
 };
 
-/**
- * get_mmu_pid_irqs_off - update %pid register value in @context structure
- * @context: mm_context_t that holds current PID/CONT
- * @mode: whether to force allocation of a new pid, or try to
- *	  use the previous one
- */
-static __always_inline u64 get_mmu_pid_irqs_off(mm_context_t *context,
-		enum reload_pid_mode mode)
+static __always_inline u64 get_mmu_pid_irqs_off_impl(mm_context_t *context,
+		enum reload_pid_mode mode, u64 ctx, u64 last_ctx)
 {
-	int cpu = smp_processor_id();
-	u64 ctx = context->cpumsk[cpu];
 	bool get_new_context;
 
 	BUILD_BUG_ON(mode != MMU_PID_RELOAD_FORCED &&
@@ -107,18 +102,45 @@ static __always_inline u64 get_mmu_pid_irqs_off(mm_context_t *context,
 		get_new_context = true;
 	} else if (mode == MMU_PID_RELOAD_CHECK ||
 			mode == MMU_PID_RELOAD_CHECK__NO_UPDATE) {
-		get_new_context = (CTX_VERSION(ctx) !=
-				   CTX_VERSION(raw_cpu_read(last_mmu_context)));
+		get_new_context = (CTX_VERSION(ctx) != CTX_VERSION(last_ctx));
+	} else {
+		BUILD_BUG();
 	}
 
 	if (unlikely(get_new_context))
-		ctx = get_new_mmu_pid_irqs_off(context, cpu);
+		ctx = get_new_mmu_pid_irqs_off(context);
 
 	if (mode != MMU_PID_RELOAD_CHECK__NO_UPDATE &&
 			mode != MMU_PID_RELOAD_FORCED__NO_UPDATE)
-		raw_cpu_write(current_mmu_context, ctx);
+		current_mmu_context = ctx;
 
 	return ctx;
+}
+
+/**
+ * get_mmu_pid_irqs_off - update %pid register value in @context structure
+ * @context: mm_context_t that holds current PID/CONT
+ * @mode: whether to force allocation of a new pid, or try to
+ *	  use the previous one
+ */
+static __always_inline u64 get_mmu_pid_irqs_off(mm_context_t *context,
+		enum reload_pid_mode mode)
+{
+	u64 ctx = context->cpumsk[smp_processor_id()];
+	u64 last_ctx = raw_cpu_read(last_mmu_context);
+
+	return get_mmu_pid_irqs_off_impl(context, mode, ctx, last_ctx);
+}
+
+/* Same as get_mmu_pid_irqs_off() but without CONFIG_PREEMPT debugging
+ * since it won't work in kernel entry code. */
+static __always_inline u64 raw_get_mmu_pid_irqs_off(mm_context_t *context,
+	enum reload_pid_mode mode)
+{
+	u64 ctx = context->cpumsk[raw_smp_processor_id()];
+	u64 last_ctx = raw_cpu_read(last_mmu_context);
+
+	return get_mmu_pid_irqs_off_impl(context, mode, ctx, last_ctx);
 }
 
 /**
@@ -134,20 +156,18 @@ static __always_inline u64 get_mmu_pid_irqs_off(mm_context_t *context,
 static inline void flush_mmu_pid(mm_context_t *context)
 {
 	unsigned long flags;
-	struct mm_struct *mm = current->mm;
 
 	raw_all_irq_save(flags);
 	get_mmu_pid_irqs_off(context, MMU_PID_RELOAD_FORCED);
-	/* If 'context' is from current->active_mm and not from
-	 * current->mm then we make sure that uaccess_enable()
-	 * will not give access to lazy user context. */
-	if (!mm || context != &mm->context)
-		raw_cpu_write(current_mmu_context, E2K_KERNEL_CONTEXT);
+	if (cpu_has(CPU_FEAT_SVSC)) {
+		WRITE_UACCESS_REGS_CACHED();
+	}
 	raw_all_irq_restore(flags);
 
 	/* We are currently executing with E2K_KERNEL_CONTEXT and the
-	 * new %pid value will be written only when actually needed. */
-	VM_BUG_ON(READ_MMU_PID() != E2K_KERNEL_CONTEXT);
+	 * new %pid value will be written only when actually needed
+	 * (when !CPU_FEAT_SVSC). */
+	VM_BUG_ON((READ_MMU_PID() != E2K_KERNEL_CONTEXT) == !cpu_has(CPU_FEAT_SVSC));
 }
 
 /**
@@ -160,7 +180,7 @@ static inline void reload_root_pgd(const pgd_t *pgd)
 {
 	/* Kernel executes with user pgd loaded to register but
 	 * disabled through OS_VAB, so we can just update the register. */
-	set_MMU_U_PPTB(__pa(pgd));
+	WRITE_MMU_U_PPTB(__pa(pgd));
 }
 
 /*
@@ -181,11 +201,16 @@ static inline void enter_lazy_tlb(struct mm_struct *prev_mm,
 {
 	pgd_t *os_page_table = mm_node_pgd(&init_mm, numa_node_id());
 
-	VM_BUG_ON(!oops_in_progress && READ_MMU_PID() != E2K_KERNEL_CONTEXT);
+	VM_BUG_ON(!oops_in_progress && !cpu_has(CPU_FEAT_SVSC) &&
+		  READ_MMU_PID() != E2K_KERNEL_CONTEXT);
 
 	/* Make sure that kernel threads execute with kernel page tables */
-	raw_cpu_write(u_root_ptb, __pa(os_page_table));
-	raw_cpu_write(current_mmu_context, E2K_KERNEL_CONTEXT);
+	u_root_ptb = __pa(os_page_table);
+	current_mmu_context = E2K_KERNEL_CONTEXT;
+
+	if (cpu_has(CPU_FEAT_SVSC)) {
+		WRITE_UACCESS_REGS_CACHED();
+	}
 }
 
 extern int __init_new_context(struct task_struct *p, struct mm_struct *mm,
@@ -197,6 +222,9 @@ static inline int init_new_context(struct task_struct *p, struct mm_struct *mm)
 extern void destroy_cached_stacks(mm_context_t *context);
 extern void destroy_context(struct mm_struct *mm);
 
+extern e2k_mmu_cr_t svsc_save(void);
+extern void svsc_restore(e2k_mmu_cr_t mmu_cr);
+
 struct uaccess_regs {
 	u64 u_root_ptb;
 	u64 ctx;
@@ -204,7 +232,7 @@ struct uaccess_regs {
 
 /*
  * For specific use case in light hypercalls: if we are executing with
- * guest user's values for uac_regs and do not want to correupt them,
+ * guest user's values for uac_regs and do not want to corrupt them,
  * instead of uaccess_enable() + uaccess_disable() pair one should use:
  *
  *   struct uaccess_regs regs;
@@ -214,58 +242,55 @@ struct uaccess_regs {
  */
 static inline void native_uaccess_save(struct uaccess_regs *ua_regs)
 {
+	if (cpu_has(CPU_FEAT_SVSC))
+		return;
+
 	ua_regs->u_root_ptb = NATIVE_READ_MMU_U_PPTB_REG();
 	ua_regs->ctx = READ_MMU_PID();
 }
 
 static inline void native_uaccess_restore(const struct uaccess_regs *ua_regs)
 {
+	if (cpu_has(CPU_FEAT_SVSC))
+		return;
+
 	WRITE_UACCESS_REGS(ua_regs->ctx, ua_regs->u_root_ptb);
 }
 
 /*
- * Enable user page tables when returning to user space
+ * uaccess_enable()/uaccess_disable() are for use
+ * in get_user()/put_user()/return to user/etc
  */
-static inline void native_uaccess_enable_irqs_off(void)
+static inline void native_uaccess_enable(void)
 {
-	u64 ctx = raw_cpu_read(current_mmu_context);
-	u64 root_ptb = raw_cpu_read(u_root_ptb);
+	if (cpu_has(CPU_FEAT_SVSC))
+		return;
 
 	/* Sometimes functions that access user memory are called
 	 * from kernel threads without mm, for example:
 	 *     devtmpfsd -> ksys_mount -> strndup_user
-	 * So check `ctx` value only under (mm != NULL) condition. */
+	 * So check `current_mmu_context` value only under (mm != NULL) condition. */
 	VM_BUG_ON(!oops_in_progress &&
 		  (READ_MMU_PID() != E2K_KERNEL_CONTEXT ||
-		   root_ptb == ULL(-1) ||
-		   current->mm && CTX_HARDWARE(ctx) == E2K_KERNEL_CONTEXT));
+		   u_root_ptb == ULL(-1) ||
+		   current->mm && CTX_HARDWARE(current_mmu_context) == E2K_KERNEL_CONTEXT));
 
-	WRITE_UACCESS_REGS(ctx, root_ptb);
-}
-
-/*
- * uaccess_enable()/uaccess_disable() are for use
- * in get_user()/put_user()/etc
- */
-static inline void native_uaccess_enable(void)
-{
-	unsigned long flags;
-
-	raw_all_irq_save(flags);
-	native_uaccess_enable_irqs_off();
-	raw_all_irq_restore(flags);
+	WRITE_UACCESS_REGS_CACHED();
 }
 
 static inline void native_uaccess_disable(void)
 {
 	u64 k_root_ptb;
 
+	if (cpu_has(CPU_FEAT_SVSC))
+		return;
+
 	VM_BUG_ON(current->mm && READ_MMU_PID() == E2K_KERNEL_CONTEXT);
 #ifndef CONFIG_MMU_SEP_VIRT_SPACE_ONLY
-	k_root_ptb = MMU_IS_SEPARATE_PT() ? NATIVE_READ_MMU_OS_PPTB_REG_VALUE()
+	k_root_ptb = MMU_IS_SEPARATE_PT() ? NATIVE_READ_MMU_OS_PPTB_REG()
 					      : current->thread.regs.k_root_ptb;
 #else
-	k_root_ptb = NATIVE_READ_MMU_OS_PPTB_REG_VALUE();
+	k_root_ptb = NATIVE_READ_MMU_OS_PPTB_REG();
 #endif
 	VM_BUG_ON(k_root_ptb == ULL(-1));
 	WRITE_UACCESS_REGS(E2K_KERNEL_CONTEXT, k_root_ptb);
@@ -277,13 +302,16 @@ static inline void native_uaccess_disable(void)
  */
 static inline void uaccess_enable_in_kernel_trap(const struct pt_regs *regs)
 {
+	if (cpu_has(CPU_FEAT_SVSC))
+		return;
+
 	u64 ctx = regs->uaccess.cont;
 	u64 root_ptb = regs->uaccess.u_root_ptb;
 
 	if (unlikely(ctx != E2K_KERNEL_CONTEXT)) {
 		/* User context could have changed while we were
 		 * executing with kernel context, update it. */
-		ctx = raw_cpu_read(current_mmu_context);
+		ctx = current_mmu_context;
 		VM_BUG_ON(CTX_HARDWARE(ctx) == E2K_KERNEL_CONTEXT);
 	}
 	WRITE_UACCESS_REGS(ctx, root_ptb);
@@ -295,13 +323,17 @@ static inline void uaccess_enable_in_kernel_trap(const struct pt_regs *regs)
 static inline void
 set_root_pt(pgd_t *root_pt)
 {
-	set_MMU_U_PPTB(__pa(root_pt));
+	WRITE_MMU_U_PPTB(__pa(root_pt));
 	if (MMU_IS_SEPARATE_PT())
-		set_MMU_OS_PPTB(__pa(root_pt));
+		WRITE_MMU_OS_PPTB(__pa(root_pt));
 }
 
 /*
  * Switch a root page table pointer and context.
+ *
+ * This also flushes TLB so is more suitable for cases when
+ * we switch to a context that might overlap with the previous
+ * one (e.g. hibernation)
  */
 static inline void reload_thread(struct mm_struct *mm)
 {
@@ -312,7 +344,12 @@ static inline void reload_thread(struct mm_struct *mm)
 	/* %root_ptb/%cont are switched on kernel entry
 	 * and exit, so there is nothing to do here. */
 	(void) get_mmu_pid_irqs_off(&mm->context, MMU_PID_RELOAD_FORCED);
+	if (cpu_has(CPU_FEAT_SVSC)) {
+		WRITE_UACCESS_REGS_CACHED();
+	}
 
+	/* Normally this is not needed when switching contexts
+	 * but hibernation is a special case. */
 	local_flush_tlb_all();
 
 	raw_all_irq_restore(flags);
@@ -408,7 +445,10 @@ static inline void switch_mm(struct mm_struct *prev_mm,
 skip_mm_cpumask:
 	/* Switch context */
 	get_mmu_pid_irqs_off(&next_mm->context, MMU_PID_RELOAD_CHECK);
-	raw_cpu_write(u_root_ptb, __pa(pgd));
+	u_root_ptb = __pa(pgd);
+	if (cpu_has(CPU_FEAT_SVSC)) {
+		WRITE_UACCESS_REGS_CACHED();
+	}
 
 	raw_all_irq_restore(flags);
 }
@@ -450,8 +490,9 @@ static inline void set_secondary_space_MMU_state(void)
 {
 	e2k_mmu_cr_t mmu_cr = get_MMU_CR();
 	mmu_cr.upt = 1;
-	if (machine.native_iset_ver >= E2K_ISET_V5)
+	if (machine.native_iset_ver >= E2K_ISET_V5) {
 		mmu_cr.snxe = 1;
+	}
 	set_MMU_CR(mmu_cr);
 }
 #else	/* ! CONFIG_SECONDARY_SPACE_SUPPORT */

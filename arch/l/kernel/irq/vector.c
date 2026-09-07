@@ -1,12 +1,8 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
- * Local APIC related interfaces to support IOAPIC, MSI, etc.
- *
- * Copyright (C) 1997, 1998, 1999, 2000, 2009 Ingo Molnar, Hajnalka Szabo
- *	Moved from arch/x86/kernel/apic/io_apic.c.
- * Jiang Liu <jiang.liu@linux.intel.com>
- *	Enable support of hierarchical irqdomains
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
  */
+
 #include <linux/interrupt.h>
 #include <linux/irq.h>
 #include <linux/seq_file.h>
@@ -808,7 +804,7 @@ void irq_complete_move(struct irq_cfg *cfg)
 		__send_cleanup_vector(picd);
 }
 
-void apic_irq_force_complete_move(struct irq_desc *desc)
+void irq_force_complete_move(struct irq_desc *desc)
 {
 	struct pic_chip_data *picd;
 	struct irq_data *irqd;
@@ -930,16 +926,17 @@ out:
 
 static int __init
 pic_of_init(struct device_node *np, struct device_node *parent,
-		struct irq_chip *ic, unsigned end_vector)
+		struct pic_params *p)
 {
 	int ret;
 
-	ret = pic_get_vector_by_name(np, NULL, "IMI IRQ move cleanup interrupts",
+	ret = pic_get_vector_by_name(np, NULL, "MSV managed irq shutdown vector",
 					&managed_irq_shutdown_vector);
-	if (ret)
+	if (WARN(ret, "Please update device tree\n"))
 		return ret;
+
 	l_vector_domain = irq_domain_create_tree(of_node_to_fwnode(np), &l_vector_domain_ops,
-					ic);
+					p->ic);
 	BUG_ON(l_vector_domain == NULL);
 
 	BUG_ON(!alloc_cpumask_var(&vector_searchmask, GFP_KERNEL));
@@ -949,7 +946,7 @@ pic_of_init(struct device_node *np, struct device_node *parent,
 	 * search area.
 	 */
 	vector_matrix = irq_alloc_matrix(NR_VECTORS, FIRST_EXTERNAL_VECTOR + 1,
-					 end_vector);
+					 p->end_vector);
 	BUG_ON(!vector_matrix);
 	ret = cpuhp_setup_state(CPUHP_AP_IRQ_E2K_VECTOR_STARTING,
 				  "l/irq/vector:starting",
@@ -958,13 +955,22 @@ pic_of_init(struct device_node *np, struct device_node *parent,
 	if (WARN(ret < 0, "%pOF: Failed to setup hotplug state: %d\n", np, ret))
 		return ret;
 
-	return pic_init_smp(l_vector_domain, np);
+	return pic_init_smp(l_vector_domain, np, p);
 }
 #ifdef CONFIG_L_LOCAL_APIC
 static int __init apic_of_init(struct device_node *np,
 			struct device_node *parent)
 {
-	return pic_of_init(np, parent, &lapic_controller, FIRST_SYSTEM_VECTOR);
+	struct pic_params p = {
+		.ic = &lapic_controller,
+		.end_vector = FIRST_SYSTEM_VECTOR,
+		.pic_smp_error_interrupt = apic_smp_error_interrupt,
+		.pic_smp_spurious_interrupt = apic_smp_spurious_interrupt,
+	};
+	int ret = pic_of_init(np, parent, &p);
+	if (ret)
+		return ret;
+	return apic_init(np, &p);
 }
 IRQCHIP_DECLARE(apic, "mcst,apic", apic_of_init);
 #endif
@@ -973,10 +979,16 @@ static int __init epic_of_init(struct device_node *np,
 			struct device_node *parent)
 {
 	int ret;
-	ret = pic_of_init(np, parent, &epic_controller, FIRST_EPIC_SYSTEM_VECTOR);
+	struct pic_params p = {
+		.ic = &epic_controller,
+		.end_vector = FIRST_EPIC_SYSTEM_VECTOR,
+		.pic_smp_error_interrupt = epic_smp_error_interrupt,
+		.pic_smp_spurious_interrupt = epic_smp_spurious_interrupt,
+	};
+	ret = pic_of_init(np, parent, &p);
 	if (ret)
 		return ret;
-	return epic_init(np);
+	return epic_init(np, &p);
 }
 IRQCHIP_DECLARE(epic, "mcst,epic", epic_of_init);
 #endif

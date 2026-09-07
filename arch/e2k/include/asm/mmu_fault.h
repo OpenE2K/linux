@@ -217,6 +217,11 @@ static inline void load_qvalue_and_tagq(const void *address, e2k_qreg_t *val,
 	NATIVE_LOAD_VAL_AND_TAGQ(address, val->lo, val->hi, *tag, offset);
 }
 
+static inline void store_tagged_qword(void *address, e2k_qreg_t data, u8 tag, size_t offset)
+{
+	NATIVE_STORE_TAGGED_QWORD(address, data.lo, data.hi, tag & 0xf, tag >> 4, offset);
+}
+
 static inline bool
 is_guest_kernel_gregs(struct thread_info *ti,
 			unsigned greg_num_d, u64 **greg_copy)
@@ -245,12 +250,6 @@ handle_mpdma_fault(e2k_addr_t hva, struct pt_regs *ptregs)
 }
 
 # ifndef CONFIG_VIRTUALIZATION
-/* it is native kernel without any virtualization */
-static inline int guest_addr_to_host(void **addr, const pt_regs_t *regs)
-{
-	return native_guest_addr_to_host(addr);
-}
-
 static inline void __user *guest_ptr_to_host(void *ptr, bool is_write,
 				int size, const pt_regs_t *regs)
 {
@@ -273,14 +272,6 @@ store_tagged_dword(void *address, u64 data, u32 tag)
 {
 	recovery_faulted_tagged_store((e2k_addr_t) address, data, tag,
 			TAGGED_MEM_STORE_REC_OPC, 0, 0, 0, 1, 0, 0);
-}
-
-static inline void
-store_tagged_qword(void *address, u64 data_lo, u64 data_hi, u32 tag_lo, u32 tag_hi)
-{
-	recovery_faulted_tagged_store((unsigned long) address, data_lo, tag_lo,
-			TAGGED_MEM_STORE_REC_OPC, data_hi, tag_hi,
-			TAGGED_MEM_STORE_REC_OPC | 8ul, 0, 0, 1);
 }
 
 static inline void

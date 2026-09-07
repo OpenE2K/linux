@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
 #include <linux/interrupt.h>
 #include <linux/irq.h>
 #include <linux/init.h>
@@ -176,22 +181,17 @@ const struct irq_domain_ops lvt_apic_irqdomain_ops = {
 static int __init
 lvt_apic_init(struct device_node *np, struct device_node *parent)
 {
-	int ret;
 	struct irq_domain *dmn;
 	struct fwnode_handle *fn = of_node_to_fwnode(np);
 
 	dmn = irq_domain_create_linear(fn, ARRAY_SIZE(lvt_regs),
-				&lvt_apic_irqdomain_ops,
-				NULL);
-	if (!dmn) {
-		ret = -ENOMEM;
-		goto err;
-	}
+				&lvt_apic_irqdomain_ops, NULL);
+	if (!dmn)
+		return -ENOMEM;
 
 	dmn->parent = irq_find_host(parent);
 	BUG_ON(!dmn->parent);
-err:
-	return ret;
+	return 0;
 }
 
 IRQCHIP_DECLARE(apic, "mcst,apic-lvt", lvt_apic_init);

@@ -372,17 +372,11 @@ typedef struct mpc_gpio_act {
 #define MP_GPIO_ACT_DIRECTION_OUT	2
 
 #ifdef __KERNEL__
-struct iohub_sysdata;
-void mp_pci_add_resources(struct list_head *resources,
-			   struct iohub_sysdata *sd);
 extern int __init mp_ioepic_find_bus(int ioepic_id);
 #ifdef	CONFIG_IOHUB_DOMAINS
-struct iohub_sysdata;
 extern int mp_find_iolink_root_busnum(int node, int link);
 extern int mp_find_iolink_io_apicid(int node, int link);
 extern int mp_fix_io_apicid(unsigned int src_apicid, unsigned int new_apicid);
-void mp_pci_add_resources(struct list_head *resources,
-			   struct iohub_sysdata *sd);
 extern int mp_iohubs_num;
 #else
 static inline int mp_fix_io_apicid(unsigned int src_apicid,
@@ -404,8 +398,6 @@ extern int smp_found_config;
 extern void find_smp_config(void);
 extern void get_smp_config(void);
 extern int nr_ioapics;
-extern int mp_irq_entries;
-extern struct mpc_intsrc mp_irqs [];
 extern unsigned long mp_lapic_addr;
 extern int pic_mode;
 extern int using_apic_timer;

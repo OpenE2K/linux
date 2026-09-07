@@ -1080,6 +1080,9 @@ static const struct file_operations umad_fops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= ib_umad_compat_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl = ib_umad_ioctl,
+#endif
 	.open		= ib_umad_open,
 	.release	= ib_umad_close,
 	.llseek		= no_llseek,

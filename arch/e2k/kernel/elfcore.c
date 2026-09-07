@@ -18,7 +18,7 @@
 
 
 /*
- * Support for tags and cokors dumping
+ * Support for tags and colors dumping
  */
 
 #define MEM_HAS_COLORS	(cpu_has(CPU_FEAT_ISET_V7) && !cpu_has(CPU_FEAT_E48C_MAKET) && \

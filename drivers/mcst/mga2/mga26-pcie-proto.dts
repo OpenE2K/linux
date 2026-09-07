@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
 /dts-v1/;
 /plugin/;
 
@@ -80,7 +85,10 @@
 		reg = <0x2000 0x20>;
 		status = VID0_STS;
 	};
-	vga_bridge: vga_bridge {
+	rgb_connector: rgb_connector {
+		status = VID0_STS;
+	};
+	rgb_bridge: rgb_bridge {
 		status = VID0_STS;
 	};
 	vid0_txi2c: i2c@2020 {
@@ -109,10 +117,9 @@
 
 &vid0 {
 	compatible = "mcst,mga2x-rgb";
-	ddc-i2c-bus = <&vid0_ddc>;
+	/*dual-edge-data;*/
 	#address-cells = <1>;
 	#size-cells = <0>;
-
 	clocks = <&dc0_pll>, <&dc0_pix>, <&dc0_aux>;
 
 	port@0 {
@@ -127,34 +134,38 @@
 	port@1 {
 		reg = <1>;
 		vid0_out: endpoint {
-			remote-endpoint = <&vga_bridge_in>;
-		};
-	};
-	port@2 { /* for dumb-vga-dac to find ddc bus */
-		reg = <2>;
-		vid0_in_aux: endpoint {
-			remote-endpoint = <&vga_bridge_out>;
+			remote-endpoint = <&rgb_bridge_in>;
 		};
 	};
 };
 
-&vga_bridge {
+&rgb_bridge {
 	compatible = "dumb-vga-dac";
-	ports {
-		#address-cells = <1>;
-		#size-cells = <0>;
-		port@0 {
-			reg = <0>;
 
-			vga_bridge_in: endpoint {
-				remote-endpoint = <&vid0_out>;
-			};
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	port@0 {
+		reg = <0>;
+		rgb_bridge_in: endpoint {
+			remote-endpoint = <&vid0_out>;
 		};
-		port@1 {
-			reg = <1>;
-			vga_bridge_out: endpoint {
-				remote-endpoint = <&vid0_in_aux>;
-			};
+	};
+	port@1 {
+		reg = <1>;
+		rgb_bridge_out: endpoint {
+			remote-endpoint = <&rgb_con_in>;
+		};
+	};
+};
+
+&rgb_connector {
+	compatible = "dvi-connector";
+	digital;
+	ddc-i2c-bus = <&vid0_ddc>;
+	port {
+		rgb_con_in: endpoint {
+			remote-endpoint = <&rgb_bridge_out>;
 		};
 	};
 };

@@ -528,6 +528,18 @@ static long radeon_kms_compat_ioctl(struct file *filp, unsigned int cmd, unsigne
 }
 #endif
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+static long radeon_kms_ptr128_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+	unsigned int nr = DRM_IOCTL_NR(cmd);
+
+	if (nr < DRM_COMMAND_BASE)
+		return drm_ptr128_ioctl(filp, cmd, arg);
+
+	return radeon_drm_ioctl(filp, cmd, arg);
+}
+#endif
+
 static const struct dev_pm_ops radeon_pm_ops = {
 	.suspend = radeon_pmops_suspend,
 	.resume = radeon_pmops_resume,
@@ -550,6 +562,9 @@ static const struct file_operations radeon_driver_kms_fops = {
 	.read = drm_read,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = radeon_kms_compat_ioctl,
+#endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl = radeon_kms_ptr128_ioctl,
 #endif
 };
 

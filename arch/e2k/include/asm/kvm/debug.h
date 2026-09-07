@@ -27,8 +27,10 @@ extern e2k_addr_t kvm_get_guest_phys_addr(struct task_struct *task,
 						e2k_addr_t virt);
 extern void kvm_print_all_vm_stacks(void);
 extern void kvm_print_vcpu_stack(struct kvm_vcpu *vcpu);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 extern void kvm_dump_guest_stack(struct task_struct *task,
 		stack_regs_t *const stack_regs, bool show_reg_window);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #define	IS_GUEST_USER_ADDR(task, addr)	\
 		(((e2k_addr_t)(addr)) < GUEST_TASK_SIZE)
@@ -58,12 +60,15 @@ static inline void print_guest_vcpu_stack(struct kvm_vcpu *vcpu)
 {
 	kvm_print_vcpu_stack(vcpu);
 }
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline void
 print_guest_stack(struct task_struct *task,
 		stack_regs_t *const stack_regs, bool show_reg_window)
 {
 	kvm_dump_guest_stack(task, stack_regs, show_reg_window);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
+
 #include <asm/kvm/hypercall.h>
 static inline void
 host_ftrace_stop(void)

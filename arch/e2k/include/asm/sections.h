@@ -11,7 +11,7 @@
 #include <asm-generic/sections.h>
 #endif	/* ! __ASSEMBLY__ */
 
-#if (defined __e2k__) && (defined __LCC__)
+#if defined __LCC__
 #define __interrupt     __attribute__((__check_stack__))
 #else
 #define __interrupt     __attribute__((__interrupt__))

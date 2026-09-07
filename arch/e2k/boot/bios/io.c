@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
 #include "pci.h"
 #include <asm/types.h>
 #include <asm/e2k_api.h>
@@ -376,11 +381,11 @@ void bios_outsw(unsigned long port, const void *src, unsigned long count)
 
 	DebugIO("outsw(): port=%lx src=%px count=%lx\n", port, src, count);
 
-        if (((unsigned long)src) & 0x1) {
-                rom_printk("outsw: memory address is not short aligned");
-        }
-        if (!count)
-                return;
+	if (((unsigned long)src) & 0x1) {
+		rom_printk("outsw: memory address is not short aligned");
+	}
+	if (!count)
+		return;
 
 	while (count--) {
 		fast_outw_p(*hw_p++, port);
@@ -402,11 +407,11 @@ void bios_insw(unsigned long port, void *dst, unsigned long count)
 
 	DebugIO("insw(): port=%lx dst=%px count=%lx\n",port, dst, count);
 
-        if (((unsigned long)dst) & 0x1) {
-                rom_printk("insw: memory address is not short aligned");
-        }
-        if (!count)
-                return;
+	if (((unsigned long)dst) & 0x1) {
+		rom_printk("insw: memory address is not short aligned");
+	}
+	if (!count)
+		return;
 
 	while (count--) {
 		*hw_p++ = fast_inw_p(port);

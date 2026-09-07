@@ -74,7 +74,7 @@ static inline void syscall_set_arguments(struct task_struct *task,
 
 static inline int syscall_get_arch(struct task_struct *task)
 {
-        return AUDIT_ARCH_E2K;
+	return AUDIT_ARCH_E2K;
 }
 
 static inline void syscall_rollback(struct task_struct *task,

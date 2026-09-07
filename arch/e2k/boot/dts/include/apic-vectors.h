@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
 #ifndef _APIC_VECTORS_H
 #define _APIC_VECTORS_H
 
@@ -33,18 +38,17 @@
 #define ERROR_APIC_VECTOR		0xfe
 #define RESCHEDULE_VECTOR		0xfd
 #define CALL_FUNCTION_VECTOR		0xfc
-/* VIRQ vector to emulate SysRq on guest kernel */
-#define	SYSRQ_SHOWSTATE_APIC_VECTOR	0xfa
-/* VIRQ vector to emulate NMI on guest kernel */
-#define	KVM_NMI_APIC_VECTOR		0xee
 #define CALL_FUNCTION_SINGLE_VECTOR	0xfb
+/* VIRQ vector to emulate SysRq on guest kernel */
+#define SYSRQ_SHOWSTATE_APIC_VECTOR	0xfa
 #define RDMA_INTERRUPT_VECTOR		0xf9
 #define LVT3_INTERRUPT_VECTOR		0xf8
 #define LVT4_INTERRUPT_VECTOR		0xf7
 #define IRQ_WORK_VECTOR			0xf6
 
 #define MANAGED_IRQ_SHUTDOWN_VECTOR	0xef
-
 #define LOCAL_TIMER_VECTOR		0xee
+/* VIRQ vector to emulate NMI on guest kernel */
+#define KVM_NMI_APIC_VECTOR		0xed
 
 #endif

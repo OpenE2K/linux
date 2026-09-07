@@ -9,6 +9,7 @@
 #include <linux/smp.h>
 #include <asm/delay.h>
 #include <asm/pic.h>
+#include <asm/nmi.h>
 
 /*
  * NMI IPI support

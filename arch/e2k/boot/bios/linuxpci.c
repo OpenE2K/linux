@@ -1,12 +1,6 @@
 /*
- *    $Id: linuxpci.c,v 1.10 2008/05/23 20:26:35 alexmipt Exp $
- *
- *      PCI Bus Services, see include/linux/pci.h for further explanation.
- *
- *      Copyright 1993 -- 1997 Drew Eckhardt, Frederic Potter,
- *      David Mosberger-Tang
- *
- *      Copyright 1997 -- 1999 Martin Mares <mj@atrey.karlin.mff.cuni.cz>
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
  */
 
 #include <linux/pci.h>
@@ -163,10 +157,10 @@ void pci_get_size(struct bios_pci_dev *dev, unsigned long reg,
 			dev->devfn, reg);
 		printk_debug("addr was 0x%x, size was 0x%x\n",addr,size); 
 		type = 0;
-         	size = 0;
-         }
+		size = 0;
+	 }
 	// Now compute the actual size, See PCI Spec 6.2.5.1 ... 
-         else
+	 else
 #endif
 	if (size & PCI_BASE_ADDRESS_SPACE_IO) {
 		type = size & (~PCI_BASE_ADDRESS_IO_MASK);
@@ -558,7 +552,7 @@ static unsigned int bios_pci_scan_bus(struct bios_pci_bus *bus)
 #ifdef	CONFIG_E2K_SIC
 #ifndef	CONFIG_L_IOH2
 				/* Here we need to setup system commutator register for PCI bridges
-		 		 * (PCI Bridge Bus Number Reg - 0x18 - 0x1b ) that is in accordance with 
+				 * (PCI Bridge Bus Number Reg - 0x18 - 0x1b ) that is in accordance with 
 				 * that of current bridge. We are interested only Subordinate Bus Number 
 				 * and Secondary Bus Number fields so it is useless to write Primary. 
 				 * According to iset manual aren't required for virtual PCI_2_PCI on 

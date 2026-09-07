@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: GPL-2.0
  * Copyright (c) 2023 MCST
  */
+
 #include <linux/kernel.h>
 #include <linux/cpu.h>
 
@@ -23,6 +24,7 @@ DEFINE_EARLY_PER_CPU_READ_MOSTLY(u16, cpu_to_picid, BAD_APICID);
 physid_mask_t phys_cpu_present_map;
 
 DEFINE_PER_CPU(long long, next_rt_intr) = 0;
+DEFINE_PER_CPU(long long, must_do_timer) = 0;
 
 
 /* Processor that is doing the boot up */
@@ -65,7 +67,7 @@ void __init pic_processor_info(int picid, int picver, unsigned int freq)
 		cpu = epic_processor_info(picid, picver, freq);
 	else
 		cpu = generic_processor_info(picid, picver);
-	early_map_cpu_to_node(cpu, e2k_early_cpu_to_node(cpu));
+	early_map_cpu_to_node(cpu, early_cpu_to_node(cpu));
 }
 
 bool read_pic_bsp(void)
@@ -114,4 +116,39 @@ int pic_get_vector_by_name(struct device_node *np,
 out:
 	of_node_put(np);
 	return ret;
+}
+
+void fixup_irqs_pic(void)
+{
+	unsigned int vector;
+
+	/*
+	 * We can remove mdelay() and then send spuriuous interrupts to
+	 * new cpu targets for all the irqs that were handled previously by
+	 * this cpu. While it works, I have seen spurious interrupt messages
+	 * (nothing wrong but still...).
+	 *
+	 * So for now, retain mdelay(1) and check the IRR and then send those
+	 * interrupts to new targets as this cpu is already offlined...
+	 */
+	mdelay(1);
+
+	for (vector = FIRST_EXTERNAL_VECTOR; vector < NR_VECTORS; vector++) {
+		unsigned int irr;
+
+		if (__this_cpu_read(vector_irq[vector]) < 0)
+			continue;
+
+		irr = cpu_has_epic() ? get_irr_epic(vector) : get_irr_apic(vector);
+		if (irr  & (1 << (vector % 32))) {
+			struct irq_desc *desc = __this_cpu_read(vector_irq[vector]);
+			struct irq_data *data = irq_desc_get_irq_data(desc);
+			struct irq_chip *chip = irq_data_get_irq_chip(data);
+
+			raw_spin_lock(&desc->lock);
+			if (chip->irq_retrigger)
+				chip->irq_retrigger(data);
+			raw_spin_unlock(&desc->lock);
+		}
+	}
 }

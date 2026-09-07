@@ -58,7 +58,9 @@ typedef struct thread_info {
 #ifdef CONFIG_SMP
 	u32			cpu;		/* current CPU */
 #endif
+#ifdef SHOW_WOKEN_TIME
 	long long		irq_enter_clk;	/* CPU clock when irq enter */
+#endif
 						/* occured */
 	struct pt_regs		*pt_regs;	/* head of pt_regs */
 						/* structure queue: */
@@ -70,22 +72,11 @@ typedef struct thread_info {
 	e2k_psp_t		k_psp;
 	e2k_pcsp_t		k_pcsp;
 
-	struct kernel_gregs	k_gregs;
-
-	/* Because we don't have pt_regs ready upon kernel entry we
-	 * temporarily save stack registers here, then copy to pt_regs */
-	struct hw_stacks	tmp_user_stacks;
-	/* Because we have to use the same kernel entry for both user
-	 * and kernel interrupts, we have to save user's global registers
-	 * to some temporary area, only after we copy them to pt_regs if
-	 * this was user interrupt. */
-	struct kernel_gregs	tmp_k_gregs;
-
 #ifdef CONFIG_KVM_HOST_MODE
 	struct kernel_gregs	k_gregs_light;
 #endif
 
-        e2k_upsr_t              upsr;           /* kernel upsr */
+	e2k_upsr_t              upsr;           /* kernel upsr */
 
 	data_stack_t		u_stack;	/* User data stack info */
 	hw_stack_t		u_hw_stack;	/* User hardware stacks info */
@@ -266,9 +257,6 @@ typedef struct thread_info {
 #define	TS_HOST_TO_GUEST_USER		0x00002000
 #define	TS_HOST_SWITCH_MMU_PID		0x00004000
 
-#define	THREAD_SIZE		KERNEL_STACKS_SIZE
-#define THREAD_SIZE_ORDER	order_base_2(KERNEL_STACKS_SIZE / PAGE_SIZE)
-
 #ifndef __ASSEMBLY__
 
 #ifdef CONFIG_SECONDARY_SPACE_SUPPORT
@@ -276,8 +264,10 @@ typedef struct thread_info {
 #define BC_CHILD_IS_SERVING		0x00000001
 /* Thread is serving (doesn't execute x86 commands) */
 #define BC_IS_SERVING			0x00000002
- /* Thread should be moved to outmost ns */
+/* Thread should be moved to outmost ns */
 #define BC_IS_OUTMOST			0x00000004
+/* Thread has child serving thread in outmost ns */
+#define BC_HAS_OUTMOST_CHILD		0x00000008
 
 static __always_inline bool is_bc_outmost_thread(struct thread_info *ti)
 {

@@ -22,64 +22,64 @@
 
 static inline void arch_atomic_and(int incr, atomic_t *val)
 {
-	__api_atomic_op(incr, &val->counter, w, "ands", RELAXED_MB);
+	(void) __api_atomic_op(incr, &val->counter, w, "ands", RELAXED_MB);
 }
 
 static inline void arch_atomic64_and(__s64 incr, atomic64_t *val)
 {
-	__api_atomic_op(incr, &val->counter, d, "andd", RELAXED_MB);
+	(void) __api_atomic_op(incr, &val->counter, d, "andd", RELAXED_MB);
 }
 
 #define arch_atomic_andnot arch_atomic_andnot
 static inline void arch_atomic_andnot(int incr, atomic_t *val)
 {
-	__api_atomic_op(incr, &val->counter, w, "andns", RELAXED_MB);
+	(void) __api_atomic_op(incr, &val->counter, w, "andns", RELAXED_MB);
 }
 
 #define arch_atomic64_andnot arch_atomic64_andnot
 static inline void arch_atomic64_andnot(__s64 incr, atomic64_t *val)
 {
-	__api_atomic_op(incr, &val->counter, d, "andnd", RELAXED_MB);
+	(void) __api_atomic_op(incr, &val->counter, d, "andnd", RELAXED_MB);
 }
 
 static inline void arch_atomic_or(int incr, atomic_t *val)
 {
-	__api_atomic_op(incr, &val->counter, w, "ors", RELAXED_MB);
+	(void) __api_atomic_op(incr, &val->counter, w, "ors", RELAXED_MB);
 }
 
 static inline void arch_atomic64_or(__s64 incr, atomic64_t *val)
 {
-	__api_atomic_op(incr, &val->counter, d, "ord", RELAXED_MB);
+	(void) __api_atomic_op(incr, &val->counter, d, "ord", RELAXED_MB);
 }
 
 static inline void arch_atomic_xor(int incr, atomic_t *val)
 {
-	__api_atomic_op(incr, &val->counter, w, "xors", RELAXED_MB);
+	(void) __api_atomic_op(incr, &val->counter, w, "xors", RELAXED_MB);
 }
 
 static inline void arch_atomic64_xor(__s64 incr, atomic64_t *val)
 {
-	__api_atomic_op(incr, &val->counter, d, "xord", RELAXED_MB);
+	(void) __api_atomic_op(incr, &val->counter, d, "xord", RELAXED_MB);
 }
 
 static inline void arch_atomic_add(int incr, atomic_t *val)
 {
-	__api_atomic_op(incr, &val->counter, w, "adds", RELAXED_MB);
+	(void) __api_atomic_op(incr, &val->counter, w, "adds", RELAXED_MB);
 }
 
 static inline void arch_atomic64_add(__s64 incr, atomic64_t *val)
 {
-	__api_atomic_op(incr, &val->counter, d, "addd", RELAXED_MB);
+	(void) __api_atomic_op(incr, &val->counter, d, "addd", RELAXED_MB);
 }
 
 static inline void arch_atomic_sub(int incr, atomic_t *val)
 {
-	__api_atomic_op(incr, &val->counter, w, "subs", RELAXED_MB);
+	(void) __api_atomic_op(incr, &val->counter, w, "subs", RELAXED_MB);
 }
 
 static inline void arch_atomic64_sub(__s64 incr, atomic64_t *val)
 {
-	__api_atomic_op(incr, &val->counter, d, "subd", RELAXED_MB);
+	(void) __api_atomic_op(incr, &val->counter, d, "subd", RELAXED_MB);
 }
 
 #define __atomic_add_return(v, p, mem_model) \
@@ -145,6 +145,7 @@ static inline void arch_atomic64_sub(__s64 incr, atomic64_t *val)
 #define arch_atomic_fetch_or_acquire(v, p) __atomic_fetch_or((v), (p), ACQUIRE_MB)
 #define arch_atomic_fetch_or_release(v, p) __atomic_fetch_or((v), (p), RELEASE_MB)
 #define arch_atomic_fetch_or(v, p)	   __atomic_fetch_or((v), (p), STRONG_MB)
+#define arch_atomic_fetch_or_lock(v, p)    __atomic_fetch_or((v), (p), LOCK_MB)
 
 #define __atomic64_fetch_or(v, p, mem_model) \
 	__api_atomic_fetch_op((__s64) (v), &(p)->counter, d, "ord", mem_model)

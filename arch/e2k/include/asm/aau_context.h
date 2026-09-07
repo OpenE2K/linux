@@ -128,9 +128,6 @@ static __always_inline void native_clear_all_aaldis(void)
 
 static __always_inline void native_set_all_aaldas(const e2k_aalda_t aaldas_p[])
 {
-#ifndef __LITTLE_ENDIAN
-# error This loads must be little endian to not mix aaldas up (and the same goes to SAVE_AALDA)
-#endif
 	NATIVE_SET_ALL_AALDAS(aaldas_p);
 }
 
@@ -212,9 +209,6 @@ static __always_inline void native_clear_aau_context(void)
 #define	GET_AAU_CONTEXT_V3(cntx, aasr)	native_get_aau_context_v3(cntx, aasr)
 #define	GET_AAU_CONTEXT_V5(cntx, aasr)	native_get_aau_context_v5(cntx, aasr)
 
-#define	SAVE_AAU_MASK_REGS(aau_context, aasr)			\
-		NATIVE_SAVE_AAU_MASK_REGS(aau_context, aasr)
-
 #define	RESTORE_AAU_MASK_REGS(aau_context, aaldv, aasr)		\
 		NATIVE_RESTORE_AAU_MASK_REGS(aau_context, aaldv, aasr)
 
@@ -285,7 +279,7 @@ static __always_inline void clear_aau_context(void)
 /* 
  * for code optimization
  */
-static inline int aau_working(e2k_aasr_t aasr)
+static __always_inline int aau_working(e2k_aasr_t aasr)
 {
 	return unlikely(aasr.iab || aasr.stb);
 }

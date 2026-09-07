@@ -690,13 +690,25 @@ static struct file_operations bige_fops =
  Return type     : int
 ------------------------------------------------------------------------------*/
 
+#ifdef CONFIG_MCST
+static int bige_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
+#else
 int __init bige_init(void)
+#endif
 {
   int result, i;
   /* u32 buf[4]; */
 
   printk(KERN_INFO "bige: Initializing\n");
 
+#ifdef CONFIG_MCST
+  if (pdev) {
+    gDev = pdev;
+  } else {
+    printk(KERN_ERR "bige: no device found!\n");
+    return -ENODEV;
+  }
+#endif
   result = PcieInit();
   if (result)
     goto err;
@@ -807,7 +819,11 @@ err:
  Return type     : int
 ------------------------------------------------------------------------------*/
 
+#ifdef CONFIG_MCST
+static void bige_remove(struct pci_dev *pdev)
+#else
 void __exit bige_cleanup(void)
+#endif
 {
   bige_t *dev = &bige_data;
 
@@ -839,6 +855,7 @@ static int PcieInit(void)
   int rc = 0;
   struct uio_info *info;
 
+#if !defined(CONFIG_MCST)
   // Look for a device on the PCIe bus that matches the vendor and device ID
   gDev = pci_get_device(BIGE_PCI_VENDOR_ID, BIGE_PCI_DEVICE_ID, gDev);
   if (gDev == NULL) {
@@ -852,6 +869,29 @@ static int PcieInit(void)
   if (gDev == NULL) {
     printk(KERN_ERR "bige: pci_get_device() failed.\n");
     return -1;
+  }
+#endif
+  if (gDev->dev.bus->dma_configure) {
+    struct pci_driver driver = { };
+    if (!gDev->dev.driver) /*HACK: dma_configure() uses the pointer*/
+      gDev->dev.driver = &driver.driver;
+  
+    /* Bind iommu. Normally it is done just before pci-probe call,
+    but vc9000d is not pci driver */
+     rc = gDev->dev.bus->dma_configure(&gDev->dev);
+    if (gDev->dev.driver == &driver.driver)
+      gDev->dev.driver = NULL;
+    if ( rc) {
+      pr_err("bige: dma_configure failed.\n");
+      return  rc;
+    }
+  }
+  /* Bind irq. Normally it is done just before pci-probe call,
+  but vc9000d is not pci driver */
+   rc = pcibios_alloc_irq(gDev);
+  if ( rc < 0) {
+    pr_err("bige: pcibios_alloc_irq failed.\n");
+    return  rc;
   }
 
   // Allocate space for the uio_info struct
@@ -1142,6 +1182,29 @@ static struct pci_device_id bige_pci_tbl[] = {
 };
 
 MODULE_DEVICE_TABLE(pci, bige_pci_tbl);
+
+static struct pci_driver bige_driver = {
+	.name		= KBUILD_MODNAME,
+	.id_table	= bige_pci_tbl,
+	.probe		= bige_probe,
+	.remove		= bige_remove,
+};
+
+void __exit bige_cleanup(void)
+{
+	pci_unregister_driver(&bige_driver);
+}
+
+int __init bige_init(void)
+{
+	int status = pci_register_driver(&bige_driver);
+
+	if (status != 0)
+		pr_err(KBUILD_MODNAME ": Could not register driver\n");
+
+	return status;
+}
+
 #endif
 module_init(bige_init);
 module_exit(bige_cleanup);

@@ -1401,16 +1401,9 @@ gckOS_AllocateNonPagedMemory(gckOS Os,
 
 #if !defined(NO_DMA_COHERENT) || defined(CONFIG_MCST)
         /* Point to dma coherent allocator. */
-#if defined(CONFIG_MCST)
-        if ((dma_allocator_enable &&
-                       (!strcmp(allocator->name, "dma") ||
-            ((Flag & allocator->capability) == Flag && numPages == 1))) ||
-                       (!dma_allocator_enable &&
-                       ((Flag & allocator->capability) == Flag))) {
-#else
         if (!strcmp(allocator->name, "dma") ||
             ((Flag & allocator->capability) == Flag && numPages == 1)) {
-#endif
+
             status = allocator->ops->Alloc(allocator, mdl, numPages, Flag);
 
             if (gcmIS_SUCCESS(status)) {

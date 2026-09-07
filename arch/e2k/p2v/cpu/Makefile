@@ -4,7 +4,8 @@
 KASAN_SANITIZE := n
 GCOV_PROFILE := n
 
-ccflags-remove-$(CONFIG_FUNCTION_TRACER) += $(CC_FLAGS_FTRACE) -fprofile-generate-kernel
+ccflags-remove-$(CONFIG_FUNCTION_TRACER) += $(CC_FLAGS_FTRACE)
+ccflags-remove-y += -fprofile-generate-kernel
 
 obj-y := boot_iset_v3.o boot_iset_v6.o
 

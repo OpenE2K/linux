@@ -48,6 +48,9 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "km_apphint_defs.h"
 #include "htbuffer_types.h"
 #include "htbuffer_init.h"
+#if defined(CONFIG_MCST)
+#include "pvrversion.h"
+#endif
 
 #include "devicemem.h"
 #include "devicemem_pdump.h"
@@ -1234,6 +1237,22 @@ static PVRSRV_ERROR InitFirmware(PVRSRV_DEVICE_NODE *psDeviceNode,
 		IMG_CHAR *pszFWFilename = NULL;
 		IMG_CHAR *pszFWpFilename = NULL;
 
+#if defined(CONFIG_MCST)
+		IMG_CHAR aszFWFilenameStr[OSStringLength(RGX_FW_FILENAME)+MAX_BVNC_STRING_LEN+8+2];
+		IMG_CHAR aszFWpFilenameStr[OSStringLength(RGX_FW_FILENAME)+MAX_BVNC_STRING_LEN+8+3];
+
+		pszFWFilename = &aszFWFilenameStr[0];
+		OSSNPrintf(pszFWFilename, OSStringLength(RGX_FW_FILENAME)+MAX_BVNC_STRING_LEN+8+2, "%s.%d.%d.%d.%d.%d%s", RGX_FW_FILENAME,
+		           psDevInfo->sDevFeatureCfg.ui32B, psDevInfo->sDevFeatureCfg.ui32V,
+		           psDevInfo->sDevFeatureCfg.ui32N, psDevInfo->sDevFeatureCfg.ui32C,
+		           (PVRVERSION_BUILD), PVRSRV_VZ_MODE_IS(DRIVER_MODE_NATIVE) ? "" : ".vz");
+		pszFWpFilename = &aszFWpFilenameStr[0];
+		OSSNPrintf(pszFWpFilename, OSStringLength(RGX_FW_FILENAME)+MAX_BVNC_STRING_LEN+8+3, "%s.%d.%dp.%d.%d.%d%s", RGX_FW_FILENAME,
+		           psDevInfo->sDevFeatureCfg.ui32B, psDevInfo->sDevFeatureCfg.ui32V,
+		           psDevInfo->sDevFeatureCfg.ui32N, psDevInfo->sDevFeatureCfg.ui32C,
+		           (PVRVERSION_BUILD), PVRSRV_VZ_MODE_IS(DRIVER_MODE_NATIVE) ? "" : ".vz");
+		PVR_LOG(("InitFirmware: FW name: %s FWp name: %s", pszFWFilename, pszFWpFilename));
+#else
 		IMG_CHAR aszFWFilenameStr[OSStringLength(RGX_FW_FILENAME)+MAX_BVNC_STRING_LEN+2];
 		IMG_CHAR aszFWpFilenameStr[OSStringLength(RGX_FW_FILENAME)+MAX_BVNC_STRING_LEN+3];
 
@@ -1245,6 +1264,7 @@ static PVRSRV_ERROR InitFirmware(PVRSRV_DEVICE_NODE *psDeviceNode,
 		OSSNPrintf(pszFWpFilename, OSStringLength(RGX_FW_FILENAME)+MAX_BVNC_STRING_LEN+3, "%s.%d.%dp.%d.%d%s", RGX_FW_FILENAME,
 		           psDevInfo->sDevFeatureCfg.ui32B, psDevInfo->sDevFeatureCfg.ui32V,
 		           psDevInfo->sDevFeatureCfg.ui32N, psDevInfo->sDevFeatureCfg.ui32C, PVRSRV_VZ_MODE_IS(DRIVER_MODE_NATIVE) ? "" : ".vz");
+#endif
 
 		/*
 		 * Get pointer to Firmware image

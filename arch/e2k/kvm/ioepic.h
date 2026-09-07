@@ -66,19 +66,4 @@ int kvm_ioepic_set_base(struct kvm *kvm, unsigned long new_base);
 int kvm_ioepic_set_irq(struct kvm_ioepic *ioepic, int irq, int level);
 void kvm_ioepic_reset(struct kvm_ioepic *ioepic);
 
-
-static inline void get_io_epic_msi(int node, u32 *lo, u32 *hi)
-{
-	if (node < 0)
-		node = 0;
-	/* FIXME SIC reads with mas 0x13 aren't supported by hypervisor */
-	if (paravirt_enabled()) {
-		*lo = early_sic_read_node_nbsr_reg(node, SIC_rt_msi);
-		*hi = early_sic_read_node_nbsr_reg(node, SIC_rt_msi_h);
-	} else {
-		*lo = sic_read_node_nbsr_reg(node, SIC_rt_msi);
-		*hi = sic_read_node_nbsr_reg(node, SIC_rt_msi_h);
-	}
-}
-
 #endif

@@ -17,7 +17,6 @@
 #include <asm/sic_regs_access.h>
 #include <asm/iolinkmask.h>
 
-#include <asm-l/swiotlb.h>
 
 #define L_IOMMU_CTRL		SIC_iommu_ctrl
 #define L_IOMMU_FLUSH_ALL	SIC_iommu_flush
@@ -135,15 +134,11 @@ static inline int l_iommu_get_table(unsigned long iova)
 #define l_iommu_supported()		HAS_MACHINE_L_IOMMU
 
 
-extern int l_iommu_no_numa_bug;
-extern int l_iommu_force_numa_bug_on;
-extern unsigned long l_iommu_win_sz;
 
-#define l_iommu_has_numa_bug() (l_iommu_force_numa_bug_on || \
-		(nr_online_nodes > 1 && l_iommu_no_numa_bug == 0 && \
+#define l_iommu_has_numa_bug() ((nr_online_nodes > 1  && \
 		cpu_has(CPU_HWBUG_CANNOT_DO_DMA_IN_NEIGHBOUR_NODE)) || \
-		(cpu_has(CPU_HWBUG_CANNOT_DO_DMA_THROUGH_LINKS_B_AND_C) && \
-			nr_online_nodes > 2))
+		(nr_online_nodes > 2 && \
+		cpu_has(CPU_HWBUG_CANNOT_DO_DMA_THROUGH_LINKS_B_AND_C)))
 
 #define	L_PGSIZE_BITMAP SZ_4K
 

@@ -53,8 +53,9 @@ endef
 
 KASAN_SANITIZE := n
 BOOT_CFLAGS_REMOVE := $(CC_FLAGS_FTRACE)
-BOOT_CFLAGS_ADD := -DE2K_P2V -fno-semi-spec-ld -fno-spec-ld \
-		    -ftrivial-auto-var-init=uninitialized
+BOOT_CFLAGS_ADD := -DE2K_P2V $(call lcc-option,-fno-semi-spec-ld) \
+		   $(call lcc-option,-fno-spec-ld) \
+		   -ftrivial-auto-var-init=uninitialized
 
 CFLAGS_ttable.o += -Wframe-larger-than=4096
 CFLAGS_REMOVE_ttable.o = $(BOOT_CFLAGS_REMOVE)

@@ -57,18 +57,6 @@ static bool is_current_bincomp(void)
 	return res;
 }
 
-static void set_upt_sec_ad_shift_dsbl(void *arg)
-{
-	unsigned long flags;
-	e2k_cu_hw0_t cu_hw0;
-
-	raw_all_irq_save(flags);
-	cu_hw0 = read_CU_HW0_reg();
-	cu_hw0.upt_sec_ad_shift_dsbl = (arg) ? 1 : 0;
-	write_CU_HW0_reg(cu_hw0);
-	raw_all_irq_restore(flags);
-}
-
 static bin_comp_info_t *alloc_bin_comp_info_info(unsigned long size)
 {
 	void *info;
@@ -105,6 +93,16 @@ static int set_user_bin_comp_info_info(void __user *addr, unsigned long size,
 	}
 
 	bi = &mm->context.bincomp_info;
+
+	read_lock(&bi->lock);
+	info = bi->info;
+	read_unlock(&bi->lock);
+
+	if (info) {
+		/* info can be set only once */
+		ret = -EPERM;
+		goto out_put_mm;
+	}
 
 	info = alloc_bin_comp_info_info(size);
 	if (!info) {
@@ -738,7 +736,9 @@ static pid_t get_outmost_ns_tid(pid_t tid)
 {
 	struct pid_namespace *bc_init_ns;
 	struct pid *pid;
-	pid_t nr;
+	struct task_struct *p;
+	struct mm_struct *mm;
+	pid_t nr = -ESRCH;
 
 	if (!is_current_bincomp())
 		return -EPERM;
@@ -749,12 +749,31 @@ static pid_t get_outmost_ns_tid(pid_t tid)
 
 	if (tid == 0 || current->pid == tid)
 		pid = get_task_pid(current, PIDTYPE_PID);
-	else
+	else {
 		pid = find_get_pid(tid);
+		if (!pid)
+			goto out;
+
+		p = get_pid_task(pid, PIDTYPE_PID);
+		if (!p)
+			goto out_put_pid;
+
+		mm = get_task_mm(p);
+		put_task_struct(p);
+
+		nr = -EACCES;
+		if (!mm)
+			goto out_put_pid;
+		mmput(mm);
+
+		if (current->mm != mm)
+			goto out_put_pid;
+	}
 
 	nr = pid_nr_ns(pid, bc_init_ns);
-
+out_put_pid:
 	put_pid(pid);
+out:
 	return nr;
 }
 
@@ -884,7 +903,7 @@ static s64 map_bin_comp_exe(long addr, long len, long prot, long flags, long off
 	struct file *file;
 	s64 res;
 
-	if (!is_current_bincomp())
+	if (!is_current_bincomp() || (flags & MAP_SHARED))
 		return -EPERM;
 
 	file = get_task_exe_file(current);
@@ -1173,13 +1192,7 @@ SYSCALL_DEFINE6(el_binary, s64, work,
 			ti->last_ic_flush_cpu = -1;
 		break;
 	case SET_UPT_SEC_AD_SHIFT_DSBL:
-		DebugSS("SET_UPT_AEC_AD_SHIFT_DSBL: set = %lld\n", arg2);
-		if (!capable(CAP_SYS_ADMIN))
-			return -EPERM;
-		if (machine.native_iset_ver >= E2K_ISET_V6)
-			on_each_cpu(set_upt_sec_ad_shift_dsbl, (void *)arg2, 1);
-		else
-			res = -EPERM;
+		res = -EPERM;
 		break;
 	case GET_UPT_SEC_AD_SHIFT_DSBL:
 		DebugSS("SET_UPT_AEC_AD_SHIFT_DSBL\n");
@@ -1238,9 +1251,15 @@ SYSCALL_DEFINE6(el_binary, s64, work,
 		if (!is_current_bincomp())
 			return -EPERM;
 
-		ti->bc_flags = (bool)arg2 ?
-					ti->bc_flags | BC_CHILD_IS_SERVING :
-					ti->bc_flags & ~BC_CHILD_IS_SERVING;
+		if ((bool)arg2) {
+			if (ti->bc_flags & BC_HAS_OUTMOST_CHILD)
+				res = -EPERM;
+			else
+				ti->bc_flags |= BC_CHILD_IS_SERVING
+						| BC_HAS_OUTMOST_CHILD;
+		} else {
+			ti->bc_flags &= ~BC_CHILD_IS_SERVING;
+		}
 		break;
 	case GET_OUTMOST_NS_TID:
 		DebugSS("GET_OUTMOST_NS_TID: tid = %u\n", (pid_t)arg2);
@@ -1271,12 +1290,12 @@ SYSCALL_DEFINE6(el_binary, s64, work,
 		break;
 	case GET_MAP_INFO:
 		 DebugSS("GET_MAP_INFO: info = %lx num = %d start addr = %lx\n",
-			  (char *)arg2, (int)arg3, (unsigned long)arg4);
+			  (unsigned long)arg2, (int)arg3, (unsigned long)arg4);
 		 res = get_map_info((char __user *)arg2, (int)arg3, (unsigned long)arg4);
 		 break;
 	case GET_FD_PATH:
 		DebugSS("GET_FD_PATH: fd = %d, buf = %lx, size = %u\n",
-				(int)arg2, (char __user *)arg3, (int)arg4);
+				(int)arg2, (unsigned long)arg3, (int)arg4);
 		res = get_fd_path((int)arg2, (char __user *)arg3, (int)arg4);
 		break;
 	case BIN_COMP_FD_OPEN:

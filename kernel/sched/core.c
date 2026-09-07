@@ -4370,7 +4370,7 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 #ifdef CONFIG_MCST_4RT
 	if (system_state == SYSTEM_RUNNING) {
 		p->waken_tm = 0;
-		p->wakeup_tm = sched_clock();
+		p->wakeup_tm = getns64timeofday();
 #if defined(SHOW_WOKEN_TIME)
 		if (show_woken_time > 1) {
 			p->sched_enter_tm = 0;
@@ -7056,7 +7056,7 @@ static void __sched notrace __schedule(unsigned int sched_mode)
 
 #if defined(CONFIG_MCST_4RT)
 	if (system_state == SYSTEM_RUNNING) {
-		cur_tm = sched_clock();
+		cur_tm = getns64timeofday();
 		if (current->waken_tm == 0)
 			current->waken_tm = cur_tm;
 #if defined(SHOW_WOKEN_TIME)

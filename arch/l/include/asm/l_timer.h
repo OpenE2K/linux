@@ -48,7 +48,7 @@ typedef	struct lt_regs_eioh {
 } lt_regs_eioh_t;
 
 extern lt_regs_t *lt_regs;
-extern long lt_clock_rate;
+extern u64 lt_clock_rate;
 
 /* counters registers structure */
 #define	LT_COUNTER_SHIFT	9	/* [30: 9] counters value */

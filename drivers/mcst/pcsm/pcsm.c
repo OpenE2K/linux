@@ -42,6 +42,13 @@
 #define DRIVER_VERSION		"0.9"
 
 /*---------------------------------------------------------------------------*/
+/* E2K cpu type */
+#define CPU_E12C                        0xA
+#define CPU_E16C                        0xB
+#define CPU_E2C3                        0xC
+#define CPU_E48C                        0xD
+#define CPU_E8V7                        0xE
+
 
 /* PCSM registers */
 
@@ -151,6 +158,7 @@
 #define MANUFACTURER_ID_LO		0xC3
 #define MANUFACTURER_ID_HI		0xE2
 
+#define EVENTS_MAX_NUM			8
 /*---------------------------------------------------------------------------*/
 
 enum events { ecc_id = 1, main_id, therm_id };
@@ -161,8 +169,13 @@ struct event_data {
 	u8 monitor_st;
 	u8 event;
 	u8 event_st;
-	u8 table_size;
 	const char **names;
+};
+
+struct events_mon {
+	const char *events_ecc_name[EVENTS_MAX_NUM];
+	const char *events_main_name[EVENTS_MAX_NUM];
+	const char *events_therm_name[EVENTS_MAX_NUM];
 };
 
 /* Client data (each client gets its own) */
@@ -1173,7 +1186,6 @@ static ssize_t show_temp(struct device *dev,
 			 struct device_attribute *devattr,
 			 char *buf)
 {
-	struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
 	struct pcsm_data *data = pcsm_update_device(dev);
 
 	int temp = data->temp;
@@ -1345,35 +1357,127 @@ static ssize_t set_pwm_ct(struct device *dev,
 	return count;
 }
 
-static const char *events_ecc_name[8] = {
-	"Memory controller 0 Error",
-	"Memory controller 1 Error",
-	"Memory controller 2 Error",
-	"Memory controller 3 Error",
-	"Memory controller 4 Error",
-	"Memory controller 5 Error",
-	"Memory controller 6 Error",
-	"Memory controller 7 Error"
+static struct events_mon events_mon_v6 = {
+	.events_ecc_name = {
+		"Memory controller 0 Error",
+		"Memory controller 1 Error",
+		"Memory controller 2 Error",
+		"Memory controller 3 Error",
+		"Memory controller 4 Error",
+		"Memory controller 5 Error",
+		"Memory controller 6 Error",
+		"Memory controller 7 Error"
+	},
+	.events_main_name = {
+		"MC[0-3] DIMM Error",
+		"MC[4-7] DIMM Error",
+		"MC[0-3] Power Error",
+		"MC[4-7] Power Error",
+		"CPU Power (except MC) Error",
+		"MotherBoard Power Error",
+		"MotherBoard Error",
+		"CPU Fault"
+	},
+	.events_therm_name = {
+		"PCS FAN0 Error",
+		"PCS FAN1 Error",
+		"CPU state HOT",
+		"MC[0-3] Throttle",
+		"MC[4-7] Throttle",
+		"CPU Force Power Mode"
+	}
 };
 
-static const char *events_main_name[8] = {
-	"MC[0-3] DIMM Error",
-	"MC[4-7] DIMM Error",
-	"MC[0-3] Power Error",
-	"MC[4-7] Power Error",
-	"CPU Power (except MC) Error",
-	"MotherBoard Power Error",
-	"MotherBoard Error",
-	"CPU Fault"
+static struct events_mon events_mon_e8v7 = {
+	.events_ecc_name = {
+		"Memory controller 0 Error",
+		"Memory controller 1 Error",
+		"Memory controller 2 Error",
+		"Memory controller 3 Error",
+		"Memory controller 4 Error",
+		"Memory controller 5 Error",
+		"Memory controller 6 Error",
+		"Memory controller 7 Error"
+	},
+	.events_main_name = {
+		"MC[0] DIMM Error",
+		"MC[1] DIMM Error",
+		"MotherBoard Error",
+		"PMC SMBus[0] Error",
+		"PMC SMBus[1] Error",
+		"CPU Fault"
+	},
+	.events_therm_name = {
+		"PCS FAN0 Error",
+		"PCS FAN1 Error",
+		"MotherBoard Error",
+		"CPU state HOT",
+		"MC[0,2,4,6] Throttle",
+		"MC[1,3,5,7] Throttle",
+		"CPU Force Power Mode"
+	}
 };
 
-static const char *events_therm_name[6] = {
-	"PCS FAN0 Error",
-	"PCS FAN1 Error",
-	"CPU state HOT",
-	"MC[0-3] Throttle",
-	"MC[4-7] Throttle",
-	"CPU Force Power Mode"
+static struct events_mon events_mon_e48c = {
+	.events_ecc_name = {
+		"Memory controller 0 Error",
+		"Memory controller 1 Error",
+		"Memory controller 2 Error",
+		"Memory controller 3 Error",
+		"Memory controller 4 Error",
+		"Memory controller 5 Error",
+		"Memory controller 6 Error",
+		"Memory controller 7 Error"
+	},
+	.events_main_name = {
+		"MC[0,2,4,6] DIMM Error",
+		"MC[1,3,5,7] DIMM Error",
+		"MotherBoard Error",
+		"PMC SMBus[0] Error",
+		"PMC SMBus[1] Error",
+		"CPU Fault"
+	},
+	.events_therm_name = {
+		"PCS FAN0 Error",
+		"PCS FAN1 Error",
+		"MotherBoard Error",
+		"CPU state HOT",
+		"MC[0,2,4,6] Throttle",
+		"MC[1,3,5,7] Throttle",
+		"CPU Force Power Mode"
+	}
+};
+
+static struct events_mon events_mon_e48c_rev0 = {
+	.events_ecc_name = {
+		"Memory controller 0 Error",
+		"Memory controller 1 Error",
+		"Memory controller 2 Error",
+		"Memory controller 3 Error",
+		"Memory controller 4 Error",
+		"Memory controller 5 Error",
+		"Memory controller 6 Error",
+		"Memory controller 7 Error"
+	},
+	.events_main_name = {
+		"MC[0,2,4,6] DIMM Error",
+		"MC[1,3,5,7] DIMM Error",
+		"MC[0,2,4,6] Power Error",
+		"MC[1,3,5,7] Power Error",
+		"CPU Power Error",
+		"MotherBoard Power Error",
+		"MotherBoard Error",
+		"CPU Fault"
+	},
+	.events_therm_name = {
+		"PCS FAN0 Error",
+		"PCS FAN1 Error",
+		"CPU state HOT",
+		"MC[0,2,4,6] Throttle",
+		"MC[1,3,5,7] Throttle",
+		"CPU Force Power Mode",
+		"PMC SMBus Error"
+	}
 };
 
 static ssize_t show_event(struct device *dev,
@@ -1408,7 +1512,7 @@ static ssize_t show_event(struct device *dev,
 	offs += snprintf(buf + offs, PAGE_SIZE - 1 - offs,
 			 "%-30s: %-7s: %-7s\n",
 			 "event name", "current", "history");
-	for (i = 0; i < ptr->table_size; i++) {
+	for (i = 0; i < EVENTS_MAX_NUM && ptr->names[i]; i++) {
 		offs += snprintf(buf + offs, PAGE_SIZE - 1 - offs,
 			 "%-30s: %-7s: %-7s\n", ptr->names[i],
 			 ((ptr->monitor >> i) & 1) ? "present" : "clear",
@@ -1720,20 +1824,38 @@ static void pcsm_init_data(struct pcsm_data *data)
 	data->ecc.id = ecc_id;
 	data->ecc.monitor = pcsm_read_byte(client, PMCM_REG(PMCM_RO_MON_0));
 	data->ecc.event = pcsm_read_byte(client, PMCM_REG(PMCM_RWC_HIST_0));
-	data->ecc.table_size = 8;
-	data->ecc.names = events_ecc_name;
 
 	data->main.id = main_id;
 	data->main.monitor = pcsm_read_byte(client, PMCM_REG(PMCM_RO_MON_1));
 	data->main.event = pcsm_read_byte(client, PMCM_REG(PMCM_RWC_HIST_1));
-	data->main.table_size = 8;
-	data->main.names = events_main_name;
 
 	data->therm.id = therm_id;
 	data->therm.monitor = pcsm_read_byte(client, PMCM_REG(PMCM_RO_MON_2));
 	data->therm.event = pcsm_read_byte(client, PMCM_REG(PMCM_RWC_HIST_2));
-	data->therm.table_size = 6;
-	data->therm.names = events_therm_name;
+
+	switch (data->model) {
+	case CPU_E8V7:
+		data->ecc.names = events_mon_e8v7.events_ecc_name;
+		data->main.names = events_mon_e8v7.events_main_name;
+		data->therm.names = events_mon_e8v7.events_therm_name;
+		break;
+	case CPU_E48C:
+		if (data->revision == 0) {
+			data->ecc.names = events_mon_e48c_rev0.events_ecc_name;
+			data->main.names = events_mon_e48c_rev0.events_main_name;
+			data->therm.names = events_mon_e48c_rev0.events_therm_name;
+		} else {
+			data->ecc.names = events_mon_e48c.events_ecc_name;
+			data->main.names = events_mon_e48c.events_main_name;
+			data->therm.names = events_mon_e48c.events_therm_name;
+		}
+		break;
+	default:
+		data->ecc.names = events_mon_v6.events_ecc_name;
+		data->main.names = events_mon_v6.events_main_name;
+		data->therm.names = events_mon_v6.events_therm_name;
+		break;
+	}
 }
 
 static int pcsm_probe(struct i2c_client *client, const struct i2c_device_id *id)

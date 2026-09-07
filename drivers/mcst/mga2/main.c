@@ -13,20 +13,20 @@ struct drm_gem_object *mga2_gem_create_with_handle(struct drm_file *file,
 {
 	int ret;
 	struct drm_gem_object *gobj = mga2_gem_create(drm, size, domain);
-
 	if (IS_ERR(gobj))
 		return gobj;
-
 	/*
 	 * allocate a id of idr table where the gobj is registered
 	 * and handle has the id what user can see.
 	 */
 	ret = drm_gem_handle_create(file, gobj, handle);
 
-	/* drop reference from allocate - handle holds it now. */
-	drm_gem_object_put(gobj);
 	if (ret)
 		return ERR_PTR(ret);
+
+	/* drop reference from allocate - handle holds it now. */
+	drm_gem_object_put(gobj);
+
 	return gobj;
 }
 
@@ -45,11 +45,7 @@ static struct sg_table *mga2_gem_get_sg_table(struct drm_gem_object *obj)
 			      mga2_gem->dma_addr, obj->size);
 	if (ret < 0)
 		goto out;
-
-	/*mga2_flush_cache_range(mga2_gem->vaddr, mga2_gem->vaddr + obj->size);*/
-
 	return sgt;
-
 out:
 	kfree(sgt);
 	return NULL;
@@ -148,8 +144,6 @@ static void mga2_gem_free(struct drm_gem_object *gobj)
 	if (time_before(now, mo->hw_unref_time))
 		schedule_timeout_uninterruptible(mo->hw_unref_time - now);
 
-	drm_gem_free_mmap_offset(gobj);
-
 	switch (mo->write_domain) {
 	case MGA2_GEM_DOMAIN_VRAM:
 		if (mga2_use_uncached(mga2->dev_id)) {
@@ -160,13 +154,19 @@ static void mga2_gem_free(struct drm_gem_object *gobj)
 			mutex_unlock(&mga2->vram_mu);
 		}
 		break;
-	case MGA2_GEM_DOMAIN_CPU: {
-		 if (mo->vaddr) {
+	case MGA2_GEM_DOMAIN_CPU:
+		if (mo->sgt) { /* created by mga25_virt_to_handle() */
+			dma_unmap_sg(drm->dev, mo->sgt->sgl,
+				mo->sgt->nents, mo->dma_dir);
+			sg_free_table(mo->sgt);
+			vunmap(mo->vaddr);
+			if (mo->pages && mo->pages[0])
+				release_pages(mo->pages, gobj->size / PAGE_SIZE);
+		} else if (mo->vaddr) {
 			dma_free_coherent(drm->dev, gobj->size,
 					mo->vaddr, mo->dma_addr);
 		}
 		break;
-	}
 	default:
 		WARN_ON(1);
 	}
@@ -297,6 +297,7 @@ struct drm_gem_object *mga2_gem_create(struct drm_device *drm,
 		goto fail;
 	}
 	obj->write_domain = domain;
+	obj->dma_dir = DMA_BIDIRECTIONAL;
 
 	return gobj;
 fail:
@@ -324,6 +325,34 @@ int mga2_dumb_create(struct drm_file *file,
 		return PTR_ERR(gobj);
 
 	return 0;
+}
+
+/* rm 28020. Copy of drm_gem_dumb_map_offset() (linux-5.4) except of import_attach check */
+int mga2_gem_dumb_map_offset(struct drm_file *file, struct drm_device *dev,
+			    u32 handle, u64 *offset)
+{
+	struct drm_gem_object *obj;
+	int ret;
+
+	obj = drm_gem_object_lookup(file, handle);
+	if (!obj)
+		return -ENOENT;
+#if 0
+	/* Don't allow imported objects to be mapped */
+	if (obj->import_attach) {
+		ret = -EINVAL;
+		goto out;
+	}
+#endif
+	ret = drm_gem_create_mmap_offset(obj);
+	if (ret)
+		goto out;
+
+	*offset = drm_vma_node_offset_addr(&obj->vma_node);
+out:
+	drm_gem_object_put(obj);
+
+	return ret;
 }
 
 /**
@@ -477,4 +506,86 @@ int mga2_gem_mmap_ioctl(struct drm_device *drm, void *data,
 	struct drm_mga2_gem_mmap *args = data;
 	return drm_gem_dumb_map_offset(file, drm, args->handle,
 						&args->offset);
+}
+
+int mga2_virt_to_handle(struct drm_device *drm, void *data,
+			struct drm_file *file)
+{
+	int ret;
+	struct sg_table *sgt = NULL;
+	struct mga2_gem_object *mo;
+	struct drm_gem_object *gobj;
+	struct drm_mga2_virt_to_hndl *a = data;
+	int n = a->nr_pages;
+
+	a->handle = 0;
+
+	mo = __mga2_gem_create(drm, n * PAGE_SIZE);
+	if (IS_ERR(mo))
+		return PTR_ERR(mo);
+
+	gobj = &mo->base;
+
+	ret = drm_gem_handle_create(file, gobj, &a->handle);
+	if (ret)
+		goto err;
+	/* drop reference from allocate - handle holds it now. */
+	drm_gem_object_put(gobj);
+
+	mo->write_domain = MGA2_GEM_DOMAIN_CPU;
+	mo->dma_dir = a->rw ? DMA_BIDIRECTIONAL :
+				DMA_TO_DEVICE;
+	sgt = kzalloc(sizeof(*sgt), GFP_KERNEL);
+	if (!sgt) {
+		ret = -ENOMEM;
+		goto err;
+	}
+	mo->sgt = sgt;
+
+	mo->pages = kvmalloc_array(n, sizeof(struct page *), GFP_KERNEL);
+	if (!mo->pages) {
+		ret = -ENOMEM;
+		goto err;
+	}
+	mo->pages[0] = NULL; /*for mga2_gem_free()*/
+
+	ret = get_user_pages(a->virt & PAGE_MASK, n, a->rw ? FOLL_WRITE : 0, mo->pages, NULL);
+	if (ret != n) {
+		if (ret >= 0) {
+			release_pages(mo->pages, ret);
+			a->nr_pages = ret;
+			ret = -ERANGE;
+		}
+		mo->pages[0] = NULL; /*for mga2_gem_free()*/
+		goto err;
+	}
+
+	mo->vaddr = vmap(mo->pages, n, VM_MAP, PAGE_KERNEL);
+	if (!mo->vaddr) {
+		ret = -EFAULT;
+		goto err;
+	}
+
+	ret = sg_alloc_table_from_pages(sgt, mo->pages, n, 0,
+				      n << PAGE_SHIFT,
+				      GFP_KERNEL);
+	if (ret)
+		goto err;
+
+	ret = dma_map_sg(drm->dev, sgt->sgl, sgt->nents, mo->dma_dir);
+	if (ret != 1) {
+		ret = -EFAULT;
+		goto err;
+	}
+	ret = 0;
+
+	mo->dma_addr = sg_dma_address(sgt->sgl);
+
+	return 0;
+err:
+	if (a->handle)
+		drm_gem_handle_delete(file, a->handle);
+	else
+		drm_gem_object_put(gobj);
+	return ret;
 }

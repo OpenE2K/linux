@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
 #include <linux/interrupt.h>
 #include <linux/irq.h>
 #include <linux/init.h>
@@ -89,6 +94,24 @@ void prepic_node_write_w(int node, unsigned int reg, unsigned int v)
 		early_prepic_node_write_w(node, reg, v);
 	else
 		sic_write_node_nbsr_reg(node, reg, v);
+}
+
+static irqreturn_t prepic_smp_error_interrupt(int irq, void *data)
+{
+	unsigned int stat, msg_hi, msg_lo;
+	struct irq_data *irqd = irq_get_irq_data(irq);
+	int node = irq_data_get_node(irqd);
+
+	stat = prepic_node_read_w(node, SIC_prepic_err_stat);
+
+	msg_hi = prepic_node_read_w(node, SIC_prepic_err_msg_hi);
+	msg_lo = prepic_node_read_w(node, SIC_prepic_err_msg_lo);
+	prepic_node_write_w(node, SIC_prepic_err_stat, stat);
+
+	pr_err("PREPIC#%d err: stat 0x%x, msg_hi 0x%x, msg_lo 0x%x\n",
+		node, stat, msg_hi, msg_lo);
+
+	return IRQ_HANDLED;
 }
 
 static int irq_domain_translate_threecell(struct irq_domain *d,
@@ -221,20 +244,35 @@ linp_epic_init(struct device_node *np, struct device_node *parent)
 {
 	int ret;
 	struct irq_domain *dmn;
+	const char *iname = "PREPIC error interrupts";
 	struct fwnode_handle *fn = of_node_to_fwnode(np);
 
 	dmn = irq_domain_create_linear(fn, ARRAY_SIZE(linp_regs),
-				&linp_epic_irqdomain_ops,
-				NULL);
-	if (!dmn) {
-		ret = -ENOMEM;
-		goto err;
-	}
+				&linp_epic_irqdomain_ops, NULL);
+	if (!dmn)
+		return -ENOMEM;
 
 	dmn->parent = irq_find_host(parent);
 	BUG_ON(!dmn->parent);
-err:
-	return ret;
+
+	ret = of_property_match_string(np, "interrupt-names", iname);
+	if (ret < 0) {
+		pr_warn("%pOF: failed to get irq index: %d\n", np, ret);
+		goto out;
+	}
+	ret = of_irq_get(np, ret);
+	if (ret <= 0) {
+		pr_warn("%pOF: failed to get irq: %d\n", np, ret);
+		goto out;
+	}
+	ret = request_irq(ret, prepic_smp_error_interrupt,
+		/*rm 34064: kthread is not started yet (rest_init())*/
+			IRQF_NO_THREAD,
+			iname, NULL);
+	if (WARN(ret, "%pOF: %d", np, ret))
+		return ret;
+out:
+	return 0;
 }
 
 IRQCHIP_DECLARE(epic, "mcst,epic-linp", linp_epic_init);

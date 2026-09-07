@@ -227,6 +227,10 @@ struct tty_ldisc_ops {
 			unsigned long arg);
 	int	(*compat_ioctl)(struct tty_struct *tty, unsigned int cmd,
 			unsigned long arg);
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	int	(*ptr128_ioctl)(struct tty_struct *tty, unsigned int cmd, unsigned long arg);
+#endif
+
 	void	(*set_termios)(struct tty_struct *tty, const struct ktermios *old);
 	__poll_t (*poll)(struct tty_struct *tty, struct file *file,
 			     struct poll_table_struct *wait);

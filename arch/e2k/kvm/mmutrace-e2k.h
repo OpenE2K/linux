@@ -272,6 +272,7 @@ TRACE_EVENT(
 		__entry->name, __entry->cur)
 );
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 DECLARE_EVENT_CLASS(
 	kvm_gmm_get_put_class,
 	TP_PROTO(const char *from_or_to, struct kvm_vcpu *vcpu,
@@ -347,6 +348,7 @@ TRACE_EVENT(
 		__entry->vcpu_id, __entry->comment,
 		__entry->gti_id, __entry->gmm_id, __entry->count)
 );
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 TRACE_EVENT(
 	kvm_mmu_get_page,

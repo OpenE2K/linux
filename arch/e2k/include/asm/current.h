@@ -12,8 +12,7 @@
 #include <asm/e2k_api.h>
 
 struct task_struct;
-register struct task_struct *current DO_ASM_GET_GREG_MEMONIC(
-							CURRENT_TASK_GREG);
+register struct task_struct *current ASM_GREG(CURRENT_TASK_GREG);
 #define	native_current()	current
 
 #endif /* _E2K_CURRENT_H */

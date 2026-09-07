@@ -649,7 +649,6 @@ HYPERVISOR_update_guest_kernel_crs(e2k_mem_crs_t *crs,
 #define	KVM_HCALL_FAST_TAGGED_MEMORY_COPY 117	/* fast tagged memory copy */
 #define	KVM_HCALL_FAST_TAGGED_MEMORY_SET  118	/* fast tagged memory set */
 #define	KVM_HCALL_SHUTDOWN		120	/* shutdown of guest */
-#define	KVM_HCALL_DUMP_GUEST_STACK	121	/* dump guest current stack */
 #define	KVM_HCALL_FTRACE_STOP		122	/* stop host's ftrace */
 #define	KVM_HCALL_FTRACE_DUMP		123	/* dump host's ftrace buffer */
 #define	KVM_HCALL_DUMP_COMPLETION	125	/* show state or dump all */
@@ -1521,11 +1520,6 @@ HYPERVISOR_print_guest_user_address_ptes(int gmmid_nr, e2k_addr_t address)
 {
 	return generic_hypercall2(KVM_HCALL_PRINT_GUEST_USER_ADDRESS_PTES,
 				  gmmid_nr, address);
-}
-
-static inline void HYPERVISOR_dump_guest_stack(void)
-{
-	generic_hypercall0(KVM_HCALL_DUMP_GUEST_STACK);
 }
 
 static inline void HYPERVISOR_ftrace_stop(void)

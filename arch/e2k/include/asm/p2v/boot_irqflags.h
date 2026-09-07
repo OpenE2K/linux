@@ -34,14 +34,14 @@
 	e2k_psr_t psr = boot_read_PSR_reg();			\
 	psr.ie = 1;						\
 	psr.nmie = 1;						\
-	boot_write_PSR_reg(_psr);				\
+	write_irq_barrier_PSR_reg(_psr);			\
 })
 #define	BOOT_PSR_ALL_CLI()					\
 ({								\
 	e2k_psr_t psr = boot_read_PSR_reg();			\
 	psr.ie = 1;						\
 	psr.nmie = 1;						\
-	boot_write_PSR_reg(_psr);				\
+	write_irq_barrier_PSR_reg(_psr);			\
 })
 #define	BOOT_PSR_ALL_SAVE_AND_CLI(flags)			\
 ({								\
@@ -49,12 +49,12 @@
 	flags = AW(psr);					\
 	psr.ie = 0;						\
 	psr.nmie = 0;						\
-	boot_write_PSR_reg(psr);				\
+	write_irq_barrier_PSR_reg(psr);				\
 })
 #define	BOOT_PSR_SAVE(src_psr)					\
 		(src_psr = AW(boot_read_PSR_reg())
 #define	BOOT_PSR_RESTORE(src_psr)				\
-		boot_write_PSR_reg(TOS(e2k_psr_t, src_psr))
+		write_irq_barrier_PSR_reg(TOS(e2k_psr_t, src_psr))
 
 /* IRQs mask control in dinamic case */
 #define	BOOT_IRQ_ALL_STI() \
@@ -89,4 +89,4 @@
 
 #define	BOOT_SWITCH_IRQ_TO_UPSR() \
 		((unlikely(IS_IRQ_MASK_GLOBAL())) ? BOOT_IRQ_BUG() : \
-			boot_write_PSR_reg(E2K_KERNEL_PSR_ENABLED)
+			write_irq_barrier_PSR_reg(E2K_KERNEL_PSR_ENABLED))

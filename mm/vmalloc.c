@@ -42,6 +42,7 @@
 #include <linux/sched/mm.h>
 #include <asm/tlbflush.h>
 #include <asm/shmparam.h>
+#include <linux/crash_dump.h>
 
 #include "internal.h"
 #include "pgalloc-track.h"
@@ -444,10 +445,51 @@ void __vunmap_range_noflush(unsigned long start, unsigned long end)
 		arch_sync_kernel_mappings(start, end);
 }
 
+#ifdef CONFIG_E2K_MODULES_DUPLICATION
+/*
+ * To support deduplication during unmapping, we do not need to duplicate
+ * functions for all PT levels, because there is no need to pass node number
+ * to the last level.
+ */
+void __vunmap_range_noflush_node(int node, unsigned long start, unsigned long end)
+{
+	unsigned long next;
+	pgd_t *pgd;
+	unsigned long addr = start;
+	pgtbl_mod_mask mask = 0;
+
+	BUG_ON(addr >= end);
+	pgd = node_pgd_offset_k(node, addr);
+	do {
+		next = pgd_addr_end(addr, end);
+		if (pgd_bad(*pgd))
+			mask |= PGTBL_PGD_MODIFIED;
+		if (pgd_none_or_clear_bad(pgd))
+			continue;
+		vunmap_p4d_range(pgd, addr, next, &mask);
+	} while (pgd++, addr = next, addr != end);
+
+	if (mask & ARCH_PAGE_TABLE_SYNC_MASK)
+		arch_sync_kernel_mappings(start, end);
+}
+#endif /* CONFIG_E2K_MODULES_DUPLICATION */
+
 void vunmap_range_noflush(unsigned long start, unsigned long end)
 {
 	kmsan_vunmap_range_noflush(start, end);
+#ifdef CONFIG_E2K_MODULES_DUPLICATION
+	if (start >= MODULES_VADDR && end < MODULES_END) {
+		int node;
+
+		/* Modules are duplicated across NUMA nodes in e2k */
+		for_each_node_has_dup_kernel(node)
+			__vunmap_range_noflush_node(node, start, end);
+	} else {
+		__vunmap_range_noflush(start, end);
+	}
+#else /* !CONFIG_E2K_MODULES_DUPLICATION */
 	__vunmap_range_noflush(start, end);
+#endif /* CONFIG_E2K_MODULES_DUPLICATION */
 }
 
 /**
@@ -653,6 +695,302 @@ static int vmap_pages_range(unsigned long addr, unsigned long end,
 	flush_cache_vmap(addr, end);
 	return err;
 }
+
+#ifdef CONFIG_E2K_MODULES_DUPLICATION
+static int vmap_pages_pte_range_node(int node, pmd_t *pmd, unsigned long addr,
+		unsigned long end, pgprot_t prot, struct page **pages, int *nr)
+{
+	pte_t *pte;
+
+	/*
+	 * nr is a running index into the array which helps higher level
+	 * callers keep track of where we're up to.
+	 */
+
+	pte = pte_alloc_kernel_track_node(node, pmd, addr);
+	if (!pte)
+		return -ENOMEM;
+	do {
+		struct page *page = pages[*nr];
+
+		if (WARN_ON(!pte_none(*pte)))
+			return -EBUSY;
+		if (WARN_ON(!page))
+			return -ENOMEM;
+		if (WARN_ON(!pfn_valid(page_to_pfn(page))))
+			return -EINVAL;
+
+		set_pte_at(&init_mm, addr, pte, mk_pte(page, prot));
+		(*nr)++;
+	} while (pte++, addr += PAGE_SIZE, addr != end);
+	return 0;
+}
+
+static int vmap_pages_pmd_range_node(int node, pud_t *pud, unsigned long addr,
+		unsigned long end, pgprot_t prot, struct page **pages, int *nr)
+{
+	pmd_t *pmd;
+	unsigned long next;
+
+	pmd = pmd_alloc_track_node(node, &init_mm, pud, addr);
+	if (!pmd)
+		return -ENOMEM;
+	do {
+		next = pmd_addr_end(addr, end);
+		if (vmap_pages_pte_range_node(node, pmd, addr, next, prot, pages, nr))
+			return -ENOMEM;
+	} while (pmd++, addr = next, addr != end);
+	return 0;
+}
+
+static int vmap_pages_pud_range_node(int node, p4d_t *p4d, unsigned long addr,
+		unsigned long end, pgprot_t prot, struct page **pages, int *nr)
+{
+	pud_t *pud;
+	unsigned long next;
+
+	pud = pud_alloc_track_node(node, &init_mm, p4d, addr);
+	if (!pud)
+		return -ENOMEM;
+	do {
+		next = pud_addr_end(addr, end);
+		if (vmap_pages_pmd_range_node(node, pud, addr, next, prot, pages, nr))
+			return -ENOMEM;
+	} while (pud++, addr = next, addr != end);
+	return 0;
+}
+
+static int vmap_pages_p4d_range_node(int node, pgd_t *pgd, unsigned long addr,
+		unsigned long end, pgprot_t prot, struct page **pages, int *nr)
+{
+	p4d_t *p4d;
+	unsigned long next;
+
+	p4d = p4d_alloc_track_node(node, &init_mm, pgd, addr);
+	if (!p4d)
+		return -ENOMEM;
+	do {
+		next = p4d_addr_end(addr, end);
+		if (vmap_pages_pud_range_node(node, p4d, addr, next, prot, pages, nr))
+			return -ENOMEM;
+	} while (p4d++, addr = next, addr != end);
+	return 0;
+}
+
+static int vmap_small_pages_range_noflush_node(int node, unsigned long addr, unsigned long end,
+		pgprot_t prot, struct page **pages)
+{
+	pgd_t *pgd;
+	unsigned long next;
+	int err = 0;
+	int nr = 0;
+
+	if (ARCH_PAGE_TABLE_SYNC_MASK) {
+		/*
+		 * Unlike in arch-independent mapping, page table modification
+		 * tracking is omitted here. If needed, it can be done exactly
+		 * like it is done in arch-independent vmap.
+		 *
+		 * We rely on the compiler to optimize this BUILD_BUG_ON() out
+		 * if ARCH_PAGE_TABLE_SYNC_MASK is 0. The same hack is used for
+		 * arch_sync_kernel_mappings().
+		 */
+		BUILD_BUG_ON(1);
+	}
+
+
+	BUG_ON(addr >= end);
+	pgd = node_pgd_offset_k(node, addr);
+	do {
+		next = pgd_addr_end(addr, end);
+		err = vmap_pages_p4d_range_node(node, pgd, addr, next, prot, pages, &nr);
+		if (err)
+			return err;
+	} while (pgd++, addr = next, addr != end);
+
+	return 0;
+}
+
+static int vmap_pte_range_node(int node, pmd_t *pmd, unsigned long addr, unsigned long end,
+		phys_addr_t phys_addr, pgprot_t prot, unsigned int max_page_shift)
+{
+	pte_t *pte;
+	u64 pfn;
+	unsigned long size = PAGE_SIZE;
+
+	pfn = phys_addr >> PAGE_SHIFT;
+	pte = pte_alloc_kernel_track_node(node, pmd, addr);
+	if (!pte)
+		return -ENOMEM;
+	do {
+		BUG_ON(!pte_none(*pte));
+
+#ifdef CONFIG_HUGETLB_PAGE
+		/* In e2k there is only one available pte size */
+		BUILD_BUG_ON(!IS_ENABLED(CONFIG_E2K));
+#endif
+		set_pte_at(&init_mm, addr, pte, pfn_pte(pfn, prot));
+		pfn++;
+	} while (pte += PFN_DOWN(size), addr += size, addr != end);
+	return 0;
+}
+
+static int vmap_pmd_range_node(int node, pud_t *pud, unsigned long addr, unsigned long end,
+		phys_addr_t phys_addr, pgprot_t prot, unsigned int max_page_shift)
+{
+	pmd_t *pmd;
+	unsigned long next;
+
+	pmd = pmd_alloc_track_node(node, &init_mm, pud, addr);
+	if (!pmd)
+		return -ENOMEM;
+	do {
+		next = pmd_addr_end(addr, end);
+
+		if (vmap_try_huge_pmd(pmd, addr, next, phys_addr, prot, max_page_shift))
+			continue;
+
+		if (vmap_pte_range_node(node, pmd, addr, next, phys_addr, prot, max_page_shift))
+			return -ENOMEM;
+	} while (pmd++, phys_addr += (next - addr), addr = next, addr != end);
+	return 0;
+}
+
+static int vmap_pud_range_node(int node, p4d_t *p4d, unsigned long addr, unsigned long end,
+		phys_addr_t phys_addr, pgprot_t prot, unsigned int max_page_shift)
+{
+	pud_t *pud;
+	unsigned long next;
+
+	pud = pud_alloc_track_node(node, &init_mm, p4d, addr);
+	if (!pud)
+		return -ENOMEM;
+	do {
+		next = pud_addr_end(addr, end);
+
+		if (vmap_try_huge_pud(pud, addr, next, phys_addr, prot, max_page_shift))
+			continue;
+
+		if (vmap_pmd_range_node(node, pud, addr, next, phys_addr, prot,
+					max_page_shift))
+			return -ENOMEM;
+	} while (pud++, phys_addr += (next - addr), addr = next, addr != end);
+	return 0;
+}
+
+static int vmap_p4d_range_node(int node, pgd_t *pgd, unsigned long addr, unsigned long end,
+			phys_addr_t phys_addr, pgprot_t prot, unsigned int max_page_shift)
+{
+	p4d_t *p4d;
+	unsigned long next;
+
+	p4d = p4d_alloc_track_node(node, &init_mm, pgd, addr);
+	if (!p4d)
+		return -ENOMEM;
+	do {
+		next = p4d_addr_end(addr, end);
+
+		if (vmap_try_huge_p4d(p4d, addr, next, phys_addr, prot, max_page_shift))
+			continue;
+
+		if (vmap_pud_range_node(node, p4d, addr, next, phys_addr, prot,
+					max_page_shift))
+			return -ENOMEM;
+	} while (p4d++, phys_addr += (next - addr), addr = next, addr != end);
+	return 0;
+}
+
+static int vmap_range_noflush_node(int node, unsigned long addr, unsigned long end,
+			phys_addr_t phys_addr, pgprot_t prot,
+			unsigned int max_page_shift)
+{
+	pgd_t *pgd;
+	unsigned long next;
+	int err;
+
+	if (ARCH_PAGE_TABLE_SYNC_MASK) {
+		/*
+		 * Unlike in arch-independent mapping, page table modification
+		 * tracking is omitted here. If needed, it can be done exactly
+		 * like it is done in arch-independent vmap.
+		 *
+		 * We rely on the compiler to optimize this BUILD_BUG_ON() out
+		 * if ARCH_PAGE_TABLE_SYNC_MASK is 0. The same hack is used for
+		 * arch_sync_kernel_mappings().
+		 */
+		BUILD_BUG_ON(1);
+	}
+
+	might_sleep();
+	BUG_ON(addr >= end);
+
+	pgd = node_pgd_offset_k(node, addr);
+	do {
+		next = pgd_addr_end(addr, end);
+		err = vmap_p4d_range_node(node, pgd, addr, next, phys_addr, prot, max_page_shift);
+		if (err)
+			break;
+	} while (pgd++, phys_addr += (next - addr), addr = next, addr != end);
+
+	return err;
+}
+
+static int __numa_vmap_pages_range_noflush(unsigned long addr, unsigned long end,
+		pgprot_t prot, struct page **pages, unsigned int page_shift)
+{
+	unsigned int i, nr = (end - addr) >> PAGE_SHIFT;
+
+	WARN_ON(page_shift < PAGE_SHIFT);
+
+	if (!IS_ENABLED(CONFIG_HAVE_ARCH_HUGE_VMALLOC) || page_shift == PAGE_SHIFT) {
+		int err, node;
+
+		for_each_node_has_dup_kernel(node) {
+			err = vmap_small_pages_range_noflush_node(node, addr, end, prot, pages);
+			if (err)
+				return err;
+		}
+
+		return 0;
+	}
+
+	for (i = 0; i < nr; i += 1U << (page_shift - PAGE_SHIFT)) {
+		int err, node;
+
+		for_each_node_has_dup_kernel(node) {
+			err = vmap_range_noflush_node(node, addr, addr + (1ul << page_shift),
+					page_to_phys(pages[i]), prot, page_shift);
+			if (err)
+				return err;
+		}
+
+		addr += 1UL << page_shift;
+	}
+
+	return 0;
+}
+
+static int numa_vmap_pages_range_noflush(unsigned long addr, unsigned long end,
+		pgprot_t prot, struct page **pages, unsigned int page_shift)
+{
+	int ret = kmsan_vmap_pages_range_noflush(addr, end, prot, pages, page_shift);
+
+	if (ret)
+		return ret;
+
+	return __numa_vmap_pages_range_noflush(addr, end, prot, pages, page_shift);
+}
+
+static int numa_vmap_pages_range(unsigned long addr, unsigned long end,
+		pgprot_t prot, struct page **pages, unsigned int page_shift)
+{
+	int err;
+
+	err = numa_vmap_pages_range_noflush(addr, end, prot, pages, page_shift);
+	flush_cache_vmap(addr, end);
+	return err;
+}
+#endif /* CONFIG_E2K_MODULES_DUPLICATION */
 
 int is_vmalloc_or_module_addr(const void *x)
 {
@@ -3132,8 +3470,21 @@ static void *__vmalloc_area_node(struct vm_struct *area, gfp_t gfp_mask,
 		flags = memalloc_noio_save();
 
 	do {
+#ifdef CONFIG_E2K_MODULES_DUPLICATION
+		/* Check this is not panic kernel, where only one node available */
+		if (addr >= MODULES_VADDR && addr + size <= MODULES_END &&
+				!is_kdump_kernel()) {
+			/* Modules are duplicated across NUMA nodes in e2k */
+			ret = numa_vmap_pages_range(addr, addr + size, prot,
+						    area->pages, page_shift);
+		} else {
+			ret = vmap_pages_range(addr, addr + size, prot,
+					       area->pages, page_shift);
+		}
+#else /* !CONFIG_E2K_MODULES_DUPLICATION */
 		ret = vmap_pages_range(addr, addr + size, prot, area->pages,
 			page_shift);
+#endif /* CONFIG_E2K_MODULES_DUPLICATION */
 		if (nofail && (ret < 0))
 			schedule_timeout_uninterruptible(1);
 	} while (nofail && (ret < 0));

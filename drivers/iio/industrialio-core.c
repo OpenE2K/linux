@@ -1867,6 +1867,9 @@ static const struct file_operations iio_buffer_fileops = {
 	.poll = iio_buffer_poll_addr,
 	.unlocked_ioctl = iio_ioctl,
 	.compat_ioctl = compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = iio_ioctl,
+#endif
 	.open = iio_chrdev_open,
 	.release = iio_chrdev_release,
 };
@@ -1876,6 +1879,9 @@ static const struct file_operations iio_event_fileops = {
 	.llseek = noop_llseek,
 	.unlocked_ioctl = iio_ioctl,
 	.compat_ioctl = compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = iio_ioctl,
+#endif
 	.open = iio_chrdev_open,
 	.release = iio_chrdev_release,
 };

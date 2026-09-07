@@ -47,7 +47,7 @@ struct prot_stack {
 
 struct prot_iovec {
 	e2k_ptr_t	iov_base;
-	__kernel_size_t iov_len;
+	ssize_t		iov_len;
 };
 
 struct protected_user_msghdr {

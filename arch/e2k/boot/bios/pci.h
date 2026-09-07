@@ -1,17 +1,6 @@
 /*
- *	$Id: pci.h,v 1.13 2009/01/27 11:34:42 atic Exp $
- *
- *	PCI defines and function prototypes
- *	Copyright 1994, Drew Eckhardt
- *	Copyright 1997--1999 Martin Mares <mj@atrey.karlin.mff.cuni.cz>
- *
- *	For more information, please consult the following manuals (look at
- *	http://www.pcisig.com/ for how to get them):
- *
- *	PCI BIOS Specification
- *	PCI Local Bus Specification
- *	PCI to PCI Bridge Specification
- *	PCI System Design Guide
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
  */
 
 #ifndef PCI_H
@@ -570,7 +559,7 @@ struct lpt_ports {
 	unsigned int enable, // 1 if this port is enabled
 		     mode,   // pp mode
 		     base,   // IO base of the parallel port
-                     irq;    // irq
+		     irq;    // irq
 };
 
 struct superio {

@@ -20,7 +20,9 @@ struct mga2_pic {
 	void __iomem *regs;
 	int dev_id;
 	u32 irq_en_mask;
-	spinlock_t mask_lock;
+	/* raw_spinlock_t used here because of raw_spinlock_t
+	 * in struct irq_desc locked in __setup_irq */
+	raw_spinlock_t mask_lock;
 };
 
 #define __rint(__offset)	 ({				\
@@ -62,10 +64,10 @@ static irqreturn_t mga2_pic_irq_handler(int irq, void *arg)
 
 	/* r2000+ has edge interrupt, so we have to mask/unmask interrupts
 	  in order not to lose any interrupt */
-	spin_lock_irqsave(&mpic->mask_lock, flags);
+	raw_spin_lock_irqsave(&mpic->mask_lock, flags);
 	ena = READ_ONCE(mpic->irq_en_mask);
 	__wint(ena, INTENA);
-	spin_unlock_irqrestore(&mpic->mask_lock, flags);
+	raw_spin_unlock_irqrestore(&mpic->mask_lock, flags);
 
 	intr &= ena;
 	__wint(intr, INTREQ);
@@ -78,10 +80,10 @@ static irqreturn_t mga2_pic_irq_handler(int irq, void *arg)
 		raw_local_irq_restore(flags);
 		intr &= ~(1 << hwirq);
 	}
-	spin_lock_irqsave(&mpic->mask_lock, flags);
+	raw_spin_lock_irqsave(&mpic->mask_lock, flags);
 	ena = READ_ONCE(mpic->irq_en_mask);
 	__wint(ena | MGA2_INT_B_SETRST, INTENA);
-	spin_unlock_irqrestore(&mpic->mask_lock, flags);
+	raw_spin_unlock_irqrestore(&mpic->mask_lock, flags);
 
 	return IRQ_HANDLED;
 }
@@ -90,20 +92,20 @@ static void mga2_pic_irq_mask(struct irq_data *d)
 {
 	unsigned long flags;
 	struct mga2_pic *mpic = irq_data_get_irq_chip_data(d);
-	spin_lock_irqsave(&mpic->mask_lock, flags);
+	raw_spin_lock_irqsave(&mpic->mask_lock, flags);
 	mpic->irq_en_mask &= ~(1 << d->hwirq);
 	wint(1 << d->hwirq, INTENA);
-	spin_unlock_irqrestore(&mpic->mask_lock, flags);
+	raw_spin_unlock_irqrestore(&mpic->mask_lock, flags);
 }
 
 static void mga2_pic_irq_unmask(struct irq_data *d)
 {
 	unsigned long flags;
 	struct mga2_pic *mpic = irq_data_get_irq_chip_data(d);
-	spin_lock_irqsave(&mpic->mask_lock, flags);
+	raw_spin_lock_irqsave(&mpic->mask_lock, flags);
 	mpic->irq_en_mask |= 1 << d->hwirq;
 	wint((1 << d->hwirq) | MGA2_INT_B_SETRST, INTENA);
-	spin_unlock_irqrestore(&mpic->mask_lock, flags);
+	raw_spin_unlock_irqrestore(&mpic->mask_lock, flags);
 }
 
 static struct irq_chip mga2_pic_irq_chip = {
@@ -144,7 +146,7 @@ static int mga2_pic_probe(struct platform_device *pdev)
 	}
 	pci_dev = to_pci_dev(dev->parent);
 
-	spin_lock_init(&mpic->mask_lock);
+	raw_spin_lock_init(&mpic->mask_lock);
 	mpic->regs = devm_ioremap_resource(dev, res);
 	if (IS_ERR(mpic->regs))
 		return PTR_ERR(mpic->regs);

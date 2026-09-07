@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
 #include "main.h"
 
 static inline const unsigned int e2c3_get_divF(const struct e2c3_devfreq_provider *provider,

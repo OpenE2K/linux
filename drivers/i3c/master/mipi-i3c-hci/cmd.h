@@ -45,6 +45,27 @@ enum hci_resp_err {
 	/* 0xc to 0xf are reserved for transfer specific errors */
 };
 
+#ifdef CONFIG_E2K
+static inline char *dma_response_name(u32 resp)
+{
+	switch (RESP_STATUS(resp)) {
+	case RESP_SUCCESS : return "RESP_SUCCESS";
+	case RESP_ERR_CRC : return "RESP_ERR_CRC";
+	case RESP_ERR_PARITY : return "RESP_ERR_PARITY";
+	case RESP_ERR_FRAME : return "RESP_ERR_FRAME";
+	case RESP_ERR_ADDR_HEADER : return "RESP_ERR_ADDR_HEADER or RESP_ERR_BCAST_NACK_7E";
+	case RESP_ERR_NACK : return "RESP_ERR_NACK";
+	case RESP_ERR_OVL : return "RESP_ERR_OVL";
+	case RESP_ERR_I3C_SHORT_READ : return "RESP_ERR_I3C_SHORT_READ";
+	case RESP_ERR_HC_TERMINATED : return "RESP_ERR_HC_TERMINATED";
+	case RESP_ERR_I2C_WR_DATA_NACK :
+			return "RESP_ERR_I2C_WR_DATA_NACK or RESP_ERR_BUS_XFER_ABORTED";
+	case RESP_ERR_NOT_SUPPORTED : return "RESP_ERR_NOT_SUPPORTED";
+	case RESP_ERR_ABORTED_WITH_CRC : return "RESP_ERR_ABORTED_WITH_CRC";
+	default : return "RESP_UNKNOWN";
+	}
+}
+#endif
 /* TID generation (4 bits wide in all cases) */
 #define hci_get_tid(bits) \
 	(atomic_inc_return_relaxed(&hci->next_cmd_tid) % (1U << 4))

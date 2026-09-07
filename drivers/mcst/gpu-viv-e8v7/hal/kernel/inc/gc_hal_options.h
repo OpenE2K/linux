@@ -68,7 +68,7 @@
  *       Print HAL version.
  */
 #ifndef gcdPRINT_VERSION
-#define gcdPRINT_VERSION                0
+#define gcdPRINT_VERSION                1
 #endif
 
 /*
@@ -170,7 +170,7 @@
  *       When set to 1, will dump hw command buffer when GPU/VIP hang.
  */
 #ifndef gcdDUMP_HW_SUBCOMMAND
-#define gcdDUMP_HW_SUBCOMMAND           0
+#define gcdDUMP_HW_SUBCOMMAND           1
 #endif
 
 /*
@@ -430,7 +430,7 @@
  */
 #ifndef gcdGPU_TIMEOUT
 #if gcdFPGA_BUILD
-#  define gcdGPU_TIMEOUT                      2000000
+#  define gcdGPU_TIMEOUT                      20000
 # else
 #ifdef EMULATOR
 #   define gcdGPU_TIMEOUT                     200000
@@ -589,7 +589,7 @@
  *       When non-zero, command buffer will be cacheable.
  */
 #ifndef gcdENABLE_CACHEABLE_COMMAND_BUFFER
-#define gcdENABLE_CACHEABLE_COMMAND_BUFFER      0
+#define gcdENABLE_CACHEABLE_COMMAND_BUFFER      1
 #endif
 
 /*
@@ -1173,7 +1173,7 @@
  *       Only works on linux OS.
  */
 #ifndef gcdSUPPORT_DEVICE_TREE_SOURCE
-#define gcdSUPPORT_DEVICE_TREE_SOURCE           0
+#define gcdSUPPORT_DEVICE_TREE_SOURCE           1
 #endif
 
 /*

@@ -1,5 +1,6 @@
 /*
- * $Id: printk.h,v 1.1 2005/08/19 13:17:27 kostin Exp $
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
  */
 
 #ifndef _PRINTK_H_

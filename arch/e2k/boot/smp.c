@@ -343,15 +343,15 @@ void start_secondary(void *unused)
 
 	psp = native_read_PSP_reg();
 
-	rom_printk("CPU #%d Proc. Stack (PSP) at: 0x%llx, size 0x%llx\n",
+	rom_printk("CPU #%d Proc. Stack (PSP) at: 0x%x, size 0x%x\n",
 		   cpu_id, psp.Base, psp.Size);
 
 	pcsp = native_read_PCSP_reg();
 
-	rom_printk("CPU #%d PCSP: base 0x%llx, size 0x%llx\n",
+	rom_printk("CPU #%d PCSP: base 0x%x, size 0x%x\n",
 		   cpu_id, pcsp.Base, pcsp.Size);
 	usbr = native_read_USBR_reg();
-	rom_printk("CPU #%d USBR: base 0x%llx, size 0x%x\n",
+	rom_printk("CPU #%d USBR: base 0x%x, size 0x%x\n",
 		   cpu_id, usbr.base, E2K_BOOT_KERNEL_US_SIZE);
 
 	/*

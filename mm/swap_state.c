@@ -226,9 +226,6 @@ fail:
 struct page *swap_sanit_page = NULL;
 EXPORT_SYMBOL(swap_sanit_page);
 
-u64 test_sntz_sect = 0;
-EXPORT_SYMBOL(test_sntz_sect);
-
 static void end_bio_sntz(struct bio *bio)
 {
 	unlock_page(swap_sanit_page);
@@ -261,7 +258,6 @@ static void sanitize_swap_page(struct page *page)
 	bio->bi_end_io = end_bio_sntz;
 	count_vm_event(PSWPOUT);
 	bio_get(bio);
-	test_sntz_sect = bio->bi_iter.bi_sector;
 	submit_bio(bio);
 	wait_on_page_locked(swap_sanit_page);
 
@@ -359,15 +355,22 @@ void free_pages_and_swap_cache(struct page **pages, int nr)
 
 	lru_add_drain();
 #ifdef CONFIG_MCST_MEMORY_SANITIZE
-	for (i = 0; i < nr; i++) {
-		if (mem_san && PageSwapCache(pagep[i]))
-			sanitize_swap_page(pagep[i]);
-		free_swap_cache(pagep[i]);
+	if (mem_san) {
+		if (swap_sanit_page == NULL) {
+			swap_sanit_page = alloc_page(GFP_KERNEL);
+			memset(page_address(swap_sanit_page), SANITIZE_VALUE,
+					PAGE_SIZE);
+			pr_info("MCST_MEMORY_SANITIZE by SANITIZE_VALUE=0x%x\n",
+				SANITIZE_VALUE);
+		}
+		for (i = 0; i < nr; i++) {
+			if (PageSwapCache(pagep[i]))
+				sanitize_swap_page(pagep[i]);
+		}
 	}
-#else
+#endif
 	for (i = 0; i < nr; i++)
 		free_swap_cache(pagep[i]);
-#endif
 	release_pages(pagep, nr);
 }
 

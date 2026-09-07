@@ -195,6 +195,7 @@ int kvm_nidmap_init(struct kvm_nid_table *nid_table,
 	return 0;
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 void kvm_nidmap_reset(struct kvm_nid_table *nid_table, int last_nid)
 {
 	DebugKVM("started\n");
@@ -203,6 +204,7 @@ void kvm_nidmap_reset(struct kvm_nid_table *nid_table, int last_nid)
 	nidhash_init(nid_table);
 	raw_spin_unlock_irq(&nid_table->nidmap_lock);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static void nidmap_release(struct kvm_nid_table *nid_table)
 {

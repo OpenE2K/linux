@@ -17,7 +17,7 @@
 #include <asm/page.h>
 #include <asm/trace-tlb-flush.h>
 
-#include "gaccess.h"
+#include "paravirt_sw/gaccess.h"
 
 #define CREATE_TRACE_POINTS
 #include "trace-tlb-flush.h"
@@ -52,6 +52,7 @@ void host_flush_tlb_page(gmm_struct_t *gmm, unsigned long addr)
 			       trace_host_flush_tlb_enabled());
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 /* See comment before native_flush_tlb_range() */
 static void host_flush_tlb_mm_range(gmm_struct_t *gmm,
 			  unsigned long start, unsigned long end,
@@ -61,6 +62,7 @@ static void host_flush_tlb_mm_range(gmm_struct_t *gmm,
 			start, end, stride, levels_mask,
 			trace_host_flush_tlb_enabled());
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 /* See comment before native_flush_tlb_range() */
 void host_flush_tlb_range(gmm_struct_t *gmm,
@@ -244,6 +246,7 @@ void host_flush_shadow_pt_level_tlb(struct kvm *kvm, gmm_struct_t *gmm, gva_t gv
 }
 #endif	/* CONFIG_SMP */
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 long kvm_pv_sync_and_flush_tlb(struct kvm_vcpu *vcpu,
 				mmu_spt_flush_t *flush_user)
 {
@@ -393,3 +396,4 @@ long kvm_pv_sync_addr_range(struct kvm_vcpu *vcpu,
 			round_down(start_gva, PAGE_SIZE),
 			round_up(end_gva, PAGE_SIZE));
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */

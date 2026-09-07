@@ -10,6 +10,9 @@
 #include <linux/vmalloc.h>
 #include <linux/splice.h>
 #include <linux/compat.h>
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#include <asm/prot_compat.h>
+#endif
 #include <net/checksum.h>
 #include <linux/scatterlist.h>
 #include <linux/instrumented.h>
@@ -1723,7 +1726,43 @@ uaccess_end:
 	user_access_end();
 	return ret;
 }
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+static int copy_ptr128_iovec_from_user(struct iovec *iov,
+		const struct iovec __user *uvec, unsigned long nr_segs)
+{
+	const struct prot_iovec __user *uiov =
+		(const struct prot_iovec __user *)uvec;
+	int ret = -EFAULT, i;
 
+	for (i = 0; i < nr_segs; i++) {
+		ssize_t len;
+		e2k_ap_t ap;
+		int tag;
+
+		if (get_user(len, &uiov[i].iov_len)) {
+			goto uaccess_end;
+		}
+		if (len > 0) {
+			if (get_user_tagged_16(ap.qword, tag, &uiov[i].iov_base)
+					|| !IS_AP(ap, tag) || AP_OBJ_SIZE(ap) < len) {
+				goto uaccess_end;
+			}
+			iov[i].iov_base = (void __user *)AP_PTR(ap);
+		} else if (len == 0) {
+			iov[i].iov_base = NULL;
+		} else {
+			ret = -EINVAL;
+			goto uaccess_end;
+		}
+		iov[i].iov_len = len;
+	}
+	set_max_u_border();
+	ret = 0;
+uaccess_end:
+	user_access_end();
+	return ret;
+}
+#endif
 static int copy_iovec_from_user(struct iovec *iov,
 		const struct iovec __user *uvec, unsigned long nr_segs)
 {
@@ -1761,6 +1800,11 @@ struct iovec *iovec_from_user(const struct iovec __user *uvec,
 			return ERR_PTR(-ENOMEM);
 	}
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	if (in_ptr128_syscall())
+		ret = copy_ptr128_iovec_from_user(iov, uvec, nr_segs);
+	else
+#endif
 	if (compat)
 		ret = copy_compat_iovec_from_user(iov, uvec, nr_segs);
 	else
@@ -1800,9 +1844,9 @@ ssize_t __import_iovec(int type, const struct iovec __user *uvec,
 		ssize_t len = (ssize_t)iov[seg].iov_len;
 
 #ifdef CONFIG_E2K
-		if ((type == READ && !access_ok(iov[seg].iov_base, len))
-			|| !__range_ok((unsigned long)iov[seg].iov_base, len,
-					PAGE_OFFSET)) {
+		if (!in_ptr128_syscall())
+			if ((type == READ && !access_ok(iov[seg].iov_base, len)) ||
+			    !__range_ok((unsigned long)iov[seg].iov_base, len, PAGE_OFFSET)) {
 #else
 		if (!access_ok(iov[seg].iov_base, len)) {
 #endif

@@ -5,6 +5,9 @@
 #include <linux/dma-map-ops.h>
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
+#ifdef CONFIG_E2K
+# include <asm/set_memory.h>
+#endif
 
 struct page **dma_common_find_pages(void *cpu_addr)
 {
@@ -23,7 +26,12 @@ void *dma_common_pages_remap(struct page **pages, size_t size,
 			 pgprot_t prot, const void *caller)
 {
 	void *vaddr;
-
+#ifdef CONFIG_E2K
+	if (pgprot_val(prot) == pgprot_val(pgprot_writecombine(prot))) {
+		if (set_pages_array_wc(pages, PAGE_ALIGN(size) >> PAGE_SHIFT))
+			return NULL;
+	}
+#endif
 	vaddr = vmap(pages, PAGE_ALIGN(size) >> PAGE_SHIFT,
 		     VM_DMA_COHERENT, prot);
 	if (vaddr)
@@ -57,7 +65,11 @@ void *dma_common_contiguous_remap(struct page *page, size_t size,
 /*
  * Unmaps a range previously mapped by dma_common_*_remap
  */
+#ifdef CONFIG_E2K
+void dma_common_free_remap(void *cpu_addr, size_t size, unsigned long attrs)
+#else
 void dma_common_free_remap(void *cpu_addr, size_t size)
+#endif
 {
 	struct vm_struct *area = find_vm_area(cpu_addr);
 
@@ -65,6 +77,13 @@ void dma_common_free_remap(void *cpu_addr, size_t size)
 		WARN(1, "trying to free invalid coherent area: %p\n", cpu_addr);
 		return;
 	}
-
+#ifdef CONFIG_E2K
+	if (attrs & DMA_ATTR_WRITE_COMBINE) {
+		if (WARN_ON(set_pages_array_wb(area->pages,
+				PAGE_ALIGN(size) >> PAGE_SHIFT))) {
+			return;
+		}
+	}
+#endif
 	vunmap(cpu_addr);
 }

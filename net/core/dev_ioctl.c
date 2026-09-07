@@ -12,6 +12,9 @@
 
 #include "dev.h"
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#include <net/ptr128.h>
+#endif
 /*
  *	Map an interface index to its name (SIOCGIFNAME)
  */
@@ -51,6 +54,34 @@ int dev_ifconf(struct net *net, struct ifconf __user *uifc)
 		pos = compat_ptr(ifc32.ifcbuf);
 		len = ifc32.ifc_len;
 		size = sizeof(struct compat_ifreq);
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	} else if (in_ptr128_syscall()) {
+		e2k_ap_t ap;
+		int tag;
+		struct ptr128_ifconf __user *uifc128 = (struct ptr128_ifconf __user *)uifc;
+		if (get_user_tagged_16(ap.qword, tag, &uifc128->ap))
+			return -EFAULT;
+		if (!IS_AP(ap, tag)) {
+			if (AP_NULL(ap, tag)) {
+				/* request just to know size for data to request in next call */
+				pos = NULL;
+				len = 0;
+			} else {
+				return -EFAULT;
+			}
+		} else {
+			/* real request */
+			pos = (void *)AP_PTR(ap);
+			if (get_user(len, &uifc128->ifc_len)) {
+				return -EFAULT;
+			}
+			if (len > AP_OBJ_SIZE(ap)) {
+				len = AP_OBJ_SIZE(ap);
+			}
+			set_u_border(MAX_U_BORDER);
+		}
+	size = sizeof(struct ptr128_ifreq);
+#endif
 	} else {
 		struct ifconf ifc;
 

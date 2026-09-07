@@ -46,6 +46,16 @@ long vfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
 	int error = -ENOTTY;
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	if (in_ptr128_syscall()) {
+		if (!filp->f_op->ptr128_ioctl)
+			return -ENOTTY;
+		error = filp->f_op->ptr128_ioctl(filp, cmd, arg);
+		if (error == -ENOIOCTLCMD)
+			error = -ENOTTY;
+		return error;
+	}
+#endif
 	if (!filp->f_op->unlocked_ioctl)
 		goto out;
 
@@ -1008,7 +1018,7 @@ do { \
 
 long ptr128_ioctl(struct file *file, unsigned long cmd, unsigned long arg)
 {
-	DbgSCP("%s(file=0x%lx, cmd=0x%lx, arg=0x%lx)\n",
+	DbgSCP("%s(file=0x%px, cmd=0x%lx, arg=0x%lx)\n",
 	       __func__, file, cmd, arg);
 	if (!file->f_op->unlocked_ioctl)
 		return -ENOIOCTLCMD;
@@ -1018,62 +1028,20 @@ long ptr128_ioctl(struct file *file, unsigned long cmd, unsigned long arg)
 EXPORT_SYMBOL(ptr128_ioctl);
 
 
-SYSCALL_DEFINE3(protected_ioctl, unsigned int, fd, unsigned long, cmd, unsigned long, arg)
+long sys_protected_ioctl(unsigned long fd, unsigned long cmd, unsigned long arg,
+			 long arg4, long arg5, long arg6, struct pt_regs *regs)
 {
-	struct fd f = fdget(fd);
-	int error = -EBADF;
+	long res;
 
-	if (!f.file)
-		return -EBADF;
-
-	DbgSCP("%s(fd=%d, cmd=0x%lx, arg=0x%lx)\n", __func__, fd, cmd, arg);
-
-	/* RED-PEN how should LSM module know it's handling 128 bit?
-	 * NB> Available security modules (Smack, Tomoyo, elmac)
-	 *				don't use 'arg' at all.
-	 */
-	error = security_file_ioctl(f.file, cmd, arg);
-	if (error)
-		goto out;
-
-	/*
-	 * To allow the protected ioctl handlers to be self contained
-	 * we need to check the common ioctls here first.
-	 * Just handle them with the standard handlers below.
-	 */
-	switch (cmd) {
-	/* FICLONE takes an int argument */
-	case FICLONE:
-		error = ioctl_file_clone(f.file, arg, 0, 0, 0);
-		break;
-	/*
-	 * everything else in do_vfs_ioctl() takes either a compatible
-	 * pointer argument or no argument -- call it as is.
-	 */
-	default:
-		error = do_vfs_ioctl(f.file, fd, cmd, arg);
-		if (error != -ENOIOCTLCMD)
-			break;
-
-		DbgSCP("%s() : f.file->f_op->ptr128_ioctl=0x%lx error=%d\n",
-		       __func__, (long)(f.file->f_op->ptr128_ioctl), error);
-		if (f.file->f_op->ptr128_ioctl)
-			error = f.file->f_op->ptr128_ioctl(f.file, cmd, arg);
-		else /* no specific handler; using regular one */
-			error = vfs_ioctl(f.file, cmd, arg);
-		if (error == -ENOIOCTLCMD)
-			error = -ENOTTY;
-		break;
+	if (prot_arg_is_int(regs, 2)) {
+		return sys_ioctl(fd, cmd, arg);
+	} else if (!prot_arg_is_ap(regs, 2)) {
+		return -EINVAL;
 	}
-
- out:
-	fdput(f);
-
-	if (error)
-		DbgSCP("%s(fd=%d, cmd=0x%lx, arg) returned error=%d\n",
-		       __func__, fd, cmd, error);
-
-	return error;
+	set_ap_u_border(regs->qargs[2]);
+	res = sys_ioctl(fd, cmd, (unsigned long)AP_PTR(regs->qargs[2]));
+	set_u_border(MAX_U_BORDER);
+	return res;
 }
 
 #endif /* CONFIG_PROTECTED_MODE */

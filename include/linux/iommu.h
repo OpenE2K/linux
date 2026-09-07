@@ -98,12 +98,6 @@ struct iommu_domain {
 	void *handler_token;
 	struct iommu_domain_geometry geometry;
 	struct iommu_dma_cookie *iova_cookie;
-#ifdef CONFIG_MCST /* support CPU_HWBUG_CANNOT_DO_DMA_IN_NEIGHBOUR_NODE*/
-	unsigned long map_base;
-	unsigned long *orig_phys_lo;
-	struct idr idr_hi;
-	rwlock_t lock_hi;
-#endif
 };
 
 static inline bool iommu_is_dma_domain(struct iommu_domain *domain)

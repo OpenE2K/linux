@@ -82,6 +82,45 @@ extern void do_notify_resume(struct pt_regs *regs);
 
 extern void coredump_in_future(void);
 
+/**
+ * trap_cellar_resume - continue handling trap cellar after it has been
+ * interrupted by real signal or TIF_NOTIFY_SIGNAL
+ *
+ * On e2k we cannot just return to user to reexecute the instruction
+ * that caused page fault since exc_data_page and exc_mem_lock are
+ * delayed exceptions, so continue handling trap cellar manually.
+ */
+static inline void trap_cellar_resume(struct pt_regs *regs)
+{
+	struct trap_pt_regs *trap = regs->trap;
+
+	if (trap && (3 * trap->curr_cnt) < trap->tc_count && trap->tc_count > 0)
+		do_trap_cellar(regs, false);
+}
+
+#if IS_ENABLED(CONFIG_SOFT_PM)
+/* handlers positions in exc_tbl */
+#define E2K_EXC_ILLEGAL_INSTR_ADDR_IND	7
+#define E2K_EXC_DIAG_OPERAND_IND	15
+#define E2K_EXC_ILLEGAL_OPERAND_IND	16
+#define E2K_EXC_ARRAY_BOUNDS_IND	17
+
+#define SOFT_PM_EXCEPTIONS_MASK \
+	((1 << E2K_EXC_ILLEGAL_INSTR_ADDR_IND) | \
+	 (1 << E2K_EXC_DIAG_OPERAND_IND) | \
+	 (1 << E2K_EXC_ILLEGAL_OPERAND_IND) | \
+	 (1 << E2K_EXC_ARRAY_BOUNDS_IND))
+
+/* soft_pm handlers initializers */
+typedef int (*soft_pm_handler)(struct pt_regs *, const char *);
+extern void soft_pm_init_handlers(soft_pm_handler handle_illegal_operand,
+				  soft_pm_handler handle_diag_operand,
+				  soft_pm_handler handle_array_bounds,
+				  soft_pm_handler handle_illegal_instr_addr);
+
+extern void soft_pm_remove_handlers(void);
+#endif /* CONFIG_SOFT_PM */
+
 enum getsp_action {
 	GETSP_OP_FAIL = 1,
 	GETSP_OP_SIGSEGV,
@@ -129,7 +168,7 @@ static inline unsigned int user_hcall_init(void)
 	linux_hcem = 1 << LINUX_HCALL_GENERIC_TRAPNUM;
 
 	/* Light hypercalls aren't used with hardware virtualization support */
-	if (!cpu_has(CPU_FEAT_ISET_V6))
+	if (!cpu_has(CPU_FEAT_ISET_V6) || IS_ENABLED(CONFIG_TEST_HYPERCALLS_LOOP))
 		linux_hcem |= 1 << LINUX_HCALL_LIGHT_TRAPNUM;
 
 	return linux_hcem;

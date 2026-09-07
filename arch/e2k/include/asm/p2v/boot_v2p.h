@@ -92,7 +92,7 @@ static inline bool is_addr_from_high_memory(e2k_addr_t addr)
 
 /* Use the following 2 defines below just to avoid headers loop. */
 /* Fortunately as v6 as v7 hold required value on this place     */
-#define NATIVE_READ_OSCUD_LO_REG_VALUE() NATIVE_GET_DSREG_CLOSED(oscud.lo)
+#define NATIVE_READ_OSCUD_LO_REG_VALUE() NATIVE_GET_DREG_CLOSED(oscud.lo)
 #define OSCUD_lo_base_mask 0xffffffffffffULL
 
 static inline void *boot_native_kernel_va_to_pa(void *virt_pnt,

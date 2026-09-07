@@ -36,4 +36,5 @@ struct ioepic_vcpu_info {
 	phys_addr_t int_table;
 	struct msi_msg msi;
 };
+
 #endif	/* _ASM_L_IO_EPIC_H */

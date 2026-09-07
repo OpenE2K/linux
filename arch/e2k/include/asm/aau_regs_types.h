@@ -61,12 +61,31 @@ enum {
 #define E2K_NULL_AASR ((e2k_aasr_t) { .lds = AASR_NULL })
 
 /* Check up AAU state */
-#define AAU_NULL(aasr)		(aasr.lds == AASR_NULL)
-#define AAU_READY(aasr)		(aasr.lds == AASR_READY)
-#define AAU_ACTIVE(aasr)	(aasr.lds == AASR_ACTIVE)
-#define AAU_STOPPED(aasr)	(aasr.lds == AASR_STOPPED)
 
-#define aau_has_state(aasr)	(!AAU_NULL(aasr) || aasr.iab || aasr.stb)
+static __always_inline bool aau_null(e2k_aasr_t aasr)
+{
+	return aasr.lds == AASR_NULL;
+}
+
+static __always_inline bool aau_ready(e2k_aasr_t aasr)
+{
+	return aasr.lds == AASR_READY;
+}
+
+static __always_inline bool aau_active(e2k_aasr_t aasr)
+{
+	return aasr.lds == AASR_ACTIVE;
+}
+
+static __always_inline bool aau_stopped(e2k_aasr_t aasr)
+{
+	return aasr.lds == AASR_STOPPED;
+}
+
+static __always_inline bool aau_has_state(e2k_aasr_t aasr)
+{
+	return !aau_null(aasr) || aasr.iab || aasr.stb;
+}
 
 
 typedef u32 e2k_aafstr_t;

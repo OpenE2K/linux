@@ -6,11 +6,24 @@
 #ifndef PCSM_H_
 #define PCSM_H_
 
-#define MAX_NODE 4
-
-#define PCSM_BASE_ADDR                  0x1000
-#define PVT_BASE_ADDR                   0x2000
-
+/*
+ * V6, V7 Power Control System (PCS) registers
+ * PMC_TERM_* Temperature sensors
+ * PMC base = 0x1000 + PMC_TERM_CONV_OFFSET(0x8)
+ * */
+#define PMC_TERM_CONV			0x0
+#define PMC_TERM_CTRL			0x4
+#define PMC_TERM_TS0			0x8
+#define PMC_TERM_TS1			0xc
+#define PMC_TERM_TS2			0x10
+#define PMC_TERM_TS3			0x14
+#define PMC_TERM_TS4			0x18
+#define PMC_TERM_TS5			0x1c
+#define PMC_TERM_TS6			0x20
+#define PMC_TERM_TS7			0x24
+/*
+ * V6, V7 PWMs registers
+ * */
 #define FRST_INST                       0x1
 #define SCND_INST                       0x2
 
@@ -67,109 +80,6 @@
 #define PCSM_RW_TACH_MAX_HI		0x2d
 #define PCSM_RW_ALERT_STATUS		0x2e
 
-#define PMC_SYS_EVENTS_POLLING		0x510
-#define PMC_SYS_EVENTS_MASK		0x514
-#define PMC_SYS_EVENTS_INT		0x518
-#define PMC_SYS_EVENTS_HW		0x51c
-#define PMC_SYS_EVENTS_CFG		0x520
-
-#define MC03_DIMM_EVENT		    (1 << 0)
-#define MC47_DIMM_EVENT		    (1 << 1)
-#define MC03_PWR_ALERT		    (1 << 2)
-#define MC47_PWR_ALERT		    (1 << 3)
-#define CPU_PWR_ALERT		    (1 << 4)
-#define MACHINE_PWR_ALERT	    (1 << 5)
-#define MACHINE_GEN_ALERT	    (1 << 6)
-#define PCS_FAN0_ALERT		    (1 << 7)
-#define PCS_FAN1_ALERT		    (1 << 8)
-#define TERM_NOMAX		    (1 << 9)
-#define TERM_FAULT		    (1 << 10)
-#define TERM_DIAG		    (1 << 11)
-#define CPU_HOT			    (1 << 12)
-#define TS_ALL_INT		    (1 << 13)
-#define TS_ALARMA		    (1 << 14)
-#define TS_ALARMB		    (1 << 15)
-#define VM_ALL_INT		    (1 << 16)
-#define VM_ALARMA		    (1 << 17)
-#define VM_ALARMB		    (1 << 18)
-#define PD_ALL_INT		    (1 << 19)
-#define PD_ALARMA		    (1 << 20)
-#define PD_ALARMB		    (1 << 21)
-#define MC03_THROTTLE		    (1 << 22)
-#define MC47_THROTTLE		    (1 << 23)
-#define CPU_FORCEPR		    (1 << 24)
-
-#define PCS_EVENTS_MAX			25
-
-#define CONTINUOUS_EVENTS_MASK		\
-	    (				\
-		MC03_DIMM_EVENT	    |	\
-		MC47_DIMM_EVENT	    |	\
-		MC03_PWR_ALERT	    |	\
-		MC47_PWR_ALERT	    |	\
-		CPU_PWR_ALERT	    |	\
-		MACHINE_PWR_ALERT   |	\
-		MACHINE_GEN_ALERT   |	\
-		PCS_FAN0_ALERT	    |	\
-		PCS_FAN1_ALERT	    |	\
-		TERM_NOMAX	    |	\
-		TERM_FAULT	    |	\
-		TERM_DIAG		\
-	    )
-
-#define THROTTLING_EVENTS_MASK		\
-	    (				\
-		CPU_HOT		    |	\
-		MC03_THROTTLE	    |	\
-		MC47_THROTTLE	    |	\
-		CPU_FORCEPR		\
-	    )
-
-#define ALARM_EVENTS_MASK		\
-	    (				\
-		TS_ALARMA	    |	\
-		TS_ALARMB	    |	\
-		VM_ALARMA	    |	\
-		VM_ALARMB		\
-	    )
-
-
-#define ALL_EVENTS_MASK			\
-	(CONTINUOUS_EVENTS_MASK | THROTTLING_EVENTS_MASK | ALARM_EVENTS_MASK)
-
-typedef struct event_info {
-	int count;
-	time64_t time;
-} event_info_t;
-
-event_info_t pcs_events[MAX_NODE][PCS_EVENTS_MAX];
-
-static int PCS_ADJUST_PERIOD = 300000; /* ms */
-
-#define PMC_FAN_CFG                     0x540
-
-/* */
-#define PMC_TERM_CONV                   0x008
-#define PMC_TERM_CTRL                   0x00c
-#define PMC_TERM_TS0                    0x010
-#define PMC_TERM_TS1                    0x014
-#define PMC_TERM_TS2                    0x018
-#define PMC_TERM_TS3                    0x01c
-#define PMC_TERM_TS4                    0x020
-#define PMC_TERM_TS5                    0x024
-#define PMC_TERM_TS6                    0x028
-#define PMC_TERM_TS7                    0x02c
-
-#define PCS_PVT_REGS_VM_BASE    0x184
-#define PCS_VM0_DATA_OFFSET     0x034
-
-#define PCS_VM_N_CH_DATA(n, ch)	\
-	(PVT_BASE_ADDR + PCS_PVT_REGS_VM_BASE + PCS_VM0_DATA_OFFSET + (n*16 + ch)*4)
-
-#define NO_EXIST    -1
-#define VCORE       0
-#define VDDR        1
-
 /* max value for pwm and temp registers */
 #define PCSM_THERM_MAX			0xFF
 #define PCSM_PWM_MAX			0x80
@@ -178,66 +88,231 @@ static int PCS_ADJUST_PERIOD = 300000; /* ms */
 
 #define MANUFACTURER_ID_LO		0xC3
 #define MANUFACTURER_ID_HI		0xE2
+/*
+ * V6, V7 Power System Events
+ * */
+typedef union {
+	struct {
+		u32 mc03_dimm_event	: 1;
+		u32 mc47_dimm_event	: 1;
+		u32 mc03_pwr_alert	: 1;
+		u32 mc47_pwr_alert	: 1;
+		u32 cpu_pwr_alert	: 1;
+		u32 machine_pwr_alert	: 1;
+		u32 machine_gen_alert	: 1;
+		u32 pcs_fan0_alert	: 1;
+		u32 pcs_fan1_alert	: 1;
+		u32 term_nomax		: 1;
+		u32 term_fault		: 1;
+		u32 term_diag		: 1;
+		u32 cpu_hot		: 1;
+		u32 ts_all_int		: 1;
+		u32 ts_alarma		: 1;
+		u32 ts_alarmb		: 1;
+		u32 vm_all_int		: 1;
+		u32 vm_alarma		: 1;
+		u32 vm_alarmb		: 1;
+		u32 pd_all_int		: 1;
+		u32 pd_alarma		: 1;
+		u32 pd_alarmb		: 1;
+		u32 mc03_throttle	: 1;
+		u32 mc47_throttle	: 1;
+		u32 cpu_forcepr		: 1;
+		u32 rsv			: 7;
+	} v6;
+	struct {
+		u32 mc0246_dimm_event	: 1;
+		u32 mc1357_dimm_event	: 1;
+		u32 mc0246_pwr_alert	: 1;
+		u32 mc1357_pwr_alert	: 1;
+		u32 cpu_pwr_alert	: 1;
+		u32 machine_pwr_alert	: 1;
+		u32 machine_gen_alert	: 1;
+		u32 smbus_alert		: 1;
+		u32 mc0246_throttle	: 1;
+		u32 mc1357_throttle	: 1;
+		u32 cpu_forcepr		: 1;
+		u32 term_nomax		: 1;
+		u32 term_fault		: 1;
+		u32 term_diag		: 1;
+		u32 volt_no_minmax	: 1;
+		u32 volt_fault		: 1;
+		u32 volt_diag		: 1;
+		u32 cpu_hot		: 1;
+		u32 ts_all_int		: 1;
+		u32 ts_alarma		: 1;
+		u32 ts_alarmb		: 1;
+		u32 vm_all_int		: 1;
+		u32 vm_alarma		: 1;
+		u32 vm_alarmb		: 1;
+		u32 pd_all_int		: 1;
+		u32 pd_alarma		: 1;
+		u32 pd_alarmb		: 1;
+		u32 uС_int0		: 1;
+		u32 uС_int1		: 1;
+		u32 uС_int2		: 1;
+		u32 uС_int3		: 1;
+		u32 rsv			: 1;
+	} e48c_rev0;
+	struct {
+		u32 prg_mc0246_dimm_event : 1;
+		u32 prg_mc1357_dimm_event : 1;
+		u32 machine_gen_alert	  : 1;
+		u32 nmi_cpu_sw		  : 1;
+		u32 smbus_alert_0	  : 1;
+		u32 smbus_alert_1	  : 1;
+		u32 board_event		  : 1;
+		u32 cpu_hot		  : 1;
+		u32 mc0246_throttle	  : 1;
+		u32 mc1357_throttle	  : 1;
+		u32 cpu_forcepr		  : 1;
+		u32 term_nomax		  : 1;
+		u32 term_fault		  : 1;
+		u32 term_diag		  : 1;
+		u32 volt_no_minmax	  : 1;
+		u32 volt_fault		  : 1;
+		u32 volt_diag		  : 1;
+		u32 uC_int		  : 1;
+		u32 ts_alarma		  : 1;
+		u32 ts_alarmb		  : 1;
+		u32 vm_alarma		  : 1;
+		u32 vm_alarmb		  : 1;
+		u32 pd_alarma		  : 1;
+		u32 pd_alarmb		  : 1;
+		u32 pvt_all_int		  : 1;
+		u32 rsv0		  : 1;
+		u32 rsv1		  : 1;
+		u32 core_cc_lo		  : 1; /* CORE0-CORE31 */
+		u32 core_cc_hi		  : 1; /* CORE32-CORE47 */
+		u32 core_cu_lo		  : 1; /* CORE0-CORE31 */
+		u32 core_cu_hi		  : 1; /* CORE32-CORE47 */
+		u32 rsv2		  : 1;
+	} e48c;
+	struct {
+		u32 mc0_dimm_event : 1;
+		u32 mc1_dimm_event : 1;
+		u32 machine_gen_alert	  : 1;
+		u32 nmi_cpu_sw		  : 1;
+		u32 smbus_alert_0	  : 1;
+		u32 smbus_alert_1	  : 1;
+		u32 board_event		  : 1;
+		u32 cpu_hot		  : 1;
+		u32 mc0_throttle	  : 1;
+		u32 mc1_throttle	  : 1;
+		u32 cpu_forcepr		  : 1;
+		u32 term_nomax		  : 1;
+		u32 term_fault		  : 1;
+		u32 term_diag		  : 1;
+		u32 volt_no_minmax	  : 1;
+		u32 volt_fault		  : 1;
+		u32 volt_diag		  : 1;
+		u32 uC_int		  : 1;
+		u32 ts_alarma		  : 1;
+		u32 ts_alarmb		  : 1;
+		u32 vm_alarma		  : 1;
+		u32 vm_alarmb		  : 1;
+		u32 pd_alarma		  : 1;
+		u32 pd_alarmb		  : 1;
+		u32 pvt_all_int		  : 1;
+		u32 rsv0		  : 1;
+		u32 rsv1		  : 1;
+		u32 core_cc_lo		  : 1; /* CORE0-CORE7 */
+		u32 rsv2		  : 1;
+		u32 core_cu_lo		  : 1; /* CORE0-CORE7 */
+		u32 rsv3		  : 1;
+		u32 rsv4		  : 1;
+	} e8v7;
+	u32 reg;
+} pcs_sys_events_t;
+
+#define ALL_EVENTS_MASK_V6		0x01ffffff
+#define ALL_EVENTS_MASK_E8V7		0x29ffffff
+#define ALL_EVENTS_MASK_E48C		0x79ffffff
+#define ALL_EVENTS_MASK_E48C_REV0	0x7fffffff
+
+#define PCS_EVENTS_MAX			25
+
+typedef struct event_info {
+	int count;
+	time64_t time;
+} event_info_t;
+
+event_info_t pcs_events[PCS_EVENTS_MAX];
+
+static int PCS_ADJUST_PERIOD = 300000; /* ms */
+
+#define PMC_TERM_TS_MAX	8
+#define PMC_FAN_CFG 0x0
+/*
+ * V7
+ * VOLT_CONV = PMC_BASE_ADDR(0x1000) + PMC_VOLT_CONV(0x0d0)
+ * VOLT_MON0 = PMC_BASE_ADDR(0x1000) + PMC_VOLT_MON0(0x0d4)
+ * VOLT_VM0_CTRL = PMC_BASE_ADDR(0x1000) + PMC_VOLT_VM0_CTRL(0x0dc)
+ * VM = PMC_BASE_ADDR(0x1000) + PCS_PVT_REGS_VM_BASE(0x100)
+ * FAN = PMC_BASE_ADDR(0x1000) + PMC_FAN_CFG(0x950)
+ * SYS_EVENTS = PMC_BASE_ADDR(0x1000) + PMC_SYS_EVENTS_POLLING(0x910)
+ */
+#define PMC_REGS_VM_BASE	0x100
+#define PMC_VOLT_VMN_CH(n, i) ((0x020 * (n)) + (0x004 * ((i) >> 1)))
+#define PMC_VOLT_CONV			0x0
+#define PMC_VOLT_MON0_CTRL		0x4
+#define PMC_VOLT_MON1_CTRL		0x8
+#define PMC_VOLT_VM0_CTRL		0xc
+#define PMC_VOLT_VM1_CTRL		0x10
+#define PMC_VOLT_VM2_CTRL		0x14
+#define PMC_VOLT_VM3_CTRL		0x18
+#define PMC_VOLT_VM4_CTRL		0x1c
+#define PMC_VOLT_VM5_CTRL		0x20
+#define PMC_VOLT_VM6_CTRL		0x24
+#define PMC_VOLT_VM7_CTRL		0x28
+#define PMC_VOLT_VM0_CH0		0x30
+
+
+#define PMC_SYS_EVENTS_POLLING_0_V7	0x0
+#define PMC_SYS_EVENTS_POLLING_1_V7	0x4
+#define PMC_SYS_EVENTS_MASK_0_V7	0x8
+#define PMC_SYS_EVENTS_MASK_1_V7	0xc
+#define PMC_SYS_EVENTS_INT_0_V7		0x10
+#define PMC_SYS_EVENTS_INT_1_V7		0x14
+#define PMC_SYS_EVENTS_UC_ALL0_MASK_V7	0x18
+#define PMC_SYS_EVENTS_UC_ALL0_INT_V7	0x1c
+#define PMC_SYS_EVENTS_HW_V7		0x20
+#define PMC_SYS_EVENTS_CFG_V7		0x24
+/*
+ * V6
+ * VM = PVT_BASE_ADDR(0x2000) + PCS_PVT_REGS_VM_BASE(0x184) + PCS_VM0_DATA_OFFSET(0x34)
+ * FAN = PMC_BASE_ADDR(0x1000) + PMC_FAN_CFG(0x540)
+ * SYS_EVENTS = PMC_BASE_ADDR(0x1000) + PMC_SYS_EVENTS_POLLING(0x510)
+ */
+#define PCS_PVT_REGS_VM_BASE    0x184
+#define PCS_VM0_DATA_OFFSET     0x034
+#define PCS_VM_N_CH_DATA(n, ch)	((n*16 + ch)*4)
+
+#define PMC_SYS_EVENTS_POLLING_V6	0x0
+#define PMC_SYS_EVENTS_MASK_V6		0x4
+#define PMC_SYS_EVENTS_INT_V6		0x8
+#define PMC_SYS_EVENTS_HW_V6		0xc
+#define PMC_SYS_EVENTS_CFG_V6		0x10
+
+#define NO_EXIST    -1
+#define VCORE       0
+#define VDDR        1
+#define VEXT        2
 
 #define VM_MAX_CHANNELS 16
 #define VM_MAX_SENSORS  8
 
 #define ACCURACY 10
 
-enum vm_values {
-	VM1,
-	VM2,
-	VM3,
-	VM4,
-	VM5,
-	VM6
-};
-
-enum ts_values {
-	TS1,
-	TS2,
-	TS3,
-	TS4,
-	TS5,
-	TS6,
-	TS7
-};
-
 struct ts {
 	char *name;
-	int addr;
+	unsigned int addr;
 };
 
-static const struct ts ts_e16c_map[] = {
-	{"CORE_0",  PMC_TERM_TS5},
-	{"CORE_1",  PMC_TERM_TS1},
-	{"CORE_14", PMC_TERM_TS2},
-	{"CORE_15", PMC_TERM_TS3},
-	{"EIOH",    PMC_TERM_TS4},
-	{"TEST",    PMC_TERM_TS0},
-	{"Tmax",    PMC_TERM_TS6}
+struct cpu_sensors {
+	struct ts ts_map[PMC_TERM_TS_MAX];
+	s8 vm_table_type[VM_MAX_CHANNELS][VM_MAX_SENSORS];
 };
-
-static const struct ts ts_e12c_map[] = {
-	{"CORE_0",  PMC_TERM_TS1},
-	{"CORE_1",  PMC_TERM_TS0},
-	{"CORE_10", PMC_TERM_TS2},
-	{"CORE_11", PMC_TERM_TS3},
-	{"EIOH",    PMC_TERM_TS4},
-	{"",	    PMC_TERM_TS5},
-	{"Tmax",    PMC_TERM_TS6}
-};
-
-static const struct ts ts_e2c3_map[] = {
-	{"CORE_0",  PMC_TERM_TS2},
-	{"CORE_1",  PMC_TERM_TS1},
-	{"MC0",	    PMC_TERM_TS3},
-	{"MC1",	    PMC_TERM_TS0},
-	{"EIOH",    PMC_TERM_TS4},
-	{"",	    PMC_TERM_TS5},
-	{"Tmax",    PMC_TERM_TS6}
-};
-
 
 static const char * const pmc_sys_events[] = {
 	"mc03_dimm_event",
@@ -265,63 +340,6 @@ static const char * const pmc_sys_events[] = {
 	"mc03_throttle",
 	"mc47_throttle",
 	"cpu_forcepr"
-};
-
-int vm_table_e16c[VM_MAX_CHANNELS][VM_MAX_SENSORS] = {
-	{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
-	{VCORE, VDDR,  VDDR,  VDDR,  VCORE, VDDR,  NO_EXIST, NO_EXIST, },
-	{VCORE, VDDR,  VDDR,  VDDR,  VCORE, VDDR,  NO_EXIST, NO_EXIST, },
-	{VCORE, VDDR,  VDDR,  VDDR,  VCORE, VDDR,  NO_EXIST, NO_EXIST, },
-	{VCORE, VDDR,  VDDR,  VDDR,  VCORE, VDDR,  NO_EXIST, NO_EXIST, },
-	{VCORE, VDDR,  VDDR,  VDDR,  VCORE, VDDR,  NO_EXIST, NO_EXIST, },
-	{VCORE, VDDR,  VDDR,  VDDR,  VCORE, VDDR,  NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
-};
-
-int vm_table_e2c3[VM_MAX_CHANNELS][VM_MAX_SENSORS] = {
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VDDR,  VCORE, VCORE, VDDR,  VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VDDR,  VCORE, VCORE, VDDR,  VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VDDR,  VCORE, VCORE, VDDR,  VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-};
-
-int vm_table_e12c[VM_MAX_CHANNELS][VM_MAX_SENSORS] = {
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VDDR,  VDDR,  VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VDDR,  VDDR,  VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VDDR,  VDDR,  VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
 };
 
 extern unsigned int pcsm_l_cpufreq_get(unsigned int cpu);
@@ -355,6 +373,33 @@ typedef union pmc_term_ts_regs {
     };
     u32 word;
 } term_ts_regs_t;
+
+typedef union pvt_vm_regs {
+    struct {
+	u32 data:      14;
+	u32 rsv1:       2;
+	u32 type:       1;
+	u32 fault:      1;
+	u32 rsv2:      14;
+    };
+    u32 word;
+} pvt_vm_regs_t;
+
+typedef union pmc_vm_regs {
+    struct {
+	u32 v_i:         11;
+	u32 v_val_i:      1;
+	u32 v_diag_i:     1;
+	u32 v_fault_i:    1;
+	u32 rsv1:         2;
+	u32 v_j:         11;
+	u32 v_val_j:      1;
+	u32 v_diag_j:     1;
+	u32 v_fault_j:    1;
+	u32 rsv2:         2;
+    };
+    u32 word;
+} pmc_vm_regs_t;
 
 typedef union pwm_tach_control_regs {
     struct {

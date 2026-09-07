@@ -244,7 +244,7 @@ DEFINE_IDTENTRY_IRQ(common_interrupt)
 	struct pt_regs *old_regs = set_irq_regs(regs);
 	struct irq_desc *desc;
 
-#ifdef CONFIG_MCST
+#ifdef SHOW_WOKEN_TIME
 	current_thread_info()->irq_enter_clk = get_cycles();
 #endif
 

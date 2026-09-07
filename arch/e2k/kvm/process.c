@@ -32,7 +32,7 @@
 #include "mman.h"
 #include "mmu.h"
 #include "io.h"
-#include "gaccess.h"
+#include "paravirt_sw/gaccess.h"
 #include "time.h"
 #include "pic.h"
 #include "../kernel/cpu/iset-kvm.h"
@@ -231,12 +231,12 @@
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static bool debug_copy_guest = false;
 static bool debug_clone_guest = false;
 
 static gthread_info_t *alloc_guest_thread_info(struct kvm *kvm);
-static void free_guest_thread_info(struct kvm *kvm, gthread_info_t *gti);
-static void do_free_guest_thread_info(struct kvm *kvm, gthread_info_t *gti);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #define	SET_VCPU_BREAKPOINT	false
 
@@ -244,6 +244,7 @@ static void do_free_guest_thread_info(struct kvm *kvm, gthread_info_t *gti);
 atomic_t hw_data_breakpoint_num = ATOMIC_INIT(-1);
 #endif /* CONFIG_DATA_BREAKPOINT */
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static void setup_vcpu_boot_stacks(struct kvm_vcpu *vcpu, gthread_info_t *gti)
 {
 	thread_info_t *ti = current_thread_info();
@@ -300,7 +301,7 @@ static void setup_vcpu_boot_stacks(struct kvm_vcpu *vcpu, gthread_info_t *gti)
 	DebugKVMSTUP("guest data stack USD: base 0x%llx size 0x%llx\n",
 		     vcpu_usd_ptr(vcpu, gti->stack_regs.stacks.u_usd),
 		     vcpu_usd_ind(vcpu, gti->stack_regs.stacks.u_usd));
-	DebugKVMSTUP("host  data stack bottom 0x%lx\n", gti->stack);
+	DebugKVMSTUP("host  data stack bottom 0x%px\n", gti->stack);
 
 	*hw_stacks = ti->u_hw_stack;
 	hw_stacks->ps = boot_stacks->ps;
@@ -338,10 +339,10 @@ static void setup_vcpu_boot_stacks(struct kvm_vcpu *vcpu, gthread_info_t *gti)
 	}
 	gti->stack_regs.stacks.pcsp = pcsp;
 
-	DebugKVMSTUP("guest procedure stack base 0x%lx, size 0x%lx\n",
+	DebugKVMSTUP("guest procedure stack base 0x%px, size 0x%lx\n",
 		     GET_PS_BASE(hw_stacks),
 		     kvm_get_guest_hw_ps_user_size(hw_stacks));
-	DebugKVMSTUP("guest procedure chain stack base 0x%lx, size 0x%lx\n",
+	DebugKVMSTUP("guest procedure chain stack base 0x%px, size 0x%lx\n",
 		     GET_PCS_BASE(hw_stacks),
 		     kvm_get_guest_hw_pcs_user_size(hw_stacks));
 	DebugKVMSTUP("guest procedure stack PSP: base 0x%llx size 0x%llx ind 0x%llx\n",
@@ -374,30 +375,6 @@ static gthread_info_t *create_guest_start_thread_info(struct kvm_vcpu *vcpu)
 	pv_vcpu_set_active_gmm(vcpu, pv_vcpu_get_init_gmm(vcpu));
 	setup_vcpu_boot_stacks(vcpu, gthread_info);
 	return gthread_info;
-}
-
-/*
- * There are two VCPU threads: host thread and guest thread.
- * Both threads are created and executed as user threads on host
- * Host VCPU thread execute QEMU (virtual machine simulation) and
- * start guest VCPU run, handle exit reasons from guest VCPU,
- * resume VCPU execution, terminate VCPU running
- * Guest VCPU thread is created by host VCPU thread and execute
- * guest kernel on this thread (as one of guest VCPUs)
- * Guest VCPU thread creates VIRQ VCPU threads to handle virtual
- * interrupts
- */
-void kvm_clear_host_thread_info(thread_info_t  *ti)
-{
-	/* each VCPU can has own root pgd */
-	ti->kernel_image_pgd_p = NULL;
-	pgd_val(ti->kernel_image_pgd) = 0;
-
-	/* guest thread info does not yet created */
-	ti->gthread_info = NULL;
-
-	INIT_LIST_HEAD(&ti->tasks_to_spin);
-	ti->gti_to_spin = NULL;
 }
 
 static inline void resume_host_start_thread(struct kvm_vcpu *vcpu)
@@ -485,6 +462,7 @@ static int prepare_pv_stacks_to_startup_vcpu(struct kvm_vcpu *vcpu,
 		     vcpu_pcsp_ind(vcpu, stack_regs->stacks.pcsp));
 	return 0;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static void kvm_reset_vcpu_thread(struct kvm_vcpu *vcpu)
 {
@@ -509,11 +487,7 @@ int kvm_init_vcpu_thread(struct kvm_vcpu *vcpu)
 	return 0;
 }
 
-int hv_vcpu_setup_thread(struct kvm_vcpu *vcpu)
-{
-	return 0;
-}
-
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 int pv_vcpu_setup_thread(struct kvm_vcpu *vcpu)
 {
 	gthread_info_t *gthread_info;
@@ -545,6 +519,7 @@ out_unlock:
 out_failed:
 	return ret;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 /*
  * FIXME: QEMU should pass physical addresses for entry IP and
@@ -588,6 +563,7 @@ void prepare_vcpu_startup_args(struct kvm_vcpu *vcpu)
 	}
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 int kvm_prepare_pv_vcpu_start_stacks(struct kvm_vcpu *vcpu)
 {
 	vcpu_boot_stack_t *boot_stacks = &vcpu->arch.boot_stacks;
@@ -1324,7 +1300,7 @@ unsigned long kvm_switch_to_virt_mode(struct kvm_vcpu *vcpu,
 			ret = -ENOMEM;
 			goto failed;
 		}
-		INIT_HOST_VCPU_STATE_GREG_COPY(current_thread_info(), vcpu);
+		// FIXME INIT_HOST_VCPU_STATE_GREG_COPY(current_thread_info(), vcpu);
 		/* all addresses into VCPU state too */
 		guest_pv_vcpu_state_to_paging(vcpu);
 
@@ -1363,8 +1339,6 @@ failed:
 	return ret;
 }
 
-extern int guest_thread_copy;	/* FIXME: only to debug */
-
 static inline int
 kvm_put_guest_new_sw_regs(struct kvm_vcpu *vcpu, gthread_info_t *new_gti,
 			  e2k_stacks_t *new_stacks, e2k_mem_crs_t *new_crs,
@@ -1383,15 +1357,15 @@ kvm_put_guest_new_sw_regs(struct kvm_vcpu *vcpu, gthread_info_t *new_gti,
 	if (g_gregs != NULL) {
 		int ret;
 
-		ret = kvm_copy_guest_all_glob_regs(vcpu, &sw_regs->gregs,
-						   g_gregs);
+		// FIXME ret = kvm_copy_guest_all_glob_regs(vcpu, &sw_regs->gregs, g_gregs);
+		ret = -ENOTSUPP;
 		if (ret != 0) {
 			pr_err("%s(): could not copy guest global registers, error %d\n",
 				__func__, ret);
 			return ret;
 		}
 		/* set BGR register to enable floating point stack */
-		sw_regs->gregs.bgr = E2K_INITIAL_BGR;
+		// FIXME sw_regs->gregs.bgr = E2K_INITIAL_BGR;
 	}
 	sw_regs->cutd = new_gti->stack_regs.cutd;
 	sw_regs->dimar[0] = 0;
@@ -2394,7 +2368,7 @@ static inline int calculate_goal_signal_stack(struct kvm_vcpu *vcpu,
 	skip_traps = 0;
 	skip_syscalls = 0;
 
-	DebugSIGST("signal stack at 0x%lx size 0x%lx, used 0x%lx, frames %d (%d traps + %d syscalls)\n",
+	DebugSIGST("signal stack at 0x%px size 0x%lx, used 0x%lx, frames %d (%d traps + %d syscalls)\n",
 		   ti->signal_stack.base, ti->signal_stack.size,
 		   ti->signal_stack.used, frames_num, traps_num, syscalls_num);
 	DebugSIGST("target frame: PCSP base 0x%llx ind 0x%llx size 0x%llx\n",
@@ -2724,6 +2698,7 @@ int kvm_activate_host_vcpu(struct kvm *kvm, int vcpu_id)
 	mutex_unlock(&kvm->lock);
 	return ret;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 /* Suspend vcpu thread until it will be woken up by pv_kick */
 void kvm_pv_wait(struct kvm *kvm, struct kvm_vcpu *vcpu)
@@ -2808,6 +2783,7 @@ int hv_vcpu_activate(int vcpu_id)
 	return ret;
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 int kvm_activate_guest_all_vcpus(struct kvm *kvm)
 {
 	struct kvm_vcpu *vcpu_to;	/* follow VCPU to activate */
@@ -2848,7 +2824,7 @@ long kvm_guest_shutdown(struct kvm_vcpu *vcpu, void *msg, unsigned long reason)
 		hva_msg = kvm_vcpu_gva_to_hva(vcpu, (gva_t) msg,
 					      false, &exception);
 		if (kvm_is_error_hva(hva_msg)) {
-			DebugKVM("failed to find GPA for dst %lx GVA, inject page fault to guest\n",
+			DebugKVM("failed to find GPA for dst %px GVA, inject page fault to guest\n",
 				msg);
 			kvm_vcpu_inject_page_fault(vcpu, msg, &exception);
 			return -EAGAIN;
@@ -2909,6 +2885,7 @@ long kvm_guest_shutdown(struct kvm_vcpu *vcpu, void *msg, unsigned long reason)
 	}
 	return 0;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #ifdef CONFIG_KVM_ASYNC_PF
 
@@ -3145,6 +3122,7 @@ void kvm_print_all_vm_stacks(void)
 	mutex_unlock(&kvm_lock);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 unsigned long kvm_add_ctx_signal_stack(struct kvm_vcpu *vcpu, u64 key,
 				       bool is_main)
 {
@@ -3167,3 +3145,4 @@ void kvm_remove_ctx_signal_stack(struct kvm_vcpu *vcpu, u64 key)
 {
 	remove_gst_ctx_signal_stack(key);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */

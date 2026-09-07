@@ -849,11 +849,7 @@ static char *default_pointer(char *buf, char *end, const void *ptr,
 	return ptr_to_id(buf, end, ptr, spec);
 }
 
-#ifdef CONFIG_MCST
-int kptr_restrict __read_mostly = 1;
-#else
 int kptr_restrict __read_mostly;
-#endif
 
 static noinline_for_stack
 char *restricted_pointer(char *buf, char *end, const void *ptr,

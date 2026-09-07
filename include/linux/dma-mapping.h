@@ -588,10 +588,6 @@ static inline int dma_mmap_wc(struct device *dev,
 			      DMA_ATTR_WRITE_COMBINE);
 }
 
-#ifdef CONFIG_MCST
-int dma_supported(struct device *dev, u64 mask);
-#endif
-
 #ifdef CONFIG_NEED_DMA_MAP_STATE
 #define DEFINE_DMA_UNMAP_ADDR(ADDR_NAME)        dma_addr_t ADDR_NAME
 #define DEFINE_DMA_UNMAP_LEN(LEN_NAME)          __u32 LEN_NAME

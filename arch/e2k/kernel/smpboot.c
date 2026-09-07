@@ -151,7 +151,7 @@ void e2k_start_secondary_switched_stacks(int cpuid, int cpu)
 
 	trap_init();
 
-	this_cpu_write(u_root_ptb, __pa(mm_node_pgd(&init_mm, numa_node_id())));
+	u_root_ptb = __pa(mm_node_pgd(&init_mm, numa_node_id()));
 
 	/*
 	 * The BSP has finished the init stage and is spinning on

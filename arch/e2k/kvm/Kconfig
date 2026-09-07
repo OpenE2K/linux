@@ -32,6 +32,9 @@ menuconfig KVM
 	select DIRECT_VIRQ_INJECTION
 	select PARAVIRT_SPINLOCKS if SMP
 	select KVM_XFER_TO_GUEST_WORK
+	select VIRTIO_BALLOON
+	select VIRTIO_PCI
+	select VIRTIO_PCI_LEGACY
 
 	help
 	  Support hosting:
@@ -48,7 +51,7 @@ config KVM_GUEST
 
 config KVM_PARAVIRTUALIZATION
 	bool "Hypervisor software paravirtualization enable"
-	default y
+	default n
 	help
 	  Say Y here if hypervisor based on KVM should support
 	  software paravirtualized mode. In this case guest kernel
@@ -66,7 +69,6 @@ config KVM_HW_VIRTUALIZATION
 config KVM_HW_PARAVIRTUALIZATION
 	bool "Hypervisor based on hardware virtualization and paravirtulized guest"
 	depends on KVM_HW_VIRTUALIZATION
-	select KVM_PARAVIRTUALIZATION
 	help
 	  Say Y here if machine hardware has virtualization support
 	  and to enable host kernel and hypervisor based on KVM.
@@ -82,6 +84,8 @@ choice
 config KVM_HOST_KERNEL
 	bool "KVM hypervisor and host kernel support"
 	select KVM_HOST_MODE
+	imply VHOST_NET
+	imply VHOST_VSOCK
 	help
 	  Say Y here to get host kernel which can be run
 	  only as host kernel with hypervisor functionality
@@ -107,7 +111,7 @@ config KVM_GUEST_HW_PV
 config KVM_SHADOW_PT_ENABLE
 	bool "Enable Shadow Page Tables support"
 	depends on KVM_HOST_MODE
-	default n
+	default KVM_HW_VIRTUALIZATION
 	select KVM_HV_MMU
 	help
 	  Say Y here to enable support of shadow page tables by hypervisor
@@ -191,7 +195,7 @@ config KVM_TDP_ENABLE
 	bool "Enable Two Dimensional Page Tables (gva->gpa->hpa) support"
 	depends on KVM_HOST_MODE && KVM_HW_VIRTUALIZATION
 	depends on KVM_SHADOW_PT_ENABLE
-	default n
+	default KVM_HW_VIRTUALIZATION
 	select KVM_HV_MMU
 	select KVM_PHYS_PT_ENABLE
 	help
@@ -203,7 +207,7 @@ config KVM_TDP_ENABLE
 config KVM_NONPAGING_ENABLE
 	bool "Nonpaging mode of KVM MMU is enable"
 	depends on KVM_HOST_MODE && KVM_SHADOW_PT_ENABLE
-	default n
+	default KVM_HW_VIRTUALIZATION
 	select KVM_HV_MMU
 	help
 	  Say Y here to enable non paging mode by hypervisor.
@@ -333,3 +337,10 @@ config	DIRECT_VIRQ_INJECTION
 	help
 	  Direct injection of VIRQs to guest kernel VCPU through standard
 	  mechanism of traps passing from host to guest
+
+config TEST_HYPERCALLS_LOOP
+	bool "Test many hypercalls in a row"
+	depends on KVM
+	help
+	  Runs same hypercall many times over and over again, to check for
+	  any possible asymmetries or leaks in data stack switch code.

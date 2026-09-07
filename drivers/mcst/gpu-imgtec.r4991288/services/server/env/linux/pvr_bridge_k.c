@@ -1256,7 +1256,8 @@ e0:
 	mutex_unlock(&g_sMMapMutex);
 
 	PVR_DPF((PVR_DBG_ERROR, "Unable to translate error %d", eError));
+#ifndef CONFIG_MCST /* rm 29454: stress-ng test: do not dump stack on error */
 	PVR_ASSERT(eError != PVRSRV_OK);
-
+#endif
 	return -ENOENT; // -EAGAIN // or what?
 }

@@ -281,6 +281,10 @@ static struct tty_ldisc_ops serport_ldisc = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl =	serport_ldisc_compat_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl =	serport_ldisc_ioctl,
+#endif
+
 	.receive_buf =	serport_ldisc_receive,
 	.hangup =	serport_ldisc_hangup,
 	.write_wakeup =	serport_ldisc_write_wakeup

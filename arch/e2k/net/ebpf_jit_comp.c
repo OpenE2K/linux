@@ -1861,7 +1861,7 @@ static int build_prologue(void **pptr, const int pass, struct ebpf_prog_info *in
  */
 static inline void calc_reg_window(struct ebpf_prog_info *info)
 {
-	unsigned int total = MAX_BPF_REG + 3; /* JIT uses 3 additional registers */
+	unsigned int total = MAX_BPF_JIT_REG + 3; /* JIT uses 3 additional registers */
 	unsigned int reg_start = total;
 	unsigned int arg_regs_num = 8;
 
@@ -1902,7 +1902,7 @@ static inline void save_addrs(int num, const struct bpf_insn *instr,
 	 * Also, the start of the translation may have a nop interval
 	 * in the beginning. Here we take it into account.
 	 */
-	next_instr_num = num + is_double_instr(instr) ? 2 : 1;
+	next_instr_num = num + (is_double_instr(instr) ? 2 : 1);
 	if (next_instr_num < info->body_len)
 		cur_off += real_wide_instr_offset(&info->body[next_instr_num], 0);
 
@@ -1938,7 +1938,7 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 	u8 *image_ptr = NULL;
 	unsigned int image_size = 0;
 	struct bpf_binary_header *image = NULL;
-	const struct bpf_insn *insns = prog->insnsi;
+	const struct bpf_insn *insns = NULL;
 	struct ebpf_prog_info *bpf_prog_info;
 	int i = 0, pass = 0;
 	void *ptr = NULL;
@@ -1961,6 +1961,8 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 		blinded = true;
 		prog = blinded_prog;
 	}
+
+	insns = prog->insnsi;
 
 	jit_data = prog->aux->jit_data;
 	if (!jit_data) {

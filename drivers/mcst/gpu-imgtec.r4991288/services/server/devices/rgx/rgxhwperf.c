@@ -3273,7 +3273,11 @@ PVRSRV_ERROR RGXHWPerfOpen(RGX_HWPERF_CONNECTION *psHWPerfConnection)
 }
 
 
-PVRSRV_ERROR RGXHWPerfConnect(RGX_HWPERF_CONNECTION** ppsHWPerfConnection)
+#if defined(CONFIG_MCST)
+PVRSRV_ERROR RGXHWPerfConnect_4991288(RGX_HWPERF_CONNECTION **ppsHWPerfConnection)
+#else
+PVRSRV_ERROR RGXHWPerfConnect(RGX_HWPERF_CONNECTION **ppsHWPerfConnection)
+#endif
 {
 	PVRSRV_ERROR eError;
 
@@ -3296,7 +3300,11 @@ e0: /* LazyConnect might have allocated some resources and then failed,
 }
 
 
+#if defined(CONFIG_MCST)
+PVRSRV_ERROR RGXHWPerfControl_4991288(
+#else
 PVRSRV_ERROR RGXHWPerfControl(
+#endif
 		RGX_HWPERF_CONNECTION *psHWPerfConnection,
 		RGX_HWPERF_STREAM_ID eStreamId,
 		IMG_BOOL             bToggle,
@@ -3331,7 +3339,11 @@ PVRSRV_ERROR RGXHWPerfControl(
 }
 
 
+#if defined(CONFIG_MCST)
+PVRSRV_ERROR RGXHWPerfConfigureAndEnableCounters_4991288(
+#else
 PVRSRV_ERROR RGXHWPerfConfigureAndEnableCounters(
+#endif
 		RGX_HWPERF_CONNECTION *psHWPerfConnection,
 		IMG_UINT32					ui32NumBlocks,
 		RGX_HWPERF_CONFIG_CNTBLK*	asBlockConfigs)
@@ -3371,7 +3383,11 @@ PVRSRV_ERROR RGXHWPerfConfigureAndEnableCounters(
 }
 
 
+#if defined(CONFIG_MCST)
+PVRSRV_ERROR RGXHWPerfDisableCounters_4991288(
+#else
 PVRSRV_ERROR RGXHWPerfDisableCounters(
+#endif
 		RGX_HWPERF_CONNECTION *psHWPerfConnection,
 		IMG_UINT32   ui32NumBlocks,
 		IMG_UINT16*   aeBlockIDs)
@@ -3411,7 +3427,11 @@ PVRSRV_ERROR RGXHWPerfDisableCounters(
 }
 
 
+#if defined(CONFIG_MCST)
+PVRSRV_ERROR RGXHWPerfAcquireEvents_4991288(
+#else
 PVRSRV_ERROR RGXHWPerfAcquireEvents(
+#endif
 		IMG_HANDLE  hDevData,
 		RGX_HWPERF_STREAM_ID eStreamId,
 		IMG_PBYTE*  ppBuf,
@@ -3517,7 +3537,11 @@ PVRSRV_ERROR RGXHWPerfAcquireEvents(
 }
 
 
+#if defined(CONFIG_MCST)
+PVRSRV_ERROR RGXHWPerfReleaseEvents_4991288(
+#else
 PVRSRV_ERROR RGXHWPerfReleaseEvents(
+#endif
 		IMG_HANDLE hDevData,
 		RGX_HWPERF_STREAM_ID eStreamId)
 {
@@ -3679,7 +3703,11 @@ PVRSRV_ERROR RGXHWPerfClose(RGX_HWPERF_CONNECTION *psHWPerfConnection)
 }
 
 
-PVRSRV_ERROR RGXHWPerfDisconnect(RGX_HWPERF_CONNECTION** ppsHWPerfConnection)
+#if defined(CONFIG_MCST)
+PVRSRV_ERROR RGXHWPerfDisconnect_4991288(RGX_HWPERF_CONNECTION **ppsHWPerfConnection)
+#else
+PVRSRV_ERROR RGXHWPerfDisconnect(RGX_HWPERF_CONNECTION **ppsHWPerfConnection)
+#endif
 {
 	PVRSRV_ERROR eError = PVRSRV_OK;
 
@@ -3711,7 +3739,11 @@ const IMG_CHAR *RGXHWPerfKickTypeToStr(RGX_HWPERF_KICK_TYPE eKickType)
 }
 
 
+#if defined(CONFIG_MCST)
+IMG_UINT64 RGXHWPerfConvertCRTimeStamp_4991288(
+#else
 IMG_UINT64 RGXHWPerfConvertCRTimeStamp(
+#endif
 		IMG_UINT32 ui32ClkSpeed,
 		IMG_UINT64 ui64CorrCRTimeStamp,
 		IMG_UINT64 ui64CorrOSTimeStamp,

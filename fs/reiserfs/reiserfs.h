@@ -3412,4 +3412,9 @@ int reiserfs_fileattr_set(struct user_namespace *mnt_userns,
 long reiserfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
 long reiserfs_compat_ioctl(struct file *filp,
 		   unsigned int cmd, unsigned long arg);
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+long reiserfs_ptr128_ioctl(struct file *filp,
+			   unsigned int cmd, unsigned long arg);
+#endif
+
 int reiserfs_unpack(struct inode *inode);

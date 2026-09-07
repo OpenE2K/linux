@@ -1144,6 +1144,9 @@ static const struct file_operations tap_fops = {
 	.llseek		= no_llseek,
 	.unlocked_ioctl	= tap_ioctl,
 	.compat_ioctl	= compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = tap_ioctl,
+#endif
 };
 
 static int tap_get_user_xdp(struct tap_queue *q, struct xdp_buff *xdp)

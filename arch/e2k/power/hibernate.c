@@ -184,7 +184,7 @@ static void restore_tags_info(struct tags_info *t)
 			set_memory_ro((unsigned long) to, 1);
 
 			if (ret) {
-				pr_err("hibernation resume: page fault when restoring tags at 0x%lx\n",
+				pr_err("hibernation resume: page fault when restoring tags at 0x%px\n",
 						to);
 				print_kernel_address_ptes((unsigned long) to);
 				continue;

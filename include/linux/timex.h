@@ -169,6 +169,7 @@ int read_current_timer(unsigned long *timer_val);
 #ifdef CONFIG_MCST
 extern void set_pps_stat2(int);
 extern long long  next_rt_intr;
+extern long long  must_do_timer;
 extern int pps_debug;
 #endif
 #ifdef CONFIG_ESCLKR_CLOCKSOURCE

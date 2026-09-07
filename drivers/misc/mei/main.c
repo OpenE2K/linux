@@ -1168,6 +1168,9 @@ static const struct file_operations mei_fops = {
 	.read = mei_read,
 	.unlocked_ioctl = mei_ioctl,
 	.compat_ioctl = compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = mei_ioctl,
+#endif
 	.open = mei_open,
 	.release = mei_release,
 	.write = mei_write,

@@ -7974,6 +7974,9 @@ const struct block_device_operations md_fops =
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= md_compat_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl		= md_ioctl,
+#endif
 	.getgeo		= md_getgeo,
 	.check_events	= md_check_events,
 	.set_read_only	= md_set_read_only,

@@ -8,24 +8,19 @@
 #include <linux/pci.h>
 #include <linux/swiotlb.h>
 
-#ifdef CONFIG_E2K
-# include <asm/set_memory.h>
-#endif
-
 #include "mem2alloc.h"
 
-#ifdef CONFIG_MCST
 #ifndef CLASS_NAME
 #define CLASS_NAME               "mem2alloc_class"
 #endif
 static struct class* devClass = NULL;
-#endif
 static int mem2alloc_major = 0;	/* dynamic */
 static DEFINE_SPINLOCK(mem_lock);
 
 struct ma_chunk {
 	struct ma_chunk *next;
-	struct page *page;
+	struct device *dev;
+	void *cpu_address;
 	MemallocParams params;
 };
 
@@ -79,22 +74,11 @@ static int mem2alloc_open(struct inode *inode, struct file *filp)
 
 static int mem2alloc_release(struct inode *inode, struct file *filp)
 {
-	struct ma_chunk *c;
+	struct ma_chunk *c = NULL;
 	for (c = filp->private_data; c;) {
-		struct pci_dev *pdev;
-		struct device *dev = NULL;
-		MemallocParams *p = &c->params;
 		struct ma_chunk *c2 = c;
-		pdev = pci_get_domain_bus_and_slot(p->pci_domain, p->bus,
-				PCI_DEVFN(p->slot, p->function));
-		if (pdev)
-			dev = &pdev->dev;
-		dma_unmap_page(dev, p->dma_address, p->size,
-			       DMA_BIDIRECTIONAL);
-#ifdef CONFIG_E2K
-		set_memory_wb((unsigned long) __va(p->phys_address), (p->size >> PAGE_SHIFT));
-#endif
-		__free_pages(c->page, get_order(p->size));
+		if (c->dev && c->cpu_address)
+			dma_free_wc(c->dev, c->params.size, c->cpu_address, c->params.dma_address);
 		c = c->next;
 		kfree(c2);
 	}
@@ -103,10 +87,8 @@ static int mem2alloc_release(struct inode *inode, struct file *filp)
 
 void __exit mem2alloc_cleanup(void)
 {
-#ifdef CONFIG_MCST
     device_destroy(devClass, MKDEV(mem2alloc_major, 0));
     class_destroy(devClass);
-#endif
 	unregister_chrdev(mem2alloc_major, "mem2alloc");
 }
 
@@ -129,7 +111,6 @@ int __init mem2alloc_init(void)
 	else if (result != 0)	/* this is for dynamic major */
 		mem2alloc_major = result;
 
-#ifdef CONFIG_MCST
     devClass = class_create(THIS_MODULE, CLASS_NAME);
 
     if (IS_ERR(devClass))
@@ -140,7 +121,6 @@ int __init mem2alloc_init(void)
     }
 
     device_create(devClass, NULL, MKDEV(mem2alloc_major, 0), NULL, "mem2alloc");
-#endif
 	return 0;
       err:
 	return result;
@@ -149,55 +129,39 @@ int __init mem2alloc_init(void)
 static int AllocMemory(MemallocParams *p, struct file *filp)
 {
 	int ret = 0;
-	struct pci_dev *pdev;
+	struct pci_dev *pdev = NULL;
 	struct device *dev = NULL;
 	struct ma_chunk *n, *c = kzalloc(sizeof(*c), GFP_KERNEL);
-	gfp_t gfp_mask = __GFP_ZERO | GFP_USER;
-	pdev = pci_get_domain_bus_and_slot(p->pci_domain, p->bus,
-			PCI_DEVFN(p->slot, p->function));
+	gfp_t gfp_mask = GFP_KERNEL | __GFP_ZERO;
+
 	if (!c)
 		return -ENOMEM;
 	if (p->size == 0) {
 		ret = -EINVAL;
 		goto err;
 	}
+
+	pdev = pci_get_domain_bus_and_slot(p->pci_domain, p->bus,
+			PCI_DEVFN(p->slot, p->function));
 	if (pdev)
 		dev = &pdev->dev;
 	if (!dev) {
 		ret = -EINVAL;
 		goto err;
 	}
-#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
-	if (swiotlb_max_segment(swiotlb_node(dev)) &&	/* swiotlb is running */
-#else
-	if (swiotlb_max_segment() &&
-#endif
-		   dma_get_mask(dev) <= DMA_BIT_MASK(32)) {
-		gfp_mask |= __GFP_DMA;
-	}
-	c->page = alloc_pages(gfp_mask | __GFP_RETRY_MAYFAIL | __GFP_NOWARN,
-			       get_order(p->size));
-	if (!c->page)
-		c->page = alloc_pages(gfp_mask | __GFP_NOFAIL,
-				      get_order(p->size));
-	if (!c->page) {
+
+	c->dev = dev;
+	c->params.size = p->size;
+	c->cpu_address = dma_alloc_wc(c->dev, c->params.size, &c->params.dma_address, gfp_mask);
+	if (!c->cpu_address) {
 		ret = -ENOMEM;
 		goto err;
 	}
 
-	p->dma_address = dma_map_page(dev, c->page, 0, p->size,
-				      DMA_BIDIRECTIONAL);
-	ret = dma_mapping_error(dev, p->dma_address);
-	pci_dev_put(pdev);
-	if (ret) {
-		ret = -EFAULT;
-		goto err;
-	}
+	p->dma_address = c->params.dma_address;
+	p->phys_address = p->dma_address;
 
-	p->phys_address = page_to_phys(c->page);
-#ifdef CONFIG_E2K
-	set_memory_wc((unsigned long) __va(p->phys_address), (p->size >> PAGE_SHIFT));
-#endif
+	pci_dev_put(pdev);
 
 	spin_lock(&mem_lock);
 	n = filp->private_data;
@@ -207,9 +171,9 @@ static int AllocMemory(MemallocParams *p, struct file *filp)
 
 	memcpy(&c->params, p, sizeof(*p));
 	return 0;
-      err:
-	if (c->page)
-		__free_pages(c->page, get_order(p->size));
+err:
+	if (c->dev && c->cpu_address)
+		dma_free_wc(c->dev, c->params.size, c->cpu_address, c->params.dma_address);
 	kfree(c);
 	return ret;
 }
@@ -218,9 +182,6 @@ static int FreeMemory(u64 busaddr, struct file *filp)
 {
 	int r = -ENOENT;
 	struct ma_chunk *c, *prev = NULL;
-	struct pci_dev *pdev;
-	struct device *dev = NULL;
-	MemallocParams *p;
 
 	spin_lock(&mem_lock);
 	for (c = filp->private_data; c && c->params.dma_address != busaddr;
@@ -238,17 +199,8 @@ static int FreeMemory(u64 busaddr, struct file *filp)
 	if (!c)
 		return r;
 
-	p = &c->params;
-	pdev = pci_get_domain_bus_and_slot(p->pci_domain, p->bus,
-			PCI_DEVFN(p->slot, p->function));
-	if (pdev)
-		dev = &pdev->dev;
-	dma_unmap_page(dev, p->dma_address, p->size,
-			DMA_BIDIRECTIONAL);
-#ifdef CONFIG_E2K
-	set_memory_wb((unsigned long) __va(p->phys_address), (p->size >> PAGE_SHIFT));
-#endif
-	__free_pages(c->page, get_order(p->size));
+	if (c->dev && c->cpu_address)
+		dma_free_wc(c->dev, c->params.size, c->cpu_address, c->params.dma_address);
 	kfree(c);
 	r = 0;
 
@@ -258,28 +210,30 @@ static int FreeMemory(u64 busaddr, struct file *filp)
 static int mem2alloc_mmap(struct file *file, struct vm_area_struct *vma)
 {
 	size_t size = vma->vm_end - vma->vm_start;
-	phys_addr_t offset = (phys_addr_t)vma->vm_pgoff << PAGE_SHIFT;
-	struct ma_chunk *c;
-	int ret;
+	dma_addr_t offset = (dma_addr_t)vma->vm_pgoff << PAGE_SHIFT;
+	struct ma_chunk *c = NULL;
+	int ret = 0;
 
 	/* Check that this is indeed a chunk that was allocated with mem2alloc */
 	spin_lock(&mem_lock);
 	for (c = file->private_data; c != NULL; c = c->next) {
-		if (c->params.phys_address == offset)
+		if (c->params.dma_address == offset)
 			break;
 	}
-	ret = (!c || WARN_ON_ONCE(c->params.size != size)) ? -EINVAL : 0;
+	ret = (!c || !c->dev || !c->cpu_address ||
+			WARN_ON_ONCE(c->params.size != size)) ? -EINVAL : 0;
 	spin_unlock(&mem_lock);
 	if (ret)
 		return ret;
 
-	vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
+	vma->vm_pgoff = 0;
+	vma->vm_flags |= VM_IO | VM_DONTEXPAND | VM_DONTDUMP;
 
-	/* Remap-pfn-range will mark the range VM_IO */
-	if (remap_pfn_range(vma, vma->vm_start, vma->vm_pgoff,
-			    size, vma->vm_page_prot)) {
+	ret = dma_mmap_wc(c->dev, vma, c->cpu_address,
+			c->params.dma_address, c->params.size);
+	if (ret)
 		return -EAGAIN;
-	}
+
 	return 0;
 }
 

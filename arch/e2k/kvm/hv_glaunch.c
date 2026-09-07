@@ -14,7 +14,8 @@
 #include <asm/kvm/switch.h>
 #include <asm/sections.h>
 
-/* THis function is written this way (not used e2k_ctpr_t struct)
+/*
+ * This function is written this way (not used e2k_ctpr_t struct)
  * due to lcc troubles whith check_stack (the same as __interrupt)
  * compilation mode
  */
@@ -46,7 +47,7 @@ noinline  __interrupt void launch_hv_vcpu(struct kvm_vcpu_arch *vcpu)
 
 	/* CPU_HWBUG_BRANCH_ACTIVATES_CTPR: avoid rbranch, ibranch and ibranchd
 	 * instructions between %ctpr[.hi] restoring and glaunch instruction. */
-	native_write_CTPR2_reg(ctpr2);
+	RWSH_CTPR_NOIRQ(ctpr2, ctpr2);
 	/* These registers must be restored after ctpr2 */
 	native_set_aau_aaldis_aaldas(ti->aalda, &sw_ctxt->aau_context);
 	NATIVE_RESTORE_AAU_MASK_REGS(sw_ctxt->aau_context.aaldm,

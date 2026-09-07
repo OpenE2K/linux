@@ -14,6 +14,7 @@
 #include <asm/e2k_ptypes.h>
 #include <asm/e2k_debug.h>
 #include <asm/machdep.h>
+#include <asm/mman.h>
 #include <linux/version.h>
 #include "asm/syscalls.h"
 #include <asm/protected_mode.h>
@@ -121,7 +122,8 @@ do { \
 		protected_mode_message(1, MSG_ID, ##__VA_ARGS__); \
 } while (0)
 
-#define PM_SC_DBG_MODE_MSG_TYPE_ERROR		1
+#define PM_SC_DBG_MODE_MSG_TYPE_INFO		0
+#define PM_SC_DBG_MODE_MSG_TYPE_ERROR           1
 #define PM_SC_DBG_MODE_MSG_TYPE_WARNING		2
 #define PM_SC_DBG_MODE_MSG_TYPE_PWARNING	3 /* maybe programmer's error */
 
@@ -187,10 +189,11 @@ do { \
 
 #endif /* DYNAMIC_DEBUG_SYSCALLP_ENABLED */
 
-#define SYSCALL_NAME_ON_ID(sys_num) \
-	((sys_num < NR_syscalls) ? sys_call_ID_to_name[sys_num] : "BadSyscallID")
-
-/* Protected mode diagnostic message ID's: */
+/*
+ * Protected mode diagnostic message ID's:
+ * NB> Add new messages at the bottom of the array only !!!
+ *	ID's are fixed as these are used in qualification tests.
+ */
 enum pm_syscall_err_msg_id {
 	PMSCERRMSG_ERR_ID,
 	/* Syscall arg related messages: */
@@ -297,7 +300,15 @@ enum pm_syscall_err_msg_id {
 	/* __iset__ >= 6 */
 	PMSCWARN_MMAP_SHARED_FLAG,
 
+	/* MISC: */
+	PMSCWARN_UNALIGNED_PL_IN_ARG,
+	PMSCERRMSG_SC_NOT_ENABLED,
+	PMSCWARN_UNALIGNED_DSCR_IN_ARG,
+	PMSCERRMSG_SC_ALLOWED_IN_SOFT_MODE,
+
 	/* NB> New messages to add above this line */
+	/* Unclassified */ PMSCERRMSG_FILLING_FREED_MEM_BLOCKED,
+	/* Unclassified */ PMSCERRMSG_FILLING_FREED_MEM_IN_NON_HM,
 
 	/* Intro diagnostic messages: */
 	PMSCERRMSG_RUNTIME_ERROR,
@@ -323,6 +334,7 @@ extern char const **protected_error_list;
 extern void protected_mode_message(int header_type,
 				   enum pm_syscall_err_msg_id MSG_ID, ...) __cold;
 
+extern ssize_t protected_mode_write_to_current_stderr(const char *message, size_t msglen);
 
 static inline
 void __user *arch_protected_alloc_user_data_stack(unsigned long len)
@@ -361,6 +373,11 @@ int prot_sc_arg_not_ptr(const int arg_num, const struct pt_regs *regs)
 	return !IS_AP(regs->qargs[arg_num - 1], prot_sc_arg_tag(arg_num, regs));
 }
 static inline
+int prot_sc_arg_is_ap(const int arg_num, const struct pt_regs *regs)
+{
+	return IS_AP(regs->qargs[arg_num - 1], prot_sc_arg_tag(arg_num, regs));
+}
+static inline
 int prot_sc_arg_NULL_ptr(const int arg_num, const struct pt_regs *regs)
 {
 	return (((regs->tags >> (8*(arg_num))) & 0xf) == E2K_NULLPTR_ETAG) \
@@ -377,6 +394,11 @@ extern void pm_deliver_sig_bnderr(int argno, const struct pt_regs *regs) __cold;
 extern int get_prot_sigevent(sigevent_t *k, const struct prot_sigevent __user *u, size_t sz,
 			     const int arg_num, const struct pt_regs *regs);
 
+typedef unsigned long (*protected_system_call_func)(unsigned long arg1,
+			unsigned long arg2, unsigned long arg3, unsigned long arg4,
+			unsigned long arg5, unsigned long arg6, struct pt_regs *regs);
+
+extern const protected_system_call_func sys_call_table_entry8[NR_syscalls];
 
 /* If running in the orthodox protected mode, deliver exception to break execution: */
 #define PM_EXCEPTION_IF_ORTH_MODE(signo, code, errno) \
@@ -454,7 +476,7 @@ static inline long  ptr128_2_ptr64(long __user *pdescr)
 	int tag;
 
 	if (get_user_tagged_16(descr.qword, tag, pdescr)) {
-		DbgSCP_ALERT("%s failed with pdescr == 0x%lx\n", __func__, pdescr);
+		DbgSCP_ALERT("%s failed with pdescr == 0x%px\n", __func__, pdescr);
 		return -EFAULT;
 	}
 
@@ -475,7 +497,7 @@ static inline int this_is_descriptor(long __user *pdescr, const int ret_val_zero
 	int tag;
 
 	if (get_user_tagged_16(descr.qword, tag, pdescr)) {
-		DbgSCP_ALERT("%s failed with pdescr == 0x%lx\n", __func__, pdescr);
+		DbgSCP_ALERT("%s failed with pdescr == 0x%px\n", __func__, pdescr);
 		return -EFAULT;
 	}
 
@@ -493,15 +515,24 @@ static inline int warn_if_not_descr(const int		n,
 				const struct pt_regs	*regs)
 {
 	if (prot_sc_arg_not_ptr(n, regs)) {
+		int tags = exception ? prot_sc_arg_tag(n, regs) : 0;
+
+		if ((tags & 0x3) && (tags & 0x3) != ETAGEWD)
+			PROTECTED_MODE_WARNING(PMSCERRMSG_UNEXP_ARG_TAG_ID,
+				regs->sys_num, sys_call_ID_to_name[regs->sys_num], tags, n);
+
 		if (exception == CHECK4DESCR_ERROR) {
 			PROTECTED_MODE_ALERT(PMSCERRMSG_NOT_DESCR_IN_SC_ARG,
 				regs->sys_num, sys_call_ID_to_name[regs->sys_num], n);
+			if ((tags & 0x3) == ETAGEWD)
+				PROTECTED_MODE_MESSAGE(0, PMSCERRMSG_SC_ARG_MISSED_OR_UNINIT, n);
 			PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EFAULT);
 		} else if (exception) { /* this is warning */
 			PROTECTED_MODE_WARNING(PMSCERRMSG_NOT_DESCR_IN_SC_ARG,
 				regs->sys_num, sys_call_ID_to_name[regs->sys_num], n);
-			if (exception)
-				PM_EXCEPTION_ON_WARNING(SIGABRT, SI_KERNEL, EFAULT);
+			if ((tags & 0x3) == ETAGEWD)
+				PROTECTED_MODE_MESSAGE(0, PMSCERRMSG_SC_ARG_MISSED_OR_UNINIT, n);
+			PM_EXCEPTION_ON_WARNING(SIGABRT, SI_KERNEL, EFAULT);
 		}
 		return 1;
 	}
@@ -515,12 +546,18 @@ static inline int size_exceeds_descr_max_capacity(const size_t size,
 					   const size_t arg_val,
 					   const struct pt_regs *regs)
 {
-	if (size >> 31) {
-		PROTECTED_MODE_ALERT(PMSCERRMSG_SC_ARGNAME_VAL_EXCEEDS_DSCR_MAX,
-			regs->sys_num, sys_call_ID_to_name[regs->sys_num], arg_val, arg_name);
-		return 1;
+	if (cpu_has(CPU_FEAT_V7_CPU_REGS)) {
+		if (size < E2K_VA_END) {
+			return 0;
+		}
+	} else {
+		if (!(size >> 31)) {
+			return 0;
+		}
 	}
-	return 0;
+	PROTECTED_MODE_ALERT(PMSCERRMSG_SC_ARGNAME_VAL_EXCEEDS_DSCR_MAX,
+		regs->sys_num, sys_call_ID_to_name[regs->sys_num], arg_val, arg_name);
+	return 1;
 }
 
 
@@ -568,6 +605,63 @@ unsigned long arg64_from_regs(const struct pt_regs	*regs,
 		return AP_PTR(regs->qargs[arg_num - 1]);
 	else
 		return regs->qargs[arg_num - 1].lo;
+}
+
+
+static inline
+int prot_arg_is_ap(const struct pt_regs *regs,
+		   int arg_num) /* argument # in syscall */
+/* Checks that argument #argnum is descriptor: */
+{
+	int tag = (regs->tags >> (arg_num * 8)) & 0xff;
+
+	return (tag == ETAGAPQ);
+}
+
+static inline
+int prot_arg_is_int(const struct pt_regs *regs,
+		    int arg_num) /* argument # in syscall */
+/* Checks that argument #argnum is of type 'int': */
+{
+	int tag = (regs->tags >> (arg_num * 8)) & 0xff;
+
+	return ((tag & 3) == 0);
+}
+
+
+/* Here we check that descriptor specified in argument #arg_num is read-able: */
+static inline
+int check_buffer_is_readable(const struct pt_regs	*regs,
+			     const int			arg_num)
+{
+	if (cpu_has(CPU_FEAT_ISET_V7)) {
+		if (regs->qargs[arg_num - 1].rw_v7 & PROT_READ)
+			return 1;
+	} else {
+		if (regs->qargs[arg_num - 1].rw_v6 & PROT_READ)
+			return 1;
+	}
+	PROTECTED_MODE_ALERT(PMSCERRMSG_DSCR_WITHOUT_READ_PERM,
+			     sys_call_ID_to_name[regs->sys_num], arg_num);
+	return 0;
+}
+
+/* Here we check that descriptor specified in argument #arg_num is write-able: */
+static inline
+int check_buffer_is_writeable(const struct pt_regs	*regs,
+			      const int			arg_num)
+{
+	if (cpu_has(CPU_FEAT_ISET_V7)) {
+		if (regs->qargs[arg_num - 1].rw_v7 & PROT_WRITE)
+			return 1;
+	} else {
+		if (regs->qargs[arg_num - 1].rw_v6 & PROT_WRITE)
+			return 1;
+	}
+
+	PROTECTED_MODE_ALERT(PMSCERRMSG_DSCR_WITHOUT_WRITE_PERM,
+			     sys_call_ID_to_name[regs->sys_num], arg_num);
+	return 0;
 }
 
 #else /* #ifndef CONFIG_PROTECTED_MODE */

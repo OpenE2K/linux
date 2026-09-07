@@ -108,7 +108,6 @@
 #define MCNA_DIAG_ADDR	0x4c8
 #define MCNA_DIAG_DATA	0x4cc
 
-
 /* HMU monitors */
 #define HMU_MIC		0xd00
 #define HMU_MCR		0xd14
@@ -164,13 +163,25 @@ typedef union {
 	u32 word;
 } xmu_l_int_m_t;
 
-/* L3 regs */
+/* L3 global regs */
 #define L3_BASC		0x300c
 #define L3_IMSK		0x3024
-#define L3_INT		0
-#define L3_ECC		0x04
+#define L3_PMON_UCTL	0x3050
+#define L3_PMON_FLT0	0x3054
+#define L3_PMON_FLT1	0x3058
+#define L3_PMON_CTL0_V6	0x3060
+#define L3_PMON_CTL0_V7	0x305c
+#define L3_PMON_CTL1_V6	0x3064
+#define L3_PMON_CTL1_V7	0x3060
 #define L3_BASR(i)	(0x3100 + ((i) << 2))
 
+/* L3 local regs */
+#define L3_INT			0
+#define L3_ECC			0x04
+#define L3_PMON_CNT0_LO		0x10
+#define L3_PMON_CNT0_HI		0x14
+#define L3_PMON_CNT1_LO		0x18
+#define L3_PMON_CNT1_HI		0x1c
 
 typedef union {
 	struct {
@@ -209,7 +220,6 @@ typedef union {	/* iset V7 */
 
 typedef e2k_l3_imsk_t e2k_l3_int_t;
 
-
 /* OCN regs */
 #define OCN_MIL		0x3804
 #define OCN_L3EN0	0x3810
@@ -217,9 +227,6 @@ typedef e2k_l3_imsk_t e2k_l3_int_t;
 #define OCN_LASC	0x3840
 #define OCN_LASR(i)	(0x3a00 + ((i) << 2))
 #define OCN_PAR(i)	(0 + ((i) << 2))
-
-
-
 
 /* PREPIC monitors */
 #define PREPIC_MCR	0x8070
@@ -440,7 +447,6 @@ typedef union {
 	u32 word;
 } e2k_mc_mon_ctrext_t;
 
-
 /*
  * HMU memory interleaving control register (HMU_MIC)
  */
@@ -506,12 +512,6 @@ typedef union {
 	u32 word;
 } e2k_prepic_mid_t;
 
-
-
-
-
-
-
 /* V7 regs */
 
 typedef union {
@@ -539,7 +539,6 @@ typedef union {
 	u32 word;
 } e2k_e48c_mc_cfg_t;
 
-
 typedef union {
 	struct {
 		u32			: 8;
@@ -554,7 +553,6 @@ typedef union {
 	u32 word;
 } e2k_mc_eccdiag1_t;
 
-
 typedef union {
 	struct {
 		u32 mil_bit0	:  6;
@@ -565,7 +563,6 @@ typedef union {
 	};
 	u32 word;
 } e2k_ocn_mil_t;
-
 
 typedef union {
 	struct {
@@ -603,4 +600,115 @@ typedef union {
 	u32 word;
 } e2k_ha_mcr_t;
 
+typedef union {
+	struct {
+		u32 rst_cnt		: 1;
+		u32 rst_cfg		: 1;
+		u32 frz			: 1;
+		u32			: 29;
+	};
+	u32 word;
+} e2k_l3_pmon_uctl;
 
+typedef union {
+	struct {
+		u32 en			: 1;
+		u32 rst			: 1;
+		u32 sbnk		: 2;
+		u32 rqf			: 1;
+		u32 stf			: 1;
+		u32 edg			: 1;
+		u32 inv			: 1;
+		u32 sel			: 8;
+		u32 msk			: 8;
+		u32 thr			: 8;
+	};
+	u32 word;
+} e2k_l3_pmon_ctl_v6;
+
+typedef union {
+	struct {
+		u32 en			: 1;
+		u32 rst			: 1;
+		u32 sbnk		: 2;
+		u32 rqf			: 1;
+		u32 stf			: 1;
+		u32 edg			: 1;
+		u32 inv			: 1;
+		u32 sel			: 6;
+		u32 msk			: 10;
+		u32 thr			: 8;
+	};
+	u32 word;
+} e2k_l3_pmon_ctl_v7;
+
+typedef union {
+	struct {
+		u32 rqf			: 9;
+		u32			: 3;
+		u32 rqf_mask		: 2;
+		u32			: 2;
+		u32 stf			: 10;
+		u32			: 6;
+	};
+	u32 word;
+} e2k_l3_pmon_flt0_v6;
+
+typedef union {
+	struct {
+		u32 rqf			: 7;
+		u32			: 1;
+		u32 rqf_mask		: 3;
+		u32			: 5;
+		u32 stf			: 10;
+		u32			: 6;
+	};
+	u32 word;
+} e2k_l3_pmon_flt0_v7;
+
+typedef union {
+	struct {
+		u32 en			: 1;
+		u32			: 3;
+		u32 code		: 1;
+		u32 data		: 1;
+		u32 loc			: 1;
+		u32 rem			: 1;
+		u32 opf			: 8;
+		u32 opc0		: 8;
+		u32 opc1		: 8;
+	};
+	u32 word;
+} e2k_l3_pmon_flt1_v6;
+
+typedef union {
+	struct {
+		u32 en			: 1;
+		u32 code		: 1;
+		u32 data		: 1;
+		u32 loc			: 1;
+		u32 rem			: 1;
+		u32 opf			: 10;
+		u32			: 2;
+		u32 opc_injc		: 3;
+		u32 opc_injc_en		: 1;
+		u32 opc_srq		: 3;
+		u32 opc_srq_en		: 1;
+		u32 opc_irq		: 6;
+		u32 opc_irq_en		: 1;
+	};
+	u32 word;
+} e2k_l3_pmon_flt1_v7;
+
+typedef union {
+	u32 val;
+	u32 word;
+} e2k_l3_pmon_cnt_lo;
+
+typedef union {
+	struct {
+		u32 val			: 24;
+		u32			: 8;
+	};
+	u32 word;
+} e2k_l3_pmon_cnt_hi;

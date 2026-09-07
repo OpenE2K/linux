@@ -59,7 +59,6 @@ __init extern void setup_stack_print(void);
 extern void set_protected_mode_flags(void);
 
 extern int debug_signal;
-extern int debug_trap;
 extern int debug_userstack;
 extern int debug_pagefault;
 extern int debug_semi_spec;
@@ -121,16 +120,6 @@ native_do_parse_chain_stack(bool user, struct task_struct *p,
 	return ____parse_chain_stack(user, p, func, arg, delta_user, top, bottom);
 }
 
-extern void	*kernel_symtab;
-extern long	kernel_symtab_size;
-extern void	*kernel_strtab;
-extern long	kernel_strtab_size;
-
-#define	boot_kernel_symtab	boot_get_vo_value(kernel_symtab)
-#define	boot_kernel_symtab_size	boot_get_vo_value(kernel_symtab_size)
-#define	boot_kernel_strtab	boot_get_vo_value(kernel_strtab)
-#define	boot_kernel_strtab_size	boot_get_vo_value(kernel_strtab_size)
-
 #define NATIVE_IS_USER_ADDR(task, addr)		\
 		(((e2k_addr_t)(addr)) < NATIVE_TASK_SIZE)
 
@@ -176,10 +165,10 @@ typedef struct stack_regs {
 	u64 orig_base_psp_stack_k;
 	void *psp_stack_cache;
 	u64 size_psp_stack;
-	bool show_trap_regs;
 	bool show_user_regs;
 	struct printed_trap_regs trap[MAX_USER_TRAPS];
-	struct e2k_global_regs gregs;
+	struct global_gregs g_gregs;
+	struct local_gregs l_gregs;
 	bool gregs_valid;
 #ifdef CONFIG_DATA_STACK_WINDOW
 	bool show_k_data_stack;
@@ -298,10 +287,10 @@ extern inline void print_chain_stack_regs(char *point)
 	cr1 = read_CR1_reg();
 	pr_info("        CR1: ussz 0x%llx br 0x%llx\n", get_cr1_ussz(cr1), (u64) cr1.br);
 	pr_info("             unmie %d nmie %d uie %d lw %d sge %d ie %d pm %d\n",
-	        (int)cr1.unmie, (int)cr1.nmie, (int)cr1.uie,
-	        (int)cr1.lw, (int)cr1.sge, (int)cr1.ie, (int)cr1.pm);
+		(int)cr1.unmie, (int)cr1.nmie, (int)cr1.uie,
+		(int)cr1.lw, (int)cr1.sge, (int)cr1.ie, (int)cr1.pm);
 	pr_info("                cuir 0x%x wbs 0x%x wpsz %d wfx %d ein %d\n",
-	        (int)cr1.cuir, (int)cr1.wbs, (int)cr1.wpsz, (int)cr1.wfx, (int)cr1.ein);
+		(int)cr1.cuir, (int)cr1.wbs, (int)cr1.wpsz, (int)cr1.wfx, (int)cr1.ein);
 
 }
 
@@ -343,72 +332,6 @@ static inline void print_cpu_regs(char *str)
 	pr_info("wd %llx\n", read_WD_reg().word);
 }
 
-extern inline void print_stack_pointers_reg(char *point)
-{
-	register e2k_usd_t usd;
-	register e2k_psp_t psp;
-	register e2k_pcsp_t pcsp;
-	register e2k_pshtp_t pshtp;
-	register e2k_pcshtp_t pcshtp;
-
-	pr_info("Stack pointer registers state");
-	if (point != NULL)
-		pr_info(" at %s :", point);
-	pr_info("\n");
-	pr_info("   USBR: base 0x%llx\n", read_USBR_reg().base);
-	usd = read_USD_reg();
-	if (USD_P(usd)) {
-		pr_info("   PUSD: p_base 0x%x, size 0x%llx, psl 0x%x\n",
-			usd.P_ptr, USD_IND(usd), USD_PSL(usd));
-	} else {
-		pr_info("   USD: base 0x%llx, size 0x%llx\n",
-			USD_PTR(usd), USD_IND(usd));
-	}
-	psp = read_PSP_reg();
-	pshtp = read_PSHTP_reg();
-	pcsp = read_PCSP_reg();
-	pcshtp = read_PCSHTP_reg();
-	pr_info("   PSP:_size 0x%llx ind 0x%llx base 0x%llx\n",
-		(u64)PSP_SIZE(psp), (u64)PSP_IND(psp), (u64)PSP_BASE(psp));
-	pr_info("   PCSHTP : ind = %d\n", pcshtp.ind);
-	if (PSP_IND(psp) + pshtp.ind >= PSP_SIZE(psp)) {
-		pr_info("PROCEDURE STACK OVERFLOW 0x%llx > size 0x%llx\n",
-			(u64)(PSP_IND(psp) + pshtp.ind), (u64)PSP_SIZE(psp));
-	}
-	pr_info("   PCSP: base 08%llx, size 08%llx, ind 08%llx\n",
-		(u64)PCSP_BASE(pcsp), (u64)PCSP_SIZE(pcsp), (u64)PCSP_IND(pcsp));
-	pr_info("   PSHTP : ind 0x%x, fxind 0x%x, tind 0x%x, fx 0x%x\n",
-		pshtp.ind, pshtp.fxind, pshtp.tind, pshtp.fx);
-
-	DebugCRs(point);
-
-}
-
-static inline int print_siginfo(siginfo_t *info, struct pt_regs *regs)
-{
-	pr_info("Signal #%d info structure:\n"
-		"   errno %d code %d pid %d uid %d\n"
-		"   trap #%d address 0x%px\n",
-		info->si_signo, info->si_errno, info->si_code, info->si_pid,
-		info->si_uid, info->si_trapno, info->si_addr);
-
-	print_pt_regs(regs);
-
-	return 1;
-}
-
-
-/*
- * Print Switch Regs
- */
-extern inline void print_sw_regs(char *point, sw_regs_t *sw_regs)
-{
-	pr_info("%s\n", point);
-	pr_info("sbr: %llx\n", sw_regs->top);
-	pr_info("usd: lo 0x%08llx, hi %llx\n", LO(sw_regs->usd), HI(sw_regs->usd));
-	pr_info("psp: lo 0x%08llx, hi %llx\n", LO(sw_regs->psp), HI(sw_regs->psp));
-	pr_info("pcsp: lo 08%llx, hi 08%llx\n", LO(sw_regs->pcsp), HI(sw_regs->pcsp));
-}
 
 extern e2k_addr_t print_user_address_ptes(struct mm_struct *mm, e2k_addr_t address);
 
@@ -428,22 +351,22 @@ static inline int set_hardware_instr_breakpoint(u64 addr,
 
 	switch (cp_num) {
 	case 0:
-		write_DIBAR0_reg_value(dibar);
+		write_DIBAR0_reg(dibar);
 		dibcr.v0 = !!v;
 		dibcr.t0 = 1ULL;
 		break;
 	case 1:
-		write_DIBAR1_reg_value(dibar);
+		write_DIBAR1_reg(dibar);
 		dibcr.v1 = !!v;
 		dibcr.t1 = 1ULL;
 		break;
 	case 2:
-		write_DIBAR2_reg_value(dibar);
+		write_DIBAR2_reg(dibar);
 		dibcr.v2 = !!v;
 		dibcr.t2 = 1ULL;
 		break;
 	case 3:
-		write_DIBAR3_reg_value(dibar);
+		write_DIBAR3_reg(dibar);
 		dibcr.v3 = !!v;
 		dibcr.t3 = 1ULL;
 		break;
@@ -560,16 +483,16 @@ static inline int reset_hardware_data_breakpoint(void *addr)
 			continue;
 		switch (cp_num) {
 		case 0:
-			ddbar = READ_DDBAR0_REG_VALUE();
+			ddbar = READ_DDBAR0_REG();
 			break;
 		case 1:
-			ddbar = READ_DDBAR1_REG_VALUE();
+			ddbar = READ_DDBAR1_REG();
 			break;
 		case 2:
-			ddbar = READ_DDBAR2_REG_VALUE();
+			ddbar = READ_DDBAR2_REG();
 			break;
 		case 3:
-			ddbar = READ_DDBAR3_REG_VALUE();
+			ddbar = READ_DDBAR3_REG();
 			break;
 		default:
 			if (__builtin_constant_p(cp_num))
@@ -680,15 +603,15 @@ print_aau_regs(char *str, e2k_aau_t *context, struct pt_regs *regs,
 		"lsr            = 0x%llx\n"
 		"ilcr           = 0x%llx\n",
 		AW(regs->aasr),
-		AAU_NULL(regs->aasr) ? "NULL" :
-		AAU_READY(regs->aasr) ? "READY" :
-		AAU_ACTIVE(regs->aasr) ? "ACTIVE" :
-		AAU_STOPPED(regs->aasr) ? "STOPPED" :
+		aau_null(regs->aasr) ? "NULL" :
+		aau_ready(regs->aasr) ? "READY" :
+		aau_active(regs->aasr) ? "ACTIVE" :
+		aau_stopped(regs->aasr) ? "STOPPED" :
 						"undefined",
 		regs->aasr.iab, regs->aasr.stb,
 		LO(regs->ctpr2), regs->lsr, regs->ilcr);
 
-	if (AAU_STOPPED(regs->aasr)) {
+	if (aau_stopped(regs->aasr)) {
 		pr_info("aaldv          = 0x%llx\n"
 			"aaldm          = 0x%llx\n",
 			AW(context->aaldv), AW(context->aaldm));

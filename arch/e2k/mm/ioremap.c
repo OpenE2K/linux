@@ -142,6 +142,14 @@ void __iomem *ioremap(resource_size_t address, unsigned long size)
 }
 EXPORT_SYMBOL(ioremap);
 
+
+void __iomem *ioremap_cache(resource_size_t address, unsigned long size)
+{
+	return __ioremap_caller(address, size, GEN_CACHE_MT,
+			__builtin_return_address(0));
+}
+EXPORT_SYMBOL(ioremap_cache);
+
 void __iomem *ioremap_wc(resource_size_t address, unsigned long size)
 {
 	return __ioremap_caller(address, size, EXT_PREFETCH_MT,

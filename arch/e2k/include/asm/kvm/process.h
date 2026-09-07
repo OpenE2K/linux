@@ -20,8 +20,6 @@
 #include <asm/kvm/page.h>
 #include <asm/kvm/switch.h>
 
-extern void kvm_clear_host_thread_info(thread_info_t *ti);
-
 extern int kvm_correct_guest_trap_return_ip(unsigned long return_ip, struct kvm *kvm);
 
 extern long return_pv_vcpu_syscall_fork(u64 sys_rval);
@@ -216,6 +214,7 @@ static inline void kvm_clear_virt_thread_struct(thread_info_t *ti)
 	INIT_HOST_VCPU_STATE_GREG_COPY(__ti, vcpu);			\
 })
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static __always_inline void
 host_exit_to_usermode_loop(struct pt_regs *regs, bool syscall, bool has_signal)
 {
@@ -261,6 +260,7 @@ host_exit_to_usermode_loop(struct pt_regs *regs, bool syscall, bool has_signal)
 		pv_vcpu_switch_to_host_from_intc(current_thread_info());
 	}
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #ifdef	CONFIG_SMP
 #define	SAVE_GUEST_KERNEL_GREGS_COPY_TO(__k_gregs, __g_gregs,		\

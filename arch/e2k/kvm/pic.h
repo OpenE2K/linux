@@ -75,7 +75,9 @@ static inline int kvm_io_pic_set_base(struct kvm *kvm, u64 new_base)
 {
 	if (kvm_is_epic(kvm))
 		return kvm_ioepic_set_base(kvm, new_base);
-	return -ENODEV;
+
+	/* For IO_APIC we assume constant base address */
+	return 0;
 }
 
 static inline void kvm_pic_set_vapic_addr(struct kvm_vcpu *vcpu,

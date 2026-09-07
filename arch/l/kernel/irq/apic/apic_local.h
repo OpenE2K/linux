@@ -1,11 +1,6 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Historical copyright notices:
- *
- * Copyright 2004 James Cleverdon, IBM.
- * (c) 1995 Alan Cox, Building #3 <alan@redhat.com>
- * (c) 1998-99, 2000 Ingo Molnar <mingo@redhat.com>
- * (c) 2002,2003 Andi Kleen, SuSE Labs.
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
  */
 
 #include <linux/jump_label.h>

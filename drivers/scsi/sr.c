@@ -579,6 +579,9 @@ static const struct block_device_operations sr_bdops =
 	.release	= sr_block_release,
 	.ioctl		= sr_block_ioctl,
 	.compat_ioctl	= blkdev_compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl		= sr_block_ioctl,
+#endif
 	.check_events	= sr_block_check_events,
 	.free_disk	= sr_free_disk,
 };

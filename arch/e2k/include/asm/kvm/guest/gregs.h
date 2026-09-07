@@ -55,7 +55,8 @@
 #define	KVM_SAVE_KERNEL_GREGS_AND_SET(__ti)				\
 ({									\
 	if (IS_HV_GM()) {						\
-		NATIVE_SAVE_KERNEL_GREGS_AND_SET(__ti);			\
+		machine.save_kernel_gregs(&(__ti)->k_gregs);		\
+		ONLY_SET_KERNEL_GREGS(__ti);				\
 	}								\
 })
 #define	KVM_RESTORE_KERNEL_GREGS_AND_FREE(__ti)				\

@@ -25,7 +25,7 @@
 #include "cpu.h"
 #include "process.h"
 #include "mmu.h"
-#include "gaccess.h"
+#include "paravirt_sw/gaccess.h"
 
 #undef	DEBUG_KVM_MODE
 #undef	DebugKVM
@@ -124,8 +124,10 @@ bool debug_guest_user_stacks = false;
 
 __visible int __nodedata slt_disable;
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static int kvm_save_updated_guest_local_glob_regs(struct kvm_vcpu *vcpu,
 						  inject_caller_t from);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 void kvm_set_pv_vcpu_kernel_image(struct kvm_vcpu *vcpu)
 {
@@ -163,6 +165,7 @@ void kvm_set_pv_vcpu_kernel_image(struct kvm_vcpu *vcpu)
 	DebugKVM("set OSCUTD & CUTD to init state: base 0x%llx\n", cutd.base);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 void kvm_reset_cpu_state(struct kvm_vcpu *vcpu)
 {
 	{
@@ -186,31 +189,33 @@ void kvm_reset_cpu_state(struct kvm_vcpu *vcpu)
 	/* Set virtual CPUs registers status to initial value */
 	kvm_reset_guest_vcpu_regs_status(vcpu);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 e2k_idr_t kvm_vcpu_get_idr(const struct kvm_vcpu *vcpu)
 {
 	kvm_guest_info_t *guest_info = &vcpu->kvm->arch.guest_info;
 	e2k_idr_t idr = read_IDR_reg();
 
-	if (guest_info->is_stranger ||
-			cpu_has(CPU_FEAT_V7_CPU_REGS) && !vcpu_descr_v7(vcpu)) {
-		/* update IDR in accordance with guest machine CPUs type */
+	if (idr.mdl == guest_info->cpu_mdl) {
+		/* In native case must report actual revision to apply
+		 * needed workarounds and distinguish engineering samples. */
+	} else {
+		/* Update IDR in accordance with guest machine CPUs type */
 		idr.mdl = guest_info->cpu_mdl;
 		idr.rev = guest_info->cpu_rev;
-		idr.core = vcpu->vcpu_id;
-		idr.pn = 0;	/* FIXME: is not implemented NUMA node id */
-		if (unlikely(guest_info->cpu_iset < E2K_ISET_V3)) {
-			/* set IDR.hw_virt to mark guest mode because of */
-			/* CPUs of iset V2 have not CORE_MODE register */
-			idr.hw_virt = vcpu->kvm->arch.is_hv;
-		}
-
-		DebugCUREG("guest IDR was changed: 0x%llx\n", AW(idr));
+	}
+	idr.core = vcpu->vcpu_id;
+	idr.pn = 0;	/* FIXME: is not implemented NUMA node id */
+	if (guest_info->cpu_iset < E2K_ISET_V3) {
+		/* Set IDR.hw_virt to mark guest mode because
+		 * iset V2 CPUs do not have CORE_MODE register */
+		idr.hw_virt = vcpu->kvm->arch.is_hv;
 	}
 
 	return idr;
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 void kvm_reset_cpu_state_idr(struct kvm_vcpu *vcpu)
 {
 	e2k_idr_t idr = kvm_vcpu_get_idr(vcpu);
@@ -296,12 +301,17 @@ void write_hw_ctxt_to_pv_vcpu_registers(struct kvm_vcpu *vcpu,
 
 	kvm_set_guest_vcpu_OSR0(vcpu, hw_ctxt->sh_osr0);
 	DebugSHC("SH_OSR0: value 0x%llx\n", hw_ctxt->sh_osr0);
+#ifdef CONFIG_CPU_HAS_OSR1
+	kvm_set_guest_vcpu_OSR1(vcpu, hw_ctxt->sh_osr1);
+	DebugSHC("SH_OSR1: value 0x%llx\n", hw_ctxt->sh_osr1);
+#endif
 	kvm_set_guest_vcpu_CORE_MODE(vcpu, hw_ctxt->sh_core_mode);
 	DebugSHC("SH_CORE_MODE: value 0x%x, gmi %s, hci %s\n",
 		 AW(hw_ctxt->sh_core_mode),
 		 (hw_ctxt->sh_core_mode.gmi) ? "true" : "false",
 		 (hw_ctxt->sh_core_mode.hci) ? "true" : "false");
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 void kvm_dump_shadow_u_pptb(struct kvm_vcpu *vcpu, const char *title)
 {
@@ -349,7 +359,8 @@ void prepare_stacks_to_startup_vcpu(struct kvm_vcpu *vcpu,
 
 	/* guest is user of host for pv, GLAUNCH set PSR for hv */
 	/* set mode to run guest */
-	psr.pm = vcpu->arch.is_hv;
+	if (!vcpu->arch.is_hv)
+		psr.pm = 0;
 
 	/* Prepare pcs[1] frame, it is frame of VCPU start function */
 	/* Important only only IP (as start of function) */
@@ -416,6 +427,7 @@ void prepare_stacks_to_startup_vcpu(struct kvm_vcpu *vcpu,
 	DebugKVMSTUP("stacks PS.ind 0x%lx PCS.ind 0x%lx\n", *ps_ind, *pcs_ind);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 void kvm_init_pv_vcpu_intc_handling(struct kvm_vcpu *vcpu, pt_regs_t *regs)
 {
 	struct kvm_intc_cpu_context *intc_ctxt = &vcpu->arch.intc_ctxt;
@@ -864,7 +876,6 @@ static int prepare_pv_vcpu_inject_handler_frame(struct kvm_vcpu *vcpu,
 						e2k_mem_crs_t *crs)
 {
 	thread_info_t *ti = current_thread_info();
-	gthread_info_t *gti = pv_vcpu_get_gti(vcpu);
 	unsigned long ussz, flags;
 	e2k_mem_crs_t *k_crs;
 	long g_pcshtp;
@@ -1243,7 +1254,7 @@ static int setup_pv_vcpu_trap(struct kvm_vcpu *vcpu, pt_regs_t *regs)
 		 *      host VCPU state greg is inited by pointer to the VCPU
 		 * interface with guest
 		 */
-		INIT_HOST_GREGS_COPY(current_thread_info(), vcpu);
+		// FIXME INIT_HOST_GREGS_COPY(current_thread_info(), vcpu);
 	} else {
 		/* keep the current kernel & host global registers state */
 		kvm_check_vcpu_state_greg();
@@ -1406,7 +1417,6 @@ out_to_kill:
 
 static int setup_pv_vcpu_syscall(struct kvm_vcpu *vcpu, pt_regs_t *regs)
 {
-	gthread_info_t *gti = pv_vcpu_get_gti(vcpu);
 	inject_caller_t from;
 	int ret;
 
@@ -1466,7 +1476,7 @@ static int setup_pv_vcpu_syscall(struct kvm_vcpu *vcpu, pt_regs_t *regs)
 	 *      host VCPU state greg is inited by pointer to the VCPU
 	 * interface with guest
 	 */
-	INIT_HOST_GREGS_COPY(current_thread_info(), vcpu);
+	// FIXME INIT_HOST_GREGS_COPY(current_thread_info(), vcpu);
 
 	return 0;
 
@@ -1546,7 +1556,7 @@ kvm_get_host_guest_glob_regs(struct kvm_vcpu *vcpu,
 		}
 	}
 
-	copy_k_gregs_to_gregs(&gregs, &current_thread_info()->k_gregs);
+	copy_k_gregs_to_gregs(&gregs, &current->thread.u_gregs);
 
 	if (ret == 0) {
 		DebugGREGS("get %ld global registers of guest\n",
@@ -1567,7 +1577,7 @@ kvm_get_guest_glob_regs(struct kvm_vcpu *vcpu,
 
 	hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t) g_gregs, true, &exception);
 	if (kvm_is_error_hva(hva)) {
-		DebugKVM("failed to find GPA for dst %lx GVA, inject page fault to guest\n",
+		DebugKVM("failed to find GPA for dst %px GVA, inject page fault to guest\n",
 			g_gregs);
 		kvm_vcpu_inject_page_fault(vcpu, (void *)g_gregs, &exception);
 		return -EAGAIN;
@@ -1576,7 +1586,7 @@ kvm_get_guest_glob_regs(struct kvm_vcpu *vcpu,
 	if (bgr != NULL) {
 		bgr_hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t) bgr, true, &exception);
 		if (kvm_is_error_hva(bgr_hva)) {
-			DebugKVM("failed to find GPA for dst %lx GVA, inject page fault to guest\n",
+			DebugKVM("failed to find GPA for dst %px GVA, inject page fault to guest\n",
 				bgr);
 			kvm_vcpu_inject_page_fault(vcpu, (void *)bgr, &exception);
 			return -EAGAIN;
@@ -1706,7 +1716,7 @@ static int kvm_get_updated_guest_local_glob_regs(struct kvm_vcpu *vcpu,
 
 	/* other locals should be on real hardware registers */
 	preempt_disable();	/* to save on one CPU */
-	machine.save_local_gregs(k_l_gregs, true);
+	machine.save_local_gregs(k_l_gregs);
 	preempt_enable();
 
 	/* update all guest local gregs which may be as targets of page faults */
@@ -1741,7 +1751,7 @@ static int kvm_save_updated_guest_local_glob_regs(struct kvm_vcpu *vcpu,
 
 	/* restore other locals on real hardware registers */
 	preempt_disable();	/* to save on one CPU */
-	machine.restore_local_gregs(&k_l_gregs, true);
+	// FIXME machine.restore_local_gregs(&k_l_gregs, true);
 	preempt_enable();
 
 	E2K_KVM_BUG_ON(is_actual_pv_vcpu_l_gregs(vcpu));
@@ -1756,7 +1766,7 @@ kvm_get_guest_local_glob_regs(struct kvm_vcpu *vcpu,
 			      unsigned long *u_l_gregs[2],
 			      bool is_signal)
 {
-	thread_info_t *ti = current_thread_info();
+//	thread_info_t *ti = current_thread_info();
 	struct signal_stack_context __user *context = NULL;
 	local_gregs_t k_l_gregs;
 	unsigned long **l_gregs = u_l_gregs;
@@ -1766,7 +1776,7 @@ kvm_get_guest_local_glob_regs(struct kvm_vcpu *vcpu,
 
 	hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t) l_gregs, true, &exception);
 	if (kvm_is_error_hva(hva)) {
-		DebugKVM("failed to find GPA for dst %lx GVA, inject page fault to guest\n",
+		DebugKVM("failed to find GPA for dst %px GVA, inject page fault to guest\n",
 			l_gregs);
 		kvm_vcpu_inject_page_fault(vcpu, (void *)l_gregs, &exception);
 		return -EAGAIN;
@@ -1788,11 +1798,11 @@ kvm_get_guest_local_glob_regs(struct kvm_vcpu *vcpu,
 		/* only "kernel" user local global registers can be at context */
 		/* other locals should be on real hardware registers */
 		E2K_KVM_BUG_ON(is_signal);
-		copy_k_gregs_to_l_gregs(&k_l_gregs, &ti->k_gregs);
+		// FIXME copy_k_gregs_to_l_gregs(&k_l_gregs, &current->thread.u_gregs);
 
 		preempt_disable();	/* to save on one CPU */
 		k_l_gregs.bgr = native_read_BGR_reg();
-		machine.save_local_gregs(&k_l_gregs, true);
+		machine.save_local_gregs(&k_l_gregs);
 		preempt_enable();
 	}
 
@@ -1806,7 +1816,7 @@ kvm_get_guest_local_glob_regs(struct kvm_vcpu *vcpu,
 int kvm_get_all_guest_glob_regs(struct kvm_vcpu *vcpu,
 				unsigned long *g_gregs[2])
 {
-	thread_info_t *ti = current_thread_info();
+//	thread_info_t *ti = current_thread_info();
 	unsigned long **gregs = g_gregs;
 	hva_t hva;
 	int ret;
@@ -1814,7 +1824,7 @@ int kvm_get_all_guest_glob_regs(struct kvm_vcpu *vcpu,
 
 	hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t) gregs, true, &exception);
 	if (kvm_is_error_hva(hva)) {
-		DebugKVM("failed to find GPA for dst %lx GVA, inject page fault to guest\n",
+		DebugKVM("failed to find GPA for dst %px GVA, inject page fault to guest\n",
 			g_gregs);
 		kvm_vcpu_inject_page_fault(vcpu, (void *)g_gregs, &exception);
 		return -EAGAIN;
@@ -1825,7 +1835,7 @@ int kvm_get_all_guest_glob_regs(struct kvm_vcpu *vcpu,
 					   NULL);
 	if (ret)
 		return ret;
-	ret = copy_kernel_gregs_to_guest_gregs(gregs, &ti->k_gregs);
+	// FIXME ret = copy_kernel_gregs_to_guest_gregs(gregs, &ti->k_gregs);
 	return ret;
 }
 
@@ -1842,7 +1852,7 @@ kvm_set_guest_glob_regs(struct kvm_vcpu *vcpu,
 
 	hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t) g_gregs, true, &exception);
 	if (kvm_is_error_hva(hva)) {
-		DebugKVM("failed to find GPA for dst %lx GVA, inject page fault to guest\n",
+		DebugKVM("failed to find GPA for dst %px GVA, inject page fault to guest\n",
 			g_gregs);
 		kvm_vcpu_inject_page_fault(vcpu, (void *)g_gregs, &exception);
 		return -EAGAIN;
@@ -1855,7 +1865,7 @@ kvm_set_guest_glob_regs(struct kvm_vcpu *vcpu,
 
 	bgr_hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t) bgr, true, &exception);
 	if (kvm_is_error_hva(bgr_hva)) {
-		DebugKVM("failed to find GPA for dst %lx GVA, inject page fault to guest\n",
+		DebugKVM("failed to find GPA for dst %px GVA, inject page fault to guest\n",
 			bgr);
 		kvm_vcpu_inject_page_fault(vcpu, (void *)bgr, &exception);
 		return -EAGAIN;
@@ -1865,7 +1875,7 @@ kvm_set_guest_glob_regs(struct kvm_vcpu *vcpu,
 		DebugKVM("could not copy BGR registers from user\n");
 		ret = -EFAULT;
 	}
-	get_k_gregs_from_gregs(&current_thread_info()->k_gregs, &gregs);
+	// FIXME get_k_gregs_from_gregs(&current_thread_info()->k_gregs, &gregs);
 
 	preempt_disable();	/* to restore on one CPU */
 	if (ret == 0) {
@@ -1921,7 +1931,7 @@ int kvm_copy_guest_all_glob_regs(struct kvm_vcpu *vcpu,
 
 	hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t) g_gregs, true, &exception);
 	if (kvm_is_error_hva(hva)) {
-		pr_err("%s(): failed to find GPA for dst %lx GVA, inject page fault to guest\n",
+		pr_err("%s(): failed to find GPA for dst %px GVA, inject page fault to guest\n",
 			__func__, g_gregs);
 		kvm_vcpu_inject_page_fault(vcpu, (void *)g_gregs, &exception);
 		return -EAGAIN;
@@ -1929,8 +1939,7 @@ int kvm_copy_guest_all_glob_regs(struct kvm_vcpu *vcpu,
 
 	g_gregs = (void *)hva;
 	if (copy_from_user_with_tags(h_gregs->g, g_gregs, sizeof(h_gregs->g))) {
-		pr_err("%s(); could not copy global registers from user\n",
-		       __func__);
+		pr_err("%s(); could not copy global registers from user\n", __func__);
 		return -EFAULT;
 	}
 
@@ -1942,7 +1951,7 @@ kvm_set_guest_local_glob_regs(struct kvm_vcpu *vcpu,
 			      unsigned long *u_l_gregs[2],
 			      bool is_signal)
 {
-	thread_info_t *ti = current_thread_info();
+//	thread_info_t *ti = current_thread_info();
 	struct signal_stack_context __user *context = NULL;
 	local_gregs_t k_l_gregs;
 	unsigned long **l_gregs = u_l_gregs;
@@ -1952,7 +1961,7 @@ kvm_set_guest_local_glob_regs(struct kvm_vcpu *vcpu,
 
 	hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t) l_gregs, true, &exception);
 	if (kvm_is_error_hva(hva)) {
-		DebugKVM("failed to find GPA for dst %lx GVA, inject page fault to guest\n",
+		DebugKVM("failed to find GPA for dst %px GVA, inject page fault to guest\n",
 			l_gregs);
 		kvm_vcpu_inject_page_fault(vcpu, (void *)l_gregs, &exception);
 		return -EAGAIN;
@@ -1992,12 +2001,12 @@ kvm_set_guest_local_glob_regs(struct kvm_vcpu *vcpu,
 			return ret;
 	} else if (context == NULL) {
 		E2K_KVM_BUG_ON(is_signal);
-		get_k_gregs_from_l_regs(&ti->k_gregs, &k_l_gregs);
+		// FIXME get_k_gregs_from_l_regs(&ti->k_gregs, &k_l_gregs);
 	}
 
 	preempt_disable();	/* to restore on one CPU */
 	k_l_gregs.bgr = native_read_BGR_reg();
-	machine.restore_local_gregs(&k_l_gregs, is_signal);
+	// FIXME machine.restore_local_gregs(&k_l_gregs, is_signal);
 	preempt_enable();
 
 	trace_pv_restore_l_gregs(vcpu, FROM_PV_VCPU_SIGNAL_RETURN, &k_l_gregs);
@@ -2303,7 +2312,7 @@ static int kvm_patch_guest_chain_stack(struct kvm_vcpu *vcpu,
 
 	hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t) pcs, true, &exception);
 	if (kvm_is_error_hva(hva)) {
-		DebugKVM("failed to find GPA for dst %lx GVA, inject page fault to guest\n", pcs);
+		DebugKVM("failed to find GPA for dst %px GVA, inject page fault to guest\n", pcs);
 		kvm_vcpu_inject_page_fault(vcpu, (void *)pcs, &exception);
 		ret = -EAGAIN;
 		goto out_error;
@@ -2397,13 +2406,16 @@ int kvm_patch_guest_data_and_chain_stacks(struct kvm_vcpu *vcpu,
 		ret = kvm_patch_guest_chain_stack(vcpu, u_pcs_patch, pcs_frames);
 	return ret;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
-void kvm_switch_debug_regs(struct kvm_sw_cpu_context *sw_ctxt, int is_active)
+__section(".entry.text")
+notrace __interrupt void kvm_switch_debug_regs(struct kvm_sw_cpu_context *sw_ctxt,
+		bool guest_enter)
 {
-	u64 b_dimar0, b_dimar1, b_dimar2, b_dimar3, b_ddmar0, b_ddmar1, b_ddmar2 = 0,
-	    b_ddmar3 = 0, b_dibar0, b_dibar1, b_dibar2, b_dibar3, b_ddbar0, b_ddbar1,
-	    b_ddbar2 = 0, b_ddbar3 = 0, a_dimar0, a_dimar1, a_dimar2, a_dimar3, a_ddmar0,
-	    a_ddmar1, a_ddmar2 = 0, a_ddmar3 = 0, a_dibar0, a_dibar1, a_dibar2, a_dibar3,
+	u64 b_dimar0, b_dimar1, b_dimar2, b_dimar3, b_ddmar0, b_ddmar1, b_ddmar2,
+	    b_ddmar3, b_dibar0, b_dibar1, b_dibar2, b_dibar3, b_ddbar0, b_ddbar1,
+	    b_ddbar2, b_ddbar3, a_dimar0, a_dimar1, a_dimar2, a_dimar3, a_ddmar0,
+	    a_ddmar1, a_ddmar2, a_ddmar3, a_dibar0, a_dibar1, a_dibar2, a_dibar3,
 	    a_ddbar0, a_ddbar1, a_ddbar2, a_ddbar3;
 	e2k_dimcr_t b_dimcr, b_dimcr1, a_dimcr, a_dimcr1;
 	e2k_ddmcr_t b_ddmcr, b_ddmcr1, a_ddmcr, a_ddmcr1;
@@ -2412,6 +2424,8 @@ void kvm_switch_debug_regs(struct kvm_sw_cpu_context *sw_ctxt, int is_active)
 	e2k_ddbcr_t b_ddbcr, a_ddbcr;
 	e2k_ddbsr_t b_ddbsr, a_ddbsr;
 	e2k_dimtp_t b_dimtp, a_dimtp;
+	bool has_dimcr1 = cpu_has(CPU_FEAT_ISET_V7) && !cpu_has(CPU_HWBUG_DIMCR1);
+	bool has_ddmcr1 = cpu_has(CPU_FEAT_ISET_V7);
 
 	b_dibcr = sw_ctxt->dibcr;
 	b_ddbcr = sw_ctxt->ddbcr;
@@ -2433,26 +2447,24 @@ void kvm_switch_debug_regs(struct kvm_sw_cpu_context *sw_ctxt, int is_active)
 	b_ddmar1 = sw_ctxt->ddmar[1];
 	b_dimtp = sw_ctxt->dimtp;
 
-	if (cpu_has(CPU_FEAT_ISET_V7)) {
+	if (has_ddmcr1) {
 		b_ddmcr1 = sw_ctxt->ddmcr1;
 		b_ddmar2 = sw_ctxt->ddmar[2];
 		b_ddmar3 = sw_ctxt->ddmar[3];
 
-		if (!cpu_has(CPU_HWBUG_DIMCR1)) {
-			b_dimcr1 = sw_ctxt->dimcr1;
-			b_dimar2 = sw_ctxt->dimar[2];
-			b_dimar3 = sw_ctxt->dimar[3];
-		}
-
 		a_ddmcr1 = NATIVE_READ_DDMCR1_REG();
-		a_ddmar2 = NATIVE_READ_DDMAR2_REG_VALUE();
-		a_ddmar3 = NATIVE_READ_DDMAR3_REG_VALUE();
+		a_ddmar2 = NATIVE_READ_DDMAR2_REG();
+		a_ddmar3 = NATIVE_READ_DDMAR3_REG();
+	}
 
-		if (!cpu_has(CPU_HWBUG_DIMCR1)) {
-			a_dimcr1 = native_read_DIMCR1_reg();
-			a_dimar2 = native_read_DIMAR2_reg_value();
-			a_dimar3 = native_read_DIMAR3_reg_value();
-		}
+	if (has_dimcr1) {
+		b_dimcr1 = sw_ctxt->dimcr1;
+		b_dimar2 = sw_ctxt->dimar[2];
+		b_dimar3 = sw_ctxt->dimar[3];
+
+		a_dimcr1 = native_read_DIMCR1_reg();
+		a_dimar2 = native_read_DIMAR2_reg();
+		a_dimar3 = native_read_DIMAR3_reg();
 	}
 
 	a_dibcr = native_read_DIBCR_reg();
@@ -2461,53 +2473,59 @@ void kvm_switch_debug_regs(struct kvm_sw_cpu_context *sw_ctxt, int is_active)
 	a_ddbsr = NATIVE_READ_DDBSR_REG();
 	a_dimcr = native_read_DIMCR_reg();
 	a_ddmcr = NATIVE_READ_DDMCR_REG();
-	a_dibar0 = native_read_DIBAR0_reg_value();
-	a_dibar1 = native_read_DIBAR1_reg_value();
-	a_dibar2 = native_read_DIBAR2_reg_value();
-	a_dibar3 = native_read_DIBAR3_reg_value();
+	a_dibar0 = native_read_DIBAR0_reg();
+	a_dibar1 = native_read_DIBAR1_reg();
+	a_dibar2 = native_read_DIBAR2_reg();
+	a_dibar3 = native_read_DIBAR3_reg();
 	a_ddbar0 = NATIVE_READ_DDBAR0_REG_VALUE();
 	a_ddbar1 = NATIVE_READ_DDBAR1_REG_VALUE();
 	a_ddbar2 = NATIVE_READ_DDBAR2_REG_VALUE();
 	a_ddbar3 = NATIVE_READ_DDBAR3_REG_VALUE();
-	a_ddmar0 = NATIVE_READ_DDMAR0_REG_VALUE();
-	a_ddmar1 = NATIVE_READ_DDMAR1_REG_VALUE();
-	a_dimar0 = native_read_DIMAR0_reg_value();
-	a_dimar1 = native_read_DIMAR1_reg_value();
-	a_dimtp = native_read_DIMTP_reg();
+	a_ddmar0 = NATIVE_READ_DDMAR0_REG();
+	a_ddmar1 = NATIVE_READ_DDMAR1_REG();
+	a_dimar0 = native_read_DIMAR0_reg();
+	a_dimar1 = native_read_DIMAR1_reg();
 
-	if (is_active) {
+	if (guest_enter) {
+		a_dimtp = native_read_DIMTP_reg();
+
 		/* These two must be written first to disable monitoring */
 		native_write_DIBCR_reg(b_dibcr);
 		NATIVE_WRITE_DDBCR_REG(b_ddbcr);
+	} else {
+		a_dimtp = native_read_guest_DIMTP_reg();
 	}
-	native_write_DIBAR0_reg_value(b_dibar0);
-	native_write_DIBAR1_reg_value(b_dibar1);
-	native_write_DIBAR2_reg_value(b_dibar2);
-	native_write_DIBAR3_reg_value(b_dibar3);
+	native_write_DIBAR0_reg(b_dibar0);
+	native_write_DIBAR1_reg(b_dibar1);
+	native_write_DIBAR2_reg(b_dibar2);
+	native_write_DIBAR3_reg(b_dibar3);
 	NATIVE_WRITE_DDBAR0_REG_VALUE(b_ddbar0);
 	NATIVE_WRITE_DDBAR1_REG_VALUE(b_ddbar1);
 	NATIVE_WRITE_DDBAR2_REG_VALUE(b_ddbar2);
 	NATIVE_WRITE_DDBAR3_REG_VALUE(b_ddbar3);
 	NATIVE_WRITE_DDMAR0_REG_VALUE(b_ddmar0);
 	NATIVE_WRITE_DDMAR1_REG_VALUE(b_ddmar1);
-	native_write_DIMAR0_reg_value(b_dimar0);
-	native_write_DIMAR1_reg_value(b_dimar1);
+	native_write_DIMAR0_reg(b_dimar0);
+	native_write_DIMAR1_reg(b_dimar1);
 	native_write_DIBSR_reg(b_dibsr);
 	NATIVE_WRITE_DDBSR_REG(b_ddbsr);
 	native_write_DIMCR_reg(b_dimcr);
 	NATIVE_WRITE_DDMCR_REG(b_ddmcr);
-	if (cpu_has(CPU_FEAT_ISET_V7)) {
+	if (has_ddmcr1) {
 		NATIVE_WRITE_DDMAR2_REG_VALUE(b_ddmar2);
 		NATIVE_WRITE_DDMAR3_REG_VALUE(b_ddmar3);
 		NATIVE_WRITE_DDMCR1_REG(b_ddmcr1);
-		if (!cpu_has(CPU_HWBUG_DIMCR1)) {
-			native_write_DIMAR2_reg_value(b_dimar2);
-			native_write_DIMAR3_reg_value(b_dimar3);
-			native_write_DIMCR1_reg(b_dimcr1);
-		}
 	}
-	native_write_DIMTP_reg(b_dimtp);
-	if (!is_active) {
+	if (has_dimcr1) {
+		native_write_DIMAR2_reg(b_dimar2);
+		native_write_DIMAR3_reg(b_dimar3);
+		native_write_DIMCR1_reg(b_dimcr1);
+	}
+	if (guest_enter) {
+		native_write_guest_DIMTP_reg(b_dimtp);
+	} else {
+		native_write_DIMTP_reg(b_dimtp);
+
 		/* These two must be written last to enable monitoring */
 		native_write_DIBCR_reg(b_dibcr);
 		NATIVE_WRITE_DDBCR_REG(b_ddbcr);
@@ -2532,14 +2550,14 @@ void kvm_switch_debug_regs(struct kvm_sw_cpu_context *sw_ctxt, int is_active)
 	sw_ctxt->dimar[0] = a_dimar0;
 	sw_ctxt->dimar[1] = a_dimar1;
 	sw_ctxt->dimtp = a_dimtp;
-	if (cpu_has(CPU_FEAT_ISET_V7)) {
+	if (has_ddmcr1) {
 		sw_ctxt->ddmcr1 = a_ddmcr1;
 		sw_ctxt->ddmar[2] = a_ddmar2;
 		sw_ctxt->ddmar[3] = a_ddmar3;
-		if (!cpu_has(CPU_HWBUG_DIMCR1)) {
-			sw_ctxt->dimcr1 = a_dimcr1;
-			sw_ctxt->dimar[2] = a_dimar2;
-			sw_ctxt->dimar[3] = a_dimar3;
-		}
+	}
+	if (has_dimcr1) {
+		sw_ctxt->dimcr1 = a_dimcr1;
+		sw_ctxt->dimar[2] = a_dimar2;
+		sw_ctxt->dimar[3] = a_dimar3;
 	}
 }

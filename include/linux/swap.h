@@ -730,8 +730,8 @@ static inline bool mem_cgroup_swap_full(struct folio *folio)
 #endif
 #ifdef CONFIG_MCST_MEMORY_SANITIZE
 extern struct page *swap_sanit_page;
-extern u64 test_sntz_sect;
 #define SANITIZE_VALUE	(0xfefefefe)
+void pageout4sanit(struct page *page);
 #endif
 
 #endif /* __KERNEL__*/

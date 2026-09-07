@@ -38,7 +38,7 @@
  * mem_wait_vcpumask_set/reset() waits for interrupt or set/reset vcpu bit in vcpus mask.
  * Note that there can be spurious wakeups as only whole cache lines can be watched.
  */
-void mem_wait_vcpumask_set_reset(int vcpuid, struct cpumask *vcpumask, bool set)
+static void mem_wait_vcpumask_set_reset(int vcpuid, struct cpumask *vcpumask, bool set)
 {
 	unsigned long *addr = cpumask_bits(vcpumask);
 	unsigned long *vcpu_p = (addr) + BIT_WORD(vcpuid);

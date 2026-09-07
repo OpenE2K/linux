@@ -1812,6 +1812,7 @@ void PVRDebugRemoveDIEntries(void)
 	if (gpsDebugLevelDIEntry != NULL)
 	{
 		DIDestroyEntry(gpsDebugLevelDIEntry);
+		gpsDebugLevelDIEntry = NULL;
 	}
 #endif
 
@@ -1819,12 +1820,14 @@ void PVRDebugRemoveDIEntries(void)
 	if (gpsFWTraceDIEntry != NULL)
 	{
 		DIDestroyEntry(gpsFWTraceDIEntry);
+		gpsFWTraceDIEntry = NULL;
 	}
 
 #if defined(SUPPORT_POWER_VALIDATION_VIA_DEBUGFS)
 	if (gpsPowMonDIEntry != NULL)
 	{
 		DIDestroyEntry(gpsPowMonDIEntry);
+		gpsPowMonDIEntry = NULL;
 	}
 #endif
 
@@ -1832,6 +1835,7 @@ void PVRDebugRemoveDIEntries(void)
 	if (gpsFirmwareGcovDIEntry != NULL)
 	{
 		DIDestroyEntry(gpsFirmwareGcovDIEntry);
+		gpsFirmwareGcovDIEntry = NULL;
 	}
 #endif
 
@@ -1839,6 +1843,7 @@ void PVRDebugRemoveDIEntries(void)
 	if (gpsPowerDataDIEntry != NULL)
 	{
 		DIDestroyEntry(gpsPowerDataDIEntry);
+		gpsPowerDataDIEntry = NULL;
 	}
 #endif
 
@@ -1846,6 +1851,7 @@ void PVRDebugRemoveDIEntries(void)
 	if (gpsRGXRegsDIEntry != NULL)
 	{
 		DIDestroyEntry(gpsRGXRegsDIEntry);
+		gpsRGXRegsDIEntry = NULL;
 	}
 #endif
 #endif /* defined(SUPPORT_RGX) */
@@ -1853,15 +1859,18 @@ void PVRDebugRemoveDIEntries(void)
 	if (gpsDumpDebugDIEntry != NULL)
 	{
 		DIDestroyEntry(gpsDumpDebugDIEntry);
+		gpsDumpDebugDIEntry = NULL;
 	}
 
 	if (gpsStatusDIEntry != NULL)
 	{
 		DIDestroyEntry(gpsStatusDIEntry);
+		gpsStatusDIEntry = NULL;
 	}
 
 	if (gpsVersionDIEntry != NULL)
 	{
 		DIDestroyEntry(gpsVersionDIEntry);
+		gpsVersionDIEntry = NULL;
 	}
 }

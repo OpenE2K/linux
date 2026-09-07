@@ -2543,6 +2543,7 @@ SYSCALL_DEFINE1(swapoff, const char __user *, specialfile)
 	kvfree(frontswap_map);
 #ifdef CONFIG_MCST_MEMORY_SANITIZE
 	kfree(swap_sanit_page);
+	swap_sanit_page = NULL;
 #endif
 	/* Destroy swap account information */
 	swap_cgroup_swapoff(p->type);
@@ -3086,6 +3087,7 @@ SYSCALL_DEFINE2(swapon, const char __user *, specialfile, int, swap_flags)
 	if (mem_san) {
 		swap_sanit_page = alloc_page(GFP_KERNEL);
 		memset(page_address(swap_sanit_page), SANITIZE_VALUE, PAGE_SIZE);
+		pr_info("swapon MCST_MEMORY_SANITIZE by SANITIZE_VALUE=0x%x\n", SANITIZE_VALUE);
 	}
 #endif
 

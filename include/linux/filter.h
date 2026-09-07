@@ -541,7 +541,12 @@ struct compat_sock_fprog {
 	u16		len;
 	compat_uptr_t	filter;	/* struct sock_filter * */
 };
-
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+struct ptr128_sock_fprog {     /* Required for SO_ATTACH_FILTER. */
+	unsigned short	len;    /* Number of filter blocks */
+	e2k_ap_t	filter; /* (struct sock_filter __user *( */
+};
+#endif
 struct sock_fprog_kern {
 	u16			len;
 	struct sock_filter	*filter;

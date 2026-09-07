@@ -538,7 +538,15 @@ static int i2c_v7_probe(struct pci_dev *pdev,
 	i2c->adap.owner = THIS_MODULE;
 	i2c->adap.class = I2C_CLASS_DDC;
 	i2c_set_adapdata(&i2c->adap, i2c);
-	snprintf(i2c->adap.name, sizeof(i2c->adap.name), "Elbrus i2c_v7 bus");
+
+	int ioh = dev_to_node(&pdev->dev);
+	if (ioh < 0)
+		ioh = 0;
+	int chan = PCI_FUNC(pdev->devfn);
+
+	snprintf(i2c->adap.name, sizeof(i2c->adap.name),
+			"i2c i2c_v7 (ioh %d chan %d)", ioh, chan);
+
 	i2c->adap.dev.parent	= dev;
 	i2c->adap.dev.of_node	= dev->of_node;
 	i2c->adap.nr		= i2c_v7_data.bus_nr;

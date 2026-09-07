@@ -412,8 +412,8 @@ asmlinkage long sys_inotify_rm_watch(int fd, __s32 wd);
 asmlinkage long sys_ioctl(unsigned int fd, unsigned int cmd,
 				unsigned long arg);
 #if defined CONFIG_E2K && defined CONFIG_PROTECTED_MODE
-asmlinkage long sys_protected_ioctl(unsigned int fd, unsigned long cmd,
-				unsigned long arg);
+asmlinkage long sys_protected_ioctl(unsigned long fd, unsigned long cmd, unsigned long arg,
+				    long arg4, long arg5, long arg6, struct pt_regs *regs);
 #endif
 
 /* fs/ioprio.c */

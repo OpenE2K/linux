@@ -115,7 +115,7 @@ static void dimtp_perf_aux_output_end(struct perf_output_handle *handle)
 	u64 offset, size;
 
 	dimtp = native_read_DIMTP_reg();
-	offset = dimtp.ind;
+	offset = DIMTP_IND(dimtp);
 	size = offset - PERF_IDX2OFF(handle->head, buf);
 
 	if (buf->snapshot)
@@ -129,7 +129,6 @@ static int dimtp_event_init(struct perf_event *event)
 {
 	struct perf_event_attr *attr = &event->attr;
 	dimtp_config_attr_t config = { .word = event->attr.config };
-	struct dimtp_pmu *dimtp_pmu = to_dimtp_pmu(event->pmu);
 	union core_event_config hw_config;
 
 	if (attr->type != event->pmu->type)
@@ -344,9 +343,9 @@ static void dimtp_start(struct perf_event *event, int flags)
 
 	if (flags & PERF_EF_RELOAD) {
 		u64 left = local64_read(&hwc->period_left);
-		write_DIMAR0_reg_value(-left);
+		write_DIMAR0_reg(-left);
 
-		write_DIMAR1_reg_value(-hwc->sample_period);
+		write_DIMAR1_reg(-hwc->sample_period);
 	}
 
 	dimtp = new_dimtp((unsigned long)buf->base, limit, PERF_IDX2OFF(handle->head, buf));
@@ -401,7 +400,7 @@ static void dimtp_stop(struct perf_event *event, int flags)
 			}
 		}
 
-		left = read_DIMAR0_reg_value();
+		left = read_DIMAR0_reg();
 		left = (left) ? -left : 1;
 		local64_set(&hwc->period_left, left);
 		hwc->state |= PERF_HES_UPTODATE;
@@ -440,7 +439,7 @@ static void dimtp_del(struct perf_event *event, int flags)
 {
 	dimtp_stop(event, PERF_EF_UPDATE);
 
-	BUG_ON(__this_cpu_read(perf_monitors_used) & (_BITUL(DIM0) | _BITUL(DIM1)) !=
+	BUG_ON((__this_cpu_read(perf_monitors_used) & (_BITUL(DIM0) | _BITUL(DIM1))) !=
 		(_BITUL(DIM0) | _BITUL(DIM1)));
 	__this_cpu_write(cpu_events[0], NULL);
 	__this_cpu_and(perf_monitors_used, ~(_BITUL(DIM0) | _BITUL(DIM1)));

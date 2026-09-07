@@ -368,7 +368,7 @@ static void l_set_dma_mode(ide_hwif_t *hwif, ide_drive_t *drive)
 	}
 	if (GET_L_IDE_MODE(ide_timing, channel, slave) != timing) {
 #ifdef CONFIG_E90
-                SET_L_IDE_MODE(ide_timing, 0xee, channel, slave);
+		SET_L_IDE_MODE(ide_timing, 0xee, channel, slave);
 #else
 		SET_L_IDE_MODE(ide_timing, timing, channel, slave);
 #endif

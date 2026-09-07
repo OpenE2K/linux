@@ -44,8 +44,15 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #ifndef __TLSERVER_H_
 #define __TLSERVER_H_
 
-#include <stddef.h>
+#if defined(CONFIG_MCST)
+#include <linux/version.h>
+#endif
 
+#if defined(CONFIG_MCST)  && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
+#include <linux/stddef.h>
+#else
+#include <stddef.h>
+#endif
 #include "img_defs.h"
 #include "pvr_debug.h"
 #include "connection_server.h"

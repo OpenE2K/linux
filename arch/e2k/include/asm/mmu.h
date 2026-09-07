@@ -114,6 +114,7 @@ typedef struct {
 		for_each_node_mask((node), (mm)->context.pgds_nodemask)
 # define mm_node_pgd(mm, node) ((MMU_IS_SEPARATE_PT() && (mm) != &init_mm) ? \
 			(void) (node), (mm)->pgd : (mm)->context.node_pgds[node])
+# define kernel_duplicated_nodes_num() nodes_weight(init_mm.context.pgds_nodemask)
 #else
 # define for_each_node_mm_pgdmask(node, mm) for_each_node(node)
 # define mm_node_pgd(mm, node) ((void) (node), (mm)->pgd)
@@ -123,6 +124,11 @@ typedef struct {
 	atomic_t	cur_cui;	/* first free cui */
 	atomic_t	tstart;		/* first free type for TSD */
 	int		tcount;
+
+	/*
+	 * Address of user area with trampolines for signals and coroutines
+	 */
+	unsigned long trampolines;
 
 	/*
 	 * Bit array for saving the information about
@@ -161,6 +167,9 @@ typedef struct {
 	 */
 	unsigned int		pm_sc_check4tags_max_size;
 	unsigned int		pm_sc_unsafe_uint64_to_ptr_mode; /* options to the syscall */
+#if IS_ENABLED(CONFIG_SOFT_PM)
+	unsigned int		pm_soft_options_mask;
+#endif /* CONFIG_SOFT_PM */
 #endif /* CONFIG_PROTECTED_MODE */
 
 	/* List of cached user hardware stacks */
@@ -240,10 +249,14 @@ unsigned long mremap_to(unsigned long addr, unsigned long old_len,
 extern struct vm_area_struct *vma_to_resize(unsigned long addr,
 	unsigned long old_len, unsigned long new_len, unsigned long flags);
 
-#ifdef CONFIG_HALF_SPEC_LOADS_INJECTION
-extern void debug_inject_half_spec_loads(bool check);
+#ifdef CONFIG_SEMI_SPEC_LOADS_INJECTION
+extern void debug_inject_semi_spec_loads(bool check);
 #else
-static inline void debug_inject_half_spec_loads(bool check) { }
+static inline void debug_inject_semi_spec_loads(bool check) { }
+#endif
+
+#ifdef CONFIG_CLW_ENABLE
+DECLARE_PER_CPU(bool, clw_enabled);
 #endif
 
 #endif /* _E2K_MMU_H_ */

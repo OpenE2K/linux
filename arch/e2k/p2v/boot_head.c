@@ -104,14 +104,6 @@ __visible ttable_entry12(int n, bootblock_struct_t *bootblock)
 	boot_startup(bsp, bootblock);
 }
 
-/*
- * Native/guest VM indicator
- */
-static bool boot_is_guest_hv_vm(struct machdep *mach)
-{
-	return !!boot_native_read_CORE_MODE_reg().gmi;
-}
-
 static void boot_setup_machine_cpu_features(struct machdep *machine)
 {
 	int cpu = machine->native_id & MACHINE_ID_CPU_TYPE_MASK;
@@ -137,9 +129,12 @@ static void boot_setup_machine_cpu_features(struct machdep *machine)
 	start = (cpuhas_initcall_t *) __cpuhas_initcalls;
 	end = (cpuhas_initcall_t *) __cpuhas_initcalls_end;
 	fn = boot_vp_to_pp(start);
-	for (fnv = start; fnv < end; fnv++, fn++)
+	for (fnv = start; fnv < end; fnv++, fn++) {
 		boot_func_to_pp(*fn) (cpu, revision, iset_ver, guest_cpu,
 				      is_hardware_guest, boot_cpu_features);
+	}
+
+	BUILD_BUG_ON_MSG(NR_CPU_FEATURES > 128, "%g23 and %g24 are not enough to hold all cpu features, please expand into %g25 too");
 }
 
 static void __init_recv boot_setup_iset_features(struct machdep *machine)
@@ -149,22 +144,26 @@ static void __init_recv boot_setup_iset_features(struct machdep *machine)
 	boot_setup_machine_cpu_features(machine);
 
 	if (machine->native_iset_ver < E2K_ISET_V5) {
-		machine->save_kernel_gregs = &save_kernel_gregs_v3;
-		machine->save_gregs = &save_gregs_v3;
+		machine->save_global_gregs = &save_global_gregs_v3;
+		machine->restore_global_gregs = &restore_global_gregs_v3;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 		machine->save_local_gregs = &save_local_gregs_v3;
-		machine->save_gregs_dirty_bgr = &save_gregs_dirty_bgr_v3;
-		machine->save_gregs_on_mask = &save_gregs_on_mask_v3;
-		machine->restore_gregs = &restore_gregs_v3;
+#endif
 		machine->restore_local_gregs = &restore_local_gregs_v3;
+		machine->save_scratch_gregs = &save_scratch_gregs_v3;
+		machine->restore_scratch_gregs = &restore_scratch_gregs_v3;
+		machine->save_gregs_on_mask = &save_gregs_on_mask_v3;
 		machine->restore_gregs_on_mask = &restore_gregs_on_mask_v3;
 	} else {
-		machine->save_kernel_gregs = &save_kernel_gregs_v5;
-		machine->save_gregs = &save_gregs_v5;
+		machine->save_global_gregs = &save_global_gregs_v5;
+		machine->restore_global_gregs = &restore_global_gregs_v5;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 		machine->save_local_gregs = &save_local_gregs_v5;
-		machine->save_gregs_dirty_bgr = &save_gregs_dirty_bgr_v5;
-		machine->save_gregs_on_mask = &save_gregs_on_mask_v5;
-		machine->restore_gregs = &restore_gregs_v5;
+#endif
 		machine->restore_local_gregs = &restore_local_gregs_v5;
+		machine->save_scratch_gregs = &save_scratch_gregs_v5;
+		machine->restore_scratch_gregs = &restore_scratch_gregs_v5;
+		machine->save_gregs_on_mask = &save_gregs_on_mask_v5;
 		machine->restore_gregs_on_mask = &restore_gregs_on_mask_v5;
 	}
 
@@ -191,13 +190,6 @@ static void __init_recv boot_setup_iset_features(struct machdep *machine)
 	else
 		machine->get_and_invalidate_MLT_context = &get_and_invalidate_MLT_context_v3;
 #endif
-	if (machine->native_iset_ver < E2K_ISET_V6) {
-		machine->boot_rrd = &boot_rrd_v3;
-		machine->boot_rwd = &boot_rwd_v3;
-	} else {
-		machine->boot_rrd = &boot_rrd_v6;
-		machine->boot_rwd = &boot_rwd_v6;
-	}
 
 	if (machine->native_iset_ver == E2K_ISET_V6) {
 		machine->save_kvm_context = &save_kvm_context_v6;
@@ -232,6 +224,8 @@ static void convert_cpu_regs_to_v7(void)
 	e2k_gd_t	gd;
 	e2k_cud_t	cud;
 	e2k_mem_crs_t	*crsp;
+	e2k_dimtp_t	dimtp;
+	e2k_sbr_t sbr;
 
 	e2k_core_mode_t cm = native_read_CORE_MODE_reg();
 	if (cm.descr_v7) {
@@ -248,10 +242,12 @@ static void convert_cpu_regs_to_v7(void)
 	/* We sure CUD and OSCUD & GD and OSGD are the same */
 	gd   = native_read_GD_reg();
 	cud  = native_read_CUD_reg();
+	dimtp = native_read_DIMTP_reg();
 
 	psp  = new_psp(psp.Base, psp.Size, psp.Ind);
 	pcsp = new_pcsp(pcsp.Base, pcsp.Size, pcsp.Ind);
 	usd  = new_usd(usd.Ptr - usd.Ind, round_up((u64) usd.Ind, 32), usd.Ind);
+	sbr  = (e2k_sbr_t) { .base = USD_BASE(usd) + USD_SIZE(usd) };
 	gd   = new_gd(gd.Base, _edata_bss - _sdata_bss);
 	cud  = new_cud(cud.Base, _end - _start, 1, cud_m64);
 
@@ -276,7 +272,6 @@ static void convert_cpu_regs_to_v7(void)
 	e2k_cr1_t cr1 = read_CR1_reg();
 	write_CR1_reg(set_cr1_ussz(cr1, prev_ussz - get_cr1_ussz(cr1)));
 
-
 	/* Must be before all other regs write */
 	cm.descr_v7 = 1;
 	cm.getsp_v7 = 1;
@@ -285,12 +280,12 @@ static void convert_cpu_regs_to_v7(void)
 	}
 	native_write_CORE_MODE_reg(cm);
 
-	native_write_hw_stacks(psp, pcsp);
-	native_write_USD_reg(usd);
+	native_write_stacks(psp, pcsp, usd, sbr);
 	native_write_GD_reg(gd);
 	native_write_CUD_reg(cud);
 	native_write_OSGD_reg(gd);
 	native_write_OSCUD_reg(cud);
+	native_write_DIMTP_reg(dimtp);
 }
 
 void __init_recv
@@ -481,10 +476,7 @@ static void __init boot_setup(bool bsp, bootblock_struct_t *bootblock)
 	 */
 	if (BOOT_IS_BSP(bsp)) {
 		boot_bootblock_phys = bootblock;
-		boot_bootinfo_phys_base = (e2k_addr_t) boot_bootblock_phys;
-
-		boot_printk("Boot block physical address: 0x%lx\n",
-			    boot_bootblock_phys);
+		boot_printk("Boot block physical address: 0x%lx\n", bootblock);
 
 		boot_loader_type_banner(boot_info);
 		if (DEBUG_BOOT_INFO_MODE) {
@@ -573,7 +565,7 @@ void __init boot_init_sequel(bool bsp, int cpuid, int cpus_to_sync)
 			dump_printk("Disable secondary INTEL caches\n");
 		if (disable_IP)
 			dump_printk("Disable IB prefetch\n");
-		DebugB("MMU CR 0x%llx\n", AW(READ_MMU_CR()));
+		DebugB("MMU CR 0x%llx\n", AW(get_MMU_CR()));
 #ifdef	CONFIG_SMP
 	}
 #endif /* CONFIG_SMP */
@@ -646,7 +638,7 @@ void __ref boot_startup(bool bsp, bootblock_struct_t *bootblock)
 	boot_info_t *boot_info = NULL;
 	u16 signature;
 #ifdef	CONFIG_RECOVERY
-	int recovery = bootblock->kernel_flags & RECOVERY_BB_FLAG;
+	int recovery = bootblock->boot_flags & RECOVERY_BB_FLAG;
 #else /* ! CONFIG_RECOVERY  */
 #define		recovery	0
 #endif /* CONFIG_RECOVERY */
@@ -658,30 +650,23 @@ void __ref boot_startup(bool bsp, bootblock_struct_t *bootblock)
 	if (bsp)
 		EARLY_BOOT_TRACEPOINT("kernel boot-time init started");
 
+	/*
+	 * Be careful with initialization order here.
+	 *
+	 * 1) boot_setup_machine_id() sets the defaults for current
+	 * processor (including iset, mmu_separate_pt, etc).
+	 *
+	 * 2) Command line parameters could specify non-default values,
+	 * so boot_parse_param() is called next.
+	 *
+	 * 3) Now that we know what CPU we are executing on, we can call
+	 * boot_setup_iset_features() to initialize cpu_has() subsystem.
+	 */
 	if (!recovery && bsp) {
-		/*
-		 * Be careful with initialization order here.
-		 *
-		 * 1) boot_setup_machine_id() sets the defaults for current processor
-		 * (including iset, mmu_separate_pt, etc).
-		 *
-		 * 2) Command line parameters could specify non-default values, so
-		 * boot_parse_param() is called next.
-		 *
-		 * 3) Now that we know what CPU we are executing on, we can call
-		 * boot_setup_iset_features() to initialize cpu_has() subsystem.
-		 */
-
 		boot_setup_machine_id(bootblock);
 		boot_parse_param(bootblock);
 		boot_setup_iset_features(&boot_machine);
-
-		/* set indicator of guest hardware virtualized VM */
-		/* can be called only after 'boot_rrd' setup */
-		boot_machine.gmi = boot_is_guest_hv_vm(&boot_machine);
-
-		boot_common_setup_arch_mmu(&boot_machine,
-					   boot_pgtable_struct_p);
+		boot_common_setup_arch_mmu(&boot_machine, boot_pgtable_struct_p);
 	}
 
 	/*
@@ -695,6 +680,13 @@ void __ref boot_startup(bool bsp, bootblock_struct_t *bootblock)
 	smp_mb();	/* all cpus should see number od cpus to sync */
 	boot_sync_all_processors(); /* For what? See above */
 #endif /* CONFIG_SMP */
+
+	/* Propagate features to all CPUs %g */
+	if (!bsp) {
+		cpuhas_greg0 = boot_cpu_features[0];
+		cpuhas_greg1 = boot_cpu_features[1];
+	}
+
 	if (boot_cpu_has(CPU_FEAT_V7_CPU_REGS)) {
 		convert_cpu_regs_to_v7();
 	}
@@ -731,8 +723,7 @@ void __ref boot_startup(bool bsp, bootblock_struct_t *bootblock)
 
 #if defined(DEBUG_BOOT_INFO) && DEBUG_BOOT_INFO
 	if (bsp)
-		do_boot_printk("bootblock 0x%x, flags 0x%x\n",
-			       bootblock, bootblock->kernel_flags);
+		do_boot_printk("bootblock 0x%x, flags 0x%x\n", bootblock, bootblock->boot_flags);
 #endif
 
 	/*

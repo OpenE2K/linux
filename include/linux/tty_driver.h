@@ -373,6 +373,10 @@ struct tty_operations {
 		    unsigned int cmd, unsigned long arg);
 	long (*compat_ioctl)(struct tty_struct *tty,
 			     unsigned int cmd, unsigned long arg);
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	int (*ptr128_ioctl)(struct tty_struct *tty,
+			     unsigned int cmd, unsigned long arg);
+#endif
 	void (*set_termios)(struct tty_struct *tty, const struct ktermios *old);
 	void (*throttle)(struct tty_struct * tty);
 	void (*unthrottle)(struct tty_struct * tty);

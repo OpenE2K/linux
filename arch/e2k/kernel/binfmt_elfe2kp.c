@@ -111,11 +111,11 @@ static int protected_elf_code(struct elfhdr *x)
 
 static unsigned long protected_randomize_stack_top(unsigned long stack_top)
 {
-        unsigned int random_variable = 0;
+	unsigned int random_variable = 0;
 
-        if (current->flags & PF_RANDOMIZE)
-                random_variable = get_random_u32() % (8*1024*1024);
-        return PAGE_ALIGN(stack_top - random_variable);
+	if (current->flags & PF_RANDOMIZE)
+		random_variable = get_random_u32() % (8*1024*1024);
+	return PAGE_ALIGN(stack_top - random_variable);
 }
 
 
@@ -141,7 +141,7 @@ create_elf_tables(struct linux_binprm *bprm, struct elfhdr *exec,
 	int			argc = bprm->argc;
 	int			envc = bprm->envc;
 	e2k_ptr_t __user	*sp;
-        unsigned long           argcp;
+	unsigned long           argcp;
 	unsigned long		argvb;
 	unsigned long		envpb;
 	unsigned long		auxb = 0;
@@ -203,9 +203,9 @@ create_elf_tables(struct linux_binprm *bprm, struct elfhdr *exec,
 	sp = STACK_ALLOC_PTRS(sp, argc + 1);
 	argvb = (unsigned long)sp;
 
-        /* allocate space for argc at address, aligned to 16 bytes */
-        sp = STACK_ALLOC_PTRS(sp, 1);
-        argcp = (unsigned long) sp;
+	/* allocate space for argc at address, aligned to 16 bytes */
+	sp = STACK_ALLOC_PTRS(sp, 1);
+	argcp = (unsigned long) sp;
 	
 #ifndef ARGS_AS_ONE_ARRAY	
 	/* allocate space for (1) - (3) descriptors */
@@ -222,9 +222,9 @@ create_elf_tables(struct linux_binprm *bprm, struct elfhdr *exec,
 	/* Populate allocated areas in revers order */
 
 #ifdef ARGS_AS_ONE_ARRAY
-        /* The base descriptor is temporarily saved to the start of the 
-           memory area it describes. After it is copied to %qr0 we may
-           erase it from stack. */
+	/* The base descriptor is temporarily saved to the start of the 
+	   memory area it describes. After it is copied to %qr0 we may
+	   erase it from stack. */
 	if (PUT_USER_AP(sp, bprm->p, args_end - bprm->p, 0L, RW_ENABLE))
 		return -EFAULT;
 	sp++;
@@ -244,7 +244,7 @@ create_elf_tables(struct linux_binprm *bprm, struct elfhdr *exec,
 		return -EFAULT;
 #endif
 
-        /* Save argc. */
+	/* Save argc. */
 	if (clear_user((e2k_ptr_t __user *) argcp, sizeof(e2k_ptr_t)))
 		return -EFAULT;
 
@@ -252,7 +252,7 @@ create_elf_tables(struct linux_binprm *bprm, struct elfhdr *exec,
 		return -EFAULT;
 
 	/* Populate argv  */
-        p = current->mm->arg_end = current->mm->arg_start;
+	p = current->mm->arg_end = current->mm->arg_start;
 	sp = (e2k_ptr_t __user *)argvb;
 	while (argc-- > 0) {
 		size_t len;
@@ -447,11 +447,11 @@ e2p_load_cu_file_by_headers(struct file *loadf,
 	int		i;
 	unsigned long	start_code_addr = 0;
 	unsigned long	start_data_addr = 0;
-	elf_addr_t	ud_start = ~0UL;
+	elf_addr_t	ud_start = (sizeof(elf_addr_t) == 4) ? U32_MAX : U64_MAX;
 	elf_addr_t	ud_end  = 0;
 	elf_addr_t	ud_allocend = 0L;
 	elf_addr_t	ud_mapend  = 0;
-	elf_addr_t	uc_start = ~0UL;
+	elf_addr_t	uc_start = (sizeof(elf_addr_t) == 4) ? U32_MAX : U64_MAX;
 	elf_addr_t	uc_end  = 0L;
 	elf_addr_t	uc_allocend = 0;
 	elf_addr_t	uc_mapend  = 0;
@@ -668,7 +668,7 @@ e2p_load_cu_file_by_headers(struct file *loadf,
 		return retval;
 	}
 
-        /*
+	/*
 	 * Load the module into memory.
 	 */
 	if (uc_allocend) {
@@ -723,7 +723,7 @@ e2p_load_cu_file_by_headers(struct file *loadf,
 		if (prog_p->p_flags & PF_R)
 			prot |= PROT_READ;
 
-                if (prog_p->p_flags & PF_W)
+		if (prog_p->p_flags & PF_W)
 			prot |= PROT_WRITE;
 
 
@@ -959,7 +959,7 @@ e2p_load_cu_file_by_headers(struct file *loadf,
 			}
 		}
 	}
- 	retval = 0;
+	retval = 0;
 
 	/*
 	 * everything is mapped. Do some actions to complete the function.
@@ -1029,7 +1029,7 @@ e2p_load_cu_file_by_headers(struct file *loadf,
 	if (load_offset)
 		*load_offset += start_data_addr;
 
-        return 0;
+	return 0;
 }
 
 static  int
@@ -1226,6 +1226,12 @@ static int load_e2p_load_binary(struct linux_binprm * bprm)
 	}
 
 	set_binfmt(&elf_format);
+
+#ifdef ARCH_HAS_SETUP_ADDITIONAL_PAGES
+	retval = ARCH_SETUP_ADDITIONAL_PAGES(bprm, elf_ex, !!interpf);
+	if (retval < 0)
+		goto out;
+#endif /* ARCH_HAS_SETUP_ADDITIONAL_PAGES */
 
 	/* load data for user */
 	retval = create_elf_tables(bprm, &elf_ex, load_offset,

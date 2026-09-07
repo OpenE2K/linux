@@ -286,8 +286,11 @@ void *nulldisp_gem_prime_vmap(struct drm_gem_object *obj)
 	if (WARN_ON(atomic_read(&nulldisp_obj->pg_refcnt) == 0))
 		return NULL;
 
-
+#ifdef CONFIG_MCST
+	return vmap(nulldisp_obj->pages, nr_pages, VM_MAP, PAGE_KERNEL);
+#else
 	return vmap(nulldisp_obj->pages, nr_pages, 0, PAGE_KERNEL);
+#endif
 }
 
 void nulldisp_gem_prime_vunmap(struct drm_gem_object *obj, void *vaddr)

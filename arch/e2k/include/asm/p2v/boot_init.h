@@ -56,19 +56,9 @@ typedef struct bootmem_areas {		/* list of all areas */
 	mem_area_desc_t	boot_pcs[NR_CPUS];
 	mem_area_desc_t	boot_stack[NR_CPUS];
 #endif /* CONFIG_SMP */
-	mem_area_desc_t	bootinfo;	/* boot-time information from loader */
 #ifdef CONFIG_BLK_DEV_INITRD
 	mem_area_desc_t	initrd;		/* initial disk info */
 #endif /* CONFIG_BLK_DEV_INITRD */
-
-#ifdef	CONFIG_L_IO_APIC
-	mem_area_desc_t	mpf;		/* MP floating table */
-	mem_area_desc_t	mpc;		/* MP configuration table */
-#endif /* CONFIG_L_IO_APIC */
-	mem_area_desc_t	symtab;		/* kernel symbols table */
-	mem_area_desc_t	strtab;		/* kernel strings table */
-	mem_area_desc_t	hw;		/* PA 640K - 1M are reserved for PC's */
-					/* integrated hardware: BIOS, VGA,... */
 } bootmem_areas_t;
 
 extern unsigned long			totalram_real_pages;
@@ -169,14 +159,6 @@ extern bootmem_areas_t		kernel_bootmem;
 		kernel_bootmem.boot_stack[cpuid].size
 #endif /* CONFIG_SMP */
 
-#define boot_bootinfo_phys_base	boot_get_vo_value(kernel_bootmem.bootinfo.phys)
-#define boot_bootinfo_virt_base	boot_get_vo_value(kernel_bootmem.bootinfo.virt)
-#define boot_bootinfo_size	boot_get_vo_value(kernel_bootmem.bootinfo.size)
-
-#define init_bootinfo_phys_base	kernel_bootmem.bootinfo.phys
-#define init_bootinfo_virt_base	kernel_bootmem.bootinfo.virt
-#define init_bootinfo_size	kernel_bootmem.bootinfo.size
-
 #ifdef CONFIG_BLK_DEV_INITRD
 #define boot_initrd_phys_base	boot_get_vo_value(kernel_bootmem.initrd.phys)
 #define boot_initrd_virt_base	boot_get_vo_value(kernel_bootmem.initrd.virt)
@@ -186,46 +168,6 @@ extern bootmem_areas_t		kernel_bootmem;
 #define init_initrd_virt_base	kernel_bootmem.initrd.virt
 #define init_initrd_size	kernel_bootmem.initrd.size
 #endif /* CONFIG_BLK_DEV_INITRD */
-
-#ifdef	CONFIG_L_IO_APIC
-#define boot_mpf_phys_base	boot_get_vo_value(kernel_bootmem.mpf.phys)
-#define boot_mpf_virt_base	boot_get_vo_value(kernel_bootmem.mpf.virt)
-#define boot_mpf_size		boot_get_vo_value(kernel_bootmem.mpf.size)
-
-#define init_mpf_phys_base	kernel_bootmem.mpf.phys
-#define init_mpf_virt_base	kernel_bootmem.mpf.virt
-#define init_mpf_size		kernel_bootmem.mpf.size
-
-#define boot_mpc_phys_base	boot_get_vo_value(kernel_bootmem.mpc.phys)
-#define boot_mpc_virt_base	boot_get_vo_value(kernel_bootmem.mpc.virt)
-#define boot_mpc_size		boot_get_vo_value(kernel_bootmem.mpc.size)
-
-#define init_mpc_phys_base	kernel_bootmem.mpc.phys
-#define init_mpc_virt_base	kernel_bootmem.mpc.virt
-#define init_mpc_size		kernel_bootmem.mpc.size
-#endif /* CONFIG_L_IO_APIC */
-
-#define boot_symtab_phys_base	boot_get_vo_value(kernel_bootmem.symtab.phys)
-#define boot_symtab_virt_base	boot_get_vo_value(kernel_bootmem.symtab.virt)
-#define boot_symtab_size	boot_get_vo_value(kernel_bootmem.symtab.size)
-
-#define init_symtab_phys_base	kernel_bootmem.symtab.phys
-#define init_symtab_virt_base	kernel_bootmem.symtab.virt
-#define init_symtab_size	kernel_bootmem.symtab.size
-
-#define boot_strtab_phys_base	boot_get_vo_value(kernel_bootmem.strtab.phys)
-#define boot_strtab_virt_base	boot_get_vo_value(kernel_bootmem.strtab.virt)
-#define boot_strtab_size	boot_get_vo_value(kernel_bootmem.strtab.size)
-
-#define init_strtab_phys_base	kernel_bootmem.strtab.phys
-#define init_strtab_virt_base	kernel_bootmem.strtab.virt
-#define init_strtab_size	kernel_bootmem.strtab.size
-
-#define boot_hw_phys_base	boot_get_vo_value(kernel_bootmem.hw.phys)
-#define boot_hw_size		boot_get_vo_value(kernel_bootmem.hw.size)
-
-#define init_hw_phys_base	kernel_bootmem.hw.phys
-#define init_hw_size		kernel_bootmem.hw.size
 
 extern unsigned long disable_caches;
 extern bool disable_secondary_caches;
@@ -237,11 +179,11 @@ extern bool disable_IP;
 
 extern void boot_mem_init(bool bsp, int cpuid, boot_info_t *boot_info);
 extern void boot_init_sequel(bool bsp, int cpuid, int cpus_to_sync);
-extern int boot_native_loader_probe_memory(node_phys_mem_t *nodes_phys_mem,
+extern void boot_native_loader_probe_memory(node_phys_mem_t *nodes_phys_mem,
 					   boot_info_t *bootblock);
-extern int boot_bios_probe_memory(node_phys_mem_t *nodes_phys_mem,
+extern void boot_bios_probe_memory(node_phys_mem_t *nodes_phys_mem,
 				     boot_info_t *bootblock);
-extern e2k_size_t boot_native_get_bootblock_size(boot_info_t *bblock);
+extern e2k_size_t boot_native_get_bootblock_size(const boot_info_t *bblock);
 extern void boot_native_reserve_all_bootmem(bool bsp, boot_info_t *boot_info);
 extern void boot_reserve_stacks(boot_info_t *boot_info);
 extern void boot_reserve_kernel_image(bool bsp, boot_info_t *boot_info);
@@ -263,16 +205,15 @@ extern void __init_recv switch_to_phys_end(void);
 #else /* native kernel */
 /* it is native kernel without any virtualization */
 /* or it is native host kernel with virtualization support */
-static inline int __init
-boot_loader_probe_memory(node_phys_mem_t *nodes_phys_mem,
+static inline void __init boot_loader_probe_memory(node_phys_mem_t *nodes_phys_mem,
 			 boot_info_t *bootblock)
 {
-	return boot_native_loader_probe_memory(nodes_phys_mem, bootblock);
+	boot_native_loader_probe_memory(nodes_phys_mem, bootblock);
 }
 
-static inline e2k_size_t __init boot_get_bootblock_size(boot_info_t *bootblock)
+static inline size_t __init boot_get_bootblock_size(const struct boot_info *boot_info)
 {
-	return boot_native_get_bootblock_size(bootblock);
+	return boot_native_get_bootblock_size(boot_info);
 }
 
 static inline void __init

@@ -56,17 +56,38 @@ do {						\
 #define prepare_arch_switch(next) prepare_arch_switch(next)
 static inline void prepare_arch_switch(struct task_struct *next)
 {
-	prefetchr_nospec_range(&next->thread.sw_regs, offsetof(struct sw_regs, cs_lo));
+	prefetchr_nospec_range(&next->thread.sw_regs, offsetof(struct sw_regs, cs.lo));
 
-	/* Protect ourselves from bad code calling schedule() or some
+	/*
+	 * Protect ourselves from bad code calling schedule() or some
 	 * other blocking function from inside uaccess section. Such calls
 	 * _must_ _not_ be made because they will lead to risking getting
-	 * a page fault from a half-speculative load inside of a critical
-	 * section in kernel scheduler. This is e2k-specific limitation. */
+	 * a page fault from a semi-speculative load inside of a critical
+	 * section in kernel scheduler.
+	 *
+	 * On CPU_FEAT_SVSC processors kernel executes without clearing
+	 * user's mmu context so this limitation does not apply.
+	 */
 	WARN_ON_ONCE(!IS_ENABLED(CONFIG_KVM_GUEST_KERNEL) &&
-		     READ_MMU_PID() != E2K_KERNEL_CONTEXT);
+		     !cpu_has(CPU_FEAT_SVSC) && READ_MMU_PID() != E2K_KERNEL_CONTEXT);
 
 	SAVE_CURR_TIME_SWITCH_TO;
+
+	/*
+	 * Follow the example of RISC-V and forbid IO crossing of scheduling
+	 * boundary.  The bad case is when task is preempted after writeX()
+	 * and migrated to another CPU fast enough so that the CPU it was
+	 * preempted on has not called any spin_unlock()'s yet.
+	 *
+	 * Also this waits for all exc_macp to arrive before task switch.
+	 */
+#if CONFIG_CPU_ISET_MIN >= 6
+	/* Cannot use this on V5 because of load-after-store dependencies -
+	 * compiled kernel won't honour them */
+	E2K_WAIT(_st_c | _ld_c | _sas | _sal | _las | _lal | _macp);
+#else
+	E2K_WAIT(_st_c | _ld_c | _macp);
+#endif
 }
 
 #define e2k_finish_switch(prev) \

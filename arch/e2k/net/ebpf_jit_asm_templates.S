@@ -36,22 +36,24 @@
  *      r8       |        --         | Maps into eBPF register R8
  *      r9       |        --         | Maps into eBPF register R9
  *      r10      |       R10         | Maps into eBPF register R10
- *      r11      |      r_TMP1       | Internal JIT usage
- *      r12      |      r_TMP2       | Internal JIT usage
- *      r13      | r_TAIL_CALL_COUNT | Tail call counter
- *      r14      |      db_R1        | 1st call argument
- *      r15      |      db_R2        | 2nd call argument
- *      r16      |      db_R3        | 3rd call argument
- *      r17      |      db_R4        | 4th call argument
- *      r18      |      db_R5        | 5th call argument
- *      r19      |       --          | 6th call argument
- *      r20      |       --          | 7th call argument
- *      r21      |       --          | 8th call argument
+ *      r11      |        --         | Maps into eBPF auxiliary register BPF_REG_AX
+ *      r12      |      r_TMP1       | Internal JIT usage
+ *      r13      |      r_TMP2       | Internal JIT usage
+ *      r14      |        --         | Unused, needed for register window alignment
+ *      r15      | r_TAIL_CALL_COUNT | Tail call counter
+ *      r16      |      db_R1        | 1st call argument
+ *      r17      |      db_R2        | 2nd call argument
+ *      r18      |      db_R3        | 3rd call argument
+ *      r19      |      db_R4        | 4th call argument
+ *      r20      |      db_R5        | 5th call argument
+ *      r21      |        --         | 6th call argument
+ *      r22      |        --         | 7th call argument
+ *      r23      |        --         | 8th call argument
  * ---------------------------------------------------------------
  *
  * Note: last 8 registers are allocated only if JIT ensures that
  *       eBPF program has a function call. Otherwise, register window
- *       contains of 14 registers (r0-r13).
+ *       contains of 16 registers (r0-r15).
  */
 
 #define R0 dr0
@@ -62,11 +64,11 @@
 #define R5 dr5
 #define R10 dr10
 
-#define r_TMP1 r11
-#define dr_TMP1 dr11
-#define r_TMP2 r12
-#define dr_TMP2 dr12
-#define r_TAIL_CALL_CNT r13
+#define r_TMP1 r12
+#define dr_TMP1 dr12
+#define r_TMP2 r13
+#define dr_TMP2 dr13
+#define r_TAIL_CALL_CNT r15
 
 /*
  * First argument of bpf-to-bpf calls is placed to db[0]. From the callee

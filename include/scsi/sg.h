@@ -102,23 +102,23 @@ struct ptr128_sg_io_hdr {
 	unsigned char mx_sb_len;    /* [i] max length to write to sbp */
 	unsigned short iovec_count; /* [i] 0 implies no scatter gather */
 	unsigned int dxfer_len;     /* [i] byte count of data transfer */
-	e2k_ptr_t __user dxferp;    /* [i], [*io] points to data transfer memory */
-				    /*	      or scatter gather list */
-	e2k_ptr_t __user cmdp;      /* [i], [*i] points to command to perform */
-	e2k_ptr_t __user sbp;	    /* [i], [*o] points to sense_buffer memory */
-	unsigned int timeout;       /* [i] MAX_UINT->no timeout (unit: millisec) */
-	unsigned int flags;         /* [i] 0 -> default, see SG_FLAG... */
-	int pack_id;                /* [i->o] unused internally (normally) */
-	e2k_ptr_t __user usr_ptr;   /* [i->o] unused internally */
-	unsigned char status;       /* [o] scsi status */
+	e2k_ap_t  dxferp;	    /* [i], [*io] points to data transfer memory */
+				    /*	      or scatter gather list (void __user *) */
+	e2k_ap_t  cmdp;		    /* [i], [*i] points to command to perform (void __user *) */
+	e2k_ap_t  sbp;		    /* [i], [*o] points to sense_buffer memory (void __user *) */
+	unsigned int timeout;	    /* [i] MAX_UINT->no timeout (unit: millisec) */
+	unsigned int flags;	    /* [i] 0 -> default, see SG_FLAG... */
+	int pack_id;		    /* [i->o] unused internally (normally) */
+	e2k_ap_t usr_ptr;	    /* [i->o] unused internally (void __user *) */
+	unsigned char status;	    /* [o] scsi status */
 	unsigned char masked_status;/* [o] shifted, masked scsi status */
 	unsigned char msg_status;   /* [o] messaging level data (optional) */
 	unsigned char sb_len_wr;    /* [o] byte count actually written to sbp */
 	unsigned short host_status; /* [o] errors from host adapter */
 	unsigned short driver_status;/* [o] errors from software driver */
-	int resid;                  /* [o] dxfer_len - actual_transferred */
-	unsigned int duration;      /* [o] time taken by cmd (unit: millisec) */
-	unsigned int info;          /* [o] auxiliary information */
+	int resid;		    /* [o] dxfer_len - actual_transferred */
+	unsigned int duration;	    /* [o] time taken by cmd (unit: millisec) */
+	unsigned int info;	    /* [o] auxiliary information */
 };
 
 #endif /* CONFIG_PROTECTED_MODE */

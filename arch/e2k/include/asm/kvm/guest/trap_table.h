@@ -83,23 +83,6 @@ kvm_do_correct_scall_psp_pcsp(struct pt_regs *regs, thread_info_t *thread_info)
 }
 #endif /* COMMON_KERNEL_USER_HW_STACKS */
 
-/*
- * Guest trap handler on hardware stacks bounds can be called only on
- * exceptions flags into TIRs, which be passed to guest by host handler.
- * So nothing addition condition to run handler.
- */
-static inline bool
-kvm_is_proc_stack_bounds(struct thread_info *ti, struct pt_regs *regs)
-{
-	return false;
-}
-
-static inline bool
-kvm_is_chain_stack_bounds(struct thread_info *ti, struct pt_regs *regs)
-{
-	return false;
-}
-
 static inline void kvm_set_sge(void)
 {
 	KVM_WRITE_PSR_REG_VALUE((KVM_READ_PSR_REG_VALUE() | PSR_SGE));
@@ -127,6 +110,9 @@ static inline void kvm_stack_bounds_trap_enable(void)
 	kvm_set_sge();
 }
 
+#ifdef	CONFIG_KVM_GUEST_KERNEL
+/* it is native KVM guest kernel (not paravirtualized) */
+
 static inline int
 kvm_do_aau_page_fault(struct pt_regs *const regs, e2k_addr_t address,
 		      const tc_cond_t condition, const tc_mask_t mask,
@@ -134,9 +120,6 @@ kvm_do_aau_page_fault(struct pt_regs *const regs, e2k_addr_t address,
 {
 	return native_do_aau_page_fault(regs, address, condition, mask, aa_no);
 }
-
-#ifdef	CONFIG_KVM_GUEST_KERNEL
-/* it is native KVM guest kernel (not paravirtualized) */
 
 #define	ttable_entry1		kvm_guest_ttable_entry1
 #define	ttable_entry3		kvm_guest_ttable_entry3
@@ -168,8 +151,6 @@ static inline void exit_handle_syscall(e2k_addr_t sbr, e2k_usd_hi_t usd_hi,
 	kvm_exit_handle_syscall(sbr, usd_hi, usd_lo, upsr, *crs);
 }
 
-#define	handle_guest_traps(regs)	/* none any guests */
-
 static __always_inline void
 init_guest_traps_handling(struct pt_regs *regs, bool user_mode_trap)
 {
@@ -195,18 +176,6 @@ static inline bool is_injected_guest_coredump(struct pt_regs *regs)
 static inline void clear_fork_child_pt_regs(struct pt_regs *childregs)
 {
 	kvm_clear_fork_child_pt_regs(childregs);
-}
-
-static inline bool
-is_proc_stack_bounds(struct thread_info *ti, struct pt_regs *regs)
-{
-	return kvm_is_proc_stack_bounds(ti, regs);
-}
-
-static inline bool
-is_chain_stack_bounds(struct thread_info *ti, struct pt_regs *regs)
-{
-	return kvm_is_chain_stack_bounds(ti, regs);
 }
 
 static inline void stack_bounds_trap_enable(void)

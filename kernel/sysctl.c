@@ -2139,11 +2139,22 @@ static struct ctl_table kern_table[] = {
 #if defined(CONFIG_E2K) && defined(CONFIG_SCLKR_CLOCKSOURCE)
 	{
 		.procname	= "sclkr_src",
-		.data		= &sclkr_src,
-		.maxlen		= SCLKR_SRC_LEN,
+		.data		= &proc_sclkr_cmd,
+		.maxlen		= SCLKR_CMD_LEN,
 		.mode		= 0644,
 		.proc_handler	= proc_sclkr,
 	},
+#endif
+#ifdef CONFIG_MCST
+# if defined(CONFIG_IRQ_FORCED_THREADING) && !defined(CONFIG_PREEMPT_RT)
+	{
+		.procname	= "force_irqthreads",
+		.data		= &force_irqthreads_key,
+		.maxlen		= sizeof(bool),
+		.mode		= 0644,
+		.proc_handler	= proc_do_static_key,
+	},
+# endif
 #endif
 	{ }
 };
@@ -2517,24 +2528,6 @@ static struct ctl_table vm_table[] = {
 		.extra2		= SYSCTL_ONE,
 	},
 #endif
-#ifdef CONFIG_MCST
-	{
-		.procname	= "sched_min_ns_no_migrate",
-		.data		= &sysctl_sched_min_ns_no_migrate,
-		.maxlen		= sizeof(unsigned int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
-	},
-# if defined(CONFIG_IRQ_FORCED_THREADING) && !defined(CONFIG_PREEMPT_RT)
-	{
-		.procname	= "force_irqthreads",
-		.data		= &force_irqthreads_key,
-		.maxlen		= sizeof(bool),
-		.mode		= 0644,
-		.proc_handler	= proc_do_static_key,
-	},
-# endif
-#endif
 	{ }
 };
 
@@ -2572,13 +2565,6 @@ static struct ctl_table debug_table[] = {
 	},
 #endif
 #ifdef CONFIG_E2K
-	{
-		.procname	= "trap_regs",
-		.data		= &debug_trap,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-        },
 	{
 		.procname	= "sigdebug",
 		.data		= NULL,

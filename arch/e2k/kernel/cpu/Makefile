@@ -10,8 +10,9 @@ CFLAGS_REMOVE_iset_v6.o = $(CFLAGS_ALL_CPUS)
 CFLAGS_REMOVE_iset_v7.o = $(CFLAGS_ALL_CPUS)
 AFLAGS_REMOVE_recovery_string_v5.o = $(CFLAGS_ALL_CPUS)
 
-CFLAGS_iset_v3.o := -march=elbrus-v3
-CFLAGS_iset_v5.o := -march=elbrus-v5
+# -fno-global-regs: for saving/restoring %g16-%g31
+CFLAGS_iset_v3.o := -march=elbrus-v3 $(call lcc-option,-fno-global-regs)
+CFLAGS_iset_v5.o := -march=elbrus-v5 $(call lcc-option,-fno-global-regs)
 CFLAGS_iset_v6.o := -march=elbrus-v6
 CFLAGS_iset_v7.o := -march=elbrus-v7
 CFLAGS_iset-kvm.o := -march=elbrus-v6

@@ -26,7 +26,9 @@
 #include <net/compat.h>
 #include <net/sock.h>
 #include <linux/uaccess.h>
-
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#include <net/ptr128.h>
+#endif
 #include <linux/netfilter/x_tables.h>
 #include <linux/netfilter_arp/arp_tables.h>
 #include "../../netfilter/xt_repldata.h"

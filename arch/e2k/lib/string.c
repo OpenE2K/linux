@@ -602,11 +602,11 @@ EXPORT_SYMBOL(__memcpy_toio);
  *
  * All parameters must be 8-bytes aligned.
  */
-void __tagged_memcpy_8(void *dst, const void *src, size_t n)
+void __tagged_memcpy_8(volatile void *dst, const volatile void *src, size_t n)
 {
 	WARN_ONCE(((unsigned long) dst & 0x7) || ((unsigned long) src & 0x7) ||
 			((unsigned long) n & 0x7),
-		"BUG: bad parameters in tagged_memcpy_8: %lx %lx %lx\n",
+		"BUG: bad parameters in tagged_memcpy_8: %px %px %lx\n",
 		dst, src, n);
 
 	/* Both src and dst are 8-bytes aligned. */
@@ -723,11 +723,8 @@ int __memcmp(const void *p1, const void *p2, size_t n)
 		v1 = *(u64 *) p1;
 		v2 = *(u64 *) p2;
 		if (v1 != v2)
-			break;
+			return (__builtin_bswap64(v1) > __builtin_bswap64(v2)) ? 1 : -1;
 	}
-
-	if (v1 != v2)
-		return (__builtin_bswap64(v1) > __builtin_bswap64(v2)) ? 1 : -1;
 
 	tail = n;
 

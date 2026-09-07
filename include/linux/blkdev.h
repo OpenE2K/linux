@@ -1402,6 +1402,9 @@ struct block_device_operations {
 	int (*rw_page)(struct block_device *, sector_t, struct page *, enum req_op);
 	int (*ioctl) (struct block_device *, fmode_t, unsigned, unsigned long);
 	int (*compat_ioctl) (struct block_device *, fmode_t, unsigned, unsigned long);
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	int (*ptr128_ioctl) (struct block_device *, fmode_t, unsigned, unsigned long);
+#endif
 	unsigned int (*check_events) (struct gendisk *disk,
 				      unsigned int clearing);
 	void (*unlock_native_capacity) (struct gendisk *);

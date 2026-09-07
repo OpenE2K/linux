@@ -19,9 +19,6 @@
 #include <asm/trap_def.h>
 #include <asm/unistd.h>
 
-#define set_mb(var, value)  do { var = value;  smp_mb(); } while (0)
-#define set_wmb(var, value) do { var = value; smp_wmb(); } while (0)
-
 #define NATIVE_WRITE_PSR_REG(v)		native_write_PSR_reg(TOS(e2k_psr_t, v))
 #define NATIVE_NV_READ_PSR_REG()	AW(native_read_PSR_reg())
 #define NATIVE_NV_READ_PSR_REG_VALUE()	AW(native_read_PSR_reg())
@@ -36,33 +33,12 @@
 #define NATIVE_WRITE_UPSR_REG(v)	native_write_UPSR_reg(TOS(e2k_upsr_t, v))
 #define NATIVE_WRITE_PSR_IRQ_BARRIER(v)	native_write_irq_barrier_PSR_reg(TOS(e2k_psr_t, v))
 
-#define NATIVE_PSR_SET_LAST_WISH()				\
-do {								\
-	e2k_psr_t __psr = native_read_PSR_reg();		\
-	__psr.lw = 1;						\
-	native_write_PSR_reg(__psr);				\
-} while (0)
-
-#define PSR_SET_LAST_WISH()					\
-do {								\
-	e2k_psr_t __psr = read_PSR_reg();			\
-	__psr.lw = 1;						\
-	write_PSR_reg(__psr);					\
-} while (0)
-
 #define	boot_native_set_sge()					\
 ({								\
 	e2k_psr_t psr = native_read_PSR_reg();			\
 	psr.sge = 1;						\
 	native_read_PSR_reg();					\
 })
-
-static inline bool native_sge_is_set(void)
-{
-	e2k_psr_t psr = native_read_PSR_reg();
-
-	return psr.sge;
-}
 
 #ifdef CONFIG_E2K_PROFILING
 typedef struct {
@@ -162,8 +138,8 @@ extern int enable_collect_interrupt_ticks;
     cpu = boot_smp_processor_id();                              \
     if (system_info[cpu].max_disabled_interrupt.begin_time >0){ \
        store_max_time_in_system_info(                           \
-         system_info[cpu].max_disabled_interrupt.begin_time,    \
-         max_disabled_interrupt);                               \
+	 system_info[cpu].max_disabled_interrupt.begin_time,    \
+	 max_disabled_interrupt);                               \
        system_info[cpu].max_disabled_interrupt.begin_time = 0;  \
     }                                                           \
 })
@@ -188,26 +164,26 @@ extern int enable_collect_interrupt_ticks;
 	}								\
 })
 #define  info_save_stack_reg(tick)                              \
-         store_max_time_in_system_info(tick,max_stack_reg)
+	 store_max_time_in_system_info(tick,max_stack_reg)
 #define  info_restore_stack_reg(tick)                           \
-         store_max_time_in_system_info(tick,max_restore_stack_reg)
+	 store_max_time_in_system_info(tick,max_restore_stack_reg)
 
 #define  info_save_mmu_reg(tick)                                \
-         store_max_time_in_system_info(tick,max_mmu_reg)
+	 store_max_time_in_system_info(tick,max_mmu_reg)
 
 #define  info_restore_mmu_reg(tick)                             \
-         store_max_time_in_system_info(tick,max_restore_mmu_reg)
+	 store_max_time_in_system_info(tick,max_restore_mmu_reg)
 
 #define  info_save_tir_reg(tick)                                \
-         store_max_time_in_system_info(tick,max_tir_reg)
+	 store_max_time_in_system_info(tick,max_tir_reg)
 
 #define  info_restore_all_reg(tick)                             \
-         store_max_time_in_system_info(tick,max_restoring_reg); \
+	 store_max_time_in_system_info(tick,max_restoring_reg); \
 
 #define cpu_idle_time()                                         \
-        store_begin_time_in_system_info(max_cpu_idle)
+	store_begin_time_in_system_info(max_cpu_idle)
 #define calculate_cpu_idle_time()                               \
-        calculate_max_time_in_system_info(max_cpu_idle)
+	calculate_max_time_in_system_info(max_cpu_idle)
 
 #define	store_begin_time_in_system_info(FIELD)				\
 ({	long t; int  cpu;						\
@@ -348,14 +324,14 @@ extern long TIME;
 #define condition_mark_disable_interrupt_ticks(_cond_)          \
 ({                                                              \
      if (enable_collect_interrupt_ticks) {              	\
-         mark_disable_interrupt_ticks();                        \
+	 mark_disable_interrupt_ticks();                        \
      }                                                          \
 })
 
 #define condition_collect_disable_interrupt_ticks(_cond_)       \
 ({                                                              \
      if (enable_collect_interrupt_ticks && _cond_) {            \
-         collect_disable_interrupt_ticks();                     \
+	 collect_disable_interrupt_ticks();                     \
      }                                                          \
 })
 
@@ -453,25 +429,18 @@ extern long TIME;
 		((IS_IRQ_MASK_GLOBAL()) ? E2K_KERNEL_PSR_GLOB_IRQ_DISABLED_ALL : \
 					  E2K_KERNEL_PSR_LOC_IRQ_DISABLED_ALL)
 
-#define E2K_KERNEL_PSR_DIS_LWISH_EN ((e2k_psr_t) { \
-	.pm	= 1,				\
-	.ie	= 0,				\
-	.sge	= 1,				\
-	.lw	= 1,				\
-	.uie	= 0,				\
-	.nmie	= 0,				\
-	.unmie	= 0				\
-})
-
-#define E2K_KERNEL_PSR_LWISH_DIS ((e2k_psr_t) {	\
-	.pm	= 1,				\
-	.ie	= 0,				\
-	.sge	= 1,				\
-	.lw	= 0,				\
-	.uie	= 0,				\
-	.nmie	= 0,				\
-	.unmie	= 0				\
-})
+static __always_inline e2k_psr_t e2k_kernel_psr_disabled(bool lw)
+{
+	return (e2k_psr_t) {
+		.pm	= 1,
+		.ie	= 0,
+		.sge	= 1,
+		.lw	= lw,
+		.uie	= 0,
+		.nmie	= 0,
+		.unmie	= 0
+	};
+}
 
 #define E2K_KERNEL_UPSR_LOC_IRQ_DISABLED ((e2k_upsr_t) {	\
 		.fe	= 1,					\
@@ -530,23 +499,15 @@ extern long TIME;
 		((IS_IRQ_MASK_GLOBAL()) ? E2K_KERNEL_UPSR_GLOB_IRQ_DISABLED_ALL : \
 					  E2K_KERNEL_UPSR_LOC_IRQ_DISABLED_ALL)
 
-#define E2K_KERNEL_INITIAL_UPSR_LOC_IRQ		E2K_KERNEL_UPSR_LOC_IRQ_DISABLED
-#define	E2K_KERNEL_INITIAL_UPSR_LOC_IRQ_WITH_DISABLED_NMI	\
-		E2K_KERNEL_UPSR_LOC_IRQ_DISABLED_ALL
-
-#define E2K_KERNEL_INITIAL_UPSR_GLOB_IRQ	E2K_KERNEL_UPSR_GLOB_IRQ_DISABLED
-#define	E2K_KERNEL_INITIAL_UPSR_GLOB_IRQ_WITH_DISABLED_NMI	\
-		E2K_KERNEL_UPSR_GLOB_IRQ_DISABLED_ALL
-
 #define	E2K_KERNEL_INITIAL_UPSR \
 		((IS_IRQ_MASK_GLOBAL()) ? \
-			E2K_KERNEL_INITIAL_UPSR_GLOB_IRQ : \
-			E2K_KERNEL_INITIAL_UPSR_LOC_IRQ)
+			E2K_KERNEL_UPSR_GLOB_IRQ_DISABLED : \
+			E2K_KERNEL_UPSR_LOC_IRQ_DISABLED)
 
 #define	E2K_KERNEL_INITIAL_UPSR_WITH_DISABLED_NMI \
 		((IS_IRQ_MASK_GLOBAL()) ? \
-			E2K_KERNEL_INITIAL_UPSR_GLOB_IRQ_WITH_DISABLED_NMI : \
-			E2K_KERNEL_INITIAL_UPSR_LOC_IRQ_WITH_DISABLED_NMI)
+			E2K_KERNEL_UPSR_GLOB_IRQ_DISABLED_ALL : \
+			E2K_KERNEL_UPSR_LOC_IRQ_DISABLED_ALL)
 
 #define	E2K_USER_INITIAL_UPSR	((e2k_upsr_t) {		\
 		.fe	= 1,				\
@@ -569,42 +530,13 @@ extern long TIME;
 		.unmie	= 0				\
 })
 
-#define E2K_PSR_SWITCH_TO_USER	((e2k_psr_t) {	\
-	.pm	= 0,				\
-	.ie	= 1,				\
-	.sge	= 1,				\
-	.lw	= 0,				\
-	.uie	= 0,				\
-	.nmie	= 1,				\
-	.unmie	= 0,				\
-})
-
-#define NATIVE_SWITCH_IRQ_TO_UPSR() \
-	native_write_irq_barrier_PSR_reg(E2K_KERNEL_PSR_ENABLED)
-
-#define NATIVE_RETURN_IRQ_TO_PSR() \
-	native_write_irq_barrier_PSR_reg(E2K_KERNEL_PSR_DISABLED)
-
-#define	NATIVE_INIT_KERNEL_UPSR_REG(irq_en, nmirq_dis)	\
-do {							\
-	e2k_upsr_t upsr = E2K_KERNEL_UPSR_DISABLED;	\
-	upsr.ie = irq_en;				\
-	upsr.nmie = !(nmirq_dis);			\
-	native_write_UPSR_reg(upsr);			\
-} while (0)
-
 #define	PREFIX_INIT_KERNEL_UPSR_LOC_IRQ_REG(PV_TYPE, irq_en, nmirq_dis)		\
 {										\
-	e2k_upsr_t upsr = E2K_KERNEL_INITIAL_UPSR_LOC_IRQ;			\
+	e2k_upsr_t upsr = E2K_KERNEL_UPSR_LOC_IRQ_DISABLED;			\
 	upsr.ie = !!(irq_en);							\
 	upsr.nmie = !(nmirq_dis);						\
 	PV_TYPE##_WRITE_UPSR_REG(AW(upsr));					\
 }
-
-#define	BOOT_PREFIX_INIT_KERNEL_UPSR_REG(PV_TYPE, irq_en, nmirq_dis) \
-do { \
-	e2k_upsr_t upsr = E2K_KERNEL_UPSR_DISABLED; \
-} while (0)
 
 #define	PREFIX_SAVE_INIT_KERNEL_UPSR_LOC_IRQ_REG(PV_TYPE, irq_en, nmi_dis, \
 							  to_save_upsr) \
@@ -614,19 +546,19 @@ do { \
 })
 #define	BOOT_PREFIX_INIT_KERNEL_UPSR_LOC_IRQ_REG(PV_TYPE, irq_en, nmirq_dis) \
 {								\
-	e2k_upsr_t upsr = E2K_KERNEL_INITIAL_UPSR_LOC_IRQ;	\
+	e2k_upsr_t upsr = E2K_KERNEL_UPSR_LOC_IRQ_DISABLED;	\
 	upsr.ie = !!(irq_en);					\
 	upsr.nmie = !(nmirq_dis);				\
 	BOOT_##PV_TYPE##_WRITE_UPSR_REG(AW(upsr));		\
 }
 #define	PREFIX_INIT_KERNEL_UPSR_GLOB_IRQ_REG(PV_TYPE) \
 ({ \
-	e2k_upsr_t upsr = E2K_KERNEL_INITIAL_UPSR_GLOB_IRQ; \
+	e2k_upsr_t upsr = E2K_KERNEL_UPSR_GLOB_IRQ_DISABLED; \
 	PV_TYPE##_WRITE_UPSR_REG(upsr); \
 })
 #define	BOOT_PREFIX_INIT_KERNEL_UPSR_GLOB_IRQ_REG(PV_TYPE)	\
 ({								\
-	e2k_upsr_t upsr = E2K_KERNEL_INITIAL_UPSR_GLOB_IRQ;	\
+	e2k_upsr_t upsr = E2K_KERNEL_UPSR_GLOB_IRQ_DISABLED;	\
 	BOOT_##PV_TYPE##_WRITE_UPSR_REG(AW(upsr));		\
 })
 
@@ -646,14 +578,6 @@ do { \
 	BOOT_##PV_TYPE##_WRITE_PSR_REG(AW(psr));		\
 })
 
-#define	BOOT_NATIVE_INIT_KERNEL_UPSR_REG(irq_en, nmirq_dis)	\
-do {								\
-	e2k_upsr_t upsr = E2K_KERNEL_UPSR_DISABLED;		\
-	upsr.ie = !!irq_en;					\
-	upsr.nmie = !nmirq_dis;					\
-	boot_write_UPSR_reg(upsr);				\
-} while (0)
-
 #define	PREFIX_INIT_KERNEL_IRQ_MASK_REG(PV_TYPE, irq_en, nmi_dis) \
 		((IS_IRQ_MASK_GLOBAL()) ? \
 			PREFIX_INIT_KERNEL_PSR_GLOB_IRQ_REG(PV_TYPE, \
@@ -667,15 +591,6 @@ do {								\
 							irq_en, nmi_dis) : \
 			PREFIX_SAVE_INIT_KERNEL_UPSR_LOC_IRQ_REG(PV_TYPE, \
 						irq_en, nmi_dis, to_save_upsr))
-#define	BOOT_PREFIX_INIT_KERNEL_IRQ_MASK_REG(PV_TYPE, irq_en, nmi_dis) \
-		((IS_IRQ_MASK_GLOBAL()) ? \
-			BOOT_PREFIX_INIT_KERNEL_PSR_GLOB_IRQ_REG(PV_TYPE, \
-							irq_en, nmi_dis) : \
-			BOOT_PREFIX_INIT_KERNEL_UPSR_LOC_IRQ_REG(PV_TYPE, \
-							irq_en, nmi_dis))
-
-#define	PREFIX_SET_KERNEL_PSR_GLOB_IRQ_REG(PV_TYPE, irq_en, nmirq_dis) \
-		PREFIX_INIT_KERNEL_PSR_GLOB_IRQ_REG(PV_TYPE, irq_en, nmirq_dis)
 
 #define	PREFIX_SET_KERNEL_PSR_LOC_IRQ_REG(PV_TYPE, irq_en, nmirq_dis, set_cr1_lo) \
 ({ \
@@ -684,13 +599,10 @@ do {								\
 })
 #define	PREFIX_SET_KERNEL_IRQ_MASK_REG(PV_TYPE, irq_en, nmi_dis, set_cr1_lo) \
 		((IS_IRQ_MASK_GLOBAL()) ? \
-			PREFIX_SET_KERNEL_PSR_GLOB_IRQ_REG(PV_TYPE, \
+			PREFIX_INIT_KERNEL_PSR_GLOB_IRQ_REG(PV_TYPE, \
 							irq_en, nmi_dis) : \
 			PREFIX_SET_KERNEL_PSR_LOC_IRQ_REG(PV_TYPE, \
 					irq_en, nmi_dis, set_cr1_lo))
-
-#define	NATIVE_INIT_KERNEL_IRQ_MASK_REG(irq_en, nmirq_dis) \
-		PREFIX_INIT_KERNEL_IRQ_MASK_REG(NATIVE, irq_en, nmirq_dis)
 
 #define	NATIVE_SAVE_INIT_KERNEL_IRQ_MASK_REG(irq_en, nmirq_dis, to_save_upsr) \
 		PREFIX_SAVE_INIT_KERNEL_IRQ_MASK_REG(NATIVE, irq_en, nmirq_dis, \
@@ -699,13 +611,6 @@ do {								\
 #define	NATIVE_SET_KERNEL_IRQ_MASK_REG(irq_en, nmirq_dis, set_cr1_lo) \
 		PREFIX_SET_KERNEL_IRQ_MASK_REG(NATIVE, irq_en, nmirq_dis, \
 							set_cr1_lo)
-
-#define	BOOT_NATIVE_INIT_KERNEL_IRQ_MASK_REG(irq_en, nmirq_dis) \
-		BOOT_PREFIX_INIT_KERNEL_IRQ_MASK_REG(NATIVE, irq_en, nmirq_dis)
-
-#define	NATIVE_INIT_USER_UPSR_REG() \
-		native_write_UPSR_reg(E2K_USER_INITIAL_UPSR)
-#define	INIT_USER_UPSR_REG()	write_UPSR_REG(E2K_USER_INITIAL_UPSR)
 
 #define	PREFIX_SET_KERNEL_UPSR_LOC_IRQ(PV_TYPE) \
 ({ \
@@ -719,15 +624,9 @@ do {								\
 	PV_TYPE##_SWITCH_IRQ_TO_UPSR_MASK_REG(); \
 })
 
-#define PREFIX_SAVE_SET_KERNEL_UPSR_LOC_IRQ_WITH_DISABLED_NMI(PV_TYPE, to_save_upsr) \
-({ \
-	PREFIX_SAVE_INIT_KERNEL_UPSR_LOC_IRQ_REG(PV_TYPE, false, true, to_save_upsr); \
-	PV_TYPE##_SWITCH_IRQ_TO_UPSR_MASK_REG(); \
-})
-
 #define	BOOT_PREFIX_SET_KERNEL_UPSR_LOC_IRQ(PV_TYPE) \
 ({ \
-	BOOT_PREFIX_INIT_KERNEL_UPSR_LOC_IRQ_REG(PV_TYPE, false, false); \
+	BOOT_PREFIX_INIT_KERNEL_UPSR_LOC_IRQ_REG(PV_TYPE, false, true); \
 	BOOT_##PV_TYPE##_SWITCH_IRQ_TO_UPSR_MASK_REG(); \
 })
 
@@ -757,25 +656,10 @@ do {								\
 			PREFIX_SET_KERNEL_PSR_GLOB_IRQ_WITH_DISABLED_NMI(PV_TYPE) : \
 			PREFIX_SET_KERNEL_UPSR_LOC_IRQ_WITH_DISABLED_NMI(PV_TYPE))
 
-#define PREFIX_SAVE_SET_KERNEL_IRQ_WITH_DISABLED_NMI(PV_TYPE, to_save_upsr) \
-({ \
-	(IS_IRQ_MASK_GLOBAL()) ? \
-		PREFIX_SET_KERNEL_PSR_GLOB_IRQ_WITH_DISABLED_NMI(PV_TYPE) : \
-		PREFIX_SAVE_SET_KERNEL_UPSR_LOC_IRQ_WITH_DISABLED_NMI(PV_TYPE, \
-								to_save_upsr); \
-})
-
 #define	BOOT_PREFIX_SET_KERNEL_IRQ_MASK(PV_TYPE) \
 		((IS_IRQ_MASK_GLOBAL()) ? \
 			BOOT_PREFIX_SET_KERNEL_PSR_GLOB_IRQ(PV_TYPE) : \
 			BOOT_PREFIX_SET_KERNEL_UPSR_LOC_IRQ(PV_TYPE))
-
-#define	NATIVE_SET_KERNEL_IRQ_WITH_DISABLED_NMI() \
-		PREFIX_SET_KERNEL_IRQ_WITH_DISABLED_NMI(NATIVE)
-#define	NATIVE_SAVE_SET_KERNEL_IRQ_WITH_DISABLED_NMI(to_save_upsr) \
-		PREFIX_SAVE_SET_KERNEL_IRQ_WITH_DISABLED_NMI(NATIVE, to_save_upsr)
-#define	BOOT_NATIVE_SET_KERNEL_IRQ_MASK() \
-		BOOT_PREFIX_SET_KERNEL_IRQ_MASK(NATIVE)
 
 /*
  * UPSR should be saved and set to kernel initial state (where interrupts
@@ -816,11 +700,6 @@ do {								\
 	PREFIX_DO_SWITCH_TO_KERNEL_UPSR_LOC_IRQ(PV_TYPE, pv_type,	\
 					irq_en, nmirq_dis);		\
 })
-#define	BOOT_PREFIX_SWITCH_TO_KERNEL_UPSR_LOC_IRQ(PV_TYPE, pv_type)	\
-({									\
-	BOOT_PREFIX_INIT_KERNEL_UPSR_LOC_IRQ_REG(PV_TYPE, false, false); \
-	BOOT_##PV_TYPE##_SWITCH_IRQ_TO_UPSR_MASK_REG(false);		\
-})
 
 #define	PREFIX_DO_SWITCH_TO_KERNEL_PSR_GLOB_IRQ(PV_TYPE, pv_type,	\
 						irq_en, nmirq_dis)	\
@@ -835,10 +714,6 @@ do {								\
 	psr_reg = PV_TYPE##_NV_READ_PSR_REG_VALUE();			\
 	PREFIX_DO_SWITCH_TO_KERNEL_PSR_GLOB_IRQ(PV_TYPE, pv_type,	\
 						irq_en, nmirq_dis);	\
-})
-#define	BOOT_PREFIX_SWITCH_TO_KERNEL_PSR_GLOB_IRQ(PV_TYPE, pv_type)	\
-({									\
-	BOOT_PREFIX_INIT_KERNEL_PSR_GLOB_IRQ_REG(PV_TYPE, false, false); \
 })
 
 #define	PREFIX_DO_SWITCH_TO_KERNEL_IRQ_MASK_REG(PV_TYPE, pv_type,	\
@@ -859,13 +734,6 @@ do {								\
 						irq_reg, irq_en, nmirq_dis) : \
 		PREFIX_SWITCH_TO_KERNEL_UPSR_LOC_IRQ(PV_TYPE, pv_type, \
 						irq_reg, irq_en, nmirq_dis); \
-})
-
-#define	BOOT_PREFIX_SWITCH_TO_KERNEL_IRQ_MASK_REG(PV_TYPE, pv_type)	\
-({ \
-	(IS_IRQ_MASK_GLOBAL()) ? \
-		BOOT_PREFIX_SWITCH_TO_KERNEL_PSR_GLOB_IRQ(PV_TYPE, pv_type) : \
-		BOOT_PREFIX_SWITCH_TO_KERNEL_UPSR_LOC_IRQ(PV_TYPE, pv_type); \
 })
 
 /* Native version of macroses (all read/write from/to real registers) */
@@ -897,16 +765,8 @@ do {									\
 #define	NATIVE_RETURN_TO_USER_UPSR(upsr_reg) \
 		PREFIX_RETURN_TO_USER_UPSR(NATIVE, native, upsr_reg, true)
 
-#define	NATIVE_RETURN_LWISH_TO_KERNEL_IRQ_MASK_REG(irq_reg, lwish_en)		\
-do {										\
-	if (lwish_en) {								\
-		native_write_irq_barrier_PSR_reg(E2K_KERNEL_PSR_DIS_LWISH_EN);	\
-	} else {								\
-		native_write_irq_barrier_PSR_reg(E2K_KERNEL_PSR_LWISH_DIS);	\
-	}									\
-	if (!IS_IRQ_MASK_GLOBAL())						\
-		native_write_UPSR_reg(TOS(e2k_upsr_t, irq_reg));		\
-} while (false)
+#define	NATIVE_RETURN_LWISH_TO_KERNEL_IRQ_MASK_REG(lwish_en)			\
+	native_write_irq_barrier_PSR_reg(e2k_kernel_psr_disabled(lwish_en))
 
 #ifdef	CONFIG_ACCESS_CONTROL
 #define	ACCESS_CONTROL_DISABLE_AND_SAVE(upsr_to_save)	\
@@ -964,13 +824,11 @@ static __always_inline clear_rf_t get_clear_rf_fn(u64 num_q)
 #define	SAVE_INIT_KERNEL_IRQ_MASK_REG	NATIVE_SAVE_INIT_KERNEL_IRQ_MASK_REG
 #define	RETURN_TO_KERNEL_IRQ_MASK_REG(upsr_reg) \
 		NATIVE_RETURN_TO_KERNEL_IRQ_MASK_REG(upsr_reg)
-#define	BOOT_SET_KERNEL_IRQ_MASK()	BOOT_NATIVE_SET_KERNEL_IRQ_MASK()
+#define	BOOT_SET_KERNEL_IRQ_MASK()	BOOT_PREFIX_SET_KERNEL_IRQ_MASK(NATIVE)
 #define	SWITCH_TO_KERNEL_IRQ_MASK_REG(upsr_reg, irq_en, nmirq_dis) \
 		NATIVE_SWITCH_TO_KERNEL_IRQ_MASK_REG(upsr_reg, irq_en, nmirq_dis)
 #define	SET_KERNEL_IRQ_WITH_DISABLED_NMI() \
-		NATIVE_SET_KERNEL_IRQ_WITH_DISABLED_NMI()
-#define	SAVE_SET_KERNEL_IRQ_WITH_DISABLED_NMI(to_save_upsr) \
-		NATIVE_SAVE_SET_KERNEL_IRQ_WITH_DISABLED_NMI(to_save_upsr)
+		PREFIX_SET_KERNEL_IRQ_WITH_DISABLED_NMI(NATIVE)
 
 static inline void *nested_kernel_return_address(int n)
 {

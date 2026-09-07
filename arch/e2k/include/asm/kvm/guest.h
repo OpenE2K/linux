@@ -71,6 +71,7 @@ typedef struct kvm_cpu_regs {
 	e2k_cutd_t	CPU_OSCUTD;	/* CUTD Register of OS */
 	e2k_cuir_t	CPU_OSCUIR;	/* CUI register of OS */
 	u64		CPU_OSR0;	/* OS register #0 */
+	u64		CPU_OSR1;	/* OS register #1 */
 	u32		CPU_OSEM;	/* OS Entries Mask */
 	e2k_psr_t	CPU_E2K_PSR;	/* Processor State Register */
 	e2k_upsr_t	CPU_UPSR;	/* User Processor State Register */

@@ -4,7 +4,7 @@
 #include <core/option.h>
 #include <core/subdev.h>
 
-#ifdef CONFIG_E2K
+#ifdef __LCC__
 #pragma diag_suppress 3302
 #endif
 

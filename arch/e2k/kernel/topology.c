@@ -3,21 +3,6 @@
  * Copyright (c) 2023 MCST
  */
 
-/*
- * This file is subject to the terms and conditions of the GNU General Public
- * License.  See the file "COPYING" in the main directory of this archive
- * for more details.
- *
- * This file contains NUMA specific variables and functions which can
- * be split away from DISCONTIGMEM and are used on NUMA machines with
- * contiguous memory.
- * 		2002/08/07 Erich Focht <efocht@ess.nec.de>
- * Populate cpu entries in sysfs for non-numa systems as well
- *  	Intel Corporation - Ashok Raj
- * Port to E2K
- * 	MCST - 2009/11/18 Evgeny Kravtsunov <kravtsunov_e@mcst.ru>
- */
-
 #include <linux/cpu.h>
 #include <linux/kernel.h>
 #include <linux/mm.h>
@@ -29,6 +14,7 @@
 #include <linux/topology.h>
 #include <asm/cpu.h>
 #include <asm/mmu_context.h>
+#include <linux/crash_dump.h>
 
 static struct cpu *sysfs_cpus;
 
@@ -96,7 +82,7 @@ s16 __apicid_to_node[NR_CPUS] = {
 /*
  * This version of cpu_to_node() will work earlier but is much slower
  */
-int e2k_early_cpu_to_node(int cpu)
+int __init early_cpu_to_node(int cpu)
 {
 	int apicid = cpu_to_cpuid(cpu);
 
@@ -143,6 +129,10 @@ static int __init duplicate_kernel_image(void)
 	unsigned long start_pfn, end_pfn;
 	int i;
 
+	/* Check this is not panic kernel, where only one node available */
+	if (is_kdump_kernel())
+		return 0;
+
 	/* These are the same areas as in boot_map_kernel_image() */
 	kernel_image_duplicate_page_range(_stext,
 			_etext - _stext, false);
@@ -181,6 +171,61 @@ static int __init duplicate_kernel_image(void)
 }
 arch_initcall(duplicate_kernel_image);
 
+# ifdef CONFIG_E2K_MODULES_DUPLICATION
+static int __init duplicate_pgds(void)
+{
+	/* Check this is not panic kernel, where only one node available */
+	if (is_kdump_kernel())
+		return 0;
+
+	/*
+	 * We duplicate PGD pages now to initialize init_mm.context.pgds_nodemask
+	 * as early as possible. All following memory allocations in modules area
+	 * (including the ones in duplicate_preallocated_pgds_for_modules_area()
+	 * and an allocation from ptp_classifier_init()) rely on initialized
+	 * pgds_nodemask.
+	 */
+	WARN_ON(duplicate_pgds_for_modules_area());
+
+	/*
+	 * PUD pages in page table for modules area were allocated in
+	 * preallocate_dynamic_pgds(). Here we duplicate them.
+	 *
+	 * Current implementation of NUMA duplication for modules area
+	 * implies that this area should always be fully duplicated on the
+	 * nodes from init_mm.context.pgds_nodemask. It requires that nothing
+	 * was mapped to modules area between preallocate_dynamic_pgds() and
+	 * current function. Otherwise, we either should duplicate everything
+	 * mapped right now or we will once find not-none entries in
+	 * PUD pages while duplicating. The first way is a bit challenging
+	 * (it requires separate page table traversal), so we just hope that
+	 * nothing is yet mapped to modules area and call a special function
+	 * to duplicate preallocated PUD pages. It will print a warning if it
+	 * failed to duplicate the pages or if it found any mapping to modules
+	 * area.
+	 */
+	return WARN_ON(duplicate_preallocated_pgds_for_modules_area());
+}
+/*
+ * Duplicate PGD pages and preallocated PUD pages as early as possible,
+ * because BPF programs can be mapped to modules area from core_initcall().
+ */
+early_initcall(duplicate_pgds);
+# endif /* CONFIG_E2K_MODULES_DUPLICATION */
+
+
+# ifdef CONFIG_E2K_MODULES_DUPLICATION
+static inline int is_duplicated_modules_addr(unsigned long addr)
+{
+	return addr >= MODULES_VADDR && addr < MODULES_END;
+}
+# else /* !CONFIG_E2K_MODULES_DUPLICATION */
+static inline int is_duplicated_modules_addr(unsigned long addr)
+{
+	return false;
+}
+# endif /* CONFIG_E2K_MODULES_DUPLICATION */
+
 int is_duplicated_address(unsigned long addr)
 {
 	/* Code is not yet duplicated this early in the boot process */
@@ -202,6 +247,139 @@ int is_duplicated_address(unsigned long addr)
 			addr >= (unsigned long) __init_data_begin &&
 				addr < (unsigned long) __init_data_end ||
 			addr >= PAGE_OFFSET && addr < PAGE_OFFSET + MAX_PM_SIZE ||
-			addr >= VMEMMAP_START && addr < VMEMMAP_END;
+			addr >= VMEMMAP_START && addr < VMEMMAP_END ||
+			is_duplicated_modules_addr(addr);
 }
-#endif
+
+# ifdef CONFIG_E2K_MODULES_DUPLICATION
+static inline int is_duplicated_modules_code(unsigned long ip)
+{
+	/* Guess caller knows that 'ip' is code */
+	return is_duplicated_modules_addr(ip);
+}
+# else /* !CONFIG_E2K_MODULES_DUPLICATION */
+static inline int is_duplicated_modules_code(unsigned long ip)
+{
+	return false;
+}
+# endif /* CONFIG_E2K_MODULES_DUPLICATION */
+
+int is_duplicated_code(unsigned long ip)
+{
+	/* Code is not yet duplicated this early in the boot process */
+	if (system_state == SYSTEM_BOOTING)
+		return 0;
+
+	return ip >= (unsigned long) _stext && ip < (unsigned long) _etext ||
+		is_duplicated_modules_code(ip);
+}
+#endif /* CONFIG_NUMA */
+
+#ifdef CONFIG_E2K_MODULES_DUPLICATION
+
+/* hack from kernel/module/internal.h */
+# ifndef CONFIG_ARCH_WANTS_MODULES_DATA_IN_VMALLOC
+#  define data_layout core_layout
+# endif
+
+static void duplicate_module_section_pages(void *start, unsigned int size, struct module *mod)
+{
+	duplicate_module_pages(start, size, &mod->arch.duplicated_pages);
+}
+
+static void duplicate_module_memory(struct module *mod)
+{
+	const struct module_layout *cl = &mod->core_layout, *dl = &mod->data_layout;
+
+	/* Duplicate text section pages */
+	duplicate_module_section_pages(cl->base, cl->text_size, mod);
+
+	/* Duplicate rodata section pages */
+	duplicate_module_section_pages(dl->base + dl->text_size, dl->ro_size - dl->text_size, mod);
+
+	/*
+	 * Section ro-after-init is duplicated later, when the module comes to
+	 * MODULE_STATE_LIVE state.
+	 */
+
+	/*
+	 * No need to duplicate data section: this section is not read-only, so its
+	 * last level pages should not be duplicated. Page table of this section was
+	 * duplicated during module memory mapping.
+	 */
+}
+
+static void duplicate_module_ro_after_init_memory(struct module *mod)
+{
+	const struct module_layout *dl = &mod->data_layout;
+
+	/* Duplicate ro-after-init section pages */
+	duplicate_module_section_pages(dl->base + dl->ro_size,
+			dl->ro_after_init_size - dl->ro_size, mod);
+}
+
+static void deduplicate_module_section_pages(void *start, unsigned int size, struct module *mod)
+{
+	deduplicate_module_pages(start, size, &mod->arch.duplicated_pages);
+}
+
+static void deduplicate_module_memory(struct module *mod)
+{
+	const struct module_layout *cl = &mod->core_layout, *dl = &mod->data_layout;
+
+	/* Deduplicate text section pages */
+	deduplicate_module_section_pages(cl->base, cl->text_size, mod);
+
+	/* Deduplicate rodata section pages */
+	deduplicate_module_section_pages(dl->base + dl->text_size,
+			dl->ro_size - dl->text_size, mod);
+
+	/* Deduplicate ro-after-init section pages */
+	deduplicate_module_section_pages(dl->base + dl->ro_size,
+			dl->ro_after_init_size - dl->ro_size, mod);
+
+	/*
+	 * No need to deduplicate data section: last level pages are not duplicated,
+	 * and duplicated page table is handled during unmapping.
+	 */
+
+	/* Check that all module's duplicated pages were freed */
+	WARN(!list_empty(&mod->arch.duplicated_pages),
+	     "List with duplicated pages for module '%s' is not empty; it is a memory leak",
+	     mod->name);
+}
+
+static int numa_duplication_module_callback(struct notifier_block *nb, unsigned long action,
+					    void *data)
+{
+	struct module *mod = data;
+
+	/* Check this is not panic kernel, where only one node available */
+	if (is_kdump_kernel())
+		return 0;
+
+	switch (action) {
+	case MODULE_STATE_COMING:
+		duplicate_module_memory(mod);
+		return NOTIFY_OK;
+	case MODULE_STATE_LIVE:
+		duplicate_module_ro_after_init_memory(mod);
+		return NOTIFY_OK;
+	case MODULE_STATE_GOING:
+		deduplicate_module_memory(mod);
+		return NOTIFY_OK;
+	default:
+		return NOTIFY_DONE;
+	}
+}
+
+static struct notifier_block numa_duplication_module_nb = {
+	.notifier_call = numa_duplication_module_callback
+};
+
+static __init int numa_duplication_init_module(void)
+{
+	return register_module_notifier(&numa_duplication_module_nb);
+}
+arch_initcall(numa_duplication_init_module);
+#endif /* CONFIG_E2K_MODULES_DUPLICATION */

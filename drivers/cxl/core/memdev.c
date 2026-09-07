@@ -320,6 +320,9 @@ static const struct file_operations cxl_memdev_fops = {
 	.open = cxl_memdev_open,
 	.release = cxl_memdev_release_file,
 	.compat_ioctl = compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = cxl_memdev_ioctl,
+#endif
 	.llseek = noop_llseek,
 };
 

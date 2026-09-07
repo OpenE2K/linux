@@ -1182,6 +1182,12 @@ error:
 }
 #endif
 
+#if defined(CONFIG_MCST)
+int gckPLATFORM_Init(struct pci_dev *pdev, struct _gcsPLATFORM **platform)
+{
+	return -ENODEV;
+}
+#else
 int gckPLATFORM_Init(struct platform_driver *pdrv, struct _gcsPLATFORM **platform)
 {
 #if !gcdSUPPORT_DEVICE_TREE_SOURCE
@@ -1263,6 +1269,7 @@ put_dev:
     return ret;
 #endif
 }
+#endif
 
 int gckPLATFORM_Terminate(struct _gcsPLATFORM *platform)
 {

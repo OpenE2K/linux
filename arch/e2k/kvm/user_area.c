@@ -952,7 +952,7 @@ free:
 	}
 	if ((to_free & FREE_TO_FREE) && free_chunk != NULL)
 		user_area_release_chunk(free_chunk);
-	while (free_chunk = queue_to_free) {
+	while ((free_chunk = queue_to_free)) {
 		queue_to_free = free_chunk->next;
 		user_area_release_chunk(free_chunk);
 	}
@@ -1136,6 +1136,7 @@ void __user *user_area_alloc_chunk(user_area_t *user_area, e2k_addr_t start,
 		return NULL;
 	}
 	add_flags = 0;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (flags & KVM_ALLOC_AREA_MAP_FLAGS) {
 		unsigned long prot = 0;
 
@@ -1158,6 +1159,7 @@ void __user *user_area_alloc_chunk(user_area_t *user_area, e2k_addr_t start,
 			add_flags |= (flags & KVM_ALLOC_AREA_MAP_FLAGS);
 		}
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	if (flags & UA_VMAP_TO_KERNEL) {
 		ret = user_area_do_alloc_chunk_pages(area_chunk);
 		add_flags |= USER_AREA_VMAPPED;

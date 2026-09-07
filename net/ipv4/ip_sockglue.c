@@ -38,6 +38,9 @@
 #include <net/route.h>
 #include <net/xfrm.h>
 #include <net/compat.h>
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#include <net/ptr128.h>
+#endif
 #include <net/checksum.h>
 #if IS_ENABLED(CONFIG_IPV6)
 #include <net/transp_v6.h>
@@ -714,6 +717,18 @@ static int copy_group_source_from_sockptr(struct group_source_req *greqs,
 		greqs->gsr_interface = gr32.gsr_interface;
 		greqs->gsr_group = gr32.gsr_group;
 		greqs->gsr_source = gr32.gsr_source;
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	} else if (in_ptr128_syscall()) {
+		struct ptr128_group_source_req gr128;
+
+		if (optlen != sizeof(gr128))
+			return -EINVAL;
+		if (copy_from_sockptr(&gr128, optval, sizeof(gr128)))
+			return -EFAULT;
+		greqs->gsr_interface = gr128.gsr_interface;
+		greqs->gsr_group = gr128.gsr_group;
+		greqs->gsr_source = gr128.gsr_source;
+#endif
 	} else {
 		if (optlen != sizeof(*greqs))
 			return -EINVAL;
@@ -848,6 +863,43 @@ out_free_gsf:
 	return err;
 }
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+static int ptr128_ip_set_mcast_msfilter(struct sock *sk, sockptr_t optval, int optlen)
+{
+	struct ptr128_group_filter *gsf = NULL;
+	unsigned int n;
+	int err;
+
+	BUILD_BUG_ON((sizeof(struct __kernel_sockaddr_storage) % sizeof(e2k_ap_t)) != 0);
+
+	if (optlen < offsetof(struct ptr128_group_filter, gf_slist_flex))
+		return -EINVAL;
+	if (optlen > READ_ONCE(sysctl_optmem_max))
+		return -ENOBUFS;
+
+	gsf = memdup_sockptr(optval, optlen);
+	if (IS_ERR(gsf))
+		return PTR_ERR(gsf);
+
+	/* numsrc >= (4G-140)/128 overflow in 32 bits */
+	n = gsf->gf_numsrc;
+	err = -ENOBUFS;
+	if (n >= 0x1ffffff ||
+	    n > READ_ONCE(sock_net(sk)->ipv4.sysctl_igmp_max_msf))
+		goto out_free_gsf;
+
+	err = -EINVAL;
+	if (offsetof(struct compat_group_filter, gf_slist_flex[n]) > optlen)
+		goto out_free_gsf;
+
+	err = set_mcast_msfilter(sk, gsf->gf_interface, n,
+				 gsf->gf_fmode, &gsf->gf_group,
+				 gsf->gf_slist_flex);
+out_free_gsf:
+	kfree(gsf);
+	return err;
+}
+#endif
 static int ip_mcast_join_leave(struct sock *sk, int optname,
 		sockptr_t optval, int optlen)
 {
@@ -892,6 +944,36 @@ static int compat_ip_mcast_join_leave(struct sock *sk, int optname,
 		return ip_mc_join_group(sk, &mreq);
 	return ip_mc_leave_group(sk, &mreq);
 }
+
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+static int ptr128_ip_mcast_join_leave(struct sock *sk, int optname,
+		sockptr_t optval, int optlen)
+{
+	struct ptr128_group_req greq;
+	struct ip_mreqn mreq = { };
+	struct sockaddr_in *psin;
+
+
+	BUILD_BUG_ON((sizeof(struct __kernel_sockaddr_storage) % sizeof(e2k_ap_t)) != 0);
+
+	if (optlen < sizeof(struct ptr128_group_req))
+		return -EINVAL;
+	if (copy_from_sockptr(&greq, optval, sizeof(greq)))
+		return -EFAULT;
+
+	psin = (struct sockaddr_in *)&greq.gr_group;
+	if (psin->sin_family != AF_INET)
+		return -EINVAL;
+	mreq.imr_multiaddr = psin->sin_addr;
+	mreq.imr_ifindex = greq.gr_interface;
+
+	if (optname == MCAST_JOIN_GROUP)
+		return ip_mc_join_group(sk, &mreq);
+	return ip_mc_leave_group(sk, &mreq);
+}
+#endif
+
+
 
 DEFINE_STATIC_KEY_FALSE(ip4_min_ttl);
 
@@ -1309,6 +1391,11 @@ int do_ip_setsockopt(struct sock *sk, int level, int optname,
 		if (in_compat_syscall())
 			err = compat_ip_mcast_join_leave(sk, optname, optval,
 							 optlen);
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+		else if (in_ptr128_syscall() && !optval.is_kernel)
+			err = ptr128_ip_mcast_join_leave(sk, optname, optval,
+							 optlen);
+#endif
 		else
 			err = ip_mcast_join_leave(sk, optname, optval, optlen);
 		break;
@@ -1321,6 +1408,10 @@ int do_ip_setsockopt(struct sock *sk, int level, int optname,
 	case MCAST_MSFILTER:
 		if (in_compat_syscall())
 			err = compat_ip_set_mcast_msfilter(sk, optval, optlen);
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+		else if (in_ptr128_syscall() && !optval.is_kernel)
+			err = ptr128_ip_set_mcast_msfilter(sk, optval, optlen);
+#endif
 		else
 			err = ip_set_mcast_msfilter(sk, optval, optlen);
 		break;
@@ -1548,6 +1639,46 @@ static int compat_ip_get_mcast_msfilter(struct sock *sk, sockptr_t optval,
 	return 0;
 }
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+static int ptr128_ip_get_mcast_msfilter(struct sock *sk, sockptr_t optval,
+					sockptr_t optlen, int len)
+{
+	const int size0 = offsetof(struct ptr128_group_filter, gf_slist_flex);
+	struct ptr128_group_filter gf128;
+	struct group_filter gf;
+	int num;
+	int err;
+
+
+	BUILD_BUG_ON((sizeof(struct __kernel_sockaddr_storage) % sizeof(e2k_ap_t)) != 0);
+
+	if (len < size0)
+		return -EINVAL;
+	if (copy_from_sockptr(&gf128, optval, size0))
+		return -EFAULT;
+
+	gf.gf_interface = gf128.gf_interface;
+	gf.gf_fmode	= gf128.gf_fmode;
+	gf.gf_numsrc	= gf128.gf_numsrc;
+	gf.gf_group	= gf128.gf_group;
+	num		= gf.gf_numsrc;
+
+	err = ip_mc_gsfget(sk, &gf, optval,
+			   offsetof(struct ptr128_group_filter, gf_slist_flex));
+	if (err)
+		return err;
+	if (gf.gf_numsrc < num)
+		num = gf.gf_numsrc;
+	len = sizeof(gf128) + (num - 1) * sizeof(struct __kernel_sockaddr_storage);
+	if (copy_to_sockptr(optlen, &len, sizeof(int)) ||
+	    copy_to_sockptr_offset(optval, offsetof(struct ptr128_group_filter, gf_fmode),
+				   &gf.gf_fmode, sizeof(gf.gf_fmode)) ||
+	    copy_to_sockptr_offset(optval, offsetof(struct ptr128_group_filter, gf_numsrc),
+				   &gf.gf_numsrc, sizeof(gf.gf_numsrc)))
+		return -EFAULT;
+	return 0;
+}
+#endif
 int do_ip_getsockopt(struct sock *sk, int level, int optname,
 		     sockptr_t optval, sockptr_t optlen)
 {
@@ -1713,6 +1844,10 @@ int do_ip_getsockopt(struct sock *sk, int level, int optname,
 		if (in_compat_syscall())
 			err = compat_ip_get_mcast_msfilter(sk, optval, optlen,
 							   len);
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+		else if (in_ptr128_syscall() && !optval.is_kernel)
+			err = ptr128_ip_get_mcast_msfilter(sk, optval, optlen, len);
+#endif
 		else
 			err = ip_get_mcast_msfilter(sk, optval, optlen, len);
 		goto out;

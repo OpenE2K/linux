@@ -222,11 +222,8 @@ acpi_system_read_event(struct file *file, char __user * buffer, size_t count,
 			return result;
 
 		chars_remaining = sprintf(str, "%s %s %08x %08x\n",
-					  event.device_class ? event.
-					  device_class : "<unknown>",
-					  event.bus_id ? event.
-					  bus_id : "<unknown>", event.type,
-					  event.data);
+					  event.device_class, event.bus_id,
+					  event.type, event.data);
 		ptr = str;
 	}
 
@@ -332,9 +329,9 @@ static irqreturn_t acpi_spmc_irq_handler(int irq, void *dev_id)
 					1);
 	} else if (event_id == ACPI_BUTTON_EVENT) {
 		acpi_bus_generate_proc_event(ACPI_BUTTON_CLASS,
-                                        ACPI_BUSID_CLASS,
-                                        ACPI_FIXED_HARDWARE_EVENT,
-                                        1);
+					ACPI_BUSID_CLASS,
+					ACPI_FIXED_HARDWARE_EVENT,
+					1);
 		if (c->input != NULL) {
 			input_report_key(c->input, KEY_POWER, 1);
 			input_sync(c->input);
@@ -343,14 +340,14 @@ static irqreturn_t acpi_spmc_irq_handler(int irq, void *dev_id)
 		}
 	} else if (event_id == ACPI_AC_EVENT) {
 		acpi_bus_generate_proc_event(ACPI_AC_CLASS,
-                                        ACPI_BUSID_CLASS,
-                                        ACPI_FIXED_HARDWARE_EVENT,
-                                        event_data);
+					ACPI_BUSID_CLASS,
+					ACPI_FIXED_HARDWARE_EVENT,
+					event_data);
 	} else if (event_id == ACPI_BATTERY_EVENT) {
 		acpi_bus_generate_proc_event(ACPI_BATTERY_CLASS,
-                                        ACPI_BUSID_CLASS,
-                                        ACPI_FIXED_HARDWARE_EVENT,
-                                        event_data);
+					ACPI_BUSID_CLASS,
+					ACPI_FIXED_HARDWARE_EVENT,
+					event_data);
 	}
 
 	return IRQ_HANDLED;
@@ -528,8 +525,8 @@ static ssize_t spmc_show_slptyp(struct device *dev,
 }
 
 static ssize_t spmc_store_slptyp(struct device *dev,
-                                    struct device_attribute *attr,
-                                    const char *buf, size_t count)
+				    struct device_attribute *attr,
+				    const char *buf, size_t count)
 {
 	unsigned long flags, val;
 	spmc_pm1_cnt_t pm1_cnt;
@@ -550,7 +547,7 @@ static ssize_t spmc_store_slptyp(struct device *dev,
 	pci_write_config_dword(c->pdev, ACPI_SPMC_PM1_CNT, pm1_cnt.reg);
 	raw_spin_unlock_irqrestore(&c->lock, flags);
 
-        return count;
+	return count;
 }
 
 /* pm_tmr */
@@ -629,17 +626,17 @@ static DEVICE_ATTR(pm1_cnt, S_IRUGO, spmc_show_pm1_cnt, NULL);
 
 static struct attribute *acpi_spmc_attributes[] = {
 	&dev_attr_sci.attr,
-        &dev_attr_tmr.attr,
-        &dev_attr_tmr32.attr,
-        &dev_attr_ac_pwr.attr,
-        &dev_attr_batlow.attr,
-        &dev_attr_pwrbtn.attr,
+	&dev_attr_tmr.attr,
+	&dev_attr_tmr32.attr,
+	&dev_attr_ac_pwr.attr,
+	&dev_attr_batlow.attr,
+	&dev_attr_pwrbtn.attr,
 	&dev_attr_slptyp.attr,
 	&dev_attr_pm_tmr.attr,
 	&dev_attr_pm1_sts.attr,
 	&dev_attr_pm1_en.attr,
 	&dev_attr_pm1_cnt.attr,
-        NULL
+	NULL
 };
 
 static const struct attribute_group acpi_spmc_attr_group = {
@@ -655,7 +652,7 @@ static struct mtd_s3_context {
 
 static void mtd_s3_notify_add(struct mtd_info *mtd)
 {
-	if (strcmp(mtd->name, "rS3S4"))
+	if (strcmp(mtd->name, "S3"))
 		return;
 
 	if (!(mtd->flags & MTD_NO_ERASE) && mtd->size < mtd->erasesize) {
@@ -845,7 +842,7 @@ static int l_power_event(struct notifier_block *this,
 		}
 
 		if (mtd->size < boot_info->s3_info.size) {
-			pr_err("mtd_s3: rS3S4 MTD partition size 0x%llx is less than RAM parameters size 0x%llx\n",
+			pr_err("mtd_s3: S3 MTD partition size 0x%llx is less than RAM parameters size 0x%llx\n",
 				mtd->size, boot_info->s3_info.size);
 			return notifier_from_errno(-EINVAL);
 		}
@@ -1116,13 +1113,13 @@ static int l_spmc_pci_probe(struct pci_dev *pdev, const struct pci_device_id *en
 	acpi_root_dir = proc_mkdir(ACPI_BUS_FILE_ROOT, NULL);
 
 	/* /proc/acpi/event [R] */
-        entry = proc_create("event", S_IRUSR, acpi_root_dir,
-                            &acpi_system_event_ops);
-        if (!entry) {
+	entry = proc_create("event", S_IRUSR, acpi_root_dir,
+			    &acpi_system_event_ops);
+	if (!entry) {
 
 		pci_dev_put(pdev);
 		gdata = NULL;
-                return -ENODEV;
+		return -ENODEV;
 	}
 	return err;
 }

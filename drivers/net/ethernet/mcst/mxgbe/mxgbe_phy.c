@@ -53,11 +53,11 @@
 #endif
 
 /** Internal PCS */
-#define PMA_and_PMD_MMD	(0x1 << 18)
-#define PCS_MMD		(0x3 << 18)
-#define AN_MMD		(0x7 << 18)
-#define VS_MMD1		(0x1e << 18)
-#define VS_MII_MMD	(0x1f << 18)
+#define PMA_and_PMD_MMD	(0x1 << 16)
+#define PCS_MMD		(0x3 << 16)
+#define AN_MMD		(0x7 << 16)
+#define VS_MMD1		(0x1e << 16)
+#define VS_MII_MMD	(0x1f << 16)
 
 #define SR_XS_PCS_CTRL1		(0x0000 | PCS_MMD)
 #define SR_XS_PCS_DEV_ID1	(0x0002 | PCS_MMD)
@@ -174,7 +174,7 @@ static int mdio_read(struct mii_bus *bus, int phy_id, int reg_num)
 	val |= 0x0 << MDIO_ST_OF_F_OFF; /* const */
 	val |= MDIO_DATA_OPCODE_ADDR << MDIO_OP_CODE_OFF;
 	val |= (phy_id & 0x1F) << MDIO_PHY_AD_OFF;
-	val |= reg_num & (0x1F << MDIO_REG_AD_OFF);
+	val |= ((reg_num >> MII_DEVADDR_C45_SHIFT) & 0x1F) << MDIO_REG_AD_OFF;
 	val |= reg_num & 0xFFFF;
 	if (mdio_io(base, val) != 0) {
 		raw_spin_unlock_irqrestore(&priv->mgio_lock, flags);
@@ -188,7 +188,7 @@ static int mdio_read(struct mii_bus *bus, int phy_id, int reg_num)
 	val |= 0x0 << MDIO_ST_OF_F_OFF; /* const */
 	val |= MDIO_DATA_OPCODE_RD << MDIO_OP_CODE_OFF;
 	val |= (phy_id & 0x1F) << MDIO_PHY_AD_OFF;
-	val |= reg_num & (0x1F << MDIO_REG_AD_OFF);
+	val |= ((reg_num >> MII_DEVADDR_C45_SHIFT) & 0x1F) << MDIO_REG_AD_OFF;
 	if (mdio_io(base, val) != 0) {
 		raw_spin_unlock_irqrestore(&priv->mgio_lock, flags);
 		dev_err(&priv->pdev->dev, "Unable to read MDIO data\n");
@@ -201,7 +201,7 @@ static int mdio_read(struct mii_bus *bus, int phy_id, int reg_num)
 
 	DEV_DBG(MXGBE_DBG_MSK_PHY, &priv->pdev->dev,
 		"mdio_read: dev 0x%02X - reg 0x%04X = 0x%04X\n",
-		(reg_num >> MDIO_REG_AD_OFF) & 0x1F, reg_num & 0xFFFF, val_out);
+		(reg_num >> MII_DEVADDR_C45_SHIFT) & 0x1F, reg_num & 0xFFFF, val_out);
 
 	return (int)val_out;
 } /* mdio_read */
@@ -225,7 +225,7 @@ static int mdio_write(struct mii_bus *bus, int phy_id, int reg_num, u16 val_in)
 	val |= 0x0 << MDIO_ST_OF_F_OFF; /* const */
 	val |= MDIO_DATA_OPCODE_ADDR << MDIO_OP_CODE_OFF;
 	val |= (phy_id & 0x1F) << MDIO_PHY_AD_OFF;
-	val |= reg_num & (0x1F << MDIO_REG_AD_OFF);
+	val |= ((reg_num >> MII_DEVADDR_C45_SHIFT) & 0x1F) << MDIO_REG_AD_OFF;
 	val |= reg_num & 0xFFFF;
 	if (mdio_io(base, val) != 0) {
 		raw_spin_unlock_irqrestore(&priv->mgio_lock, flags);
@@ -239,7 +239,7 @@ static int mdio_write(struct mii_bus *bus, int phy_id, int reg_num, u16 val_in)
 	val |= 0x0 << MDIO_ST_OF_F_OFF; /* const */
 	val |= MDIO_DATA_OPCODE_WR << MDIO_OP_CODE_OFF;
 	val |= (phy_id & 0x1F) << MDIO_PHY_AD_OFF;
-	val |= reg_num & (0x1F << MDIO_REG_AD_OFF);
+	val |= ((reg_num >> MII_DEVADDR_C45_SHIFT) & 0x1F) << MDIO_REG_AD_OFF;
 	val |= val_in & 0xFFFF;
 	if (mdio_io(base, val) != 0) {
 		raw_spin_unlock_irqrestore(&priv->mgio_lock, flags);
@@ -251,7 +251,7 @@ static int mdio_write(struct mii_bus *bus, int phy_id, int reg_num, u16 val_in)
 
 	DEV_DBG(MXGBE_DBG_MSK_PHY, &priv->pdev->dev,
 		"mdio_write: dev 0x%02X - reg 0x%04X := 0x%04X\n",
-		(reg_num >> MDIO_REG_AD_OFF) & 0x1F, reg_num & 0xFFFF, val_in);
+		(reg_num >> MII_DEVADDR_C45_SHIFT) & 0x1F, reg_num & 0xFFFF, val_in);
 
 	return 0;
 } /* mdio_write */

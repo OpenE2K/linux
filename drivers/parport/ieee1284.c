@@ -791,7 +791,7 @@ ssize_t parport_write (struct parport *port, const void *buffer, size_t len)
 	case IEEE1284_MODE_COMPAT:
 		pr_debug("%s: Using compatibility mode\n", port->name);
 #ifdef _WORKAROUND_MCST_PP
-		if ((priv->driver_data == mcst_pp_iee1284) ) {
+		if (priv->driver_data == mcst_pp_iee1284) {
 			/* put it in mSPPh mode */
 			if (len & 0x3ffffe0) {
 				retval = parport_write_block_dma_compat(port, buffer, (len & 0x3ffffe0));

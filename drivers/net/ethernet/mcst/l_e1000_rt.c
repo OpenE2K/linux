@@ -501,11 +501,45 @@ e1000_rt_set_phy_mode(struct net_device *dev)
 
 static int e1000_rt_open(struct net_device *dev)
 {
-	return -EBUSY;
+	struct e1000_rt_private *ep = netdev_priv(dev);
+
+	if (!ep)
+		return -EBUSY;
+
+	/* Since the RT driver mode can run without qdisc attached
+	 * we may use the IFF_NO_QUEUE flag as the RT mode designation
+	 * without any side effects.
+	 */
+	dev->priv_flags |= IFF_NO_QUEUE;
+
+	raw_spin_lock_irq(&ep->lock);
+	if (ep->opened == 1)
+		netif_carrier_on(dev);
+	else
+		netif_carrier_off(dev);
+	raw_spin_unlock_irq(&ep->lock);
+
+	return 0;
 }
 
 static int e1000_rt_close(struct net_device *dev)
 {
+	struct e1000_rt_private *ep = netdev_priv(dev);
+
+	if (!ep)
+		return 0;
+
+	raw_spin_lock_irq(&ep->lock);
+	if (ep->opened == 1) {
+		raw_spin_unlock_irq(&ep->lock);
+		return -EBUSY;
+	}
+
+	netif_carrier_off(dev);
+	raw_spin_unlock_irq(&ep->lock);
+
+	dev->priv_flags &= ~IFF_NO_QUEUE;
+
 	return 0;
 }
 
@@ -646,10 +680,10 @@ e1000_rt_restart(struct net_device *dev, struct e1000_rt_private *ep)
 			break;
 		}
 	}
-        if (i >= 1000) {
-                pr_warn("%s: initialization is not completed, status register "
-                        "0x%08x\n", dev->name, e1000_read_e_csr(ep));
-        }
+	if (i >= 1000) {
+		pr_warn("%s: initialization is not completed, status register "
+			"0x%08x\n", dev->name, e1000_read_e_csr(ep));
+	}
 
 	e1000_write_e_csr(ep,(INEA|STRT));
 }
@@ -780,7 +814,7 @@ end_of_tint:
 			}
 		}
 	}
-        raw_spin_unlock_irqrestore(&ep->lock, flags);
+	raw_spin_unlock_irqrestore(&ep->lock, flags);
 	e1000_write_e_csr(ep, INEA);
 
 	return IRQ_HANDLED;
@@ -898,7 +932,7 @@ static int e1000_rt_write(struct net_device *dev, struct ifreq *rq)
 static int e1000_rt_compat_write(struct net_device *dev, struct ifreq *rq)
 {
 	struct e1000_rt_private *ep = netdev_priv(dev);
-        el_netdev_udata_compat_t ud, *udp;
+	el_netdev_udata_compat_t ud, *udp;
 	int len = 0;
 	char *u_buf = 0;
 	u16  proto = 0;
@@ -912,24 +946,24 @@ static int e1000_rt_compat_write(struct net_device *dev, struct ifreq *rq)
 		ep->tx_inprogress = 0;
 		return -EBUSY;
 	}
-        udp = (el_netdev_udata_compat_t *)(rq->ifr_data);
-        if (copy_from_user(&ud, udp, sizeof (el_netdev_udata_compat_t))) {
-                return -EFAULT;
-        }
+	udp = (el_netdev_udata_compat_t *)(rq->ifr_data);
+	if (copy_from_user(&ud, udp, sizeof (el_netdev_udata_compat_t))) {
+		return -EFAULT;
+	}
 	if (ud.tx_len <= 0) {
 		return -EINVAL;
 	}
-        if (ud.tx_len > ETH_DATA_LEN) {
-                return -EINVAL;
-        }
+	if (ud.tx_len > ETH_DATA_LEN) {
+		return -EINVAL;
+	}
 	len = ud.tx_len;
 	proto = ud.proto;
 	u_buf = (char *)(long)ud.tx_buf;
 	if (copy_from_user(&ep->tx_buf[2 * ETH_ALEN + 2], u_buf, len)) {
 		return -EFAULT;
 	}
-        memcpy(&ep->tx_buf[0], ud.dst_mac, ETH_ALEN);
-        memcpy(&ep->tx_buf[ETH_ALEN], ud.src_mac, ETH_ALEN);
+	memcpy(&ep->tx_buf[0], ud.dst_mac, ETH_ALEN);
+	memcpy(&ep->tx_buf[ETH_ALEN], ud.src_mac, ETH_ALEN);
 	*((u16 *)(ep->tx_buf + 2 * ETH_ALEN)) = cpu_to_be16((u16)(ud.proto));
 	// Do real transfer
 	len += ETH_HLEN;
@@ -1035,14 +1069,14 @@ static int e1000_rt_read(struct e1000_rt_private *ep, struct ifreq *rq)
 
 
 	while (!ep->recieved) {
-               // we dont have data
+	       // we dont have data
 		if (timeout == 0) {
 			raw_spin_unlock_irq(&ep->lock);
 			return -ETIMEDOUT;
 		}
 		current->__state = TASK_INTERRUPTIBLE;
 		ep->rx_waiter = current;
-                raw_spin_unlock_irq_no_resched(&ep->lock);
+		raw_spin_unlock_irq_no_resched(&ep->lock);
 		if (timeout > 0) {
 			timeout = schedule_timeout(timeout);
 		} else {
@@ -1064,7 +1098,7 @@ static int e1000_rt_read(struct e1000_rt_private *ep, struct ifreq *rq)
 	// we can't copy to user under raw_spinlock.
 	// just mark it to notify we use this buffer
 	ep->pinned = 1;
-        ep->recieved = 0;
+	ep->recieved = 0;
 	ep->rx_skipped = 0;
 
 	if ((ep->cur_rx != entry) &&
@@ -1074,13 +1108,13 @@ static int e1000_rt_read(struct e1000_rt_private *ep, struct ifreq *rq)
 		wmb();
 	}
 
-        raw_spin_unlock_irq(&ep->lock);
+	raw_spin_unlock_irq(&ep->lock);
 
 	buf += 2 * ETH_ALEN + 2;
 	len = (len > msg_len) ? msg_len : len;
-        if (copy_to_user(u_buf, buf, len)) {
-                return -EFAULT;
-        }
+	if (copy_to_user(u_buf, buf, len)) {
+		return -EFAULT;
+	}
 	if (netif_msg_rx_status(ep)) {
 		int *b = (int *)ep->rx_buf[entry].b;
 		pr_info("%s RX_STATUS: buf = %d, len = %d\n",
@@ -1096,13 +1130,13 @@ static int e1000_rt_read(struct e1000_rt_private *ep, struct ifreq *rq)
 	ep->rx_ring[entry].status |= cpu_to_le16(RD_OWN);
 	wmb();
 	ep->pinned = 0;
-        r  = put_user(len, &ud->rx_len);
-        r |= put_user(skipped, &ud->skipped);
-        r |= put_user(proto, &ud->proto);
-        if (r) {
-                return -EFAULT;
-        }
-        return 0;
+	r  = put_user(len, &ud->rx_len);
+	r |= put_user(skipped, &ud->skipped);
+	r |= put_user(proto, &ud->proto);
+	if (r) {
+		return -EFAULT;
+	}
+	return 0;
 }
 
 
@@ -1111,7 +1145,7 @@ static int e1000_rt_read(struct e1000_rt_private *ep, struct ifreq *rq)
 
 static int e1000_rt_compat_read(struct e1000_rt_private *ep, struct ifreq *rq)
 {
-        el_netdev_udata_compat_t *udp, ud;
+	el_netdev_udata_compat_t *udp, ud;
 	char *buf = NULL;
 	int skipped;
 	int proto;
@@ -1122,16 +1156,16 @@ static int e1000_rt_compat_read(struct e1000_rt_private *ep, struct ifreq *rq)
 	int timeout= -1;
 	char *u_buf = 0;
 
-        udp = (el_netdev_udata_compat_t *)(rq->ifr_data);
-        if (copy_from_user(&ud, udp, sizeof (el_netdev_udata_compat_t))) {
-                return -EFAULT;
-        }
-        len = ud.rx_len;
+	udp = (el_netdev_udata_compat_t *)(rq->ifr_data);
+	if (copy_from_user(&ud, udp, sizeof (el_netdev_udata_compat_t))) {
+		return -EFAULT;
+	}
+	len = ud.rx_len;
 	if (len < ETH_HLEN) {
 		return -EINVAL;
 	}
-        timeout = ud.timeout;
-        u_buf = (char *)(long)ud.rx_buf;
+	timeout = ud.timeout;
+	u_buf = (char *)(long)ud.rx_buf;
 	if (timeout > 0) {
 		timeout = (timeout * HZ) / 1000;
 	}
@@ -1147,14 +1181,14 @@ static int e1000_rt_compat_read(struct e1000_rt_private *ep, struct ifreq *rq)
 
 
 	while (!ep->recieved) {
-               // we dont have data
+	       // we dont have data
 		if (timeout == 0) {
 			raw_spin_unlock_irq(&ep->lock);
 			return -ETIMEDOUT;
 		}
 		current->__state = TASK_INTERRUPTIBLE;
 		ep->rx_waiter = current;
-                raw_spin_unlock_irq_no_resched(&ep->lock);
+		raw_spin_unlock_irq_no_resched(&ep->lock);
 		if (timeout > 0) {
 			timeout = schedule_timeout(timeout);
 		} else {
@@ -1176,7 +1210,7 @@ static int e1000_rt_compat_read(struct e1000_rt_private *ep, struct ifreq *rq)
 	// we can't copy to user under raw_spinlock.
 	// just mark it to notify we use this buffer
 	ep->pinned = 1;
-        ep->recieved = 0;
+	ep->recieved = 0;
 	ep->rx_skipped = 0;
 
 	if ((ep->cur_rx != entry) &&
@@ -1186,13 +1220,13 @@ static int e1000_rt_compat_read(struct e1000_rt_private *ep, struct ifreq *rq)
 		wmb();
 	}
 
-        raw_spin_unlock_irq(&ep->lock);
+	raw_spin_unlock_irq(&ep->lock);
 
 	buf += 2 * ETH_ALEN + 2;
 	len = (len > msg_len) ? msg_len : len;
-        if (copy_to_user(u_buf, buf, len)) {
-                return -EFAULT;
-        }
+	if (copy_to_user(u_buf, buf, len)) {
+		return -EFAULT;
+	}
 	if (netif_msg_rx_status(ep)) {
 		int *b = (int *)ep->rx_buf[entry].b;
 		pr_info("%s RX_STATUS: buf = %d, len = %d\n",
@@ -1208,13 +1242,13 @@ static int e1000_rt_compat_read(struct e1000_rt_private *ep, struct ifreq *rq)
 	ep->rx_ring[entry].status |= cpu_to_le16(RD_OWN);
 	wmb();
 	ep->pinned = 0;
-        r  = put_user(len, &udp->rx_len);
-        r |= put_user(skipped, &udp->skipped);
-        r |= put_user(proto, &udp->proto);
-        if (r) {
-                return -EFAULT;
-        }
-        return 0;
+	r  = put_user(len, &udp->rx_len);
+	r |= put_user(skipped, &udp->skipped);
+	r |= put_user(proto, &udp->proto);
+	if (r) {
+		return -EFAULT;
+	}
+	return 0;
 }
 
 #endif	/* CONFIG_COMPAT */
@@ -1244,6 +1278,7 @@ e1000_rt_netdev_open(struct net_device *dev)
 	ep->opened  = 1;
 	raw_spin_unlock_irq(&ep->lock);
 
+	netif_carrier_off(dev);
 	/* Reset the PCNET32 */
 	e1000_write_e_csr(ep, STOP);
 	/* wait for stop */
@@ -1294,10 +1329,6 @@ e1000_rt_netdev_open(struct net_device *dev)
 	/* start e1000 */
 	e1000_write_e_csr(ep, INIT);
 
-
-	e1000_rt_set_phy_mode(dev);
-	mii_check_media(&ep->mii_if, netif_msg_link(ep), 1);
-	mod_timer (&(ep->watchdog_timer), E1000_WATCHDOG_TIMEOUT);
 	i = 0;
 	while (i++ < 1000) {
 		if (e1000_read_e_csr(ep) & IDON) {
@@ -1322,8 +1353,8 @@ e1000_rt_netdev_open(struct net_device *dev)
 	e1000_write_e_csr(ep, IDON);
 	if (netif_msg_ifup(ep)) {
 		pr_info("e1000_open(): e_csr register after "
-                       "clear IDON bit: 0x%x, must be 0x%x\n",
-                       e1000_read_e_csr(ep), (INIT));
+		       "clear IDON bit: 0x%x, must be 0x%x\n",
+		       e1000_read_e_csr(ep), (INIT));
 		dump_init_block(dev);
 	}
 
@@ -1339,9 +1370,9 @@ e1000_rt_netdev_open(struct net_device *dev)
 	if (request_threaded_irq(ep->irq, &e1000_rt_interrupt, NULL,
 			irqflags, dev->name, (void *)dev)) {
 		pr_warn("%s: Could not request irq\n", dev->name);
-                rc = -EAGAIN;
+		rc = -EAGAIN;
 		goto err;
-        }
+	}
 
 		
 	/* setup Interrupt enable and start bits */
@@ -1353,6 +1384,11 @@ e1000_rt_netdev_open(struct net_device *dev)
 			(INEA | RXON | TXON | STRT | INIT));
 		pr_info("e1000_open(): end\n");
 	}
+
+	e1000_rt_set_phy_mode(dev);
+	mii_check_media(&ep->mii_if, netif_msg_link(ep), 1);
+	mod_timer(&ep->watchdog_timer, E1000_WATCHDOG_TIMEOUT);
+
 	return 0;       /* Always succeed */
 
 err:
@@ -1393,6 +1429,7 @@ static void e1000_rt_netdev_close(struct net_device *dev)
 	ep->opened = -1;
 	raw_spin_unlock_irq(&ep->lock);
 
+	netif_carrier_off(dev);
 
 	if (netif_msg_ifdown(ep)) {
 		pr_debug("%s: Shutting down ethercard, status was %2.2x.\n",
@@ -1628,8 +1665,8 @@ static int e1000_rt_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 	case SIOCDEV_RTND_WRITE :
 #ifdef CONFIG_COMPAT
 		if (in_compat_syscall()) {
-                        rc = e1000_rt_compat_write(dev, rq);
-                        break;
+			rc = e1000_rt_compat_write(dev, rq);
+			break;
 		}
 #endif
 		rc = e1000_rt_write(dev, rq);
@@ -1707,12 +1744,12 @@ int e1000_rt_probe1(unsigned long ioaddr, unsigned char *base_ioaddr,
 	ep->pci_dev = pdev;
 	ep->dev = dev;
 	ep->base_ioaddr = base_ioaddr;
-        /* Setup STOP bit; Force e1000 resetting  */
-        e1000_write_e_csr(ep, STOP); /* RINT => 0; TINT => 0; IDON => 0; INTR => 0; 
-                               * INEA => 0; RXON => 0; TXON => 0; TMDM => 0;
-                               * STRT => 0; INIT => 0; 
-                               * access to E_BASE_ADDR is allowed */
-        /* PHY Resetting */
+	/* Setup STOP bit; Force e1000 resetting  */
+	e1000_write_e_csr(ep, STOP); /* RINT => 0; TINT => 0; IDON => 0; INTR => 0; 
+			       * INEA => 0; RXON => 0; TXON => 0; TMDM => 0;
+			       * STRT => 0; INIT => 0; 
+			       * access to E_BASE_ADDR is allowed */
+	/* PHY Resetting */
 	soft_reset = 0;
 	soft_reset |= (E1000_RSET_POLARITY | SRST);
 	e1000_write_mgio_csr(ep, soft_reset); /* startup software reset */
@@ -1777,24 +1814,24 @@ int e1000_rt_probe1(unsigned long ioaddr, unsigned char *base_ioaddr,
 		pr_info("%s: assigned IRQ %u.\n", pci_name(pdev), dev->irq);
 	else {
 		pr_info("%s: assigned IRQ #%u\n", pci_name(pdev), dev->irq);
-        }
-        /* Set the mii phy_id so that we can query the link state */
+	}
+	/* Set the mii phy_id so that we can query the link state */
 	if (ep->mii)
 		ep->mii_if.phy_id = 0x01;
 
 	/* Setup PHY MII/GMII enable */
 
-        val = mdio_read(dev, ep->mii_if.phy_id, PHY_AUX_CTRL);
-        DEBUG_PROBE("e1000_probe1: PHY reg # 0x12 (AUX_CTRL) : "
-                "after reset :            0x%x\n", val);
-        val &= ~(RGMII_EN_1 | RGMII_EN_0);
-        mdio_write(dev, ep->mii_if.phy_id, PHY_AUX_CTRL, val);
-        /* Setup PHY 10/100/1000 Link on 10M Link */
-        val = mdio_read(dev, ep->mii_if.phy_id, PHY_LED_CTRL);
-        DEBUG_PROBE("e1000_probe1: PHY reg # 0x13 (LED_CTRL) : "
-                "after reset :            0x%x\n", val);
-        val |= RED_LEN_EN;
-        mdio_write(dev, ep->mii_if.phy_id, PHY_LED_CTRL, val);
+	val = mdio_read(dev, ep->mii_if.phy_id, PHY_AUX_CTRL);
+	DEBUG_PROBE("e1000_probe1: PHY reg # 0x12 (AUX_CTRL) : "
+		"after reset :            0x%x\n", val);
+	val &= ~(RGMII_EN_1 | RGMII_EN_0);
+	mdio_write(dev, ep->mii_if.phy_id, PHY_AUX_CTRL, val);
+	/* Setup PHY 10/100/1000 Link on 10M Link */
+	val = mdio_read(dev, ep->mii_if.phy_id, PHY_LED_CTRL);
+	DEBUG_PROBE("e1000_probe1: PHY reg # 0x13 (LED_CTRL) : "
+		"after reset :            0x%x\n", val);
+	val |= RED_LEN_EN;
+	mdio_write(dev, ep->mii_if.phy_id, PHY_LED_CTRL, val);
 
 	val = mdio_read(dev, ep->mii_if.phy_id, PHY_BIST_CFG2);
 	DEBUG_PROBE("e1000_probe1: PHY reg # 0x1a (BIST_CFG2): "
@@ -1802,11 +1839,11 @@ int e1000_rt_probe1(unsigned long ioaddr, unsigned char *base_ioaddr,
 	val |= LINK_SEL;
 	mdio_write(dev, ep->mii_if.phy_id, PHY_BIST_CFG2, val);
 
-        /* move e1000 link status select to default 0 link */
-        val = e1000_read_mgio_csr(ep);
-        val &= ~LSTS;
-        val |= SLSP;
-        e1000_write_mgio_csr(ep, val);
+	/* move e1000 link status select to default 0 link */
+	val = e1000_read_mgio_csr(ep);
+	val &= ~LSTS;
+	val |= SLSP;
+	e1000_write_mgio_csr(ep, val);
 	e1000_rt_set_phy_mode(dev);
 
 	timer_setup(&ep->watchdog_timer, e1000_watchdog, 0);
@@ -1825,7 +1862,7 @@ int e1000_rt_probe1(unsigned long ioaddr, unsigned char *base_ioaddr,
 	}
 
 
-        e1000_write_e_csr(ep, STOP);
+	e1000_write_e_csr(ep, STOP);
 	ep->resource = res;
 	ep->bar = bar;
 	ep->msix_entries = msix_entries;
@@ -1884,7 +1921,7 @@ DEFINE_PCI_DEVICE_TABLE(e1000_rt_pci_tbl) = {
 	},
 	{PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_ETH)},
 	{PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, 0x8022)},
-        {0, }
+	{0, }
 };
 
 MODULE_DEVICE_TABLE (pci, e1000_rt_pci_tbl);

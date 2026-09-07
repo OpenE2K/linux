@@ -1,20 +1,18 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
 
-#include <linux/atomic.h>
 #include <linux/perf_event.h>
-#include <linux/kernel_stat.h>
-#include <linux/delay.h>
+
 #include <asm/pic.h>
 
-#include "../pic.h"
-#include "apic.h"
 #include "apic_local.h"
 
-
+#define ERROR_APIC_VECTOR	0xfe
 
 int nr_ioapics;
 int apic_verbosity __ro_after_init;
-
-
 
 unsigned long mp_lapic_addr;
 
@@ -175,3 +173,87 @@ static int __init apic_set_verbosity(char *arg)
 	return 0;
 }
 early_param("apic", apic_set_verbosity);
+
+/*
+ * Get the maximum number of local vector table entries
+ */
+int lapic_get_maxlvt(void)
+{
+	return GET_APIC_MAXLVT(apic_read(APIC_LVR));
+}
+
+/*
+ * Shutdown the local APIC.
+ *
+ * This is called, when a CPU is disabled and before rebooting, so the state of
+ * the local APIC has no dangling leftovers. Also used to cleanout any BIOS
+ * leftovers during boot.
+ */
+static void clear_local_APIC(void)
+{
+	int maxlvt;
+	u32 v;
+
+	maxlvt = lapic_get_maxlvt();
+	/*
+	 * Masking an LVT entry can trigger a local APIC error
+	 * if the vector is zero. Mask LVTERR first to prevent this.
+	 */
+	if (maxlvt >= 3) {
+		v = ERROR_APIC_VECTOR; /* any non-zero vector will do */
+		apic_write(APIC_LVTERR, v | APIC_LVT_MASKED);
+	}
+	/*
+	 * Careful: we have to set masks only first to deassert
+	 * any level-triggered sources.
+	 */
+	v = apic_read(APIC_LVTT);
+	apic_write(APIC_LVTT, v | APIC_LVT_MASKED);
+	v = apic_read(APIC_LVT0);
+	apic_write(APIC_LVT0, v | APIC_LVT_MASKED);
+	v = apic_read(APIC_LVT1);
+	apic_write(APIC_LVT1, v | APIC_LVT_MASKED);
+	if (maxlvt >= 4) {
+		v = apic_read(APIC_LVTPC);
+		apic_write(APIC_LVTPC, v | APIC_LVT_MASKED);
+	}
+
+	/*
+	 * Clean APIC state for other OSs:
+	 */
+	apic_write(APIC_LVTT, APIC_LVT_MASKED);
+	apic_write(APIC_LVT0, APIC_LVT_MASKED);
+	apic_write(APIC_LVT1, APIC_LVT_MASKED);
+	if (maxlvt >= 3)
+		apic_write(APIC_LVTERR, APIC_LVT_MASKED);
+	if (maxlvt >= 4)
+		apic_write(APIC_LVTPC, APIC_LVT_MASKED);
+
+	if (maxlvt > 3) {
+		/* Clear ESR due to Pentium errata 3AP and 11AP */
+		apic_write(APIC_ESR, 0);
+	}
+	apic_read(APIC_ESR);
+}
+
+/*
+ * Clear and disable the local APIC
+ */
+void disable_local_APIC(void)
+{
+	unsigned int value;
+
+	clear_local_APIC();
+
+	/*
+	 * Disable APIC (implies clearing of registers for 82489DX!).
+	 */
+	value = apic_read(APIC_SPIV);
+	value &= ~APIC_SPIV_APIC_ENABLED;
+	apic_write(APIC_SPIV, value);
+}
+
+unsigned int get_irr_apic(unsigned int vector)
+{
+	return apic_read(APIC_IRR + vector / 32 * 0x10);
+}

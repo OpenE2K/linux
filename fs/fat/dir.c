@@ -863,6 +863,9 @@ const struct file_operations fat_dir_operations = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= fat_compat_dir_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	= fat_dir_ioctl,
+#endif
 	.fsync		= fat_file_fsync,
 };
 

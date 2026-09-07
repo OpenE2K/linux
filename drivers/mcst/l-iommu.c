@@ -52,10 +52,6 @@ static struct iommu_ops l_iommu_ops;
 #define	l_prefetch_iopte(iopte, prefetch)	do {} while (0)
 #endif
 
-#ifndef l_iommu_has_numa_bug
-#define l_iommu_has_numa_bug()	0
-#endif
-
 /* iohub, iohub2 supports only 56-bit of virtual address */
 #define L_IOMMU_VA_MASK		((1UL << 56) - 1)
 
@@ -163,100 +159,6 @@ static iopte_t *l_iommu_iopte(struct l_iommu *i, unsigned long iova)
 	return t->pgtable + l_iommu_page_indx(t, iova);
 }
 
-static bool l_dom_iova_hi(unsigned long iova)
-{
-	return iova & (~0UL << 32) ? true : false;
-}
-
-static unsigned l_dom_page_indx(struct iommu_domain *d, unsigned long iova)
-{
-	if (!l_dom_iova_hi(iova))
-		return iova / IO_PAGE_SIZE;
-
-	return (iova - d->map_base) / IO_PAGE_SIZE;
-}
-
-static int l_add_buffer(struct iommu_domain *d,
-		phys_addr_t phys, unsigned long iova)
-{
-	int ret;
-	unsigned long flags;
-	unsigned i = l_dom_page_indx(d, iova);
-	if (!l_dom_iova_hi(iova)) {
-		WARN_ON(d->orig_phys_lo[i]);
-		d->orig_phys_lo[i] = phys;
-		return 0;
-	}
-
-	idr_preload(GFP_ATOMIC);
-	write_lock_irqsave(&d->lock_hi, flags);
-	ret = idr_alloc(&d->idr_hi, (void *)phys, i, i + 1, GFP_NOWAIT);
-	write_unlock_irqrestore(&d->lock_hi, flags);
-	idr_preload_end();
-
-	return ret;
-}
-
-static void l_remove_buffer(struct iommu_domain *d, unsigned long iova)
-{
-	unsigned long flags;
-	unsigned i = l_dom_page_indx(d, iova);
-	if (!l_dom_iova_hi(iova)) {
-		WARN_ON(!d->orig_phys_lo[i]);
-		d->orig_phys_lo[i] = 0;
-		return;
-	}
-	write_lock_irqsave(&d->lock_hi, flags);
-	WARN_ON(idr_remove(&d->idr_hi, i) == NULL);
-	write_unlock_irqrestore(&d->lock_hi, flags);
-}
-
-static phys_addr_t l_dom_lookup_buffer(struct iommu_domain *d,
-				     unsigned long iova)
-{
-	void *p;
-	unsigned long flags;
-	unsigned i = l_dom_page_indx(d, iova);
-	if (!l_dom_iova_hi(iova))
-		return d->orig_phys_lo[i];
-
-	read_lock_irqsave(&d->lock_hi, flags);
-	p = idr_find(&d->idr_hi, i);
-	read_unlock_irqrestore(&d->lock_hi, flags);
-
-	return (phys_addr_t)p;
-}
-
-static phys_addr_t l_alloc_buffer(struct iommu_domain *d, phys_addr_t orig_phys,
-				  size_t size, unsigned long iova, int node)
-{
-	int ret;
-	int npages = iommu_num_pages(orig_phys, size, IO_PAGE_SIZE);
-	gfp_t gfp_mask = __GFP_THISNODE | GFP_ATOMIC | __GFP_NOWARN;
-	int order = get_order(npages * IO_PAGE_SIZE);
-	struct page *page = alloc_pages_node(node, gfp_mask, order);
-	if (!page)
-		return 0;
-	ret = l_add_buffer(d, orig_phys, iova);
-	if (ret < 0) {
-		__free_pages(page, order);
-		return 0;
-	}
-	return page_to_phys(page);
-}
-
-static void l_free_buffer(struct iommu_domain *d, phys_addr_t phys,
-				size_t size, unsigned long iova)
-{
-	phys_addr_t orig_paddr = l_dom_lookup_buffer(d, iova);
-	int npages = iommu_num_pages(phys, size, IO_PAGE_SIZE);
-	int order = get_order(npages * IO_PAGE_SIZE);
-	if (!orig_paddr)
-		return;
-	__free_pages(phys_to_page(phys), order);
-	l_remove_buffer(d, iova);
-}
-
 static struct pci_dev *l_dev_to_parent_pcidev(struct device *dev)
 {
 	while (dev && !dev_is_pci(dev))
@@ -273,6 +175,7 @@ static struct pci_dev *l_dev_to_parent_pcidev(struct device *dev)
 static bool l_iommu_check_device(struct device *dev)
 {
 	struct pci_dev *pdev;
+
 	if (!dev || !dev->dma_mask)
 		return false;
 
@@ -282,12 +185,14 @@ static bool l_iommu_check_device(struct device *dev)
 	if (!dev || !dev_is_pci(dev))
 		return false;
 	pdev = to_pci_dev(dev);
-	if (pdev->vendor == PCI_VENDOR_ID_MCST_TMP &&
-			pdev->device == PCI_DEVICE_ID_MCST_3D_VIVANTE_R2000P &&
-			/* Check if r2000+ is a video card */
-			(pdev->subsystem_device != 3)) {
+
+	/* Check if r2000+ is a video card */
+	if (pdev->device == PCI_DEVICE_ID_MCST_3D_VIVANTE_R2000P &&
+			pdev->vendor == PCI_VENDOR_ID_MCST_TMP &&
+			((pdev->subsystem_device != 3) &&
+			(pdev->subsystem_device != 4)))
 		return false;
-	}
+
 	return true;
 }
 
@@ -471,12 +376,8 @@ static int l_iommu_map(struct iommu_domain *iommu_domain,
 			    int iommu_prot, gfp_t gfp)
 {
 	unsigned long prot;
-	phys_addr_t orig_phys = phys;
 	struct l_iommu_domain *d = to_l_domain(iommu_domain);
 	iopte_t *ptep = l_iommu_iopte(d->iommu, iova);
-	int node = d->iommu->node;
-	bool copy = l_iommu_has_numa_bug() &&
-			page_to_nid(phys_to_page(phys)) != node;
 
 	if (WARN_ON(!IS_ALIGNED(phys, size)))
 		return -EINVAL;
@@ -490,12 +391,6 @@ static int l_iommu_map(struct iommu_domain *iommu_domain,
 	/* If no access, then nothing to do */
 	if (!(iommu_prot & (IOMMU_READ | IOMMU_WRITE)))
 		return 0;
-
-	if (copy) {
-		phys = l_alloc_buffer(iommu_domain, orig_phys, size, iova, node);
-		if (phys == 0)
-			return -ENOMEM;
-	}
 
 	prot = l_iommu_prot_to_pte(iommu_prot);
 
@@ -520,10 +415,6 @@ static size_t l_iommu_unmap(struct iommu_domain *iommu_domain,
 		return 0;
 	if (WARN_ON(size ^ L_PGSIZE_BITMAP))
 		return 0;
-	if (l_iommu_has_numa_bug()) {
-		l_free_buffer(iommu_domain,
-			     iopte_to_pa(iopte_val(*ptep)), size, iova);
-	}
 
 	iopte_val(*ptep) = 0;
 	/* Clear out TSB entry. */
@@ -550,27 +441,11 @@ static void l_iommu_detach_device(struct iommu_domain *iommu_domain,
 static int l_iommu_attach_device(struct iommu_domain *iommu_domain,
 				   struct device *dev)
 {
-	int ret = 0;
-	unsigned o;
-	struct page *p;
 	struct l_iommu_domain *d = to_l_domain(iommu_domain);
 	struct l_iommu *i = dev_iommu_priv_get(dev);
-	mutex_lock(&i->mutex);
-	if (l_iommu_has_numa_bug() && !iommu_domain->orig_phys_lo) {
-		o = get_order(MIN_IOMMU_WINSIZE / IO_PAGE_SIZE *
-				sizeof(*iommu_domain->orig_phys_lo));
-		p = alloc_pages_node(i->node,
-					__GFP_ZERO | GFP_KERNEL, o);
-
-		if (p)
-			iommu_domain->orig_phys_lo = page_address(p);
-		else
-			ret = -ENOMEM;
-	}
-	mutex_unlock(&i->mutex);
 
 	d->iommu = i;
-	return ret;
+	return 0;
 }
 
 static struct iommu_domain *__l_iommu_domain_alloc(unsigned type, int node)
@@ -599,12 +474,6 @@ static struct iommu_domain *__l_iommu_domain_alloc(unsigned type, int node)
 	d->domain.geometry.aperture_end   = end;
 	d->domain.geometry.force_aperture = true;
 
-	idr_init(&d->domain.idr_hi);
-	rwlock_init(&d->domain.lock_hi);
-
-	d->domain.map_base = (~0UL) << win_bits;
-	d->domain.map_base &= L_IOMMU_VA_MASK;
-
 	return &d->domain;
 
 }
@@ -617,7 +486,6 @@ static struct iommu_domain *l_iommu_domain_alloc(unsigned type)
 static void l_iommu_domain_free(struct iommu_domain *iommu_domain)
 {
 	struct l_iommu_domain *d = to_l_domain(iommu_domain);
-	idr_destroy(&d->domain.idr_hi);
 	kfree(d);
 }
 
@@ -709,7 +577,8 @@ static void l_iommu_get_resv_regions(struct device *dev,
 
 	msi_addr = ((u64)msg.address_hi) << 32 |
 			(msg.address_lo & ~(RT_MSI_MEMORY_SIZE - 1));
-
+	if (WARN_ON(msi_addr == 0))
+		return;
 	region = iommu_alloc_resv_region(msi_addr, RT_MSI_MEMORY_SIZE,
 				prot, IOMMU_RESV_MSI, GFP_KERNEL);
 	if (!region)
@@ -792,7 +661,8 @@ static void l_quirk_iommu_direct_devices_r2000p(struct pci_dev *pdev)
 	data = data & ~VCFG_Convert32BitAddressForIommu;
 	pci_write_config_dword(pdev, VCFG, data);
 	/* Check if r2000+ is a video card */
-	if (pdev->subsystem_device != 3) {
+	if ((pdev->subsystem_device != 3) &&
+		(pdev->subsystem_device != 4)) {
 		/* use dma-direct interface */
 		set_dma_ops(&pdev->dev, NULL);
 	}
@@ -810,6 +680,9 @@ disable_iommu_panic(char *str)
 	return 1;
 }
 __setup("iommupanicoff", disable_iommu_panic);
+
+const struct dma_map_ops *dma_ops;
+EXPORT_SYMBOL(dma_ops);
 
 #define	L_IOMMU_MLT_HIT			0x8
 #define	L_IOMMU_PROT_VIOL_RD		0x4
@@ -861,10 +734,6 @@ static int l_iommu_suspend(struct platform_device *pdev, pm_message_t state)
 static int l_iommu_resume(struct platform_device *pdev)
 {
 	struct l_iommu *i = platform_get_drvdata(pdev);
-#if defined(CONFIG_SWIOTLB) || defined(CONFIG_E2K)
-	if (e2k_iommu_supported() && !l_use_swiotlb)
-		return 0;
-#endif	/* CONFIG_SWIOTLB */
 	l_iommu_init_hw(i, l_iommu_win_sz);
 	return 0;
 }
@@ -880,52 +749,15 @@ static void l_iommu_shutdown_node(int node)
 static void l_iommu_shutdown(struct platform_device *pdev)
 {
 	struct l_iommu *i = platform_get_drvdata(pdev);
-#if defined(CONFIG_SWIOTLB) || defined(CONFIG_E2K)
-	if (e2k_iommu_supported() && !l_use_swiotlb)
-		return;
-#endif	/* CONFIG_SWIOTLB */
+
 	if (paravirt_enabled())
 		return;
 	l_iommu_write(i, 0, L_IOMMU_CTRL);
 }
 
-const struct dma_map_ops *dma_ops;
-EXPORT_SYMBOL(dma_ops);
-
-static int __init l_iommu_setup(char *str)
-{
-	unsigned long win_sz = DFLT_IOMMU_WINSIZE;
-
-	if (!strcmp(str, "force-numa-bug-on")) {
-		l_iommu_force_numa_bug_on = 1;
-	} else if (!strcmp(str, "no-numa-bug")) {
-		l_iommu_no_numa_bug = 1;
-	} else if (!strcmp(str, "noprefetch")) {
-		l_not_use_prefetch = 1;
-	} else {
-		win_sz = memparse(str, &str);
-		if (win_sz == 0)
-			l_use_swiotlb = 1;
-	}
-
-	win_sz = roundup_pow_of_two(win_sz);
-	if (win_sz > MAX_IOMMU_WINSIZE)
-		win_sz = MAX_IOMMU_WINSIZE;
-	else if (win_sz < MIN_IOMMU_WINSIZE)
-		win_sz = MIN_IOMMU_WINSIZE;
-	l_iommu_win_sz = win_sz;
-
-	return 1;
-}
-__setup("iommu=", l_iommu_setup);
-
 static int l_iommu_remove(struct platform_device *pdev)
 {
 	struct l_iommu *i = platform_get_drvdata(pdev);
-#if defined(CONFIG_SWIOTLB) || defined(CONFIG_E2K)
-	if (e2k_iommu_supported() && !l_use_swiotlb)
-		return 0;
-#endif	/* CONFIG_SWIOTLB */
 	l_iommu_cleanup_one(i, 4);
 	platform_set_drvdata(pdev, NULL);
 	return 0;
@@ -937,15 +769,9 @@ static int l_iommu_probe(struct platform_device *pdev)
 	struct l_iommu *i;
 	struct device *dev = &pdev->dev;
 	int node = l_dev_to_node(dev);
-	size_t idr_sz = 1UL + INT_MAX;
 	size_t tbl_sz = l_iommu_win_sz / IO_PAGE_SIZE * sizeof(iopte_t);
 
-#if defined(CONFIG_SWIOTLB) || defined(CONFIG_E2K)
-	if (e2k_iommu_supported() && !l_use_swiotlb)
-		return 0;
-#endif	/* CONFIG_SWIOTLB */
-
-	if (!l_iommu_supported() || l_use_swiotlb || paravirt_enabled()) {
+	if (paravirt_enabled()) {
 		l_iommu_shutdown_node(node);
 		return 0;
 	}
@@ -954,9 +780,6 @@ static int l_iommu_probe(struct platform_device *pdev)
 		tbl_sz = PAGE_SIZE << (MAX_ORDER - 1);
 		l_iommu_win_sz = tbl_sz / sizeof(iopte_t) * IO_PAGE_SIZE;
 	}
-
-	if (l_iommu_has_numa_bug() && l_iommu_win_sz > idr_sz * PAGE_SIZE)
-		l_iommu_win_sz = idr_sz * PAGE_SIZE;
 
 	i = devm_kzalloc(dev, sizeof(*i), GFP_KERNEL);
 	if (!i)

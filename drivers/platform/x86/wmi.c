@@ -944,6 +944,9 @@ static const struct file_operations wmi_fops = {
 	.open		= wmi_char_open,
 	.unlocked_ioctl	= wmi_ioctl,
 	.compat_ioctl	= compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = wmi_ioctl,
+#endif
 };
 
 static int wmi_dev_probe(struct device *dev)

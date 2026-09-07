@@ -8,11 +8,8 @@
 
 
 #ifndef	__ASSEMBLY__
-typedef unsigned char __e2k_u8_t;
-typedef unsigned short int __e2k_u16_t;
 typedef unsigned int __e2k_u32_t;
 typedef unsigned long long __e2k_u64_t;
-typedef void *__e2k_ptr_t;
 #endif /* __ASSEMBLY__ */
 
 #ifndef __KERNEL__

@@ -883,6 +883,14 @@
 			KVM_WRITE_CR1_HI_REG_VALUE(CR1_hi_value)
 #endif
 
+#define kvm_write_cr(cr0_lo, cr0_hi, cr1_lo, cr1_hi) \
+do { \
+	KVM_WRITE_CR0_LO_REG_VALUE((cr0_lo).word); \
+	KVM_WRITE_CR0_HI_REG_VALUE((cr0_hi).word); \
+	KVM_WRITE_CR1_LO_REG_VALUE((cr1_lo).word); \
+	KVM_WRITE_CR1_HI_REG_VALUE((cr1_hi).word); \
+} while (0)
+
 #define KVM_WRITE_CR0_REG(cr0)					\
 ({								\
 	GUEST_SET_CPU_DSREG_LO(_CR0, LO(cr0));			\
@@ -1185,15 +1193,15 @@
 /*
  * Read CPU current clock regigister (CLKR)
  */
-#define	KVM_READ_CLKR_REG_VALUE()	NATIVE_GET_DSREG_CLOSED(clkr)
+#define	KVM_READ_CLKR_REG_VALUE()	NATIVE_GET_DREG_CLOSED(clkr)
 
 /*
  * Read/Write system clock registers (SCLKM)
  */
-#define	KVM_READ_SCLKR_REG_VALUE()	NATIVE_GET_DSREG_CLOSED(sclkr)
-#define	KVM_READ_SCLKM1_REG_VALUE()	NATIVE_GET_DSREG_CLOSED(sclkm1)
-#define	KVM_READ_SCLKM2_REG_VALUE()	NATIVE_GET_DSREG_CLOSED(sclkm2)
-#define	KVM_READ_SCLKM3_REG_VALUE()	NATIVE_GET_DSREG_CLOSED(sclkm3)
+#define	KVM_READ_SCLKR_REG_VALUE()	NATIVE_GET_DREG_CLOSED(sclkr)
+#define	KVM_READ_SCLKM1_REG_VALUE()	NATIVE_GET_DREG_CLOSED(sclkm1)
+#define	KVM_READ_SCLKM2_REG_VALUE()	NATIVE_GET_DREG_CLOSED(sclkm2)
+#define	KVM_READ_SCLKM3_REG_VALUE()	NATIVE_GET_DREG_CLOSED(sclkm3)
 
 #define	KVM_WRITE_SCLKR_REG_VALUE(reg_value)	\
 		GUEST_SET_CPU_DSREG(SCLKR, reg_value)
@@ -1222,8 +1230,8 @@
 /*
  * Read/write low/high double-word Recovery point register (RPR)
  */
-#define	KVM_READ_RPR_LO_REG_VALUE()	NATIVE_GET_DSREG_OPEN(rpr.lo)
-#define	KVM_READ_RPR_HI_REG_VALUE()	NATIVE_GET_DSREG_OPEN(rpr.hi)
+#define	KVM_READ_RPR_LO_REG_VALUE()	NATIVE_GET_DREG_OPEN(rpr.lo)
+#define	KVM_READ_RPR_HI_REG_VALUE()	NATIVE_GET_DREG_OPEN(rpr.hi)
 
 #define	KVM_WRITE_RPR_LO_REG_VALUE(RPR_lo_value) \
 			NATIVE_SET_DSREG_OPEN(rpr.lo, RPR_lo_value)
@@ -1233,45 +1241,45 @@
 /*
  * Read double-word CPU current Instruction Pointer register (IP)
  */
-#define	KVM_READ_IP_REG_VALUE()	NATIVE_GET_DSREG_CLOSED(ip)
+#define	KVM_READ_IP_REG_VALUE()	NATIVE_GET_DREG_CLOSED(ip)
 
 /*
  * Read debug and monitors registers
  */
-#define	KVM_READ_DIBCR_REG_VALUE()	NATIVE_GET_SREG_CLOSED(dibcr)
-#define	KVM_READ_DIBSR_REG_VALUE()	NATIVE_GET_SREG_CLOSED(dibsr)
-#define	KVM_READ_DIMCR_REG_VALUE()	NATIVE_GET_DSREG_CLOSED(dimcr)
-#define	KVM_READ_DIBAR0_REG_VALUE()	NATIVE_GET_DSREG_OPEN(dibar0)
-#define	KVM_READ_DIBAR1_REG_VALUE()	NATIVE_GET_DSREG_OPEN(dibar1)
-#define	KVM_READ_DIBAR2_REG_VALUE()	NATIVE_GET_DSREG_OPEN(dibar2)
-#define	KVM_READ_DIBAR3_REG_VALUE()	NATIVE_GET_DSREG_OPEN(dibar3)
-#define	KVM_READ_DIMAR0_REG_VALUE()	NATIVE_GET_DSREG_OPEN(dimar0)
-#define	KVM_READ_DIMAR1_REG_VALUE()	NATIVE_GET_DSREG_OPEN(dimar1)
-#define	KVM_READ_DIMAR2_REG_VALUE()	NATIVE_GET_DSREG_OPEN(dimar2)
-#define	KVM_READ_DIMAR3_REG_VALUE()	NATIVE_GET_DSREG_OPEN(dimar3)
+#define	KVM_READ_DIBCR_REG_VALUE()	NATIVE_GET_SREG_CLOSED(3, dibcr)
+#define	KVM_READ_DIBSR_REG_VALUE()	NATIVE_GET_SREG_CLOSED(3, dibsr)
+#define	KVM_READ_DIMCR_REG_VALUE()	NATIVE_GET_DREG_CLOSED(3, dimcr)
+#define	KVM_READ_DIBAR0_REG_VALUE()	NATIVE_GET_DREG_OPEN(dibar0)
+#define	KVM_READ_DIBAR1_REG_VALUE()	NATIVE_GET_DREG_OPEN(dibar1)
+#define	KVM_READ_DIBAR2_REG_VALUE()	NATIVE_GET_DREG_OPEN(dibar2)
+#define	KVM_READ_DIBAR3_REG_VALUE()	NATIVE_GET_DREG_OPEN(dibar3)
+#define	KVM_READ_DIMAR0_REG_VALUE()	NATIVE_GET_DREG_OPEN(dimar0)
+#define	KVM_READ_DIMAR1_REG_VALUE()	NATIVE_GET_DREG_OPEN(dimar1)
+#define	KVM_READ_DIMAR2_REG_VALUE()	NATIVE_GET_DREG_OPEN(dimar2)
+#define	KVM_READ_DIMAR3_REG_VALUE()	NATIVE_GET_DREG_OPEN(dimar3)
 
 #define	KVM_WRITE_DIBCR_REG_VALUE(DIBCR_value)	\
 			GUEST_SET_CPU_SREG(DIBCR, DIBCR_value)
 #define	KVM_WRITE_DIBSR_REG_VALUE(DIBSR_value)	\
-			NATIVE_SET_SREG_CLOSED_NOEXC(dibsr, DIBSR_value, 4, 6)
+			NATIVE_SET_SREG_NOEXC(3, dibsr, DIBSR_value)
 #define	KVM_WRITE_DIMCR_REG_VALUE(DIMCR_value)	\
 			GUEST_SET_CPU_DSREG(DIMCR, DIMCR_value)
 #define	KVM_WRITE_DIBAR0_REG_VALUE(DIBAR0_value)	\
-			NATIVE_SET_DSREG_CLOSED_NOEXC(dibar0, DIBAR0_value, 4, 6)
+			NATIVE_SET_DREG_NOEXC(dibar0, DIBAR0_value)
 #define	KVM_WRITE_DIBAR1_REG_VALUE(DIBAR1_value)	\
-			NATIVE_SET_DSREG_CLOSED_NOEXC(dibar1, DIBAR1_value, 4, 6)
+			NATIVE_SET_DREG_NOEXC(dibar1, DIBAR1_value)
 #define	KVM_WRITE_DIBAR2_REG_VALUE(DIBAR2_value)	\
-			NATIVE_SET_DSREG_CLOSED_NOEXC(dibar2, DIBAR2_value, 4, 6)
+			NATIVE_SET_DREG_NOEXC(dibar2, DIBAR2_value)
 #define	KVM_WRITE_DIBAR3_REG_VALUE(DIBAR3_value)	\
-			NATIVE_SET_DSREG_CLOSED_NOEXC(dibar3, DIBAR3_value, 4, 6)
+			NATIVE_SET_DREG_NOEXC(dibar3, DIBAR3_value)
 #define	KVM_WRITE_DIMAR0_REG_VALUE(DIMAR0_value)	\
-			NATIVE_SET_DSREG_CLOSED_NOEXC(dimar0, DIMAR0_value, 4, 6)
+			NATIVE_SET_DREG_NOEXC(dimar0, DIMAR0_value)
 #define	KVM_WRITE_DIMAR1_REG_VALUE(DIMAR1_value)	\
-			NATIVE_SET_DSREG_CLOSED_NOEXC(dimar1, DIMAR1_value, 4, 6)
+			NATIVE_SET_DREG_NOEXC(dimar1, DIMAR1_value)
 #define	KVM_WRITE_DIMAR2_REG_VALUE(DIMAR2_value)	\
-			NATIVE_SET_DSREG_CLOSED_NOEXC(dimar2, DIMAR2_value, 4, 6)
+			NATIVE_SET_DREG_NOEXC(dimar2, DIMAR2_value)
 #define	KVM_WRITE_DIMAR3_REG_VALUE(DIMAR3_value)	\
-			NATIVE_SET_DSREG_CLOSED_NOEXC(dimar3, DIMAR3_value, 4, 6)
+			NATIVE_SET_DREG_NOEXC(dimar3, DIMAR3_value)
 
 /*
  * Read/write double-word Compilation Unit Types Descriptor (TSD)
@@ -1498,12 +1506,9 @@ extern void dump_stack(void); \
 #define	KVM_READ_FPCR_REG_VALUE()	NATIVE_GET_SREG_OPEN(fpcr)
 #define	KVM_READ_FPSR_REG_VALUE()	NATIVE_GET_SREG_OPEN(fpsr)
 
-#define	KVM_WRITE_PFPFR_REG_VALUE(PFPFR_value)	\
-				NATIVE_SET_SREG_OPEN(pfpfr, PFPFR_value)
-#define	KVM_WRITE_FPCR_REG_VALUE(FPCR_value)	\
-				NATIVE_SET_SREG_OPEN(fpcr, FPCR_value)
-#define	KVM_WRITE_FPSR_REG_VALUE(FPSR_value)	\
-				NATIVE_SET_SREG_OPEN(fpsr, FPSR_value)
+#define	KVM_WRITE_PFPFR_REG_VALUE(PFPFR_value)	NATIVE_SET_SREG_EXC(3, pfpfr, PFPFR_value)
+#define	KVM_WRITE_FPCR_REG_VALUE(FPCR_value)	NATIVE_SET_SREG_EXC(3, fpcr, FPCR_value)
+#define	KVM_WRITE_FPSR_REG_VALUE(FPSR_value)	NATIVE_SET_SREG_EXC(3, fpsr, FPSR_value)
 
 /*
  * Read/write low/high double-word Intel segments registers (xS)
@@ -1667,11 +1672,11 @@ do { \
 #define BOOT_READ_PSP_HI_REG_VALUE()	KVM_READ_PSP_HI_REG_VALUE()
 
 #define WRITE_PSP_LO_REG_VALUE(PSP_lo_value)		\
- 	      	KVM_WRITE_PSP_LO_REG_VALUE(PSP_lo_value)
+		KVM_WRITE_PSP_LO_REG_VALUE(PSP_lo_value)
 #define WRITE_PSP_HI_REG_VALUE(PSP_hi_value)		\
-      	 	KVM_WRITE_PSP_HI_REG_VALUE(PSP_hi_value)
+		KVM_WRITE_PSP_HI_REG_VALUE(PSP_hi_value)
 #define BOOT_WRITE_PSP_LO_REG_VALUE(PSP_lo_value)	\
-      	 	KVM_WRITE_PSP_LO_REG_VALUE(PSP_lo_value)
+		KVM_WRITE_PSP_LO_REG_VALUE(PSP_lo_value)
 #define BOOT_WRITE_PSP_HI_REG_VALUE(PSP_hi_value)	\
 		KVM_WRITE_PSP_HI_REG_VALUE(PSP_hi_value)
 
@@ -1708,6 +1713,9 @@ do { \
 		KVM_WRITE_CR1_LO_REG_VALUE(CR1_lo_value)
 #define	WRITE_CR1_HI_REG_VALUE(CR1_hi_value) \
 		KVM_WRITE_CR1_HI_REG_VALUE(CR1_hi_value)
+
+#define write_cr		kvm_write_cr
+#define write_cr__no_wait	kvm_write_cr
 
 /*
  * Read/write double-word Control Transfer Preparation Registers

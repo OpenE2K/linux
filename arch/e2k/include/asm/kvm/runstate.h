@@ -221,6 +221,7 @@ kvm_init_guest_vcpu_runstate(struct kvm_vcpu *vcpu, int init_state)
 	local_irq_restore(flags);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline long
 kvm_do_get_guest_vcpu_stolen_time(struct kvm_vcpu *vcpu)
 {
@@ -277,6 +278,7 @@ kvm_get_guest_vcpu_stolen_time(struct kvm_vcpu *vcpu)
 
 	return stolen_time;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline long
 kvm_do_get_guest_vcpu_running_time(struct kvm_vcpu *vcpu)
@@ -326,6 +328,7 @@ kvm_get_guest_vcpu_running_time(struct kvm_vcpu *vcpu)
 	return running_time;
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 /* Runstate time is measured with ktime_get() cycles, it has to be monotonic across all CPUs */
 static inline unsigned long
 kvm_get_host_runstate_ktime(void)
@@ -444,6 +447,18 @@ extern void kvm_set_guest_runstate_out_kernel_trap(int saved_runstate);
 		(cur_runstate = kvm_set_guest_runstate_in_kernel_trap())
 #define	SET_RUNSTATE_OUT_KERNEL_TRAP(cur_runstate)			\
 		kvm_set_guest_runstate_out_kernel_trap(cur_runstate)
+#else
+# define SET_RUNSTATE_IN_USER_TRAP()			do { } while (0)
+# define SET_RUNSTATE_OUT_USER_TRAP()			do { } while (0)
+# define SET_RUNSTATE_IN_KERNEL_TRAP(cur_runstate) \
+do { \
+	(void) (cur_runstate); \
+} while (0)
+# define SET_RUNSTATE_OUT_KERNEL_TRAP(cur_runstate) \
+do { \
+	(void) (cur_runstate); \
+} while (0)
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #else	/* ! CONFIG_VIRTUALIZATION || CONFIG_KVM_GUEST_KERNEL */
 /* it is native kernel without virtualization support */

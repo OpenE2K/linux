@@ -1,5 +1,6 @@
 /*
- * $Id: mc146818rtc.h,v 1.7 2006/11/10 15:39:48 kostin Exp $
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
  */
 
 #ifndef _MCRTC_
@@ -185,7 +186,7 @@ static inline void rtc_init(int invalid)
 	/* Make certain we have a valid checksum */
 #if 0
 	rtc_set_checksum(PC_CKS_RANGE_START,
-                        PC_CKS_RANGE_END,PC_CKS_LOC);
+			PC_CKS_RANGE_END,PC_CKS_LOC);
 	/* Clear any pending interrupts */
 	(void) CMOS_READ(RTC_INTR_FLAGS);
 #endif

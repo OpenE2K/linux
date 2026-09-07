@@ -38,16 +38,14 @@
  */
 
 #define	PREFIX_SAVE_AAU_MASK_REGS(PV_TYPE, pv_type, aau_context, aasr)	\
-do {									\
-	if (aau_context) {						\
-		if (unlikely(AAU_STOPPED(aasr))) {			\
-			pv_type##_read_aaldv_reg(&(aau_context)->aaldv); \
-			pv_type##_read_aaldm_reg(&(aau_context)->aaldm); \
-		} else {						\
-			AW((aau_context)->aaldv) = 0;			\
-			AW((aau_context)->aaldm) = 0;			\
-		}							\
-	}								\
+do { \
+	if (unlikely(aau_stopped(aasr))) { \
+		pv_type##_read_aaldv_reg(&(aau_context)->aaldv); \
+		pv_type##_read_aaldm_reg(&(aau_context)->aaldm); \
+	} else { \
+		AW((aau_context)->aaldv) = 0; \
+		AW((aau_context)->aaldm) = 0; \
+	} \
 } while (0)
 
 #define	NATIVE_SAVE_AAU_MASK_REGS(aau_context, aasr) \
@@ -55,7 +53,7 @@ do {									\
 
 static inline e2k_aasr_t aasr_parse(e2k_aasr_t aasr)
 {
-	if (unlikely(AAU_ACTIVE(aasr))) {
+	if (unlikely(aau_active(aasr))) {
 		/* As it turns out AAU can be in ACTIVE state
 		 * in interrupt handler (bug 53227 comment 28
 		 * and bug 53227 comment 36).
@@ -637,7 +635,7 @@ do { \
 		prefetchr_nospec_range(aau->aainds, sizeof(aau->aainds) + \
 				sizeof(aau->aaind_tags) + sizeof(aau->aaincrs) + \
 				sizeof(aau->aaincr_tags) + sizeof(aau->aads)); \
-	if (AAU_STOPPED(aasr)) { \
+	if (aau_stopped(aasr)) { \
 		prefetchr_nospec_range(aau->aaldi, sizeof(aau->aaldi)); \
 		if (!cpu_has(CPU_FEAT_ISET_V6)) \
 			prefetchr_nospec_range(aalda, sizeof(e2k_aalda_t) * AALDAS_REGS_NUM); \

@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: GPL-2.0
  * Copyright (c) 2023 MCST
  */
+
 #ifndef __ASM_IO_PIC_H
 #define __ASM_IO_PIC_H
 
@@ -10,8 +11,6 @@ struct iopic;
 struct iopic_chip {
 	void (*iopic_get_id_ver_pins)(struct iopic *apic,
 			int *id, int *version, int *pins);
-	void (*iopic_mask_entry)(struct iopic *pic, int pin);
-	void (*iopic_configure_entry)(struct irq_data *irqd);
 	struct irq_chip *iopic_chip;
 	int iopic_sizeof_entry;
 };

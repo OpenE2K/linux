@@ -8,6 +8,8 @@
 
 #include <asm/cpu_features.h>
 
+#ifdef CONFIG_HAVE_ARCH_HUGE_VMAP
+
 /*
  * vmap for huge pages forbid for debug kernel configuration
  * because in case if you need to split page from vmap area
@@ -26,5 +28,6 @@ static inline bool arch_vmap_pmd_supported(pgprot_t prot)
 	return !IS_ENABLED(CONFIG_DEBUG_PAGEALLOC);
 }
 
+#endif /* CONFIG_HAVE_ARCH_HUGE_VMAP */
 
 #endif /* _ASM_E2K_VMALLOC_H */

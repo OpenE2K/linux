@@ -230,11 +230,21 @@ static int pb_type(struct mem_ctl_info *mci, int node, int mc, int pb, int *wtyp
 		dqw = mc_cfg.dqw;
 	}
 	switch (dqw) {
-		case 0: *wtype = DEV_X4;
-		case 1: *wtype = DEV_X8;
-		case 2: *wtype = DEV_X16;
-		case 3: *wtype = DEV_X32;
-		default: *wtype = DEV_UNKNOWN;
+	case 0:
+		*wtype = DEV_X4;
+		break;
+	case 1:
+		*wtype = DEV_X8;
+		break;
+	case 2:
+		*wtype = DEV_X16;
+		break;
+	case 3:
+		*wtype = DEV_X32;
+		break;
+	default:
+		*wtype = DEV_UNKNOWN;
+		break;
 	}
 	return pbtype;
 }
@@ -299,6 +309,9 @@ static int init_csrows(struct mem_ctl_info *mci)
 
 static inline int cpu_supported(void)
 {
+	if (cpu_has(CPU_FEAT_E48C_MAKET)) {
+		return 0;
+	}
 	return num_arch_nodes() > 0;
 }
 
@@ -317,8 +330,8 @@ static int pb_enable(int node, int mc, int pb) {
 }
 
 static ssize_t inject_data_error_show(struct device *dev,
-                                      struct device_attribute *mattr,
-                                      char *data)
+				      struct device_attribute *mattr,
+				      char *data)
 {       
 	return sprintf(data, "To generate single (recovered) ECC error:\n"
 		"echo node -> this_file\n");
@@ -624,9 +637,9 @@ static void send_edac_v7_single_error_message(int node, int mc, int pb, u16 cnt)
 	e2k_edac_dbg("%s", s);
 
 	edac_mc_handle_error(HW_EVENT_ERR_CORRECTED, mci,
-                             cnt, 0, 0, 0,
-                             node, mc, pb,
-                             "E2K MC", s);
+			     cnt, 0, 0, 0,
+			     node, mc, pb,
+			     "E2K MC", s);
 
 }
 

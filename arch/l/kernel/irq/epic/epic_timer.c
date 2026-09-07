@@ -1,3 +1,7 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
 
 #include <linux/clockchips.h>
 #include <linux/delay.h>
@@ -13,7 +17,7 @@
 
 #include "epic.h"
 
-const unsigned long cepic_timer_freq =
+unsigned long cepic_timer_freq =
 			CONFIG_CEPIC_TIMER_FREQUENCY * 1000000;
 static int cepic_timer_irq;
 static struct clock_event_device __percpu *cepic_timer_evt;
@@ -75,7 +79,7 @@ static int cepic_next_event(unsigned long delta,
 }
 
 /* Stop generating timer interrupts and mask them */
-static int cepic_timer_shutdown(struct clock_event_device *evt)
+int cepic_timer_shutdown(struct clock_event_device *evt)
 {
 	union cepic_timer_lvtt reg;
 
@@ -195,7 +199,7 @@ static int __init cepic_local_timer_of_register(struct device_node *np)
 		return ret;
 	}
 
-	ret = cpuhp_setup_state(CPUHP_AP_ONLINE_DYN,
+	ret = cpuhp_setup_state(CPUHP_AP_IRQ_E2K_TIMER_STARTING,
 				  "epic-timer:starting",
 				  cepic_timer_starting_cpu,
 				  cepic_timer_dying_cpu);

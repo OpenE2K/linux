@@ -139,7 +139,10 @@ static int hci_dat_v1_alloc_entry(struct i3c_hci *hci)
 
 	/* default flags */
 	dat_w0_write(dat_idx, DAT_0_SIR_REJECT | DAT_0_MR_REJECT);
-
+#ifdef CONFIG_MCST
+	/* rm25336, comm 111 */
+	dat_w1_write(dat_idx, FIELD_PREP(DAT_1_AUTOCMD_VALUE, 1));
+#endif
 	return dat_idx;
 }
 
@@ -218,13 +221,15 @@ static int hci_dat_v1_get_index(struct i3c_hci *hci, u8 dev_addr)
 	for_each_set_bit(dat_idx, hci->DAT_data, hci->DAT_entries) {
 		dat_w0 = dat_w0_read(dat_idx);
 #ifdef CONFIG_E2K
-		DBG("FIELD_GET(DAT_0_DYNAMIC_ADDRESS, dat_w0) = %ld",
-			FIELD_GET(DAT_0_DYNAMIC_ADDRESS, dat_w0));
+		DBG("FIELD_GET(DAT_0_DYNAMIC_ADDRESS, dat_w0) of index %d = %ld",
+			dat_idx, FIELD_GET(DAT_0_DYNAMIC_ADDRESS, dat_w0));
 #endif
 		if (FIELD_GET(DAT_0_DYNAMIC_ADDRESS, dat_w0) == dev_addr)
 			return dat_idx;
 	}
-
+#ifdef CONFIG_E2K
+	DBG(" returns -ENODEV\n");
+#endif
 	return -ENODEV;
 }
 

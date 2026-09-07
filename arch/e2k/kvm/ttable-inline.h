@@ -44,6 +44,8 @@ extern bool debug_guest_ust;
 #define	debug_guest_ust	false
 #endif /* DEBUG_PV_UST_MODE || DEBUG_PV_SYSCALL_MODE */
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+
 #define	CHECK_GUEST_SYSCALL_UPDATES
 
 #ifdef	CHECK_GUEST_VCPU_UPDATES
@@ -257,13 +259,13 @@ restore_guest_syscall_stack_regs(struct kvm_vcpu *vcpu, struct pt_regs *regs)
 		 * Update harware CRs registers values, stcak register will
 		 * be updated later before return to user
 		 */
-		NATIVE_RESTORE_USER_CRs(regs);
+		native_write_cr(regs->crs.cr0, regs->crs.cr1);
 		kvm_reset_guest_vcpu_regs_status(vcpu);
 		return;
 	}
 
 	if (unlikely(regs->sys_num == __NR_setcontext))
-		NATIVE_RESTORE_USER_CRs(regs);
+		native_write_cr(regs->crs.cr0, regs->crs.cr1);
 
 	regs_status = kvm_get_guest_vcpu_regs_status(vcpu);
 
@@ -433,7 +435,7 @@ void __noreturn return_to_injected_syscall_sw_fill(void);
 static __always_inline __noreturn
 void return_to_injected_syscall_switched_stacks(void)
 {
-	NATIVE_RESTORE_KERNEL_GREGS_IN_SYSCALL(current_thread_info());
+	machine.restore_local_gregs(&current->thread.u_gregs);
 
 	NATIVE_RETURN();
 
@@ -544,7 +546,7 @@ static __always_inline void guest_mkctxt_complete(void)
 	struct pt_regs regs;
 	struct local_gregs l_gregs;
 	e2k_aau_t aau_context;
-	u64 sbbp[SBBP_ENTRIES_NUM], wsz;
+	u64 wsz;
 	struct trap_pt_regs saved_trap;
 	unsigned long mmu_pid;
 	int ret;
@@ -572,8 +574,7 @@ static __always_inline void guest_mkctxt_complete(void)
 		do_exit(SIGKILL);
 	}
 
-	if (copy_context_from_signal_stack(&l_gregs, &regs, &saved_trap,
-					   sbbp, &aau_context, NULL)) {
+	if (copy_context_from_signal_stack(&regs, &saved_trap, &aau_context, NULL)) {
 		user_exit();
 		pr_err
 		    ("%s(): kill guest: copy context from signal stack failed\n",
@@ -597,7 +598,7 @@ static __always_inline void guest_mkctxt_complete(void)
 	/* Fill context from signal stack to gregs */
 	restore_guest_syscall_regs(vcpu, &regs);
 	update_pv_vcpu_local_glob_regs(vcpu, &l_gregs);
-	restore_local_glob_regs(&l_gregs, false);
+	// FIXME restore_local_glob_regs(&l_gregs, false);
 
 	/* Fill guest hw stack user regs */
 	COPY_U_HW_STACKS_TO_STACKS(&regs.g_stacks, &cur_g_stacks);
@@ -629,7 +630,6 @@ static __always_inline notrace void return_pv_vcpu_inject(inject_caller_t from)
 	struct trap_pt_regs saved_trap, *trap;
 	gthread_info_t *gti;
 	bool guest_user, user_stacks;
-	u64 sbbp[SBBP_ENTRIES_NUM];
 	struct k_sigaction ka;
 	e2k_aau_t aau_context;
 	struct local_gregs l_gregs;
@@ -641,7 +641,7 @@ static __always_inline notrace void return_pv_vcpu_inject(inject_caller_t from)
 	int ret;
 
 	gti = pv_vcpu_get_gti(vcpu);
-	COPY_U_HW_STACKS_FROM_TI(&cur_g_stacks, ti);
+	// FIXME COPY_U_HW_STACKS_FROM_TI(&cur_g_stacks, ti);
 	raw_all_irq_enable();
 
 #ifdef	CONFIG_KERNEL_TIMES_ACCOUNT
@@ -674,8 +674,7 @@ static __always_inline notrace void return_pv_vcpu_inject(inject_caller_t from)
 
 	E2K_KVM_BUG_ON(kvm_is_guest_migrated_to_other_vcpu(ti, vcpu));
 
-	if (copy_context_from_signal_stack(&l_gregs, &regs, &saved_trap,
-					   sbbp, &aau_context, &ka)) {
+	if (copy_context_from_signal_stack(&regs, &saved_trap, &aau_context, &ka)) {
 		user_exit();
 		pr_err("%s(): kill guest: copy context from signal stack failed\n",
 		     __func__);
@@ -792,13 +791,12 @@ static __always_inline notrace void return_pv_vcpu_inject(inject_caller_t from)
 	ti->pt_regs = &regs;
 
 	trap = regs.trap;
-	if (trap && (3 * trap->curr_cnt) < trap->tc_count && trap->tc_count > 0) {
-		trap->from_sigreturn = 1;
+	if (trap && (3 * trap->curr_cnt) < trap->tc_count && trap->tc_count > 0)
 		do_trap_cellar(&regs, 0);
-	}
 
 	clear_restore_sigmask();
 
+	//TODO copy-paste here copying of gregs
 	trace_pv_restore_l_gregs(vcpu, from, &l_gregs);
 
 	/* update "local" global registers which were changed */
@@ -806,6 +804,8 @@ static __always_inline notrace void return_pv_vcpu_inject(inject_caller_t from)
 	update_pv_vcpu_local_glob_regs(vcpu, &l_gregs);
 
 	if (!gti->task_is_binco) {
+// FIXME
+#if 0
 		/* Kernel has no so called "local" gregs so there is nothing
 		 * to restore if this trap happened in the guest kernel. */
 		if (regs.is_guest_user)
@@ -827,6 +827,7 @@ static __always_inline notrace void return_pv_vcpu_inject(inject_caller_t from)
 							    new_task);
 			E2K_KVM_BUG_ON(old_task != new_task);
 		}
+#endif
 	}
 
 	if (from == FROM_PV_VCPU_SYSCALL_INJECT) {
@@ -857,7 +858,7 @@ static __always_inline notrace void return_pv_vcpu_inject(inject_caller_t from)
 					regs.sys_rval = -EINTR;
 					break;
 				}
-				/* fallthrough */
+				fallthrough;
 			case -ERESTARTNOINTR:
 				restart_needed = true;
 				break;
@@ -885,7 +886,7 @@ static __always_inline notrace void pv_vcpu_return_from_fork(u64 sys_rval)
 	unsigned long mmu_pid;
 
 	gti = pv_vcpu_get_gti(vcpu);
-	COPY_U_HW_STACKS_FROM_TI(&cur_g_stacks, ti);
+	// FIXME COPY_U_HW_STACKS_FROM_TI(&cur_g_stacks, ti);
 	raw_all_irq_enable();
 
 	mmu_pid = current->mm->context.cpumsk[smp_processor_id()];
@@ -947,6 +948,7 @@ static __always_inline notrace void pv_vcpu_return_from_fork(u64 sys_rval)
 
 	finish_syscall(&regs, FROM_PV_VCPU_SYSFORK, true);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 #else /* !CONFIG_KVM_HOST_MODE */
 /* It is native guest kernel whithout virtualization support */
 /* Virtualiztion in guest mode cannot be supported */

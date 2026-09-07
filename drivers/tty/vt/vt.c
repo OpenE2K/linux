@@ -3573,6 +3573,9 @@ static const struct tty_operations con_ops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = vt_compat_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl = vt_ptr128_ioctl,
+#endif
 	.stop = con_stop,
 	.start = con_start,
 	.throttle = con_throttle,

@@ -8,6 +8,7 @@
 
 #include <linux/cpumask.h>
 #include <linux/clockchips.h>
+#include <linux/delay.h>
 #include <asm/cpu_features.h>
 
 static inline bool cpu_has_epic(void)
@@ -21,8 +22,8 @@ static inline bool cpu_has_epic(void)
 unsigned int read_pic_id(void);
 int pic_get_vector(void);
 void ack_pic_irq(void);
-
-
+void fixup_irqs_pic(void);
+void get_io_pic_msi(int node, u32 *lo, u32 *hi);
 
 bool boot_early_pic_is_bsp(void);
 unsigned int boot_early_pic_read_id(void);
@@ -43,4 +44,36 @@ static inline void local_pic_timer_interrupt(void)
 	else
 		local_apic_timer_interrupt(NULL);
 }
+
+extern void cepic_disable(void);
+extern void disable_local_APIC(void);
+
+static inline void pic_disable(void)
+{
+	if (cpu_has_epic())
+		cepic_disable();
+	else
+		disable_local_APIC();
+}
+
+struct seq_file;
+
+#ifdef CONFIG_EPIC
+extern void cpuinfo_epic(struct seq_file *);
+#else
+static inline void cpuinfo_epic(struct seq_file *m) { }
+#endif
+
+#ifdef CONFIG_L_LOCAL_APIC
+extern void cpuinfo_apic(struct seq_file *);
+#else
+static inline void cpuinfo_apic(struct seq_file *m) { }
+#endif
+
+static inline void cpuinfo_pic(struct seq_file *m)
+{
+	cpuinfo_epic(m);
+	cpuinfo_apic(m);
+}
+
 #endif	/* __ASM_E2K_PIC_H */

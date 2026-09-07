@@ -118,58 +118,12 @@ static enum getsp_action parse_getsp_literal_operand(e2k_addr_t trap_ip,
 
 static enum getsp_action get_getsp_greg(int greg_num, int *greg)
 {
-	struct thread_info *ti = current_thread_info();
-	register u32 gr;
-	u32 tag;
+	u32 gr, tag;
 
 	switch (greg_num) {
-	case 16:
-		NATIVE_LOAD_VAL_AND_TAGW(&ti->k_gregs.g[0].base, gr, tag);
-		break;
-	case 17:
-		NATIVE_LOAD_VAL_AND_TAGW(&ti->k_gregs.g[1].base, gr, tag);
-		break;
-	case 18:
-		NATIVE_LOAD_VAL_AND_TAGW(&ti->k_gregs.g[2].base, gr, tag);
-		break;
-	case 19:
-		NATIVE_LOAD_VAL_AND_TAGW(&ti->k_gregs.g[3].base, gr, tag);
-		break;
-	case 20:
-		E2K_GET_GREG_VAL_AND_TAG(20, gr, tag);
-		break;
-	case 21:
-		E2K_GET_GREG_VAL_AND_TAG(21, gr, tag);
-		break;
-	case 22:
-		E2K_GET_GREG_VAL_AND_TAG(22, gr, tag);
-		break;
-	case 23:
-		E2K_GET_GREG_VAL_AND_TAG(23, gr, tag);
-		break;
-	case 24:
-		E2K_GET_GREG_VAL_AND_TAG(24, gr, tag);
-		break;
-	case 25:
-		E2K_GET_GREG_VAL_AND_TAG(25, gr, tag);
-		break;
-	case 26:
-		E2K_GET_GREG_VAL_AND_TAG(26, gr, tag);
-		break;
-	case 27:
-		E2K_GET_GREG_VAL_AND_TAG(27, gr, tag);
-		break;
-	case 28:
-		E2K_GET_GREG_VAL_AND_TAG(28, gr, tag);
-		break;
-	case 29:
-		E2K_GET_GREG_VAL_AND_TAG(29, gr, tag);
-		break;
-	case 30:
-		E2K_GET_GREG_VAL_AND_TAG(30, gr, tag);
-		break;
-	case 31:
-		E2K_GET_GREG_VAL_AND_TAG(31, gr, tag);
+	case LOCAL_GREGS_START ... (LOCAL_GREGS_START + LOCAL_GREGS_NUM - 1):
+		NATIVE_LOAD_VAL_AND_TAGW(&current->thread.u_gregs.g[greg_num -
+						LOCAL_GREGS_START].base, gr, tag);
 		break;
 	default:
 		DebugUS("Invalid greg_num %d\n", greg_num);

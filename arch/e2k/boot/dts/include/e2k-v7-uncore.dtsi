@@ -1,0 +1,48 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
+#include <dt-bindings/interrupt-controller/irq.h>
+#include "apic-vectors.h"
+
+	LVT: LVT {
+		compatible = "mcst,epic-linp";
+		interrupt-parent = <&lpic>;
+		interrupt-controller;
+		numa-node-id = <NODE>;
+		nonposted-mmio;
+
+		#interrupt-cells = <3>;
+	};
+	SIC {
+		compatible = "mcst,sic";
+		/* reg = <0x1 0x10000000 0 0x100000>; not used */
+		nonposted-mmio;
+		interrupt-parent = <&LVT>;
+		numa-node-id = <NODE>;
+		interrupts = <LINP2_INTERRUPT_VECTOR 2 0>;
+	};
+	ltd@NODE,900 {
+		compatible = "mcst,ltd-tty";
+		reg = <NSR_ADDR(00900) 0 0x28>;
+		nonposted-mmio;
+		numa-node-id = <NODE>;
+		interrupt-parent = <&LVT>;
+		interrupts = <LINP6_INTERRUPT_VECTOR 6 0>;
+	};
+	PMC_FREQ: pmc_freq@NODE,1400 {
+		compatible = "mcst,pmc-freq";
+		reg = <NSR_ADDR(01400) 0 0x3f8>, <NSR_ADDR(00cc0) 0 0x8>;
+		numa-node-id = <NODE>;
+		nonposted-mmio;
+	};
+	PCSM_DRV: pcsm_drv@NODE,1008 {
+		compatible = "mcst,pcsm-drv";
+		reg = <NSR_ADDR(01008) 0 0x28>,
+		      <NSR_ADDR(010d0) 0 0x130>,
+		      <NSR_ADDR(01950) 0 0x4>,
+		      <NSR_ADDR(01910) 0 0x28>;
+		numa-node-id = <NODE>;
+		nonposted-mmio;
+	};

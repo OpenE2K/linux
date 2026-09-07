@@ -391,32 +391,6 @@ static inline void set_pgd_at(struct mm_struct *mm, unsigned long addr, pgd_t *p
 	native_set_pgd(pgdp, pgdval);
 }
 
-/*
- * Remap I/O pages at `pfn' of size `size' with page protection
- * `prot' into virtual address `from'.
- *
- * This function is used only on device memory and track_pfn_remap()
- * will explicitly set "External" memory type.
- *
- * As for remap_pfn_range(), it unfortunately can be used with anything,
- * so we rely on track_pfn_remap to check pfn and assign proper memory type:
- * https://lkml.org/lkml/2006/3/16/170
- *
- * "
- * remap_pfn_range() doesn't muck around with "struct page" AT ALL, so you
- * can pass it damn well anything you want these days. It doesn't care,
- * the VM doesn't care, there's no ref-counting or page flag checking
- * either on the mmap or the munmap parh.
- *
- * Normally, you'd use remap_pfn_range() only for special allocations.
- * Most commonly, it's not RAM at all, but the PCI MMIO memory window to
- * the hardware itself.
- * "
- */
-#define io_remap_pfn_range io_remap_pfn_range
-extern int io_remap_pfn_range(struct vm_area_struct *vma, unsigned long addr,
-			      unsigned long pfn, unsigned long size, pgprot_t prot);
-
 extern int memtype_reserve(phys_addr_t start, phys_addr_t end,
 			   enum page_cache_mode memtype, bool *cache_flush_needed);
 extern bool __must_check memtype_free_cacheflush(phys_addr_t start, phys_addr_t end);
@@ -446,8 +420,8 @@ extern void memtype_free(phys_addr_t start, phys_addr_t end);
  * The module space starts from end of resident kernel image and
  * both areas should be within 2 ** 30 bits of the virtual addresses.
  */
-#define MODULES_VADDR	E2K_MODULES_START	/* 0x0000 e200 0xxx x000 */
-#define MODULES_END	E2K_MODULES_END		/* 0x0000 e200 4000 0000 */
+#define MODULES_VADDR	E2K_MODULES_START
+#define MODULES_END	E2K_MODULES_END
 
 /* virtualization support */
 #include <asm/kvm/pgtable.h>
@@ -503,19 +477,6 @@ static inline int is_zero_pfn(unsigned long pfn)
 static inline u64 my_zero_pfn(unsigned long addr)
 {
 	return zero_page_nid_to_pfn[numa_node_id()];
-}
-
-static inline int is_zero_page(struct page *page)
-{
-	int node;
-
-#pragma loop count (4)
-	for_each_node_state(node, N_MEMORY) {
-		if (zero_page_nid_to_page[node] == page)
-			return 1;
-	}
-
-	return 0;
 }
 
 extern void paging_init(void);
@@ -645,6 +606,23 @@ static inline int kernel_image_duplicate_page_range(void *addr, size_t size,
 	return 0;
 }
 #endif
+
+#ifdef CONFIG_E2K_MODULES_DUPLICATION
+int duplicate_preallocated_pgds_for_modules_area(void);
+int duplicate_pgds_for_modules_area(void);
+int duplicate_module_pages(void *addr, size_t size, struct list_head *duplicated_pages);
+void deduplicate_module_pages(void *addr, size_t size, struct list_head *duplicated_pages);
+#else /* !CONFIG_E2K_MODULES_DUPLICATION */
+static inline int duplicate_module_pages(void *addr, size_t size,
+					 struct list_head *duplicated_pages)
+{
+	return 0;
+}
+static inline void deduplicate_module_pages(void *addr, size_t size,
+					    struct list_head *duplicated_pages)
+{
+}
+#endif /* CONFIG_E2K_MODULES_DUPLICATION */
 
 /* atomic versions of the some PTE manipulations */
 #include <asm/pgtable-atomic.h>

@@ -14,13 +14,14 @@
 
 #include <asm/sic_regs.h>
 #include <asm/e2k-iommu.h>
+#include <asm/pic.h>
 #include <uapi/asm/iset_ver.h>
 
 #include <asm-generic/tlb.h>
 
 #include "sic-nbsr.h"
 #include "mmu.h"
-#include "gaccess.h"
+#include "paravirt_sw/gaccess.h"
 #include "pic.h"
 #include "irq.h"
 
@@ -480,8 +481,8 @@ nbsr_set_rt_pciio_reg_v7(unsigned int start, unsigned int end)
 	e2k_rt_pciio_v7_t rt_pciio;
 
 	AW(rt_pciio) = 0;
-	rt_pciio.bgn = start >> E2K_SIC_ALIGN_RT_PCIIO;
-	rt_pciio.end = end >> E2K_SIC_ALIGN_RT_PCIIO;
+	rt_pciio.bgn = (start >> E2K_SIC_ALIGN_RT_PCIIO) & 0xff;
+	rt_pciio.end = (end >> E2K_SIC_ALIGN_RT_PCIIO) &0xff;
 	return AW(rt_pciio);
 }
 
@@ -491,8 +492,8 @@ nbsr_set_rt_pciio_reg_v6(unsigned int start, unsigned int end)
 	e2k_rt_pciio_t rt_pciio;
 
 	AW(rt_pciio) = 0;
-	rt_pciio.bgn = start >> E2K_SIC_ALIGN_RT_PCIIO;
-	rt_pciio.end = end >> E2K_SIC_ALIGN_RT_PCIIO;
+	rt_pciio.bgn = (start >> E2K_SIC_ALIGN_RT_PCIIO) & 0xff;
+	rt_pciio.end = (end >> E2K_SIC_ALIGN_RT_PCIIO) & 0xf;
 	return AW(rt_pciio);
 }
 
@@ -592,13 +593,9 @@ static inline void
 nbsr_debug_dump_rt_pcicfgb(int node_id, unsigned int reg_offset, bool write,
 			   unsigned int reg_value, char *reg_name)
 {
-	e2k_rt_pcicfgb_t rt_pcicfgb;
-
-	AW(rt_pcicfgb) = reg_value;
 	nbsr_debug("%s(): node #%d %s %s 0x%04x : %08x\n",
 		   __func__, node_id, (write) ? "write" : "read",
-		   reg_name, reg_offset,
-		   rt_pcicfgb.bgn << E2K_SIC_ALIGN_RT_PCICFGB);
+		   reg_name, reg_offset, reg_value);
 }
 
 static inline void
@@ -680,48 +677,96 @@ nbsr_debug_dump_prepic(int node_id, unsigned int reg_offset,
 		   reg_name, reg_offset);
 }
 
+static inline int
+node_nbsr_reg_get(struct kvm_nbsr *nbsr, int node_id, unsigned int reg_offset,
+				u32 *reg_val)
+{
+	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
+
+	*reg_val = node_nbsr->regs[offset_to_no(reg_offset)];
+
+	return 0;
+}
+
+static inline int
+node_nbsr_reg_set(struct kvm_nbsr *nbsr, int node, unsigned int reg_offset,
+				u32 reg_val)
+{
+	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node];
+
+	node_nbsr->regs[offset_to_no(reg_offset)] = reg_val;
+
+	return 0;
+}
+
+static inline int
+node_nbsr_reg_set_writemask(struct kvm_nbsr *nbsr, int node_id, unsigned int reg_offset,
+				u32 mask_val)
+{
+	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
+
+	node_nbsr->write_mask[offset_to_no(reg_offset)] = mask_val;
+	return 0;
+}
+
+static inline int
+node_nbsr_reg_read(struct kvm_nbsr *nbsr, int node_id, unsigned int reg_offset,
+				u32 *reg_val)
+{
+	return node_nbsr_reg_get(nbsr, node_id, reg_offset, reg_val);
+}
+
+static inline int
+node_nbsr_reg_write(struct kvm_nbsr *nbsr, int node_id, unsigned int reg_offset,
+				u32 reg_val)
+{
+	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
+	u32 write_mask = node_nbsr->write_mask[offset_to_no(reg_offset)];
+
+	return node_nbsr_reg_set(nbsr, node_id, reg_offset, reg_val & write_mask);
+}
+
 static int node_nbsr_read_rt_mem(struct kvm_nbsr *nbsr, int node_id,
 				 unsigned int reg_offset, u32 *reg_val)
 {
-	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
 	char *reg_name = "???";
 	bool is_rt_mhi = false;
 
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
 	case SIC_rt_mlo0:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_mlo0)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_mlo0, reg_val);
 		reg_name = "rt_mlo0";
 		break;
 	case SIC_rt_mlo1:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_mlo1)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_mlo1, reg_val);
 		reg_name = "rt_mlo1";
 		break;
 	case SIC_rt_mlo2:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_mlo2)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_mlo2, reg_val);
 		reg_name = "rt_mlo2";
 		break;
 	case SIC_rt_mlo3:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_mlo3)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_mlo3, reg_val);
 		reg_name = "rt_mlo3";
 		break;
 	case SIC_rt_mhi0:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_mhi0)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_mhi0, reg_val);
 		reg_name = "rt_mhi0";
 		is_rt_mhi = true;
 		break;
 	case SIC_rt_mhi1:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_mhi1)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_mhi1, reg_val);
 		reg_name = "rt_mhi1";
 		is_rt_mhi = true;
 		break;
 	case SIC_rt_mhi2:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_mhi2)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_mhi2, reg_val);
 		reg_name = "rt_mhi2";
 		is_rt_mhi = true;
 		break;
 	case SIC_rt_mhi3:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_mhi3)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_mhi3, reg_val);
 		reg_name = "rt_mhi3";
 		is_rt_mhi = true;
 		break;
@@ -743,45 +788,44 @@ static int node_nbsr_read_rt_mem(struct kvm_nbsr *nbsr, int node_id,
 static int node_nbsr_write_rt_mem(struct kvm_nbsr *nbsr, int node_id,
 				   unsigned int reg_offset, u32 reg_value)
 {
-	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
 	char *reg_name = "???";
 	bool is_rt_mhi = false;
 
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
 	case SIC_rt_mlo0:
-		node_nbsr->regs[offset_to_no(SIC_rt_mlo0)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_mlo0, reg_value);
 		reg_name = "rt_mlo0";
 		break;
 	case SIC_rt_mlo1:
-		node_nbsr->regs[offset_to_no(SIC_rt_mlo1)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_mlo1, reg_value);
 		reg_name = "rt_mlo1";
 		break;
 	case SIC_rt_mlo2:
-		node_nbsr->regs[offset_to_no(SIC_rt_mlo2)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_mlo2, reg_value);
 		reg_name = "rt_mlo2";
 		break;
 	case SIC_rt_mlo3:
-		node_nbsr->regs[offset_to_no(SIC_rt_mlo3)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_mlo3, reg_value);
 		reg_name = "rt_mlo3";
 		break;
 	case SIC_rt_mhi0:
-		node_nbsr->regs[offset_to_no(SIC_rt_mhi0)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_mhi0, reg_value);
 		reg_name = "rt_mhi0";
 		is_rt_mhi = true;
 		break;
 	case SIC_rt_mhi1:
-		node_nbsr->regs[offset_to_no(SIC_rt_mhi1)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_mhi1, reg_value);
 		reg_name = "rt_mhi1";
 		is_rt_mhi = true;
 		break;
 	case SIC_rt_mhi2:
-		node_nbsr->regs[offset_to_no(SIC_rt_mhi2)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_mhi2, reg_value);
 		reg_name = "rt_mhi2";
 		is_rt_mhi = true;
 		break;
 	case SIC_rt_mhi3:
-		node_nbsr->regs[offset_to_no(SIC_rt_mhi3)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_mhi3, reg_value);
 		reg_name = "rt_mhi3";
 		is_rt_mhi = true;
 		break;
@@ -802,25 +846,24 @@ static int node_nbsr_write_rt_mem(struct kvm_nbsr *nbsr, int node_id,
 static int node_nbsr_read_rt_lcfg(struct kvm_nbsr *nbsr, int node_id,
 				  unsigned int reg_offset, u32 *reg_val)
 {
-	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
 	char *reg_name = "???";
 
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
 	case SIC_rt_lcfg0:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_lcfg0)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_lcfg0, reg_val);
 		reg_name = "rt_lcfg0";
 		break;
 	case SIC_rt_lcfg1:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_lcfg1)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_lcfg1, reg_val);
 		reg_name = "rt_lcfg1";
 		break;
 	case SIC_rt_lcfg2:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_lcfg2)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_lcfg2, reg_val);
 		reg_name = "rt_lcfg2";
 		break;
 	case SIC_rt_lcfg3:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_lcfg3)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_lcfg3, reg_val);
 		reg_name = "rt_lcfg3";
 		break;
 	default:
@@ -836,25 +879,24 @@ static int node_nbsr_read_rt_lcfg(struct kvm_nbsr *nbsr, int node_id,
 static int node_nbsr_write_rt_lcfg(struct kvm_nbsr *nbsr, int node_id,
 				    unsigned int reg_offset, u32 reg_value)
 {
-	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
 	char *reg_name = "???";
 
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
 	case SIC_rt_lcfg0:
-		node_nbsr->regs[offset_to_no(SIC_rt_lcfg0)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_lcfg0, reg_value);
 		reg_name = "rt_lcfg0";
 		break;
 	case SIC_rt_lcfg1:
-		node_nbsr->regs[offset_to_no(SIC_rt_lcfg1)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_lcfg1, reg_value);
 		reg_name = "rt_lcfg1";
 		break;
 	case SIC_rt_lcfg2:
-		node_nbsr->regs[offset_to_no(SIC_rt_lcfg2)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_lcfg2, reg_value);
 		reg_name = "rt_lcfg2";
 		break;
 	case SIC_rt_lcfg3:
-		node_nbsr->regs[offset_to_no(SIC_rt_lcfg3)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_lcfg3, reg_value);
 		reg_name = "rt_lcfg3";
 		break;
 	default:
@@ -870,25 +912,24 @@ static int node_nbsr_write_rt_lcfg(struct kvm_nbsr *nbsr, int node_id,
 static int node_nbsr_read_rt_pcim(struct kvm_nbsr *nbsr, int node_id,
 				  unsigned int reg_offset, u32 *reg_val)
 {
-	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
 	char *reg_name = "???";
 
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
 	case SIC_rt_pcim0:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_pcim0)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_pcim0, reg_val);
 		reg_name = "rt_pcim0";
 		break;
 	case SIC_rt_pcim1:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_pcim1)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_pcim1, reg_val);
 		reg_name = "rt_pcim1";
 		break;
 	case SIC_rt_pcim2:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_pcim2)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_pcim2, reg_val);
 		reg_name = "rt_pcim2";
 		break;
 	case SIC_rt_pcim3:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_pcim3)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_pcim3, reg_val);
 		reg_name = "rt_pcim3";
 		break;
 	default:
@@ -904,25 +945,24 @@ static int node_nbsr_read_rt_pcim(struct kvm_nbsr *nbsr, int node_id,
 static int node_nbsr_write_rt_pcim(struct kvm_nbsr *nbsr, int node_id,
 				    unsigned int reg_offset, u32 reg_value)
 {
-	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
 	char *reg_name = "???";
 
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
 	case SIC_rt_pcim0:
-		node_nbsr->regs[offset_to_no(SIC_rt_pcim0)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_pcim0, reg_value);
 		reg_name = "rt_pcim0";
 		break;
 	case SIC_rt_pcim1:
-		node_nbsr->regs[offset_to_no(SIC_rt_pcim1)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_pcim1, reg_value);
 		reg_name = "rt_pcim1";
 		break;
 	case SIC_rt_pcim2:
-		node_nbsr->regs[offset_to_no(SIC_rt_pcim2)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_pcim2, reg_value);
 		reg_name = "rt_pcim2";
 		break;
 	case SIC_rt_pcim3:
-		node_nbsr->regs[offset_to_no(SIC_rt_pcim3)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_pcim3, reg_value);
 		reg_name = "rt_pcim3";
 		break;
 	default:
@@ -938,25 +978,24 @@ static int node_nbsr_write_rt_pcim(struct kvm_nbsr *nbsr, int node_id,
 static int node_nbsr_read_rt_pciio(struct kvm_nbsr *nbsr, int node_id,
 				   unsigned int reg_offset, u32 *reg_val)
 {
-	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
 	char *reg_name = "???";
 
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
 	case SIC_rt_pciio0:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_pciio0)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_pciio0, reg_val);
 		reg_name = "rt_pciio0";
 		break;
 	case SIC_rt_pciio1:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_pciio1)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_pciio1, reg_val);
 		reg_name = "rt_pciio1";
 		break;
 	case SIC_rt_pciio2:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_pciio2)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_pciio2, reg_val);
 		reg_name = "rt_pciio2";
 		break;
 	case SIC_rt_pciio3:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_pciio3)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_pciio3, reg_val);
 		reg_name = "rt_pciio3";
 		break;
 	default:
@@ -973,25 +1012,24 @@ static int node_nbsr_read_rt_pciio(struct kvm_nbsr *nbsr, int node_id,
 static int node_nbsr_write_rt_pciio(struct kvm_nbsr *nbsr, int node_id,
 				     unsigned int reg_offset, u32 reg_value)
 {
-	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
 	char *reg_name = "???";
 
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
 	case SIC_rt_pciio0:
-		node_nbsr->regs[offset_to_no(SIC_rt_pciio0)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_pciio0, reg_value);
 		reg_name = "rt_pciio0";
 		break;
 	case SIC_rt_pciio1:
-		node_nbsr->regs[offset_to_no(SIC_rt_pciio1)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_pciio1, reg_value);
 		reg_name = "rt_pciio1";
 		break;
 	case SIC_rt_pciio2:
-		node_nbsr->regs[offset_to_no(SIC_rt_pciio2)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_pciio2, reg_value);
 		reg_name = "rt_pciio2";
 		break;
 	case SIC_rt_pciio3:
-		node_nbsr->regs[offset_to_no(SIC_rt_pciio3)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_pciio3, reg_value);
 		reg_name = "rt_pciio3";
 		break;
 	default:
@@ -1008,36 +1046,33 @@ static int node_nbsr_write_rt_pciio(struct kvm_nbsr *nbsr, int node_id,
 static int node_nbsr_read_rt_pcim_xmu(struct kvm_nbsr *nbsr, int node_id,
 				      char xmu_k, u32 *reg_val)
 {
-	kvm_nbsr_regs_t *node_nbsr;
 	unsigned int reg_offset;
 	char *reg_name;
-
-	node_nbsr = &nbsr->nodes[node_id];
 
 	mutex_lock(&nbsr->lock);
 	switch (xmu_k) {
 	case RT_XMU_l:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_pcim0_xmu_l)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_pcim0_xmu_l, reg_val);
 		reg_offset = SIC_rt_pcim0_xmu_l;
 		reg_name = "SIC_rt_pcim0_xmu_l";
 		break;
 	case RT_XMU_a:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_pcim0_xmu_a)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_pcim0_xmu_a, reg_val);
 		reg_offset = SIC_rt_pcim0_xmu_a;
 		reg_name = "SIC_rt_pcim0_xmu_a";
 		break;
 	case RT_XMU_b:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_pcim0_xmu_b)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_pcim0_xmu_b, reg_val);
 		reg_offset = SIC_rt_pcim0_xmu_b;
 		reg_name = "SIC_rt_pcim0_xmu_b";
 		break;
 	case RT_XMU_c:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_pcim0_xmu_c)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_pcim0_xmu_c, reg_val);
 		reg_offset = SIC_rt_pcim0_xmu_c;
 		reg_name = "SIC_rt_pcim0_xmu_c";
 		break;
 	case RT_XMU_d:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_pcim0_xmu_d)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_pcim0_xmu_d, reg_val);
 		reg_offset = SIC_rt_pcim0_xmu_d;
 		reg_name = "SIC_rt_pcim0_xmu_d";
 		break;
@@ -1059,36 +1094,33 @@ static int node_nbsr_read_rt_pcim_xmu(struct kvm_nbsr *nbsr, int node_id,
 static int node_nbsr_write_rt_pcim_xmu(struct kvm_nbsr *nbsr, int node_id,
 					char xmu_k, u32 reg_value)
 {
-	kvm_nbsr_regs_t *node_nbsr;
 	unsigned int reg_offset;
 	char *reg_name;
-
-	node_nbsr = &nbsr->nodes[node_id];
 
 	mutex_lock(&nbsr->lock);
 	switch (xmu_k) {
 	case RT_XMU_l:
-		node_nbsr->regs[offset_to_no(SIC_rt_pcim0_xmu_l)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_pcim0_xmu_l, reg_value);
 		reg_offset = SIC_rt_pcim0_xmu_l;
 		reg_name = "rt_pcim0_xmu_l";
 		break;
 	case RT_XMU_a:
-		node_nbsr->regs[offset_to_no(SIC_rt_pcim0_xmu_a)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_pcim0_xmu_a, reg_value);
 		reg_offset = SIC_rt_pcim0_xmu_a;
 		reg_name = "rt_pcim0_xmu_a";
 		break;
 	case RT_XMU_b:
-		node_nbsr->regs[offset_to_no(SIC_rt_pcim0_xmu_b)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_pcim0_xmu_b, reg_value);
 		reg_offset = SIC_rt_pcim0_xmu_b;
 		reg_name = "rt_pcim0_xmu_b";
 		break;
 	case RT_XMU_c:
-		node_nbsr->regs[offset_to_no(SIC_rt_pcim0_xmu_c)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_pcim0_xmu_c, reg_value);
 		reg_offset = SIC_rt_pcim0_xmu_c;
 		reg_name = "rt_pcim0_xmu_c";
 		break;
 	case RT_XMU_d:
-		node_nbsr->regs[offset_to_no(SIC_rt_pcim0_xmu_d)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_pcim0_xmu_d, reg_value);
 		reg_offset = SIC_rt_pcim0_xmu_d;
 		reg_name = "rt_pcim0_xmu_d";
 		break;
@@ -1108,36 +1140,33 @@ static int node_nbsr_write_rt_pcim_xmu(struct kvm_nbsr *nbsr, int node_id,
 static int node_nbsr_read_rt_pciio_xmu(struct kvm_nbsr *nbsr, int node_id,
 				       char xmu_k, u32 *reg_val)
 {
-	kvm_nbsr_regs_t *node_nbsr;
 	unsigned int reg_offset;
 	char *reg_name;
-
-	node_nbsr = &nbsr->nodes[node_id];
 
 	mutex_lock(&nbsr->lock);
 	switch (xmu_k) {
 	case RT_XMU_l:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_pciio0_xmu_l)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_pciio0_xmu_l, reg_val);
 		reg_offset = SIC_rt_pciio0_xmu_l;
 		reg_name = "rt_pciio0_xmu_l";
 		break;
 	case RT_XMU_a:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_pciio0_xmu_a)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_pciio0_xmu_a, reg_val);
 		reg_offset = SIC_rt_pciio0_xmu_a;
 		reg_name = "rt_pciio0_xmu_a";
 		break;
 	case RT_XMU_b:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_pciio0_xmu_b)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_pciio0_xmu_b, reg_val);
 		reg_offset = SIC_rt_pciio0_xmu_b;
 		reg_name = "rt_pciio0_xmu_b";
 		break;
 	case RT_XMU_c:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_pciio0_xmu_c)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_pciio0_xmu_c, reg_val);
 		reg_offset = SIC_rt_pciio0_xmu_c;
 		reg_name = "rt_pciio0_xmu_c";
 		break;
 	case RT_XMU_d:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_pciio0_xmu_d)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_pciio0_xmu_d, reg_val);
 		reg_offset = SIC_rt_pciio0_xmu_d;
 		reg_name = "rt_pciio0_xmu_d";
 		break;
@@ -1159,36 +1188,33 @@ static int node_nbsr_read_rt_pciio_xmu(struct kvm_nbsr *nbsr, int node_id,
 static int node_nbsr_write_rt_pciio_xmu(struct kvm_nbsr *nbsr, int node_id,
 					 char xmu_k, u32 reg_value)
 {
-	kvm_nbsr_regs_t *node_nbsr;
 	unsigned int reg_offset;
 	char *reg_name;
-
-	node_nbsr = &nbsr->nodes[node_id];
 
 	mutex_lock(&nbsr->lock);
 	switch (xmu_k) {
 	case RT_XMU_l:
-		node_nbsr->regs[offset_to_no(SIC_rt_pciio0_xmu_l)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_pcim0_xmu_l, reg_value);
 		reg_offset = SIC_rt_pciio0_xmu_l;
 		reg_name = "rt_pciio0_xmu_l";
 		break;
 	case RT_XMU_a:
-		node_nbsr->regs[offset_to_no(SIC_rt_pciio0_xmu_a)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_pcim0_xmu_a, reg_value);
 		reg_offset = SIC_rt_pciio0_xmu_a;
 		reg_name = "rt_pciio0_xmu_a";
 		break;
 	case RT_XMU_b:
-		node_nbsr->regs[offset_to_no(SIC_rt_pciio0_xmu_b)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_pcim0_xmu_b, reg_value);
 		reg_offset = SIC_rt_pciio0_xmu_b;
 		reg_name = "rt_pciio0_xmu_b";
 		break;
 	case RT_XMU_c:
-		node_nbsr->regs[offset_to_no(SIC_rt_pciio0_xmu_c)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_pcim0_xmu_c, reg_value);
 		reg_offset = SIC_rt_pciio0_xmu_b;
 		reg_name = "rt_pciio0_xmu_c";
 		break;
 	case RT_XMU_d:
-		node_nbsr->regs[offset_to_no(SIC_rt_pciio0_xmu_d)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_pcim0_xmu_d, reg_value);
 		reg_offset = SIC_rt_pciio0_xmu_b;
 		reg_name = "rt_pciio0_xmu_d";
 		break;
@@ -1208,25 +1234,24 @@ static int node_nbsr_write_rt_pciio_xmu(struct kvm_nbsr *nbsr, int node_id,
 static int node_nbsr_read_rt_pcimp_b(struct kvm_nbsr *nbsr, int node_id,
 				     unsigned int reg_offset, u32 *reg_val)
 {
-	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
 	char *reg_name = "???";
 
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
 	case SIC_rt_pcimp_b0:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_pcimp_b0)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_pcimp_b0, reg_val);
 		reg_name = "rt_pcimp_b0";
 		break;
 	case SIC_rt_pcimp_b1:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_pcimp_b1)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_pcimp_b1, reg_val);
 		reg_name = "rt_pcimp_b1";
 		break;
 	case SIC_rt_pcimp_b2:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_pcimp_b2)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_pcimp_b2, reg_val);
 		reg_name = "rt_pcimp_b2";
 		break;
 	case SIC_rt_pcimp_b3:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_pcimp_b3)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_pcimp_b3, reg_val);
 		reg_name = "rt_pcimp_b3";
 		break;
 	default:
@@ -1242,25 +1267,24 @@ static int node_nbsr_read_rt_pcimp_b(struct kvm_nbsr *nbsr, int node_id,
 static int node_nbsr_read_rt_pcimp_e(struct kvm_nbsr *nbsr, int node_id,
 				     unsigned int reg_offset, u32 *reg_val)
 {
-	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
 	char *reg_name = "???";
 
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
 	case SIC_rt_pcimp_e0:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_pcimp_e0)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_pcimp_e0, reg_val);
 		reg_name = "rt_pcimp_e0";
 		break;
 	case SIC_rt_pcimp_e1:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_pcimp_e1)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_pcimp_e1, reg_val);
 		reg_name = "rt_pcimp_e1";
 		break;
 	case SIC_rt_pcimp_e2:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_pcimp_e2)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_pcimp_e2, reg_val);
 		reg_name = "rt_pcimp_e2";
 		break;
 	case SIC_rt_pcimp_e3:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_pcimp_e3)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_pcimp_e3, reg_val);
 		reg_name = "rt_pcimp_e3";
 		break;
 	default:
@@ -1276,36 +1300,33 @@ static int node_nbsr_read_rt_pcimp_e(struct kvm_nbsr *nbsr, int node_id,
 static int node_nbsr_read_rt_pcimp_b_xmu(struct kvm_nbsr *nbsr, int node_id,
 					 char xmu_k, u32 *reg_val)
 {
-	kvm_nbsr_regs_t *node_nbsr;
 	unsigned int reg_offset;
 	char *reg_name;
-
-	node_nbsr = &nbsr->nodes[node_id];
 
 	mutex_lock(&nbsr->lock);
 	switch (xmu_k) {
 	case RT_XMU_l:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_pcimp0_xmu_l_bgn)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_pcimp0_xmu_l_bgn, reg_val);
 		reg_offset = SIC_rt_pcimp0_xmu_l_bgn;
 		reg_name = "SIC_rt_pcimp0_xmu_l_bgn";
 		break;
 	case RT_XMU_a:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_pcimp0_xmu_a_bgn)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_pcimp0_xmu_a_bgn, reg_val);
 		reg_offset = SIC_rt_pcimp0_xmu_a_bgn;
 		reg_name = "SIC_rt_pcimp0_xmu_a_bgn";
 		break;
 	case RT_XMU_b:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_pcimp0_xmu_b_bgn)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_pcimp0_xmu_b_bgn, reg_val);
 		reg_offset = SIC_rt_pcimp0_xmu_b_bgn;
 		reg_name = "SIC_rt_pcimp0_xmu_b_bgn";
 		break;
 	case RT_XMU_c:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_pcimp0_xmu_c_bgn)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_pcimp0_xmu_c_bgn, reg_val);
 		reg_offset = SIC_rt_pcimp0_xmu_c_bgn;
 		reg_name = "SIC_rt_pcimp0_xmu_c_bgn";
 		break;
 	case RT_XMU_d:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_pcimp0_xmu_d_bgn)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_pcimp0_xmu_d_bgn, reg_val);
 		reg_offset = SIC_rt_pcimp0_xmu_d_bgn;
 		reg_name = "SIC_rt_pcimp0_xmu_d_bgn";
 		break;
@@ -1327,36 +1348,33 @@ static int node_nbsr_read_rt_pcimp_b_xmu(struct kvm_nbsr *nbsr, int node_id,
 static int node_nbsr_write_rt_pcimp_b_xmu(struct kvm_nbsr *nbsr, int node_id,
 					   char xmu_k, u32 reg_value)
 {
-	kvm_nbsr_regs_t *node_nbsr;
 	unsigned int reg_offset;
 	char *reg_name;
-
-	node_nbsr = &nbsr->nodes[node_id];
 
 	mutex_lock(&nbsr->lock);
 	switch (xmu_k) {
 	case RT_XMU_l:
-		node_nbsr->regs[offset_to_no(SIC_rt_pcimp0_xmu_l_bgn)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_pcimp0_xmu_l_bgn, reg_value);
 		reg_offset = SIC_rt_pcimp0_xmu_l_bgn;
 		reg_name = "SIC_rt_pcimp0_xmu_l_bgn";
 		break;
 	case RT_XMU_a:
-		node_nbsr->regs[offset_to_no(SIC_rt_pcimp0_xmu_a_bgn)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_pcimp0_xmu_a_bgn, reg_value);
 		reg_offset = SIC_rt_pcimp0_xmu_a_bgn;
 		reg_name = "SIC_rt_pcimp0_xmu_a_bgn";
 		break;
 	case RT_XMU_b:
-		node_nbsr->regs[offset_to_no(SIC_rt_pcimp0_xmu_b_bgn)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_pcimp0_xmu_b_bgn, reg_value);
 		reg_offset = SIC_rt_pcimp0_xmu_b_bgn;
 		reg_name = "SIC_rt_pcimp0_xmu_b_bgn";
 		break;
 	case RT_XMU_c:
-		node_nbsr->regs[offset_to_no(SIC_rt_pcimp0_xmu_c_bgn)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_pcimp0_xmu_c_bgn, reg_value);
 		reg_offset = SIC_rt_pcimp0_xmu_c_bgn;
 		reg_name = "SIC_rt_pcimp0_xmu_c_bgn";
 		break;
 	case RT_XMU_d:
-		node_nbsr->regs[offset_to_no(SIC_rt_pcimp0_xmu_d_bgn)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_pcimp0_xmu_d_bgn, reg_value);
 		reg_offset = SIC_rt_pcimp0_xmu_d_bgn;
 		reg_name = "SIC_rt_pcimp0_xmu_d_bgn";
 		break;
@@ -1376,36 +1394,33 @@ static int node_nbsr_write_rt_pcimp_b_xmu(struct kvm_nbsr *nbsr, int node_id,
 static int node_nbsr_read_rt_pcimp_e_xmu(struct kvm_nbsr *nbsr, int node_id,
 					 char xmu_k, u32 *reg_val)
 {
-	kvm_nbsr_regs_t *node_nbsr;
 	unsigned int reg_offset;
 	char *reg_name;
-
-	node_nbsr = &nbsr->nodes[node_id];
 
 	mutex_lock(&nbsr->lock);
 	switch (xmu_k) {
 	case RT_XMU_l:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_pcimp0_xmu_l_end)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_pcimp0_xmu_l_end, reg_val);
 		reg_offset = SIC_rt_pcimp0_xmu_l_end;
 		reg_name = "SIC_rt_pcimp0_xmu_l_end";
 		break;
 	case RT_XMU_a:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_pcimp0_xmu_a_end)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_pcimp0_xmu_a_end, reg_val);
 		reg_offset = SIC_rt_pcimp0_xmu_a_end;
 		reg_name = "SIC_rt_pcimp0_xmu_a_end";
 		break;
 	case RT_XMU_b:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_pcimp0_xmu_b_end)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_pcimp0_xmu_b_end, reg_val);
 		reg_offset = SIC_rt_pcimp0_xmu_b_end;
 		reg_name = "SIC_rt_pcimp0_xmu_b_end";
 		break;
 	case RT_XMU_c:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_pcimp0_xmu_c_end)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_pcimp0_xmu_c_end, reg_val);
 		reg_offset = SIC_rt_pcimp0_xmu_c_end;
 		reg_name = "SIC_rt_pcimp0_xmu_c_end";
 		break;
 	case RT_XMU_d:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_pcimp0_xmu_d_end)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_pcimp0_xmu_d_end, reg_val);
 		reg_offset = SIC_rt_pcimp0_xmu_d_end;
 		reg_name = "SIC_rt_pcimp0_xmu_d_end";
 		break;
@@ -1443,12 +1458,15 @@ static int node_nbsr_write_esclkr(struct kvm_nbsr *nbsr, int node_id,
 static int node_nbsr_read_rt_pcicfgb(struct kvm_nbsr *nbsr, int node_id,
 				     unsigned int reg_offset, u32 *reg_val)
 {
-	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
 	char *reg_name;
 
 	mutex_lock(&nbsr->lock);
-	*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_pcicfgb)];
-	reg_name = "rt_pcicfgb";
+	node_nbsr_reg_read(nbsr, node_id, SIC_rt_pcicfgb, reg_val);
+	if (nbsr->iset_no >= E2K_ISET_V7) {
+		reg_name = "rt_pcicfg_bgn";
+	} else {
+		reg_name = "rt_pcicfgb";
+	}
 	mutex_unlock(&nbsr->lock);
 
 	nbsr_debug_dump_rt_pcicfgb(node_id, reg_offset, false, *reg_val, reg_name);
@@ -1458,25 +1476,24 @@ static int node_nbsr_read_rt_pcicfgb(struct kvm_nbsr *nbsr, int node_id,
 static int node_nbsr_write_rt_pcimp_b(struct kvm_nbsr *nbsr, int node_id,
 				       unsigned int reg_offset, u32 reg_value)
 {
-	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
 	char *reg_name = "???";
 
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
 	case SIC_rt_pcimp_b0:
-		node_nbsr->regs[offset_to_no(SIC_rt_pcimp_b0)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_pcimp_b0, reg_value);
 		reg_name = "rt_pcimp_b0";
 		break;
 	case SIC_rt_pcimp_b1:
-		node_nbsr->regs[offset_to_no(SIC_rt_pcimp_b1)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_pcimp_b1, reg_value);
 		reg_name = "rt_pcimp_b1";
 		break;
 	case SIC_rt_pcimp_b2:
-		node_nbsr->regs[offset_to_no(SIC_rt_pcimp_b2)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_pcimp_b2, reg_value);
 		reg_name = "rt_pcimp_b2";
 		break;
 	case SIC_rt_pcimp_b3:
-		node_nbsr->regs[offset_to_no(SIC_rt_pcimp_b3)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_pcimp_b3, reg_value);
 		reg_name = "rt_pcimp_b3";
 		break;
 	default:
@@ -1492,25 +1509,24 @@ static int node_nbsr_write_rt_pcimp_b(struct kvm_nbsr *nbsr, int node_id,
 static int node_nbsr_write_rt_pcimp_e(struct kvm_nbsr *nbsr, int node_id,
 				       unsigned int reg_offset, u32 reg_value)
 {
-	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
 	char *reg_name = "???";
 
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
 	case SIC_rt_pcimp_e0:
-		node_nbsr->regs[offset_to_no(SIC_rt_pcimp_e0)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_pcimp_e0, reg_value);
 		reg_name = "rt_pcimp_e0";
 		break;
 	case SIC_rt_pcimp_e1:
-		node_nbsr->regs[offset_to_no(SIC_rt_pcimp_e1)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_pcimp_e1, reg_value);
 		reg_name = "rt_pcimp_e1";
 		break;
 	case SIC_rt_pcimp_e2:
-		node_nbsr->regs[offset_to_no(SIC_rt_pcimp_e2)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_pcimp_e2, reg_value);
 		reg_name = "rt_pcimp_e2";
 		break;
 	case SIC_rt_pcimp_e3:
-		node_nbsr->regs[offset_to_no(SIC_rt_pcimp_e3)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_pcimp_e3, reg_value);
 		reg_name = "rt_pcimp_e3";
 		break;
 	default:
@@ -1526,41 +1542,42 @@ static int node_nbsr_write_rt_pcimp_e(struct kvm_nbsr *nbsr, int node_id,
 static int node_nbsr_write_rt_pcicfgb(struct kvm_nbsr *nbsr, int node_id,
 				       unsigned int reg_offset, u32 reg_value)
 {
-	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
 	char *reg_name;
 
 	mutex_lock(&nbsr->lock);
-	node_nbsr->regs[offset_to_no(SIC_rt_pcicfgb)] = reg_value;
-	reg_name = "rt_pcicfgb";
+	node_nbsr_reg_write(nbsr, node_id, SIC_rt_pcicfgb, reg_value);
+	if (nbsr->iset_no >= E2K_ISET_V7) {
+		reg_name = "rt_pcicfg_bgn";
+	} else {
+		reg_name = "rt_pcicfgb";
+	}
 	mutex_unlock(&nbsr->lock);
 
-	nbsr_debug_dump_rt_pcicfgb(node_id, reg_offset, true, reg_value,
-				   reg_name);
+	nbsr_debug_dump_rt_pcicfgb(node_id, reg_offset, true, reg_value, reg_name);
 	return -EOPNOTSUPP;
 }
 
 static int node_nbsr_read_rt_ioapic(struct kvm_nbsr *nbsr, int node_id,
 				    unsigned int reg_offset, u32 *reg_val)
 {
-	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
 	char *reg_name = "???";
 
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
 	case SIC_rt_ioapic0:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_ioapic0)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_ioapic0, reg_val);
 		reg_name = "rt_ioapic0";
 		break;
 	case SIC_rt_ioapic1:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_ioapic1)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_ioapic1, reg_val);
 		reg_name = "rt_ioapic1";
 		break;
 	case SIC_rt_ioapic2:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_ioapic2)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_ioapic2, reg_val);
 		reg_name = "rt_ioapic2";
 		break;
 	case SIC_rt_ioapic3:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_ioapic3)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_ioapic3, reg_val);
 		reg_name = "rt_ioapic3";
 		break;
 	default:
@@ -1576,25 +1593,24 @@ static int node_nbsr_read_rt_ioapic(struct kvm_nbsr *nbsr, int node_id,
 static int node_nbsr_write_rt_ioapic(struct kvm_nbsr *nbsr, int node_id,
 				      unsigned int reg_offset, u32 reg_value)
 {
-	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
 	char *reg_name = "???";
 
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
 	case SIC_rt_ioapic0:
-		node_nbsr->regs[offset_to_no(SIC_rt_ioapic0)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_ioapic0, reg_value);
 		reg_name = "rt_ioapic0";
 		break;
 	case SIC_rt_ioapic1:
-		node_nbsr->regs[offset_to_no(SIC_rt_ioapic1)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_ioapic1, reg_value);
 		reg_name = "rt_ioapic1";
 		break;
 	case SIC_rt_ioapic2:
-		node_nbsr->regs[offset_to_no(SIC_rt_ioapic2)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_ioapic2, reg_value);
 		reg_name = "rt_ioapic2";
 		break;
 	case SIC_rt_ioapic3:
-		node_nbsr->regs[offset_to_no(SIC_rt_ioapic3)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_ioapic3, reg_value);
 		reg_name = "rt_ioapic3";
 		break;
 	default:
@@ -1610,16 +1626,14 @@ static int node_nbsr_write_rt_ioapic(struct kvm_nbsr *nbsr, int node_id,
 static int node_nbsr_read_rt_msi(struct kvm_nbsr *nbsr, int node_id,
 				 unsigned int reg_offset, u32 *reg_val)
 {
-	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
-
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
 	case SIC_rt_msi:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_msi)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_msi, reg_val);
 		nbsr_debug_dump_rt_msi(node_id, reg_offset, false, *reg_val, "rt_msi");
 		break;
 	case SIC_rt_msi_h:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_msi_h)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_rt_msi_h, reg_val);
 		nbsr_debug_dump_rt_msi_h(node_id, reg_offset, false, *reg_val, "rt_msi_h");
 		break;
 	default:
@@ -1631,13 +1645,23 @@ static int node_nbsr_read_rt_msi(struct kvm_nbsr *nbsr, int node_id,
 	return 0;
 }
 
+static int node_nbsr_read_pmc_info(struct kvm_nbsr *nbsr, int node_id,
+					unsigned int reg_offset, u32 *reg_val)
+{
+	e2k_idr_t idr = read_IDR_reg();
+	u8 mdl = idr.mdl;
+	u8 rev = idr.rev;
+
+	*reg_val = rev << 8 | mdl;
+
+	return 0;
+}
+
 static int node_nbsr_read_pmc(struct kvm_nbsr *nbsr, int node_id,
 			      unsigned int reg_offset, u32 *reg_val)
 {
-	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
-
 	mutex_lock(&nbsr->lock);
-	*reg_val = node_nbsr->regs[offset_to_no(reg_offset)];
+	node_nbsr_reg_read(nbsr, node_id, reg_offset, reg_val);
 	mutex_unlock(&nbsr->lock);
 
 	nbsr_debug_dump_pmc(node_id, reg_offset, false, *reg_val, "pmc_sleep");
@@ -1648,12 +1672,10 @@ static int node_nbsr_read_pmc(struct kvm_nbsr *nbsr, int node_id,
 static int node_nbsr_read_l3(struct kvm_nbsr *nbsr, int node_id,
 			     unsigned int reg_offset, u32 *reg_val)
 {
-	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
-
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
 	case SIC_l3_ctrl:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_l3_ctrl)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_l3_ctrl, reg_val);
 		nbsr_debug_dump_l3(node_id, reg_offset, false, *reg_val, "l3_ctrl");
 		break;
 	default:
@@ -1665,30 +1687,86 @@ static int node_nbsr_read_l3(struct kvm_nbsr *nbsr, int node_id,
 	return 0;
 }
 
+static int node_nbsr_read_iommu(struct kvm_nbsr *nbsr, int node_id,
+				  unsigned int reg_offset, u32 *reg_val)
+{
+	char *reg_name = "???";
+	int ret;
+
+	mutex_lock(&nbsr->lock);
+	switch (reg_offset) {
+	/* SIC_iommu_err is emulated only in qemu */
+	case SIC_iommu_err:
+		ret = -EOPNOTSUPP;
+		reg_name = "iommu_err";
+		break;
+	/* SIC_iommu_err_info_hi is emulated only in qemu */
+	case SIC_iommu_err_info_lo:
+		ret = -EOPNOTSUPP;
+		reg_name = "iommu_err_info";
+		break;
+	case SIC_iommu_mcr:
+		ret = 0;
+		node_nbsr_reg_read(nbsr, node_id, SIC_iommu_mcr, reg_val);
+		reg_name = "iommu_mcr";
+		break;
+	case SIC_iommu_mid:
+		ret = 0;
+		node_nbsr_reg_read(nbsr, node_id, SIC_iommu_mid, reg_val);
+		reg_name = "iommu_mid";
+		break;
+	case SIC_iommu_mar0_lo:
+		ret = 0;
+		node_nbsr_reg_read(nbsr, node_id, SIC_iommu_mar0_lo, reg_val);
+		reg_name = "iommu_mar0_lo";
+		break;
+	case SIC_iommu_mar0_hi:
+		ret = 0;
+		node_nbsr_reg_read(nbsr, node_id, SIC_iommu_mar0_hi, reg_val);
+		reg_name = "iommu_mar0_hi";
+		break;
+	case SIC_iommu_mar1_lo:
+		ret = 0;
+		node_nbsr_reg_read(nbsr, node_id, SIC_iommu_mar1_lo, reg_val);
+		reg_name = "iommu_mar1_lo";
+		break;
+	case SIC_iommu_mar1_hi:
+		ret = 0;
+		node_nbsr_reg_read(nbsr, node_id, SIC_iommu_mar1_hi, reg_val);
+		reg_name = "iommu_mar1_hi";
+		break;
+	default:
+		WARN_ON_ONCE(1);
+		ret = -EOPNOTSUPP;
+		break;
+	}
+	mutex_unlock(&nbsr->lock);
+
+	nbsr_debug_dump_iommu(node_id, reg_offset, false, *reg_val, reg_name, false);
+	return ret;
+}
+
 static int node_nbsr_readll_iommu(struct kvm_nbsr *nbsr, int node_id,
 				  unsigned int reg_offset, u64 *reg_val)
 {
-	kvm_nbsr_regs_t *node_nbsr;
 	char *reg_name = "???";
 	int ret;
-	u64 reg_lo, reg_hi;
-
-	node_nbsr = &nbsr->nodes[node_id];
+	u32 reg_lo, reg_hi;
 
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
 	case SIC_iommu_ba_lo:
 		ret = 0;
-		reg_lo = node_nbsr->regs[offset_to_no(SIC_iommu_ba_lo)];
-		reg_hi = node_nbsr->regs[offset_to_no(SIC_iommu_ba_hi)];
-		*reg_val = reg_lo | (reg_hi << 32);
+		node_nbsr_reg_read(nbsr, node_id, SIC_iommu_ba_lo, &reg_lo);
+		node_nbsr_reg_read(nbsr, node_id, SIC_iommu_ba_hi, &reg_hi);
+		*reg_val = reg_lo | ((u64)reg_hi << 32);
 		reg_name = "iommu_ba";
 		break;
 	case SIC_iommu_dtba_lo:
 		ret = 0;
-		reg_lo = node_nbsr->regs[offset_to_no(SIC_iommu_dtba_lo)];
-		reg_hi = node_nbsr->regs[offset_to_no(SIC_iommu_dtba_hi)];
-		*reg_val = reg_lo | (reg_hi << 32);
+		node_nbsr_reg_read(nbsr, node_id, SIC_iommu_dtba_lo, &reg_lo);
+		node_nbsr_reg_read(nbsr, node_id, SIC_iommu_dtba_hi, &reg_hi);
+		*reg_val = reg_lo | ((u64)reg_hi << 32);
 		reg_name = "iommu_dtba";
 		break;
 		/* SIC_iommu_err is emulated only in qemu */
@@ -1701,6 +1779,27 @@ static int node_nbsr_readll_iommu(struct kvm_nbsr *nbsr, int node_id,
 		ret = -EOPNOTSUPP;
 		reg_name = "iommu_err_info";
 		break;
+	case SIC_iommu_mcr:
+		ret = 0;
+		node_nbsr_reg_read(nbsr, node_id, SIC_iommu_mcr, &reg_lo);
+		node_nbsr_reg_read(nbsr, node_id, SIC_iommu_mid, &reg_hi);
+		*reg_val = reg_lo | ((u64)reg_hi << 32);
+		reg_name = "iommu_mcr";
+		break;
+	case SIC_iommu_mar0_lo:
+		ret = 0;
+		node_nbsr_reg_read(nbsr, node_id, SIC_iommu_mar0_lo, &reg_lo);
+		node_nbsr_reg_read(nbsr, node_id, SIC_iommu_mar0_hi, &reg_hi);
+		*reg_val = reg_lo | ((u64)reg_hi << 32);
+		reg_name = "iommu_mar0";
+		break;
+	case SIC_iommu_mar1_lo:
+		ret = 0;
+		node_nbsr_reg_read(nbsr, node_id, SIC_iommu_mar1_lo, &reg_lo);
+		node_nbsr_reg_read(nbsr, node_id, SIC_iommu_mar1_hi, &reg_hi);
+		*reg_val = reg_lo | ((u64)reg_hi << 32);
+		reg_name = "iommu_mar1";
+		break;
 	default:
 		WARN_ON_ONCE(1);
 		ret = -EOPNOTSUPP;
@@ -1708,21 +1807,20 @@ static int node_nbsr_readll_iommu(struct kvm_nbsr *nbsr, int node_id,
 	}
 	mutex_unlock(&nbsr->lock);
 
-	nbsr_debug_dump_prepic(node_id, reg_offset, false, *reg_val, reg_name);
+	nbsr_debug_dump_iommu(node_id, reg_offset, false, *reg_val, reg_name, true);
 	return ret;
 }
 
 static int node_nbsr_read_prepic(struct kvm_nbsr *nbsr, int node_id,
 				 unsigned int reg_offset, u32 *reg_val)
 {
-	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
 	char *reg_name = "???";
 	int ret = 0;
 
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
 	case SIC_prepic_ctrl2:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_prepic_ctrl2)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_prepic_ctrl2, reg_val);
 		reg_name = "prepic_ctrl2";
 		break;
 		/* Registers SIC_prepic_err_stat is emulated only in qemu */
@@ -1736,27 +1834,27 @@ static int node_nbsr_read_prepic(struct kvm_nbsr *nbsr, int node_id,
 		reg_name = "prepic_err_int";
 		break;
 	case SIC_prepic_linp0:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_prepic_linp0)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_prepic_linp0, reg_val);
 		reg_name = "prepic_linp0";
 		break;
 	case SIC_prepic_linp1:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_prepic_linp1)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_prepic_linp1, reg_val);
 		reg_name = "prepic_linp1";
 		break;
 	case SIC_prepic_linp2:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_prepic_linp2)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_prepic_linp2, reg_val);
 		reg_name = "prepic_linp2";
 		break;
 	case SIC_prepic_linp3:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_prepic_linp3)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_prepic_linp3, reg_val);
 		reg_name = "prepic_linp3";
 		break;
 	case SIC_prepic_linp4:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_prepic_linp4)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_prepic_linp4, reg_val);
 		reg_name = "prepic_linp4";
 		break;
 	case SIC_prepic_linp5:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_prepic_linp5)];
+		node_nbsr_reg_read(nbsr, node_id, SIC_prepic_linp5, reg_val);
 		reg_name = "prepic_linp5";
 		break;
 	default:
@@ -1776,13 +1874,56 @@ static int node_nbsr_read_mc_ecc(const struct kvm_vcpu *vcpu, u32 *reg_val)
 	return 0;
 }
 
-static int node_nbsr_read_generic(struct kvm_nbsr *nbsr, int node_id,
+static int node_nbsr_read_stp(struct kvm_nbsr *nbsr, int node_id,
+				  unsigned int reg_offset, u32 *reg_val)
+{
+	e2k_idr_t idr = read_IDR_reg();
+	u8 type = 0x2;
+	u8 id = idr.mdl;
+	e2k_rt_lcfg_t rt_lcfg0;
+	node_nbsr_reg_read(nbsr, node_id, SIC_rt_lcfg0, &AW(rt_lcfg0));
+	u8 pn = rt_lcfg0.pln;
+	u8 pl_val = 0x7;
+	u8 mlc = 0x0;
+	u8 mlp = 0x0;
+	u8 coh_on = 0x0;
+
+	*reg_val = type | id << 4 | pn << 12 | coh_on << 20 | pl_val << 23 | mlc << 24 | mlp << 25;
+
+	return 0;
+}
+
+static int node_nbsr_write_stp(struct kvm_nbsr *nbsr, int node_id,
+				   unsigned int reg_offset, u32 reg_value)
+{
+	return 0;
+}
+
+static int node_nbsr_read_efuse(struct kvm_nbsr *nbsr, int node_id,
 				  unsigned int reg_offset, u32 *reg_val)
 {
 	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
+	u32 efuse_addr;
 
 	mutex_lock(&nbsr->lock);
-	*reg_val = node_nbsr->regs[offset_to_no(reg_offset)];
+	node_nbsr_reg_read(nbsr, node_id, EFUSE_RAM_ADDR, &efuse_addr);
+	*reg_val = node_nbsr->efuse_ram[offset_to_no(efuse_addr & 0xff)];
+	mutex_unlock(&nbsr->lock);
+
+	return 0;
+}
+
+static int node_nbsr_write_efuse(struct kvm_nbsr *nbsr, int node_id,
+				   unsigned int reg_offset, u32 reg_value)
+{
+	return 0;
+}
+
+static int node_nbsr_read_generic(struct kvm_nbsr *nbsr, int node_id,
+				  unsigned int reg_offset, u32 *reg_val)
+{
+	mutex_lock(&nbsr->lock);
+	node_nbsr_reg_read(nbsr, node_id, reg_offset, reg_val);
 	mutex_unlock(&nbsr->lock);
 
 	return 0;
@@ -1791,14 +1932,9 @@ static int node_nbsr_read_generic(struct kvm_nbsr *nbsr, int node_id,
 static int node_nbsr_write_generic(struct kvm_nbsr *nbsr, int node_id,
 				   unsigned int reg_offset, u32 reg_value)
 {
-	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
-
 	mutex_lock(&nbsr->lock);
-	node_nbsr->regs[offset_to_no(reg_offset)] = reg_value;
+	node_nbsr_reg_write(nbsr, node_id, reg_offset, reg_value);
 	mutex_unlock(&nbsr->lock);
-
-	nbsr_debug("%s(): node #%d write reg 0x%x value 0x%x ignored\n",
-		   __func__, node_id, reg_offset, reg_value);
 
 	return 0;
 }
@@ -1806,16 +1942,14 @@ static int node_nbsr_write_generic(struct kvm_nbsr *nbsr, int node_id,
 static int node_nbsr_write_rt_msi(struct kvm_nbsr *nbsr, int node_id,
 				  unsigned int reg_offset, u32 reg_value)
 {
-	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
-
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
 	case SIC_rt_msi:
-		node_nbsr->regs[offset_to_no(SIC_rt_msi)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_msi, reg_value);
 		nbsr_debug_dump_rt_msi(node_id, reg_offset, true, reg_value, "rt_msi");
 		break;
 	case SIC_rt_msi_h:
-		node_nbsr->regs[offset_to_no(SIC_rt_msi_h)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_rt_msi_h, reg_value);
 		nbsr_debug_dump_rt_msi_h(node_id, reg_offset, true, reg_value, "rt_msi_h");
 		break;
 	default:
@@ -1827,11 +1961,16 @@ static int node_nbsr_write_rt_msi(struct kvm_nbsr *nbsr, int node_id,
 	return -EOPNOTSUPP;
 }
 
-static void nbsr_update_iommu_tdp(struct kvm *kvm, kvm_nbsr_regs_t *nbsr)
+static void nbsr_update_iommu_tdp(struct kvm *kvm, struct kvm_nbsr *nbsr, int node_id)
 {
-	u32 ctrl = nbsr->regs[offset_to_no(SIC_iommu_ctrl)];
-	u64 ptbar = (u64) nbsr->regs[offset_to_no(SIC_iommu_ba_hi)] << 32 |
-		nbsr->regs[offset_to_no(SIC_iommu_ba_lo)];
+	u32 ctrl, ba_hi, ba_lo;
+	u64 ptbar;
+
+	node_nbsr_reg_read(nbsr, node_id, SIC_iommu_ctrl, &ctrl);
+	node_nbsr_reg_read(nbsr, node_id, SIC_iommu_ba_hi, &ba_hi);
+	node_nbsr_reg_read(nbsr, node_id, SIC_iommu_ba_lo, &ba_lo);
+
+	ptbar = (u64) ba_hi << 32 | ba_lo;
 
 	kvm_iommu_write_ctrl_ptbar(kvm, ctrl, ptbar);
 }
@@ -1839,17 +1978,52 @@ static void nbsr_update_iommu_tdp(struct kvm *kvm, kvm_nbsr_regs_t *nbsr)
 static int node_nbsr_write_iommu(struct kvm_nbsr *nbsr, int node_id,
 					unsigned int reg_offset, u32 reg_value)
 {
-	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
 	char *reg_name = NULL;
 	int ret = 0;
 
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
 	case SIC_iommu_ctrl:
-		node_nbsr->regs[offset_to_no(SIC_iommu_ctrl)] = reg_value;
-		nbsr_update_iommu_tdp(nbsr->kvm, node_nbsr);
+		node_nbsr_reg_write(nbsr, node_id, SIC_iommu_ctrl, reg_value);
+		nbsr_update_iommu_tdp(nbsr->kvm, nbsr, node_id);
 		reg_name = "iommu_ctrl";
 		ret = -EOPNOTSUPP;
+		break;
+	/* SIC_iommu_err is emulated only in qemu */
+	case SIC_iommu_err:
+	case SIC_iommu_err1:
+		ret = -EOPNOTSUPP;
+		reg_name = "iommu_err";
+		break;
+	/* SIC_iommu_err_info_hi is emulated only in qemu */
+	case SIC_iommu_err_info_lo:
+	case SIC_iommu_err_info_hi:
+		ret = -EOPNOTSUPP;
+		reg_name = "iommu_err_info";
+		break;
+	case SIC_iommu_mcr:
+		node_nbsr_reg_write(nbsr, node_id, SIC_iommu_mcr, reg_value);
+		reg_name = "iommu_mcr";
+		break;
+	case SIC_iommu_mid:
+		node_nbsr_reg_write(nbsr, node_id, SIC_iommu_mid, reg_value);
+		reg_name = "iommu_mid";
+		break;
+	case SIC_iommu_mar0_lo:
+		node_nbsr_reg_write(nbsr, node_id, SIC_iommu_mar0_lo, reg_value);
+		reg_name = "iommu_mar0_lo";
+		break;
+	case SIC_iommu_mar0_hi:
+		node_nbsr_reg_write(nbsr, node_id, SIC_iommu_mar0_hi, reg_value);
+		reg_name = "iommu_mar0_hi";
+		break;
+	case SIC_iommu_mar1_lo:
+		node_nbsr_reg_write(nbsr, node_id, SIC_iommu_mar1_lo, reg_value);
+		reg_name = "iommu_mar0_lo";
+		break;
+	case SIC_iommu_mar1_hi:
+		node_nbsr_reg_write(nbsr, node_id, SIC_iommu_mar1_hi, reg_value);
+		reg_name = "iommu_mar0_hi";
 		break;
 	default:
 		pr_err_ratelimited("%s(): node #%d IOMMU reg with offset 0x%04x does not support 32-bit writes, so ignore it\n",
@@ -1873,14 +2047,17 @@ static u32 kvm_write_pmc_sleep(u32 reg_value)
 	return AW(fr_state);
 }
 
+static int node_nbsr_write_pmc_info(struct kvm_nbsr *nbsr, int node_id,
+					unsigned int reg_offset, u32 reg_value)
+{
+	return 0;
+}
+
 static int node_nbsr_write_pmc(struct kvm_nbsr *nbsr, int node_id,
 			       unsigned int reg_offset, u32 reg_value)
 {
-	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
-
 	mutex_lock(&nbsr->lock);
-	node_nbsr->regs[offset_to_no(reg_offset)] =
-	    kvm_write_pmc_sleep(reg_value);
+	node_nbsr_reg_write(nbsr, node_id, reg_offset, kvm_write_pmc_sleep(reg_value));
 	mutex_unlock(&nbsr->lock);
 
 	nbsr_debug_dump_pmc(node_id, reg_offset, reg_value, true, "pmc_sleep");
@@ -1900,13 +2077,10 @@ static u32 kvm_write_l3_ctrl(struct kvm_nbsr *nbsr, u32 reg_value)
 static int node_nbsr_write_l3(struct kvm_nbsr *nbsr, int node_id,
 			      unsigned int reg_offset, u32 reg_value)
 {
-	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
-
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
 	case SIC_l3_ctrl:
-		node_nbsr->regs[offset_to_no(SIC_l3_ctrl)] =
-				kvm_write_l3_ctrl(nbsr, reg_value);
+		node_nbsr_reg_write(nbsr, node_id, SIC_l3_ctrl, kvm_write_l3_ctrl(nbsr, reg_value));
 		nbsr_debug_dump_l3(node_id, reg_offset, reg_value, true, "l3_ctrl");
 		break;
 	default:
@@ -1921,7 +2095,6 @@ static int node_nbsr_write_l3(struct kvm_nbsr *nbsr, int node_id,
 static int node_nbsr_write_prepic(struct kvm_nbsr *nbsr, int node_id,
 				  unsigned int reg_offset, u32 reg_value)
 {
-	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
 	char *reg_name = "???";
 
 	mutex_lock(&nbsr->lock);
@@ -1931,7 +2104,7 @@ static int node_nbsr_write_prepic(struct kvm_nbsr *nbsr, int node_id,
 	 */
 	switch (reg_offset) {
 	case SIC_prepic_ctrl2:
-		node_nbsr->regs[offset_to_no(SIC_prepic_ctrl2)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_prepic_ctrl2, reg_value);
 		reg_name = "prepic_ctrl2";
 		break;
 		/* SIC_prepic_err_stat is emulated only in qemu */
@@ -1943,27 +2116,27 @@ static int node_nbsr_write_prepic(struct kvm_nbsr *nbsr, int node_id,
 		reg_name = "prepic_err_int";
 		break;
 	case SIC_prepic_linp0:
-		node_nbsr->regs[offset_to_no(SIC_prepic_linp0)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_prepic_linp0, reg_value);
 		reg_name = "prepic_linp0";
 		break;
 	case SIC_prepic_linp1:
-		node_nbsr->regs[offset_to_no(SIC_prepic_linp1)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_prepic_linp1, reg_value);
 		reg_name = "prepic_linp1";
 		break;
 	case SIC_prepic_linp2:
-		node_nbsr->regs[offset_to_no(SIC_prepic_linp2)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_prepic_linp2, reg_value);
 		reg_name = "prepic_linp2";
 		break;
 	case SIC_prepic_linp3:
-		node_nbsr->regs[offset_to_no(SIC_prepic_linp3)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_prepic_linp3, reg_value);
 		reg_name = "prepic_linp3";
 		break;
 	case SIC_prepic_linp4:
-		node_nbsr->regs[offset_to_no(SIC_prepic_linp4)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_prepic_linp4, reg_value);
 		reg_name = "prepic_linp4";
 		break;
 	case SIC_prepic_linp5:
-		node_nbsr->regs[offset_to_no(SIC_prepic_linp5)] = reg_value;
+		node_nbsr_reg_write(nbsr, node_id, SIC_prepic_linp5, reg_value);
 		reg_name = "prepic_linp5";
 		break;
 	default:
@@ -1979,35 +2152,33 @@ static int node_nbsr_write_prepic(struct kvm_nbsr *nbsr, int node_id,
 static int node_nbsr_writell_iommu(struct kvm_nbsr *nbsr, int node_id,
 				   unsigned int reg_offset, u64 reg_value)
 {
-	kvm_nbsr_regs_t *node_nbsr;
 	char *reg_name;
 	int ret = 0;
 	u32 reg_hi, reg_lo;
 
 	reg_lo = reg_value & 0xffffffff;
 	reg_hi = reg_value >> 32;
-	node_nbsr = &nbsr->nodes[node_id];
 
 	mutex_lock(&nbsr->lock);
 	/* Only *_lo halves 64-bit accesses are supported */
 	switch (reg_offset) {
 	case SIC_iommu_ba_lo:
-		node_nbsr->regs[offset_to_no(SIC_iommu_ba_lo)] = reg_lo;
-		node_nbsr->regs[offset_to_no(SIC_iommu_ba_hi)] = reg_hi;
-		nbsr_update_iommu_tdp(nbsr->kvm, node_nbsr);
+		node_nbsr_reg_write(nbsr, node_id, SIC_iommu_ba_lo, reg_lo);
+		node_nbsr_reg_write(nbsr, node_id, SIC_iommu_ba_hi, reg_hi);
+		nbsr_update_iommu_tdp(nbsr->kvm, nbsr, node_id);
 		reg_name = "iommu_ba_lo";
 		ret = -EOPNOTSUPP;
 		break;
 	case SIC_iommu_dtba_lo:
-		node_nbsr->regs[offset_to_no(SIC_iommu_dtba_lo)] = reg_lo;
-		node_nbsr->regs[offset_to_no(SIC_iommu_dtba_hi)] = reg_hi;
+		node_nbsr_reg_write(nbsr, node_id, SIC_iommu_dtba_lo, reg_lo);
+		node_nbsr_reg_write(nbsr, node_id, SIC_iommu_dtba_hi, reg_hi);
 		reg_name = "iommu_dtba_lo";
 		ret = -EOPNOTSUPP;
 		break;
 	/* No need to forward flushes to qemu */
 	case SIC_iommu_flush:
-		node_nbsr->regs[offset_to_no(SIC_iommu_flush)] = reg_lo;
-		node_nbsr->regs[offset_to_no(SIC_iommu_flushP)] = reg_hi;
+		node_nbsr_reg_write(nbsr, node_id, SIC_iommu_flush, reg_lo);
+		node_nbsr_reg_write(nbsr, node_id, SIC_iommu_flushP, reg_hi);
 		kvm_iommu_flush(nbsr->kvm, reg_value);
 		reg_name = "iommu_flush";
 		break;
@@ -2020,6 +2191,21 @@ static int node_nbsr_writell_iommu(struct kvm_nbsr *nbsr, int node_id,
 	case SIC_iommu_err_info_lo:
 		reg_name = "iommu_err_info_lo";
 		ret = -EOPNOTSUPP;
+		break;
+	case SIC_iommu_mcr:
+		node_nbsr_reg_write(nbsr, node_id, SIC_iommu_mcr, reg_lo);
+		node_nbsr_reg_write(nbsr, node_id, SIC_iommu_mid, reg_lo);
+		reg_name = "iommu_mcr";
+		break;
+	case SIC_iommu_mar0_lo:
+		node_nbsr_reg_write(nbsr, node_id, SIC_iommu_mar0_lo, reg_lo);
+		node_nbsr_reg_write(nbsr, node_id, SIC_iommu_mar0_hi, reg_lo);
+		reg_name = "iommu_mar0";
+		break;
+	case SIC_iommu_mar1_lo:
+		node_nbsr_reg_write(nbsr, node_id, SIC_iommu_mar1_lo, reg_lo);
+		node_nbsr_reg_write(nbsr, node_id, SIC_iommu_mar1_hi, reg_lo);
+		reg_name = "iommu_mar0";
 		break;
 	default:
 		pr_err("%s(): node #%d IOMMU reg with offset 0x%04x does not support 64-bit writes, so ignore it\n",
@@ -2034,7 +2220,7 @@ static int node_nbsr_writell_iommu(struct kvm_nbsr *nbsr, int node_id,
 	return ret;
 }
 
-static int unsupported_reg_read(int node_id, unsigned int reg_offset, u32 *reg_val)
+static __cold int unsupported_reg_read(int node_id, unsigned int reg_offset, u32 *reg_val)
 {
 	*reg_val = -1;
 	pr_err_ratelimited("node #%d NBSR reg with offset 0x%04x is not supported so return 0x%x\n",
@@ -2055,6 +2241,8 @@ static int node_nbsr_sic_read_v3(const struct kvm_vcpu *vcpu, struct kvm_nbsr *n
 	case SIC_mc1_ecc:
 	case SIC_mc2_ecc:
 		return node_nbsr_read_mc_ecc(vcpu, reg_val);
+	case SIC_hw1:
+		return node_nbsr_read_generic(nbsr, node_id, reg_offset, reg_val);
 	default:
 		return unsupported_reg_read(node_id, reg_offset, reg_val);
 	}
@@ -2074,6 +2262,20 @@ static int node_nbsr_sic_read_v4_v5(const struct kvm_vcpu *vcpu, struct kvm_nbsr
 	case SIC_mc2_ecc:
 	case SIC_mc3_ecc:
 		return node_nbsr_read_mc_ecc(vcpu, reg_val);
+	case SIC_hw1:
+	case SIC_pcs_ctrl0:
+	case SIC_pcs_ctrl1:
+	case SIC_pcs_ctrl2:
+	case SIC_pcs_ctrl3:
+	case SIC_pcs_ctrl4:
+	case SIC_pcs_ctrl5:
+	case SIC_pcs_ctrl6:
+	case SIC_pcs_ctrl7:
+	case SIC_pcs_ctrl8:
+	case SIC_pcs_ctrl9:
+	case SIC_iol_csr:
+	case SIC_io_csr:
+		return node_nbsr_read_generic(nbsr, node_id, reg_offset, reg_val);
 	default:
 		return unsupported_reg_read(node_id, reg_offset, reg_val);
 	}
@@ -2083,6 +2285,90 @@ static int node_nbsr_sic_read_v6(const struct kvm_vcpu *vcpu, struct kvm_nbsr *n
 			      int node_id, unsigned int reg_offset, u32 *reg_val)
 {
 	switch (reg_offset) {
+	case PMC_INFO:
+		return node_nbsr_read_pmc_info(nbsr, node_id, reg_offset, reg_val);
+	case SIC_rt_ioapic0:
+	case SIC_rt_ioapic1:
+	case SIC_rt_ioapic2:
+	case SIC_rt_ioapic3:
+		return node_nbsr_read_rt_ioapic(nbsr, node_id, reg_offset, reg_val);
+	case PMC_TERM_CTRL:
+	case PMC_TERM_CONV:
+	case PMC_TERM_TS0:
+	case PMC_TERM_TS1:
+	case PMC_TERM_TS2:
+	case PMC_TERM_TS3:
+	case PMC_TERM_TS4:
+	case PMC_TERM_TS5:
+	case PMC_TERM_TS6:
+	case PMC_TERM_TS7:
+	case PMC_FREQ_CFG:
+	case PMC_FREQ_STEPS:
+	case PMC_FREQ_C2:
+	case PMC_FREQ_BND:
+	case PMC_FREQ_CORE_FLOAT:
+	case PMC_FREQ_OCN_FLOAT:
+	case PMC_FREQ_CORE_TABLE0:
+	case PMC_FREQ_CORE_TABLE1:
+	case PMC_FREQ_CORE_TABLE2:
+	case PMC_FREQ_CORE_TABLE3:
+	case PMC_FREQ_CORE_TABLE4:
+	case PMC_FREQ_CORE_TABLE5:
+	case PMC_FREQ_CORE_TABLE6:
+	case PMC_FREQ_CORE_TABLE7:
+	case PMC_FREQ_OCN_TABLE0:
+	case PMC_FREQ_OCN_TABLE1:
+	case PMC_FREQ_OCN_TABLE2:
+	case PMC_FREQ_OCN_TABLE3:
+	case PMC_FREQ_OCN_TABLE4:
+	case PMC_FREQ_OCN_TABLE5:
+	case PMC_FREQ_OCN_TABLE6:
+	case PMC_FREQ_OCN_TABLE7:
+	case PMC_FREQ_CORE_N_MON(0):
+	case PMC_FREQ_CORE_N_MON(1):
+	case PMC_FREQ_CORE_N_MON(2):
+	case PMC_FREQ_CORE_N_MON(3):
+	case PMC_FREQ_CORE_N_MON(4):
+	case PMC_FREQ_CORE_N_MON(5):
+	case PMC_FREQ_CORE_N_MON(6):
+	case PMC_FREQ_CORE_N_MON(7):
+	case PMC_FREQ_CORE_N_MON(8):
+	case PMC_FREQ_CORE_N_MON(9):
+	case PMC_FREQ_CORE_N_MON(10):
+	case PMC_FREQ_CORE_N_MON(11):
+	case PMC_FREQ_CORE_N_MON(12):
+	case PMC_FREQ_CORE_N_MON(13):
+	case PMC_FREQ_CORE_N_MON(14):
+	case PMC_FREQ_CORE_N_MON(15):
+	case PMC_FREQ_CORE_N_CTRL(0):
+	case PMC_FREQ_CORE_N_CTRL(1):
+	case PMC_FREQ_CORE_N_CTRL(2):
+	case PMC_FREQ_CORE_N_CTRL(3):
+	case PMC_FREQ_CORE_N_CTRL(4):
+	case PMC_FREQ_CORE_N_CTRL(5):
+	case PMC_FREQ_CORE_N_CTRL(6):
+	case PMC_FREQ_CORE_N_CTRL(7):
+	case PMC_FREQ_CORE_N_CTRL(8):
+	case PMC_FREQ_CORE_N_CTRL(9):
+	case PMC_FREQ_CORE_N_CTRL(10):
+	case PMC_FREQ_CORE_N_CTRL(11):
+	case PMC_FREQ_CORE_N_CTRL(12):
+	case PMC_FREQ_CORE_N_CTRL(13):
+	case PMC_FREQ_CORE_N_CTRL(14):
+	case PMC_FREQ_CORE_N_CTRL(15):
+	case PMC_FREQ_OCN_MON:
+	case PMC_FREQ_OCN_CTRL:
+	case PMC_FREQ_GRAPHIC_N_MON(0):
+	case PMC_FREQ_GRAPHIC_N_MON(1):
+	case PMC_FREQ_GRAPHIC_N_MON(2):
+	case PMC_FREQ_GRAPHIC_N_MON(3):
+	case PMC_FREQ_GRAPHIC_N_CTRL(0):
+	case PMC_FREQ_GRAPHIC_N_CTRL(1):
+	case PMC_FREQ_GRAPHIC_N_CTRL(2):
+	case PMC_FREQ_GRAPHIC_N_CTRL(3):
+	case PMC_SYS_MON_1:
+	case PMC_FAN_CFG:
+		return node_nbsr_read_generic(nbsr, node_id, reg_offset, reg_val);
 	case PMC_FREQ_CORE_N_SLEEP(0):
 	case PMC_FREQ_CORE_N_SLEEP(1):
 	case PMC_FREQ_CORE_N_SLEEP(2):
@@ -2100,15 +2386,39 @@ static int node_nbsr_sic_read_v6(const struct kvm_vcpu *vcpu, struct kvm_nbsr *n
 	case PMC_FREQ_CORE_N_SLEEP(14):
 	case PMC_FREQ_CORE_N_SLEEP(15):
 		return node_nbsr_read_pmc(nbsr, node_id, reg_offset, reg_val);
-	case SIC_rt_msi:
-	case SIC_rt_msi_h:
-		return node_nbsr_read_rt_msi(nbsr, node_id, reg_offset, reg_val);
 	case MC_ECC:
 		return node_nbsr_read_mc_ecc(vcpu, reg_val);
 	case HC_CTRL:
 	case MC_CH:
 	case HMU_MIC:
 		return node_nbsr_read_generic(nbsr, node_id, reg_offset, reg_val);
+	case SIC_st_p:
+		return node_nbsr_read_stp(nbsr, node_id, reg_offset, reg_val);
+	case SIC_st_core0:
+	case SIC_st_core1:
+	case SIC_st_core2:
+	case SIC_st_core3:
+	case SIC_st_core4:
+	case SIC_st_core5:
+	case SIC_st_core6:
+	case SIC_st_core7:
+	case SIC_st_core8:
+	case SIC_st_core9:
+	case SIC_st_core10:
+	case SIC_st_core11:
+	case SIC_st_core12:
+	case SIC_st_core13:
+	case SIC_st_core14:
+	case SIC_st_core15:
+		return node_nbsr_read_generic(nbsr, node_id, reg_offset, reg_val);
+	case SIC_rt_ln:
+	case SIC_rt_pcicfged:
+	case SIC_rt_vgamemed:
+		return node_nbsr_read_generic(nbsr, node_id, reg_offset, reg_val);
+	case EFUSE_RAM_ADDR:
+		return node_nbsr_read_generic(nbsr, node_id, reg_offset, reg_val);
+	case EFUSE_RAM_DATA:
+		return node_nbsr_read_efuse(nbsr, node_id, reg_offset, reg_val);
 	default:
 		return unsupported_reg_read(node_id, reg_offset, reg_val);
 	}
@@ -2118,26 +2428,23 @@ static int node_nbsr_sic_read_v7(const struct kvm_vcpu *vcpu, struct kvm_nbsr *n
 			      int node_id, unsigned int reg_offset, u32 *reg_val)
 {
 	switch (reg_offset) {
-	case PMC_FREQ_CORE_N_SLEEP(0):
-	case PMC_FREQ_CORE_N_SLEEP(1):
-	case PMC_FREQ_CORE_N_SLEEP(2):
-	case PMC_FREQ_CORE_N_SLEEP(3):
-	case PMC_FREQ_CORE_N_SLEEP(4):
-	case PMC_FREQ_CORE_N_SLEEP(5):
-	case PMC_FREQ_CORE_N_SLEEP(6):
-	case PMC_FREQ_CORE_N_SLEEP(7):
-	case PMC_FREQ_CORE_N_SLEEP(8):
-	case PMC_FREQ_CORE_N_SLEEP(9):
-	case PMC_FREQ_CORE_N_SLEEP(10):
-	case PMC_FREQ_CORE_N_SLEEP(11):
-	case PMC_FREQ_CORE_N_SLEEP(12):
-	case PMC_FREQ_CORE_N_SLEEP(13):
-	case PMC_FREQ_CORE_N_SLEEP(14):
-	case PMC_FREQ_CORE_N_SLEEP(15):
+	case PMC_FREQ_CORE_N_SLEEP_V7(0):
+	case PMC_FREQ_CORE_N_SLEEP_V7(1):
+	case PMC_FREQ_CORE_N_SLEEP_V7(2):
+	case PMC_FREQ_CORE_N_SLEEP_V7(3):
+	case PMC_FREQ_CORE_N_SLEEP_V7(4):
+	case PMC_FREQ_CORE_N_SLEEP_V7(5):
+	case PMC_FREQ_CORE_N_SLEEP_V7(6):
+	case PMC_FREQ_CORE_N_SLEEP_V7(7):
+	case PMC_FREQ_CORE_N_SLEEP_V7(8):
+	case PMC_FREQ_CORE_N_SLEEP_V7(9):
+	case PMC_FREQ_CORE_N_SLEEP_V7(10):
+	case PMC_FREQ_CORE_N_SLEEP_V7(11):
+	case PMC_FREQ_CORE_N_SLEEP_V7(12):
+	case PMC_FREQ_CORE_N_SLEEP_V7(13):
+	case PMC_FREQ_CORE_N_SLEEP_V7(14):
+	case PMC_FREQ_CORE_N_SLEEP_V7(15):
 		return node_nbsr_read_pmc(nbsr, node_id, reg_offset, reg_val);
-	case SIC_rt_msi:
-	case SIC_rt_msi_h:
-		return node_nbsr_read_rt_msi(nbsr, node_id, reg_offset, reg_val);
 	case MC_ECC:
 		return node_nbsr_read_mc_ecc(vcpu, reg_val);
 	case SIC_rt_pcim0_xmu_l:
@@ -2243,12 +2550,22 @@ static int node_nbsr_sic_read(const struct kvm_vcpu *vcpu, struct kvm_nbsr *nbsr
 	case SIC_prepic_linp4:
 	case SIC_prepic_linp5:
 		return node_nbsr_read_prepic(nbsr, node_id, reg_offset, reg_val);
-	case EFUSE_RAM_ADDR:
-	case EFUSE_RAM_DATA:
-		*reg_val = -1;
-		pr_err_once("%s(): node #%d NBSR regs of EFUSE_RAM (offset 0x%04x) is not yet supported, so return 0x%x\n",
-			__func__, node_id, reg_offset, *reg_val);
-		return 0;
+	case SIC_iommu_err:
+	case SIC_iommu_err1:
+	case SIC_iommu_err_info_lo:
+	case SIC_iommu_err_info_hi:
+	case SIC_iommu_mcr:
+	case SIC_iommu_mid:
+	case SIC_iommu_mar0_lo:
+	case SIC_iommu_mar0_hi:
+	case SIC_iommu_mar1_lo:
+	case SIC_iommu_mar1_hi:
+		return node_nbsr_read_iommu(nbsr, node_id, reg_offset, reg_val);
+	/* These registers are missing on hardware v3-v5, but in virtual CPU
+	 * they always exist to provide guest with MSI addresses */
+	case SIC_rt_msi:
+	case SIC_rt_msi_h:
+		return node_nbsr_read_rt_msi(nbsr, node_id, reg_offset, reg_val);
 	default:
 		/* Not a common register, now try iset-specific ones */
 		switch (vcpu->kvm->arch.guest_info.cpu_iset) {
@@ -2276,6 +2593,9 @@ static int node_nbsr_sic_readll(struct kvm_nbsr *nbsr, int node_id,
 	case SIC_iommu_dtba_lo:
 	case SIC_iommu_err:
 	case SIC_iommu_err_info_lo:
+	case SIC_iommu_mcr:
+	case SIC_iommu_mar0_lo:
+	case SIC_iommu_mar1_lo:
 		return node_nbsr_readll_iommu(nbsr, node_id, reg_offset, reg_val);
 	default:
 		*reg_val = -1;
@@ -2491,7 +2811,7 @@ static int node_nbsr_write_ignore(int node_id, unsigned int reg_offset, u32 reg_
 	return 0;
 }
 
-static int unsupported_reg_write(int node_id, unsigned int reg_offset)
+static __cold int unsupported_reg_write(int node_id, unsigned int reg_offset)
 {
 	pr_err_ratelimited("node #%d NBSR reg with offset 0x%04x is not yet supported, so ignore write\n",
 			node_id, reg_offset);
@@ -2511,6 +2831,8 @@ static int node_nbsr_sic_write_v3(const struct kvm_vcpu *vcpu, struct kvm_nbsr *
 	case SIC_mc1_ecc:
 	case SIC_mc2_ecc:
 		return node_nbsr_write_ignore(node_id, reg_offset, reg_value);
+	case SIC_hw1:
+		return node_nbsr_write_generic(nbsr, node_id, reg_offset, reg_value);
 	default:
 		return unsupported_reg_write(node_id, reg_offset);
 	}
@@ -2530,6 +2852,20 @@ static int node_nbsr_sic_write_v4_v5(const struct kvm_vcpu *vcpu, struct kvm_nbs
 	case SIC_mc2_ecc:
 	case SIC_mc3_ecc:
 		return node_nbsr_write_ignore(node_id, reg_offset, reg_value);
+	case SIC_hw1:
+	case SIC_pcs_ctrl0:
+	case SIC_pcs_ctrl1:
+	case SIC_pcs_ctrl2:
+	case SIC_pcs_ctrl3:
+	case SIC_pcs_ctrl4:
+	case SIC_pcs_ctrl5:
+	case SIC_pcs_ctrl6:
+	case SIC_pcs_ctrl7:
+	case SIC_pcs_ctrl8:
+	case SIC_pcs_ctrl9:
+	case SIC_iol_csr:
+	case SIC_io_csr:
+		return node_nbsr_write_generic(nbsr, node_id, reg_offset, reg_value);
 	default:
 		return unsupported_reg_write(node_id, reg_offset);
 	}
@@ -2539,6 +2875,90 @@ static int node_nbsr_sic_write_v6(const struct kvm_vcpu *vcpu, struct kvm_nbsr *
 			       int node_id, unsigned int reg_offset, u32 reg_value)
 {
 	switch (reg_offset) {
+	case PMC_INFO:
+		return node_nbsr_write_pmc_info(nbsr, node_id, reg_offset, reg_value);
+	case SIC_rt_ioapic0:
+	case SIC_rt_ioapic1:
+	case SIC_rt_ioapic2:
+	case SIC_rt_ioapic3:
+		return node_nbsr_write_rt_ioapic(nbsr, node_id, reg_offset, reg_value);
+	case PMC_TERM_CTRL:
+	case PMC_TERM_CONV:
+	case PMC_TERM_TS0:
+	case PMC_TERM_TS1:
+	case PMC_TERM_TS2:
+	case PMC_TERM_TS3:
+	case PMC_TERM_TS4:
+	case PMC_TERM_TS5:
+	case PMC_TERM_TS6:
+	case PMC_TERM_TS7:
+	case PMC_FREQ_CFG:
+	case PMC_FREQ_STEPS:
+	case PMC_FREQ_C2:
+	case PMC_FREQ_BND:
+	case PMC_FREQ_CORE_FLOAT:
+	case PMC_FREQ_OCN_FLOAT:
+	case PMC_FREQ_CORE_TABLE0:
+	case PMC_FREQ_CORE_TABLE1:
+	case PMC_FREQ_CORE_TABLE2:
+	case PMC_FREQ_CORE_TABLE3:
+	case PMC_FREQ_CORE_TABLE4:
+	case PMC_FREQ_CORE_TABLE5:
+	case PMC_FREQ_CORE_TABLE6:
+	case PMC_FREQ_CORE_TABLE7:
+	case PMC_FREQ_OCN_TABLE0:
+	case PMC_FREQ_OCN_TABLE1:
+	case PMC_FREQ_OCN_TABLE2:
+	case PMC_FREQ_OCN_TABLE3:
+	case PMC_FREQ_OCN_TABLE4:
+	case PMC_FREQ_OCN_TABLE5:
+	case PMC_FREQ_OCN_TABLE6:
+	case PMC_FREQ_OCN_TABLE7:
+	case PMC_FREQ_CORE_N_MON(0):
+	case PMC_FREQ_CORE_N_MON(1):
+	case PMC_FREQ_CORE_N_MON(2):
+	case PMC_FREQ_CORE_N_MON(3):
+	case PMC_FREQ_CORE_N_MON(4):
+	case PMC_FREQ_CORE_N_MON(5):
+	case PMC_FREQ_CORE_N_MON(6):
+	case PMC_FREQ_CORE_N_MON(7):
+	case PMC_FREQ_CORE_N_MON(8):
+	case PMC_FREQ_CORE_N_MON(9):
+	case PMC_FREQ_CORE_N_MON(10):
+	case PMC_FREQ_CORE_N_MON(11):
+	case PMC_FREQ_CORE_N_MON(12):
+	case PMC_FREQ_CORE_N_MON(13):
+	case PMC_FREQ_CORE_N_MON(14):
+	case PMC_FREQ_CORE_N_MON(15):
+	case PMC_FREQ_CORE_N_CTRL(0):
+	case PMC_FREQ_CORE_N_CTRL(1):
+	case PMC_FREQ_CORE_N_CTRL(2):
+	case PMC_FREQ_CORE_N_CTRL(3):
+	case PMC_FREQ_CORE_N_CTRL(4):
+	case PMC_FREQ_CORE_N_CTRL(5):
+	case PMC_FREQ_CORE_N_CTRL(6):
+	case PMC_FREQ_CORE_N_CTRL(7):
+	case PMC_FREQ_CORE_N_CTRL(8):
+	case PMC_FREQ_CORE_N_CTRL(9):
+	case PMC_FREQ_CORE_N_CTRL(10):
+	case PMC_FREQ_CORE_N_CTRL(11):
+	case PMC_FREQ_CORE_N_CTRL(12):
+	case PMC_FREQ_CORE_N_CTRL(13):
+	case PMC_FREQ_CORE_N_CTRL(14):
+	case PMC_FREQ_CORE_N_CTRL(15):
+	case PMC_FREQ_OCN_MON:
+	case PMC_FREQ_OCN_CTRL:
+	case PMC_FREQ_GRAPHIC_N_MON(0):
+	case PMC_FREQ_GRAPHIC_N_MON(1):
+	case PMC_FREQ_GRAPHIC_N_MON(2):
+	case PMC_FREQ_GRAPHIC_N_MON(3):
+	case PMC_FREQ_GRAPHIC_N_CTRL(0):
+	case PMC_FREQ_GRAPHIC_N_CTRL(1):
+	case PMC_FREQ_GRAPHIC_N_CTRL(2):
+	case PMC_FREQ_GRAPHIC_N_CTRL(3):
+	case PMC_SYS_MON_1:
+	case PMC_FAN_CFG:
+		return node_nbsr_write_generic(nbsr, node_id, reg_offset, reg_value);
 	case PMC_FREQ_CORE_N_SLEEP(0):
 	case PMC_FREQ_CORE_N_SLEEP(1):
 	case PMC_FREQ_CORE_N_SLEEP(2):
@@ -2556,15 +2976,39 @@ static int node_nbsr_sic_write_v6(const struct kvm_vcpu *vcpu, struct kvm_nbsr *
 	case PMC_FREQ_CORE_N_SLEEP(14):
 	case PMC_FREQ_CORE_N_SLEEP(15):
 		return node_nbsr_write_pmc(nbsr, node_id, reg_offset, reg_value);
-	case SIC_rt_msi:
-	case SIC_rt_msi_h:
-		return node_nbsr_write_rt_msi(nbsr, node_id, reg_offset, reg_value);
 	case MC_ECC:
 		return node_nbsr_write_ignore(node_id, reg_offset, reg_value);
 	case HC_CTRL:
 	case MC_CH:
 	case EDBC_IOMMU_CTRL ... EDBC_IOMMU_ERR_INFO_HI:
 		return node_nbsr_write_generic(nbsr, node_id, reg_offset, reg_value);
+	case SIC_st_p:
+		return node_nbsr_write_stp(nbsr, node_id, reg_offset, reg_value);
+	case SIC_st_core0:
+	case SIC_st_core1:
+	case SIC_st_core2:
+	case SIC_st_core3:
+	case SIC_st_core4:
+	case SIC_st_core5:
+	case SIC_st_core6:
+	case SIC_st_core7:
+	case SIC_st_core8:
+	case SIC_st_core9:
+	case SIC_st_core10:
+	case SIC_st_core11:
+	case SIC_st_core12:
+	case SIC_st_core13:
+	case SIC_st_core14:
+	case SIC_st_core15:
+		return node_nbsr_write_generic(nbsr, node_id, reg_offset, reg_value);
+	case SIC_rt_ln:
+	case SIC_rt_pcicfged:
+	case SIC_rt_vgamemed:
+		return node_nbsr_write_generic(nbsr, node_id, reg_offset, reg_value);
+	case EFUSE_RAM_ADDR:
+		return node_nbsr_write_generic(nbsr, node_id, reg_offset, reg_value);
+	case EFUSE_RAM_DATA:
+		return node_nbsr_write_efuse(nbsr, node_id, reg_offset, reg_value);
 	default:
 		return unsupported_reg_write(node_id, reg_offset);
 	}
@@ -2574,26 +3018,23 @@ static int node_nbsr_sic_write_v7(const struct kvm_vcpu *vcpu, struct kvm_nbsr *
 			       int node_id, unsigned int reg_offset, u32 reg_value)
 {
 	switch (reg_offset) {
-	case PMC_FREQ_CORE_N_SLEEP(0):
-	case PMC_FREQ_CORE_N_SLEEP(1):
-	case PMC_FREQ_CORE_N_SLEEP(2):
-	case PMC_FREQ_CORE_N_SLEEP(3):
-	case PMC_FREQ_CORE_N_SLEEP(4):
-	case PMC_FREQ_CORE_N_SLEEP(5):
-	case PMC_FREQ_CORE_N_SLEEP(6):
-	case PMC_FREQ_CORE_N_SLEEP(7):
-	case PMC_FREQ_CORE_N_SLEEP(8):
-	case PMC_FREQ_CORE_N_SLEEP(9):
-	case PMC_FREQ_CORE_N_SLEEP(10):
-	case PMC_FREQ_CORE_N_SLEEP(11):
-	case PMC_FREQ_CORE_N_SLEEP(12):
-	case PMC_FREQ_CORE_N_SLEEP(13):
-	case PMC_FREQ_CORE_N_SLEEP(14):
-	case PMC_FREQ_CORE_N_SLEEP(15):
+	case PMC_FREQ_CORE_N_SLEEP_V7(0):
+	case PMC_FREQ_CORE_N_SLEEP_V7(1):
+	case PMC_FREQ_CORE_N_SLEEP_V7(2):
+	case PMC_FREQ_CORE_N_SLEEP_V7(3):
+	case PMC_FREQ_CORE_N_SLEEP_V7(4):
+	case PMC_FREQ_CORE_N_SLEEP_V7(5):
+	case PMC_FREQ_CORE_N_SLEEP_V7(6):
+	case PMC_FREQ_CORE_N_SLEEP_V7(7):
+	case PMC_FREQ_CORE_N_SLEEP_V7(8):
+	case PMC_FREQ_CORE_N_SLEEP_V7(9):
+	case PMC_FREQ_CORE_N_SLEEP_V7(10):
+	case PMC_FREQ_CORE_N_SLEEP_V7(11):
+	case PMC_FREQ_CORE_N_SLEEP_V7(12):
+	case PMC_FREQ_CORE_N_SLEEP_V7(13):
+	case PMC_FREQ_CORE_N_SLEEP_V7(14):
+	case PMC_FREQ_CORE_N_SLEEP_V7(15):
 		return node_nbsr_write_pmc(nbsr, node_id, reg_offset, reg_value);
-	case SIC_rt_msi:
-	case SIC_rt_msi_h:
-		return node_nbsr_write_rt_msi(nbsr, node_id, reg_offset, reg_value);
 	case SIC_rt_pcim0_xmu_l:
 		return node_nbsr_write_rt_pcim_xmu(nbsr, node_id, RT_XMU_l, reg_value);
 	case SIC_rt_pcim0_xmu_a:
@@ -2700,6 +3141,12 @@ static int node_nbsr_sic_write(const struct kvm_vcpu *vcpu, struct kvm_nbsr *nbs
 	case SIC_iommu_err1:
 	case SIC_iommu_err_info_lo:
 	case SIC_iommu_err_info_hi:
+	case SIC_iommu_mcr:
+	case SIC_iommu_mid:
+	case SIC_iommu_mar0_lo:
+	case SIC_iommu_mar0_hi:
+	case SIC_iommu_mar1_lo:
+	case SIC_iommu_mar1_hi:
 		return node_nbsr_write_iommu(nbsr, node_id, reg_offset, reg_value);
 	case SIC_l3_ctrl:
 		return node_nbsr_write_l3(nbsr, node_id, reg_offset, reg_value);
@@ -2713,11 +3160,11 @@ static int node_nbsr_sic_write(const struct kvm_vcpu *vcpu, struct kvm_nbsr *nbs
 	case SIC_prepic_linp4:
 	case SIC_prepic_linp5:
 		return node_nbsr_write_prepic(nbsr, node_id, reg_offset, reg_value);
-	case EFUSE_RAM_ADDR:
-	case EFUSE_RAM_DATA:
-		pr_err_once("node #%d NBSR reg of EFUSE_RAM (offset 0x%04x) is not yet supported, so ignore write\n",
-			node_id, reg_offset);
-		return 0;
+	/* These registers are missing on hardware v3-v5, but in virtual CPU
+	 * they always exist to provide guest with MSI addresses */
+	case SIC_rt_msi:
+	case SIC_rt_msi_h:
+		return node_nbsr_write_rt_msi(nbsr, node_id, reg_offset, reg_value);
 	default:
 		/* Not a common register, now try iset-specific ones */
 		switch ((vcpu) ? vcpu->kvm->arch.guest_info.cpu_iset : -1) {
@@ -2772,7 +3219,7 @@ static int node_nbsr_writell(struct kvm_vcpu *vcpu, struct kvm_nbsr *nbsr,
 	}
 
 	/* Fail silently for writes to IOMMU for embedded devices */
-	if (reg_offset >= SIC_iommu_ctrl && reg_offset < SIC_iommu_err_info_hi) {
+	if (reg_offset >= SIC_iommu_ctrl && reg_offset < SIC_iommu_mar1_hi) {
 		ret = node_nbsr_writell_iommu(nbsr, node_id, reg_offset, reg_value);
 	} else if (!(reg_offset >= EDBC_IOMMU_CTRL && reg_offset <= EDBC_IOMMU_ERR_INFO_HI)) {
 		pr_err_ratelimited("%s(): node #%d NBSR reg with offset 0x%04x does not support 64-bit writes, so ignore it\n",
@@ -3149,7 +3596,6 @@ static void kvm_nbsr_reset(struct kvm *kvm, struct kvm_nbsr *nbsr)
 	e2k_rt_lcfg_t rt_lcfg0, rt_lcfg;
 	e2k_rt_pcim_t rt_pcim;
 	e2k_rt_pcimp_t rt_pcimp_b, rt_pcimp_e;
-	e2k_rt_pcicfgb_t rt_pcicfgb;
 	kvm_nbsr_regs_t *node_nbsr;
 	u32 mlo_value, mhi_value;
 	u32 pcim_value, pciio_value;
@@ -3178,8 +3624,15 @@ static void kvm_nbsr_reset(struct kvm *kvm, struct kvm_nbsr *nbsr)
 	rt_pcimp_e.end = 0x00000;
 	pcimp_b_value = AW(rt_pcimp_b);
 	pcimp_e_value = AW(rt_pcimp_e);
-	rt_pcicfgb.bgn = 0x8;	/* 0x0002 0000 0000 */
-	pcicfgb_value = AW(rt_pcicfgb);
+	if (nbsr->iset_no >= E2K_ISET_V7) {
+		e2k_rt_pcicfg_bgn_t rt_pcicfg_bgn;
+		rt_pcicfg_bgn.bgn = 0x2;	/* 0x0002 0000 0000 */
+		pcicfgb_value = AW(rt_pcicfg_bgn);
+	} else {
+		e2k_rt_pcicfgb_t rt_pcicfgb;
+		rt_pcicfgb.bgn = 0x8;	/* 0x0002 0000 0000 */
+		pcicfgb_value = AW(rt_pcicfgb);
+	}
 	for (node = 0; node < MAX_NUMNODES; node++) {
 		u32 rt_msi_lo = E2K_RT_MSI_DEFAULT_BASE & 0xffffffff;
 		u32 rt_msi_hi = E2K_RT_MSI_DEFAULT_BASE >> 32;
@@ -3190,59 +3643,168 @@ static void kvm_nbsr_reset(struct kvm *kvm, struct kvm_nbsr *nbsr)
 		 * to IOEPIC/PCI_MSI
 		 */
 		if (kvm_ioepic_unsafe_direct_map)
-			get_io_epic_msi(0, &rt_msi_lo, &rt_msi_hi);
+			get_io_pic_msi(0, &rt_msi_lo, &rt_msi_hi);
 
 		node_nbsr = &nbsr->nodes[node];
-		node_nbsr->regs[offset_to_no(SIC_rt_mhi0)] = mhi_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_mhi1)] = mhi_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_mhi2)] = mhi_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_mhi3)] = mhi_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_mlo0)] = mlo_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_mlo1)] = mlo_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_mlo2)] = mlo_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_mlo3)] = mlo_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_pcim0)] = pcim_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_pcim1)] = pcim_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_pcim2)] = pcim_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_pcim3)] = pcim_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_pcim0_xmu_l)] = pcim_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_pcim0_xmu_a)] = pcim_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_pcim0_xmu_b)] = pcim_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_pcim0_xmu_c)] = pcim_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_pcim0_xmu_d)] = pcim_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_pciio0)] = pciio_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_pciio1)] = pciio_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_pciio2)] = pciio_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_pciio3)] = pciio_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_pciio0_xmu_l)] = pciio_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_pciio0_xmu_a)] = pciio_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_pciio0_xmu_b)] = pciio_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_pciio0_xmu_c)] = pciio_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_pciio0_xmu_d)] = pciio_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_pcimp_b0)] = pcimp_b_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_pcimp_b1)] = pcimp_b_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_pcimp_b2)] = pcimp_b_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_pcimp_b3)] = pcimp_b_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_pcimp_e0)] = pcimp_e_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_pcimp_e1)] = pcimp_e_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_pcimp_e2)] = pcimp_e_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_pcimp_e3)] = pcimp_e_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_pcimp0_xmu_l_bgn)] = pcimp_b_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_pcimp0_xmu_a_bgn)] = pcimp_b_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_pcimp0_xmu_b_bgn)] = pcimp_b_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_pcimp0_xmu_c_bgn)] = pcimp_b_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_pcimp0_xmu_d_bgn)] = pcimp_b_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_pcimp0_xmu_l_end)] = pcimp_e_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_pcimp0_xmu_a_end)] = pcimp_e_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_pcimp0_xmu_b_end)] = pcimp_e_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_pcimp0_xmu_c_end)] = pcimp_e_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_pcimp0_xmu_d_end)] = pcimp_e_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_pcicfgb)] = pcicfgb_value;
-		node_nbsr->regs[offset_to_no(SIC_rt_msi)] = rt_msi_lo;
-		node_nbsr->regs[offset_to_no(SIC_rt_msi_h)] = rt_msi_hi;
-		node_nbsr->regs[offset_to_no(SIC_l3_ctrl)] = 0x3f00f8;
+		/*
+		 * Set write mask of each register to 0xff by default to enable
+		 * write. Need to redefine for specific registers later.
+		 */
+		memset(node_nbsr->write_mask, 0xff, sizeof(node_nbsr->write_mask));
+
+		node_nbsr_reg_set(nbsr, node, SIC_rt_mhi0, mhi_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_mhi1, mhi_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_mhi2, mhi_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_mhi3, mhi_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_mlo0, mlo_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_mlo1, mlo_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_mlo2, mlo_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_mlo3, mlo_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_pcim0, pcim_value);
+		node_nbsr_reg_set_writemask(nbsr, node, SIC_rt_pcim0, 0xf800f800);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_pcim1, pcim_value);
+		node_nbsr_reg_set_writemask(nbsr, node, SIC_rt_pcim1, 0xf800f800);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_pcim2, pcim_value);
+		node_nbsr_reg_set_writemask(nbsr, node, SIC_rt_pcim2, 0xf800f800);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_pcim3, pcim_value);
+		node_nbsr_reg_set_writemask(nbsr, node, SIC_rt_pcim3, 0xf800f800);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_pcim0_xmu_l, pcim_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_pcim0_xmu_a, pcim_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_pcim0_xmu_b, pcim_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_pcim0_xmu_c, pcim_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_pcim0_xmu_d, pcim_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_pciio0, pciio_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_pciio1, pciio_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_pciio2, pciio_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_pciio3, pciio_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_pciio0_xmu_l, pciio_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_pciio0_xmu_a, pciio_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_pciio0_xmu_b, pciio_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_pciio0_xmu_c, pciio_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_pciio0_xmu_d, pciio_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_pcimp_b0, pcimp_b_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_pcimp_b1, pcimp_b_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_pcimp_b2, pcimp_b_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_pcimp_b3, pcimp_b_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_pcimp_e0, pcimp_e_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_pcimp_e1, pcimp_e_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_pcimp_e2, pcimp_e_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_pcimp_e3, pcimp_e_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_pcimp0_xmu_l_bgn, pcimp_b_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_pcimp0_xmu_a_bgn, pcimp_b_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_pcimp0_xmu_b_bgn, pcimp_b_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_pcimp0_xmu_c_bgn, pcimp_b_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_pcimp0_xmu_d_bgn, pcimp_b_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_pcimp0_xmu_l_end, pcimp_e_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_pcimp0_xmu_a_end, pcimp_e_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_pcimp0_xmu_b_end, pcimp_e_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_pcimp0_xmu_c_end, pcimp_e_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_pcimp0_xmu_d_end, pcimp_e_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_pcicfgb, pcicfgb_value);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_msi, rt_msi_lo);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_msi_h, rt_msi_hi);
+		node_nbsr_reg_set(nbsr, node, SIC_l3_ctrl, 0x3f00f8);
+		node_nbsr_reg_set(nbsr, node, SIC_pcs_ctrl0, 0x0);
+		node_nbsr_reg_set(nbsr, node, SIC_pcs_ctrl1, 0x04136590);
+		node_nbsr_reg_set(nbsr, node, SIC_pcs_ctrl2, 0x01684641);
+		node_nbsr_reg_set(nbsr, node, SIC_pcs_ctrl3, 0x00040910);
+		node_nbsr_reg_set(nbsr, node, SIC_pcs_ctrl4, 0x0);
+		node_nbsr_reg_set(nbsr, node, SIC_pcs_ctrl5, 0x0);
+		node_nbsr_reg_set(nbsr, node, SIC_pcs_ctrl6, 0x0);
+		node_nbsr_reg_set(nbsr, node, SIC_pcs_ctrl7, 0x0);
+		node_nbsr_reg_set(nbsr, node, SIC_pcs_ctrl8, 0x0);
+		node_nbsr_reg_set(nbsr, node, SIC_pcs_ctrl9, 0x0);
+		node_nbsr_reg_set(nbsr, node, SIC_iol_csr, 0x3);
+		node_nbsr_reg_set(nbsr, node, SIC_io_csr, 0x80000000);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_ln, 0x0);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_pcicfged, 0x0);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_vgamemed, 0x0);
+		node_nbsr_reg_set(nbsr, node, PMC_TERM_CTRL, 0x86e00fff);
+		node_nbsr_reg_set(nbsr, node, PMC_TERM_CONV, 0x8067a18b);
+		node_nbsr_reg_set(nbsr, node, PMC_TERM_TS0, 0x80440fff);
+		node_nbsr_reg_set(nbsr, node, PMC_TERM_TS1, 0x80480fff);
+		node_nbsr_reg_set(nbsr, node, PMC_TERM_TS2, 0x804c0fff);
+		node_nbsr_reg_set(nbsr, node, PMC_TERM_TS3, 0x80500fff);
+		node_nbsr_reg_set(nbsr, node, PMC_TERM_TS4, 0x80540fff);
+		node_nbsr_reg_set(nbsr, node, PMC_TERM_TS5, 0x80580fff);
+		node_nbsr_reg_set(nbsr, node, PMC_TERM_TS6, 0x805c0fff);
+		node_nbsr_reg_set(nbsr, node, PMC_TERM_TS7, 0x80600fff);
+		node_nbsr_reg_set(nbsr, node, PMC_FREQ_CFG, 0x87070707);
+		node_nbsr_reg_set(nbsr, node, PMC_FREQ_STEPS, 0xe0504540);
+		node_nbsr_reg_set(nbsr, node, PMC_FREQ_C2, 0x00000010);
+		node_nbsr_reg_set(nbsr, node, PMC_FREQ_BND, 0x80242424);
+		node_nbsr_reg_set(nbsr, node, PMC_FREQ_CORE_FLOAT, 0x00000000);
+		node_nbsr_reg_set(nbsr, node, PMC_FREQ_OCN_FLOAT, 0x00000000);
+		node_nbsr_reg_set(nbsr, node, PMC_FREQ_CORE_TABLE0, 0x00000000);
+		node_nbsr_reg_set(nbsr, node, PMC_FREQ_CORE_TABLE1, 0x00000000);
+		node_nbsr_reg_set(nbsr, node, PMC_FREQ_CORE_TABLE2, 0x00000000);
+		node_nbsr_reg_set(nbsr, node, PMC_FREQ_CORE_TABLE3, 0x00000000);
+		node_nbsr_reg_set(nbsr, node, PMC_FREQ_CORE_TABLE4, 0x00000000);
+		node_nbsr_reg_set(nbsr, node, PMC_FREQ_CORE_TABLE5, 0x00000000);
+		node_nbsr_reg_set(nbsr, node, PMC_FREQ_CORE_TABLE6, 0x00000000);
+		node_nbsr_reg_set(nbsr, node, PMC_FREQ_CORE_TABLE7, 0x00000000);
+		node_nbsr_reg_set(nbsr, node, PMC_FREQ_OCN_TABLE0, 0x00000000);
+		node_nbsr_reg_set(nbsr, node, PMC_FREQ_OCN_TABLE1, 0x00000000);
+		node_nbsr_reg_set(nbsr, node, PMC_FREQ_OCN_TABLE2, 0x00000000);
+		node_nbsr_reg_set(nbsr, node, PMC_FREQ_OCN_TABLE3, 0x00000000);
+		node_nbsr_reg_set(nbsr, node, PMC_FREQ_OCN_TABLE4, 0x00000000);
+		node_nbsr_reg_set(nbsr, node, PMC_FREQ_OCN_TABLE5, 0x00000000);
+		node_nbsr_reg_set(nbsr, node, PMC_FREQ_OCN_TABLE6, 0x00000000);
+		node_nbsr_reg_set(nbsr, node, PMC_FREQ_OCN_TABLE7, 0x00000000);
+		node_nbsr_reg_set(nbsr, node, PMC_FREQ_OCN_MON, 0x00000000);
+		node_nbsr_reg_set(nbsr, node, PMC_FREQ_OCN_CTRL, 0x00000000);
+		node_nbsr_reg_set(nbsr, node, PMC_SYS_MON_1, 0x00000000);
+		node_nbsr_reg_set(nbsr, node, PMC_FAN_CFG, 0x00000000);
+		node_nbsr_reg_set(nbsr, node, EFUSE_RAM_ADDR, 0x00000000);
 		for (i = 0; i < 16; i++)
-			node_nbsr->regs[offset_to_no(PMC_FREQ_CORE_N_SLEEP(i))] = 0;
+			node_nbsr_reg_set(nbsr, node, SIC_st_core(i), 0x00000001);
+		if (nbsr->iset_no == E2K_ISET_V7) {
+			for (i = 0; i < 16; i++)
+				node_nbsr_reg_set(nbsr, node,
+					PMC_FREQ_CORE_N_MON_V7(i), 0x00000000);
+			for (i = 0; i < 16; i++)
+				node_nbsr_reg_set(nbsr, node,
+					PMC_FREQ_CORE_N_CTRL_V7(i), 0x00000000);
+			for (i = 0; i < 16; i++)
+				node_nbsr_reg_set(nbsr, node,
+					PMC_FREQ_CORE_N_SLEEP_V7(i), 0x00000000);
+			for (i = 0; i < 4; i++)
+				node_nbsr_reg_set(nbsr, node,
+					PMC_FREQ_GRAPHIC_N_MON_V7(i), 0x00000000);
+			for (i = 0; i < 4; i++)
+				node_nbsr_reg_set(nbsr, node,
+					PMC_FREQ_GRAPHIC_N_CTRL_V7(i), 0x00000000);
+		} else {
+			for (i = 0; i < 16; i++)
+				node_nbsr_reg_set(nbsr, node,
+					PMC_FREQ_CORE_N_MON(i), 0x00000000);
+			for (i = 0; i < 16; i++)
+				node_nbsr_reg_set(nbsr, node,
+					PMC_FREQ_CORE_N_CTRL(i), 0x00000000);
+			for (i = 0; i < 16; i++)
+				node_nbsr_reg_set(nbsr, node,
+					PMC_FREQ_CORE_N_SLEEP(i), 0x00000000);
+			for (i = 0; i < 4; i++)
+				node_nbsr_reg_set(nbsr, node,
+					PMC_FREQ_GRAPHIC_N_MON(i), 0x00000000);
+			for (i = 0; i < 4; i++)
+				node_nbsr_reg_set(nbsr, node,
+					PMC_FREQ_GRAPHIC_N_CTRL(i), 0x00000000);
+		}
+		for (i = 0; i < EFUSE_RAM_LINES; i++)
+			node_nbsr->efuse_ram[offset_to_no(i)] = 0x00000000;
+
+		switch (nbsr->iset_no) {
+		case 1 ... 3:
+			node_nbsr_reg_set(nbsr, node, SIC_hw1, 0x76);
+			break;
+		case 4:
+			node_nbsr_reg_set(nbsr, node, SIC_hw1, 0xd6);
+			break;
+		case 5:
+			node_nbsr_reg_set(nbsr, node, SIC_hw1, 0x580d6);
+			break;
+		}
 	}
 
 	/* BSP node, now it should be #0 */
@@ -3257,11 +3819,10 @@ static void kvm_nbsr_reset(struct kvm *kvm, struct kvm_nbsr *nbsr)
 	rt_lcfg.vp = 0;
 	rt_lcfg.vb = 0;
 	rt_lcfg.vio = 0;
-	node_nbsr = &nbsr->nodes[0];
-	node_nbsr->regs[offset_to_no(SIC_rt_lcfg0)] = AW(rt_lcfg0);
-	node_nbsr->regs[offset_to_no(SIC_rt_lcfg1)] = AW(rt_lcfg);
-	node_nbsr->regs[offset_to_no(SIC_rt_lcfg2)] = AW(rt_lcfg);
-	node_nbsr->regs[offset_to_no(SIC_rt_lcfg3)] = AW(rt_lcfg);
+	node_nbsr_reg_set(nbsr, 0, SIC_rt_lcfg0, AW(rt_lcfg0));
+	node_nbsr_reg_set(nbsr, 0, SIC_rt_lcfg1, AW(rt_lcfg));
+	node_nbsr_reg_set(nbsr, 0, SIC_rt_lcfg2, AW(rt_lcfg));
+	node_nbsr_reg_set(nbsr, 0, SIC_rt_lcfg3, AW(rt_lcfg));
 	/* APP nodes links to other nodes */
 	AW(rt_lcfg) = 0;
 	rt_lcfg.pln = 0x3;
@@ -3271,11 +3832,18 @@ static void kvm_nbsr_reset(struct kvm *kvm, struct kvm_nbsr *nbsr)
 	for (node = 1; node < MAX_NUMNODES; node++) {
 		if (!nbsr_is_node_online(nbsr, node))
 			continue;
-		node_nbsr = &nbsr->nodes[node];
-		node_nbsr->regs[offset_to_no(SIC_rt_lcfg0)] = AW(rt_lcfg);
-		node_nbsr->regs[offset_to_no(SIC_rt_lcfg1)] = AW(rt_lcfg);
-		node_nbsr->regs[offset_to_no(SIC_rt_lcfg2)] = AW(rt_lcfg);
-		node_nbsr->regs[offset_to_no(SIC_rt_lcfg3)] = AW(rt_lcfg);
+		node_nbsr_reg_set(nbsr, node, SIC_rt_lcfg0, AW(rt_lcfg));
+		node_nbsr_reg_set(nbsr, node, SIC_rt_lcfg1, AW(rt_lcfg));
+		node_nbsr_reg_set(nbsr, node, SIC_rt_lcfg2, AW(rt_lcfg));
+		node_nbsr_reg_set(nbsr, node, SIC_rt_lcfg3, AW(rt_lcfg));
+	}
+	for (node = 1; node < MAX_NUMNODES; node++) {
+		node_nbsr_reg_set(nbsr, node, SIC_iommu_mcr, 0x00000000);
+		node_nbsr_reg_set(nbsr, node, SIC_iommu_mid, 0x00000000);
+		node_nbsr_reg_set(nbsr, node, SIC_iommu_mar0_lo, 0x00000000);
+		node_nbsr_reg_set(nbsr, node, SIC_iommu_mar0_hi, 0x00000000);
+		node_nbsr_reg_set(nbsr, node, SIC_iommu_mar1_lo, 0x00000000);
+		node_nbsr_reg_set(nbsr, node, SIC_iommu_mar1_hi, 0x00000000);
 	}
 }
 
@@ -3284,7 +3852,7 @@ static const struct kvm_io_device_ops nbsr_mmio_ops = {
 	.write = nbsr_mmio_write,
 };
 
-int kvm_nbsr_init(struct kvm *kvm)
+int kvm_nbsr_init(struct kvm *kvm, unsigned long cpu_iset)
 {
 	struct kvm_nbsr *nbsr;
 	int ret;
@@ -3302,9 +3870,8 @@ int kvm_nbsr_init(struct kvm *kvm)
 	nbsr->base = (unsigned long) THE_NODE_NBSR_PHYS_BASE(0);
 	nbsr->size = NODE_NBSR_SIZE * MAX_NUMNODES;
 	nbsr->node_size = NODE_NBSR_SIZE;
-	if (kvm->arch.guest_info.cpu_iset) {
-		nbsr->iset_no = kvm->arch.guest_info.cpu_iset;
-	}
+
+	nbsr->iset_no = cpu_iset;
 
 	/* FIXME: now only one node #0 is allowed */
 	nbsr_set_node_online(nbsr, 0);
@@ -3371,7 +3938,7 @@ static int handle_mpdma_request(struct kvm *kvm, u32 *regs, u64 gpa)
 
 	t_base_gpa = t_base_64 + gpa_page;
 
-	ret = kvm_read_guest_phys_system(kvm, t_base_gpa, &t_base_val, 1);
+	ret = kvm_read_guest(kvm, t_base_gpa, &t_base_val, 1);
 	if (ret)
 		return ret;
 
@@ -3383,7 +3950,7 @@ static int handle_mpdma_request(struct kvm *kvm, u32 *regs, u64 gpa)
 
 		t_base_val = 1;
 
-		ret = kvm_write_guest_phys_system(kvm, t_base_gpa, &t_base_val, 1);
+		ret = kvm_write_guest(kvm, t_base_gpa, &t_base_val, 1);
 		if (ret)
 			return ret;
 	} else {
@@ -3405,7 +3972,7 @@ static int handle_mpdma_request(struct kvm *kvm, u32 *regs, u64 gpa)
 
 		t_h_base_gpa = t_h_base_64 + t_h_base_id;
 
-		ret = kvm_read_guest_phys_system(kvm, t_h_base_gpa, &t_h_base_val, 1);
+		ret = kvm_read_guest(kvm, t_h_base_gpa, &t_h_base_val, 1);
 		if (ret)
 			return ret;
 
@@ -3421,7 +3988,7 @@ static int handle_mpdma_request(struct kvm *kvm, u32 *regs, u64 gpa)
 
 			t_h_base_val = 1;
 
-			ret = kvm_write_guest_phys_system(kvm, t_h_base_gpa, &t_h_base_val, 1);
+			ret = kvm_write_guest(kvm, t_h_base_gpa, &t_h_base_val, 1);
 			if (ret)
 				return ret;
 		} else {
@@ -3450,7 +4017,7 @@ static int handle_mpdma_request(struct kvm *kvm, u32 *regs, u64 gpa)
 		nbsr_debug("%s(): set page 0x%llx to BUF 0x%llx\n",
 			   __func__, gpa_page, b_base_gpa);
 
-		ret = kvm_write_guest_phys_system(kvm, b_base_gpa, &gpa_page, 8);
+		ret = kvm_write_guest(kvm, b_base_gpa, &gpa_page, 8);
 		if (ret)
 			return ret;
 
@@ -3532,52 +4099,53 @@ err:
 int kvm_get_nbsr_state(struct kvm *kvm, struct kvm_guest_nbsr_state *nbsr)
 {
 	struct kvm_nbsr *nbsr_kvm = kvm->arch.nbsr;
-	u32 *regs = nbsr_kvm->nodes[0].regs;
-	u64 reg_lo, reg_hi;
+	u32 reg_lo, reg_hi;
 
-	nbsr->rt_pcim0 = regs[offset_to_no(SIC_rt_pcim0)];
-	nbsr->rt_pcim1 = regs[offset_to_no(SIC_rt_pcim1)];
-	nbsr->rt_pcim2 = regs[offset_to_no(SIC_rt_pcim2)];
-	nbsr->rt_pcim3 = regs[offset_to_no(SIC_rt_pcim3)];
+	nbsr->cpu_iset = kvm->arch.nbsr->iset_no;
 
-	nbsr->rt_pciio0 = regs[offset_to_no(SIC_rt_pciio0)];
-	nbsr->rt_pciio1 = regs[offset_to_no(SIC_rt_pciio1)];
-	nbsr->rt_pciio2 = regs[offset_to_no(SIC_rt_pciio2)];
-	nbsr->rt_pciio3 = regs[offset_to_no(SIC_rt_pciio3)];
+	node_nbsr_reg_read(nbsr_kvm, 0, SIC_rt_pcim0, &nbsr->rt_pcim0);
+	node_nbsr_reg_read(nbsr_kvm, 0, SIC_rt_pcim1, &nbsr->rt_pcim1);
+	node_nbsr_reg_read(nbsr_kvm, 0, SIC_rt_pcim2, &nbsr->rt_pcim2);
+	node_nbsr_reg_read(nbsr_kvm, 0, SIC_rt_pcim3, &nbsr->rt_pcim3);
 
-	nbsr->rt_pcimp_b0 = regs[offset_to_no(SIC_rt_pcimp_b0)];
-	nbsr->rt_pcimp_b1 = regs[offset_to_no(SIC_rt_pcimp_b1)];
-	nbsr->rt_pcimp_b2 = regs[offset_to_no(SIC_rt_pcimp_b2)];
-	nbsr->rt_pcimp_b3 = regs[offset_to_no(SIC_rt_pcimp_b3)];
+	node_nbsr_reg_read(nbsr_kvm, 0, SIC_rt_pciio0, &nbsr->rt_pciio0);
+	node_nbsr_reg_read(nbsr_kvm, 0, SIC_rt_pciio1, &nbsr->rt_pciio1);
+	node_nbsr_reg_read(nbsr_kvm, 0, SIC_rt_pciio2, &nbsr->rt_pciio2);
+	node_nbsr_reg_read(nbsr_kvm, 0, SIC_rt_pciio3, &nbsr->rt_pciio3);
 
-	nbsr->rt_pcimp_e0 = regs[offset_to_no(SIC_rt_pcimp_e0)];
-	nbsr->rt_pcimp_e1 = regs[offset_to_no(SIC_rt_pcimp_e1)];
-	nbsr->rt_pcimp_e2 = regs[offset_to_no(SIC_rt_pcimp_e2)];
-	nbsr->rt_pcimp_e3 = regs[offset_to_no(SIC_rt_pcimp_e3)];
+	node_nbsr_reg_read(nbsr_kvm, 0, SIC_rt_pcimp_b0, &nbsr->rt_pcimp_b0);
+	node_nbsr_reg_read(nbsr_kvm, 0, SIC_rt_pcimp_b1, &nbsr->rt_pcimp_b1);
+	node_nbsr_reg_read(nbsr_kvm, 0, SIC_rt_pcimp_b2, &nbsr->rt_pcimp_b2);
+	node_nbsr_reg_read(nbsr_kvm, 0, SIC_rt_pcimp_b3, &nbsr->rt_pcimp_b3);
 
-	nbsr->rt_pcicfgb = regs[offset_to_no(SIC_rt_pcicfgb)];
+	node_nbsr_reg_read(nbsr_kvm, 0, SIC_rt_pcimp_e0, &nbsr->rt_pcimp_e0);
+	node_nbsr_reg_read(nbsr_kvm, 0, SIC_rt_pcimp_e1, &nbsr->rt_pcimp_e1);
+	node_nbsr_reg_read(nbsr_kvm, 0, SIC_rt_pcimp_e2, &nbsr->rt_pcimp_e2);
+	node_nbsr_reg_read(nbsr_kvm, 0, SIC_rt_pcimp_e3, &nbsr->rt_pcimp_e3);
 
-	reg_lo = regs[offset_to_no(SIC_rt_msi)];
-	reg_hi = regs[offset_to_no(SIC_rt_msi_h)];
-	nbsr->rt_msi = reg_hi << 32 | reg_lo;
+	node_nbsr_reg_read(nbsr_kvm, 0, SIC_rt_pcicfgb, &nbsr->rt_pcicfgb);
 
-	nbsr->iommu_ctrl = regs[offset_to_no(SIC_iommu_ctrl)];
+	node_nbsr_reg_read(nbsr_kvm, 0, SIC_rt_msi, &reg_lo);
+	node_nbsr_reg_read(nbsr_kvm, 0, SIC_rt_msi_h, &reg_hi);
+	nbsr->rt_msi = (u64)reg_hi << 32 | reg_lo;
 
-	reg_lo = regs[offset_to_no(SIC_iommu_ba_lo)];
-	reg_hi = regs[offset_to_no(SIC_iommu_ba_hi)];
-	nbsr->iommu_ptbar = reg_hi << 32 | reg_lo;
+	node_nbsr_reg_read(nbsr_kvm, 0, SIC_iommu_ctrl, &nbsr->iommu_ctrl);
 
-	reg_lo = regs[offset_to_no(SIC_iommu_dtba_lo)];
-	reg_hi = regs[offset_to_no(SIC_iommu_dtba_hi)];
-	nbsr->iommu_dtbar = reg_hi << 32 | reg_lo;
+	node_nbsr_reg_read(nbsr_kvm, 0, SIC_iommu_ba_lo, &reg_lo);
+	node_nbsr_reg_read(nbsr_kvm, 0, SIC_iommu_ba_hi, &reg_hi);
+	nbsr->iommu_ptbar = (u64)reg_hi << 32 | reg_lo;
 
-	nbsr->prepic_ctrl2 = regs[offset_to_no(SIC_prepic_ctrl2)];
-	nbsr->prepic_linp0 = regs[offset_to_no(SIC_prepic_linp0)];
-	nbsr->prepic_linp1 = regs[offset_to_no(SIC_prepic_linp1)];
-	nbsr->prepic_linp2 = regs[offset_to_no(SIC_prepic_linp2)];
-	nbsr->prepic_linp3 = regs[offset_to_no(SIC_prepic_linp3)];
-	nbsr->prepic_linp4 = regs[offset_to_no(SIC_prepic_linp4)];
-	nbsr->prepic_linp5 = regs[offset_to_no(SIC_prepic_linp5)];
+	node_nbsr_reg_read(nbsr_kvm, 0, SIC_iommu_dtba_lo, &reg_lo);
+	node_nbsr_reg_read(nbsr_kvm, 0, SIC_iommu_dtba_hi, &reg_hi);
+	nbsr->iommu_dtbar = (u64)reg_hi << 32 | reg_lo;
+
+	node_nbsr_reg_read(nbsr_kvm, 0, SIC_prepic_ctrl2, &nbsr->prepic_ctrl2);
+	node_nbsr_reg_read(nbsr_kvm, 0, SIC_prepic_linp0, &nbsr->prepic_linp0);
+	node_nbsr_reg_read(nbsr_kvm, 0, SIC_prepic_linp1, &nbsr->prepic_linp1);
+	node_nbsr_reg_read(nbsr_kvm, 0, SIC_prepic_linp2, &nbsr->prepic_linp2);
+	node_nbsr_reg_read(nbsr_kvm, 0, SIC_prepic_linp3, &nbsr->prepic_linp3);
+	node_nbsr_reg_read(nbsr_kvm, 0, SIC_prepic_linp4, &nbsr->prepic_linp4);
+	node_nbsr_reg_read(nbsr_kvm, 0, SIC_prepic_linp5, &nbsr->prepic_linp5);
 
 	return 0;
 }

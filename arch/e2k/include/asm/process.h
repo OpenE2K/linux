@@ -25,13 +25,49 @@
 #include <asm/kvm/uaccess.h>	/* host mode support */
 
 
-#define sighandler_trampoline_32	E2K_TRAMPOLINES_START
-#define sighandler_trampoline_64	(E2K_TRAMPOLINES_START + 0x100)
-#define sighandler_trampoline_128	(E2K_TRAMPOLINES_START + 0x200)
-#define makecontext_trampoline_32	(E2K_TRAMPOLINES_START + 0x300)
-#define makecontext_trampoline_64	(E2K_TRAMPOLINES_START + 0x400)
-#define makecontext_trampoline_128	(E2K_TRAMPOLINES_START + 0x500)
-#define sys_backtrace_return		(E2K_TRAMPOLINES_START + 0x600)
+static inline bool is_trampoline(const struct mm_struct *mm, unsigned long ip)
+{
+	unsigned long base = mm->context.trampolines;
+	unsigned long size = (unsigned long) __trampolines_end -
+			     (unsigned long) __trampolines_start;
+
+	return mm != &init_mm && ip >= base && ip < base + size;
+}
+
+static inline unsigned long sighandler_trampoline_32(const struct mm_struct *mm)
+{
+	return mm->context.trampolines;
+}
+
+static inline unsigned long sighandler_trampoline_64(const struct mm_struct *mm)
+{
+	return mm->context.trampolines + 0x100;
+}
+
+static inline unsigned long sighandler_trampoline_128(const struct mm_struct *mm)
+{
+	return mm->context.trampolines + 0x200;
+}
+
+static inline unsigned long makecontext_trampoline_32(const struct mm_struct *mm)
+{
+	return mm->context.trampolines + 0x300;
+}
+
+static inline unsigned long makecontext_trampoline_64(const struct mm_struct *mm)
+{
+	return mm->context.trampolines + 0x400;
+}
+
+static inline unsigned long makecontext_trampoline_128(const struct mm_struct *mm)
+{
+	return mm->context.trampolines + 0x500;
+}
+
+static inline unsigned long backtrace_return(const struct mm_struct *mm)
+{
+	return mm->context.trampolines + 0x600;
+}
 
 /*
  * additional arch-dep flags for clone()
@@ -597,13 +633,12 @@ static inline void atomic_save_hw_stacks_regs(e2k_stacks_t *stacks)
 }
 #endif
 
-#define ATOMIC_DO_SAVE_ALL_STACKS_REGS(st_regs, cr1_p, USD)		\
+#define ATOMIC_DO_SAVE_ALL_STACKS_REGS(st_regs, cr1_p, usd)		\
 ({									\
 	e2k_psp_t psp;							\
 	e2k_pshtp_t pshtp;						\
 	e2k_pcsp_t pcsp;						\
 	e2k_pcshtp_t pcshtp;						\
-	e2k_usd_t usd = USD;						\
 	e2k_cr1_t cr1;							\
 									\
 	ATOMIC_READ_ALL_STACKS_REGS(psp, pshtp,	pcsp, pcshtp,		\
@@ -646,11 +681,9 @@ atomic_save_all_stacks_regs(e2k_stacks_t *stacks, e2k_cr1_t *cr1_p)
  * Is the CPU at guest Hardware Virtualized mode
  * CORE_MODE.gmi is true only at guest HV mode
  */
-static inline bool host_is_at_HV_GM_mode(void)
-{
-	/* native kernel does not support VMs and cannot be at guest mode */
-	return false;
-}
+/* native kernel does not support VMs and cannot be at guest mode */
+#define host_is_at_HV_GM_mode()		0
+
 #define	usd_cannot_be_expanded(regs)	user_stack_cannot_be_expanded()
 						/* all user stacks can be */
 						/* expanded if it possible */
@@ -699,11 +732,13 @@ extern long do_sigreturn(void);
 static __always_inline int
 native_switch_kernel_return_function_to(unsigned long new_function_ip)
 {
+	unsigned long flags;
 	e2k_cr0_t cr0 = native_read_CR0_reg();
 
-	/* probably here should be some validation of the new kernel IP */
+	raw_all_irq_save(flags);
 	set_cr0_ip(cr0, new_function_ip);
 	native_write_CR0_ip(cr0);
+	raw_all_irq_restore(flags);
 	return 0;
 }
 
@@ -715,6 +750,7 @@ preserve_user_hw_stacks_to_copy(e2k_stacks_t *u_stacks, e2k_mem_crs_t *crs)
 {
 	struct pt_regs *prev_regs = current_pt_regs();
 	u64 tind = u_stacks->pshtp.tind;
+	unsigned long flags;
 
 	/*
 	 * Get rid of previous frames before restoring actual frames
@@ -731,7 +767,9 @@ preserve_user_hw_stacks_to_copy(e2k_stacks_t *u_stacks, e2k_mem_crs_t *crs)
 	 *  - (READ_PCSP_REG().base + SZ_OF_CR) frame with sighandler_trampoline;
 	 *  - READ_PCSP_REG().base frame with user's ip.
 	 */
+	raw_all_irq_save(flags);
 	*crs = *(e2k_mem_crs_t *) PCSP_BASE(native_read_PCSP_reg());
+	raw_all_irq_restore(flags);
 
 	u_stacks->pshtp = prev_regs->stacks.pshtp;
 	u_stacks->pcshtp = prev_regs->stacks.pcshtp;
@@ -742,11 +780,12 @@ preserve_user_hw_stacks_to_copy(e2k_stacks_t *u_stacks, e2k_mem_crs_t *crs)
 	u_stacks->pshtp.tind = tind;
 }
 
-static inline bool native_might_be_sighandler_trampoline(const e2k_mem_crs_t *frame)
+static inline bool native_might_be_sighandler_trampoline(
+		const struct mm_struct *mm, const e2k_mem_crs_t *frame)
 {
 	u64 ip = get_cr0_ip(frame->cr0);
-	return ip == sighandler_trampoline_32 || ip == sighandler_trampoline_64 ||
-			ip == sighandler_trampoline_128;
+	return ip == sighandler_trampoline_32(mm) || ip == sighandler_trampoline_64(mm) ||
+			ip == sighandler_trampoline_128(mm);
 }
 
 /**

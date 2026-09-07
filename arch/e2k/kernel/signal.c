@@ -13,6 +13,7 @@
 #include <linux/syscalls.h>
 
 #include <asm/cpu_regs.h>
+#include <asm/check_hw_ctx.h>
 #include <asm/e2k_syswork.h>
 #include <asm/getsp_adj.h>
 #include <asm/glob_regs.h>
@@ -65,15 +66,202 @@ static void copy_jmp_regs(pt_regs_t *to, const pt_regs_t *from)
 	to->flags = from->flags;
 }
 
+static int sig_save_local_gregs(struct extra_ucontext __user *extra,
+		const struct local_gregs *l_gregs)
+{
+	unsigned long long g[LOCAL_GREGS_NUM];
+	unsigned char gtag[LOCAL_GREGS_NUM];
+	unsigned long long gext[LOCAL_GREGS_NUM];
+	unsigned char gext_tag[LOCAL_GREGS_NUM];
+
+	if (cpu_has(CPU_FEAT_QPREG)) {
+		for (int i = 0; i < LOCAL_GREGS_NUM; i++) {
+			e2k_qreg_t data;
+			u8 tag;
+
+			load_qvalue_and_tagq(&l_gregs->g[i], &data, &tag, 8);
+			g[i] = data.lo;
+			gext[i] = data.hi;
+			gtag[i] = tag & 0xf;
+			gext_tag[i] = tag >> 4;
+		}
+	} else {
+		if (clear_user(extra->gext, sizeof(extra->gext)) ||
+		    clear_user(extra->gext_tag, sizeof(extra->gext_tag))) {
+			return -EFAULT;
+		}
+
+		for (int i = 0; i < LOCAL_GREGS_NUM; i += 2) {
+			e2k_qreg_t data;
+			u8 tag;
+
+			load_qvalue_and_tagq(&l_gregs->g[i], &data, &tag, 16);
+			g[i] = data.lo;
+			g[i + 1] = data.hi;
+			gext[i] = (u64) (u16) l_gregs->g[i].ext;
+			gext[i + 1] = (u64) (u16) l_gregs->g[i + 1].ext;
+			gtag[i] = tag & 0xf;
+			gtag[i + 1] = tag >> 4;
+		}
+	}
+
+	if (copy_to_user(extra->g, g, sizeof(g)) ||
+	    copy_to_user(extra->gtag, gtag, sizeof(gtag)) ||
+	    copy_to_user(extra->gext, gext, sizeof(gext)) ||
+	    copy_to_user(extra->gext_tag, gext_tag, sizeof(gext_tag)) ||
+	    put_user(AW(l_gregs->bgr), &extra->bgr)) {
+		return -EFAULT;
+	}
+
+	return 0;
+}
+
+static int sig_restore_local_gregs(struct local_gregs *l_gregs,
+		const struct extra_ucontext __user *extra)
+{
+	unsigned long long g[LOCAL_GREGS_NUM];
+	unsigned char gtag[LOCAL_GREGS_NUM];
+	unsigned long long gext[LOCAL_GREGS_NUM];
+	unsigned char gext_tag[LOCAL_GREGS_NUM];
+	int ret;
+
+	if (copy_from_user(g, extra->g, sizeof(g)) ||
+	    copy_from_user(gtag, extra->gtag, sizeof(gtag)) ||
+	    copy_from_user(gext, extra->gext, sizeof(gext)) ||
+	    copy_from_user(gext_tag, extra->gext_tag, sizeof(gext_tag))) {
+		return -EFAULT;
+	}
+
+	ret = check_user_gregs(LOCAL_GREGS_NUM, g, gtag);
+	if (ret)
+		return ret;
+
+	ret = get_user(AW(l_gregs->bgr), &extra->bgr);
+	if (ret)
+		return ret;
+
+	if (cpu_has(CPU_FEAT_QPREG)) {
+		for (int i = 0; i < LOCAL_GREGS_NUM; i++) {
+			set_qpg_single(&l_gregs->g[i], &g[i], &gtag[i],
+				       &gext[i], &gext_tag[i]);
+		}
+	} else {
+		for (int i = 0; i < LOCAL_GREGS_NUM; i += 2) {
+			set_qg_single(&l_gregs->g[i], g[i], g[i + 1],
+				      gtag[i], gtag[i + 1], gext[i], gext[i + 1]);
+		}
+	}
+
+	return 0;
+}
+
+static int setup_extra(struct extra_ucontext __user *extra, const pt_regs_t *user_regs)
+{
+	struct trap_pt_regs *trap = user_regs->trap;
+	struct k_sigaction *ka = &current_thread_info()->ksig.ka;
+	int rval, sc_need_rstrt;
+
+	/* Fill unused fields with 0 */
+	if (__clear_user(extra, sizeof(*extra)))
+		return -EFAULT;
+
+	sc_need_rstrt = (from_syscall(user_regs) && (user_regs->sys_rval == -ERESTARTNOINTR ||
+			user_regs->sys_rval == -ERESTARTSYS && (ka->sa.sa_flags & SA_RESTART)));
+	rval = __put_user(sc_need_rstrt, &extra->sc_need_rstrt);
+
+	rval = (rval) ?: __put_user(PCSP_PTR(user_regs->stacks.pcsp) +
+					SZ_OF_CR - (unsigned long) CURRENT_PCS_BASE(),
+				    &extra->chain_stack_offset);
+	rval = (rval) ?: __put_user(PSP_PTR(user_regs->stacks.psp) -
+					(unsigned long) CURRENT_PS_BASE(),
+				    &extra->proc_stack_offset);
+
+	if (trap) {
+		const e2k_aau_t *aau_regs = user_regs->aau_context;
+
+		rval = (rval) ?: __put_user(trap->tc_count / 3, &extra->tc_count);
+		rval = (rval) ?: __put_user(trap->curr_cnt, &extra->curr_cnt);
+
+		/* CTPR */
+		rval = (rval) ?: __put_user(LO(user_regs->ctpr1), &extra->ctpr1);
+		rval = (rval) ?: __put_user(LO(user_regs->ctpr2), &extra->ctpr2);
+		rval = (rval) ?: __put_user(LO(user_regs->ctpr3), &extra->ctpr3);
+		if (cpu_has(CPU_FEAT_ISET_V6)) {
+			rval = (rval) ?: __put_user(HI(user_regs->ctpr1), &extra->ctpr1_hi);
+			rval = (rval) ?: __put_user(HI(user_regs->ctpr2), &extra->ctpr2_hi);
+			rval = (rval) ?: __put_user(HI(user_regs->ctpr3), &extra->ctpr3_hi);
+		}
+
+		rval = (rval) ?: __put_user(user_regs->lsr, &extra->lsr);
+		rval = (rval) ?: __put_user(user_regs->ilcr, &extra->ilcr);
+		if (cpu_has(CPU_FEAT_ISET_V5)) {
+			rval = (rval) ?: __put_user(user_regs->lsr1, &extra->lsr1);
+			rval = (rval) ?: __put_user(user_regs->ilcr1, &extra->ilcr1);
+		}
+
+		SAVE_AAU_REGS_FOR_PTRACE(user_regs, current_thread_info());
+		rval = (rval) ?: __put_user(AW(user_regs->aasr), &extra->aasr);
+		if (aau_regs && !rval) {
+			int i;
+			BUILD_BUG_ON(AADS_REGS_NUM != 32 || AAINDS_REGS_NUM != 16 ||
+				     AAINCRS_REGS_NUM != 8 || AALDIS_REGS_NUM != 64 ||
+				     AALDAS_REGS_NUM != 64 || AASTIS_REGS_NUM != 16);
+
+			if (__copy_to_user(extra->aad, aau_regs->aads,
+					   sizeof(aau_regs->aads)) ||
+			    __copy_to_user(extra->aaind, aau_regs->aainds,
+					   sizeof(aau_regs->aainds)) ||
+			    __copy_to_user(extra->aaldi, aau_regs->aaldi,
+					   sizeof(aau_regs->aaldi)) ||
+			    __copy_to_user(extra->aasti, aau_regs->aastis,
+					   sizeof(aau_regs->aastis))) {
+				return -EFAULT;
+			}
+
+			if (machine.native_iset_ver < E2K_ISET_V5) {
+				for (i = 0; i < AAINCRS_REGS_NUM; i++) {
+					rval = (rval) ?: __put_user((u32) aau_regs->aaincrs[i],
+								    &extra->aaincr[i]);
+				}
+			} else if (!rval) {
+				if (__copy_to_user(extra->aaincr, aau_regs->aaincrs,
+						    sizeof(aau_regs->aaincrs))) {
+					return -EFAULT;
+				}
+			}
+
+			rval = (rval) ?: __put_user(AW(aau_regs->aaldv), &extra->aaldv);
+			rval = (rval) ?: __put_user(AW(aau_regs->aaldm), &extra->aaldm);
+			rval = (rval) ?: __put_user(aau_regs->aafstr, &extra->aafstr);
+
+			for (i = 0; i < AALDAS_REGS_NUM; i++) {
+				rval = (rval) ?: __put_user(AW(current_thread_info()->aalda[i]),
+							    &extra->aalda[i]);
+			}
+
+		}
+	} else {
+		rval = (rval) ?: __put_user(-1, &extra->curr_cnt);
+	}
+
+	rval = (rval) ?: sig_save_local_gregs(extra, &current->thread.u_gregs);
+
+	/* size of saved extra elements */
+	rval = (rval) ?: __put_user(sizeof(struct extra_ucontext) - sizeof(int),
+					 &extra->sizeof_extra_uc);
+
+	return rval;
+}
+
 static int setup_frame(struct sigcontext __user *sigc,
 		struct extra_ucontext __user *extra, const pt_regs_t *user_regs)
 {
 	struct trap_pt_regs *trap = user_regs->trap;
-	register struct k_sigaction *ka = &current_thread_info()->ksig.ka;
-	int	rval;
-	int	i;
-	char	tag;
-	int	sc_need_rstrt = 0;
+	int rval, i;
+
+	rval = setup_extra(extra, user_regs);
+	if (rval)
+		return rval;
 
 	rval = __put_user(LO(user_regs->crs.cr0), &sigc->cr0_lo);
 	rval = (rval) ?: __put_user(HI(user_regs->crs.cr0), &sigc->cr0_hi);
@@ -118,6 +306,8 @@ static int setup_frame(struct sigcontext __user *sigc,
 		u64 data;
 
 		for (i = 0; i < min(MAX_TC_SIZE, HW_TC_SIZE); i++) {
+			u8 tag;
+
 			rval = (rval) ?: __put_user(trap->tcellar[i].address,
 						    &sigc->trap_cell_addr[i]);
 			rval = (rval) ?: __put_user(trap->tcellar[i].data,
@@ -135,53 +325,14 @@ static int setup_frame(struct sigcontext __user *sigc,
 			rval = (rval) ?: __put_user(LO(trap->TIRs[i]), &sigc->tir_lo[i]);
 		}
 
-		rval = (rval) ?: __put_user(trap->tc_count / 3, &extra->tc_count);
-		rval = (rval) ?: __put_user(trap->curr_cnt, &extra->curr_cnt);
-
-		/* CTPR */
-		rval = (rval) ?: __put_user(LO(user_regs->ctpr1), &extra->ctpr1);
-		rval = (rval) ?: __put_user(LO(user_regs->ctpr2), &extra->ctpr2);
-		rval = (rval) ?: __put_user(LO(user_regs->ctpr3), &extra->ctpr3);
-		if (cpu_has(CPU_FEAT_ISET_V6)) {
-			rval = (rval) ?: __put_user(HI(user_regs->ctpr1), &extra->ctpr1_hi);
-			rval = (rval) ?: __put_user(HI(user_regs->ctpr2), &extra->ctpr2_hi);
-			rval = (rval) ?: __put_user(HI(user_regs->ctpr3), &extra->ctpr3_hi);
-		} else {
-			rval = (rval) ?: __put_user(0, &extra->ctpr1_hi);
-			rval = (rval) ?: __put_user(0, &extra->ctpr2_hi);
-			rval = (rval) ?: __put_user(0, &extra->ctpr3_hi);
-		}
+		/* SBBP */
+		rval = (rval) ?: copy_to_user(sigc->sbbp, &trap->sbbp, sizeof(trap->sbbp));
 	} else {
 		rval = (rval) ?: __put_user(0, &sigc->nr_TIRs);
 		rval = (rval) ?: __put_user(0ULL, &sigc->tir_hi[0]);
 		rval = (rval) ?: __put_user(0ULL, &sigc->tir_lo[0]);
-		rval = (rval) ?: __put_user(0, &extra->tc_count);
-		rval = (rval) ?: __put_user(-1, &extra->curr_cnt);
-		rval = (rval) ?: __put_user(0, &extra->ctpr1);
-		rval = (rval) ?: __put_user(0, &extra->ctpr2);
-		rval = (rval) ?: __put_user(0, &extra->ctpr3);
-		rval = (rval) ?: __put_user(0, &extra->ctpr1_hi);
-		rval = (rval) ?: __put_user(0, &extra->ctpr2_hi);
-		rval = (rval) ?: __put_user(0, &extra->ctpr3_hi);
+		rval = (rval) ?: clear_user(sigc->sbbp, sizeof(sigc->sbbp));
 	}
-
-	if (from_syscall(user_regs) &&
-	    ((user_regs->sys_rval == -ERESTARTNOINTR) ||
-	     (user_regs->sys_rval == -ERESTARTSYS) &&
-	     (ka->sa.sa_flags & SA_RESTART)))
-		sc_need_rstrt = 1;
-	rval = (rval) ?: __put_user(sc_need_rstrt, &extra->sc_need_rstrt);
-
-	rval = (rval) ?: __put_user(PCSP_PTR(user_regs->stacks.pcsp) +
-					SZ_OF_CR - (unsigned long) CURRENT_PCS_BASE(),
-				    &extra->chain_stack_offset);
-	rval = (rval) ?: __put_user(PSP_PTR(user_regs->stacks.psp) -
-					(unsigned long) CURRENT_PS_BASE(),
-				    &extra->proc_stack_offset);
-
-	/* size of saved extra elements */
-	rval = (rval) ?: __put_user(sizeof(struct extra_ucontext) - sizeof(int),
-					 &extra->sizeof_extra_uc);
 
 	/* DAM */
 	BUILD_BUG_ON(sizeof(sigc->dam) != sizeof(current->thread.dam));
@@ -194,9 +345,14 @@ static int setup_frame(struct sigcontext __user *sigc,
 }
 
 #ifdef CONFIG_PROTECTED_MODE
-static int setup_prot_frame(struct sigcontext_prot __user *sigc, const pt_regs_t *user_regs)
+static int setup_prot_frame(struct sigcontext_prot __user *sigc,
+		struct extra_ucontext __user *extra, const pt_regs_t *user_regs)
 {
 	int rval;
+
+	rval = setup_extra(extra, user_regs);
+	if (rval)
+		return rval;
 
 	rval = __put_user(LO(user_regs->crs.cr0), &sigc->cr0_lo);
 	rval = (rval) ?: __put_user(HI(user_regs->crs.cr0), &sigc->cr0_hi);
@@ -216,9 +372,8 @@ static int setup_prot_frame(struct sigcontext_prot __user *sigc, const pt_regs_t
 
 #endif /* CONFIG_PROTECTED_MODE */
 
-static int setup_rt_frame(rt_sigframe_t __user *frame,
-				 kernel_siginfo_t *info,
-				 const struct pt_regs *regs)
+static int setup_rt_frame(rt_sigframe_t __user *frame, kernel_siginfo_t *info,
+			  const struct pt_regs *regs)
 {
 	sigset_t *set = sigmask_to_save();
 #ifdef CONFIG_COMPAT
@@ -242,7 +397,8 @@ static int setup_rt_frame(rt_sigframe_t __user *frame,
 	if (TASK_IS_PROTECTED(current)) {
 		e2k_ap_t ss_sp = new_ap(current->sas_ss_sp, current->sas_ss_size, 0, RW_ENABLE);
 
-		ret = setup_prot_frame(&frame->uc_prot.uc_mcontext, regs);
+		ret = setup_prot_frame(&frame->uc_prot.uc_mcontext,
+				       &frame->uc_prot.uc_extra, regs);
 		ret = (ret) ?: __copy_to_user(&frame->uc_prot.uc_sigmask,
 					      set, sizeof(*set));
 
@@ -301,7 +457,7 @@ static int setup_rt_frame(rt_sigframe_t __user *frame,
 		ret = (ret) ?: __put_user(0, &frame->uc_32.uc_link);
 	}
 
-	DebugHS("ret=%d info=0x%lx  info->si_value: [int]=%d [ptr]=0x%llx\n",
+	DebugHS("ret=%d info=0x%px  info->si_value: [int]=%d [ptr]=0x%px\n",
 		ret, info, info->_sifields._rt._sigval.sival_int,
 		info->_sifields._rt._sigval.sival_ptr);
 
@@ -324,11 +480,11 @@ static inline void copy_user_ctpr(e2k_ctpr_t *dst, e2k_ctpr_t val)
 	*dst = ctpr_with_ipd(*dst, ipd);
 }
 
-int restore_rt_frame(rt_sigframe_t __user *frame, struct k_sigaction *ka)
+int restore_rt_frame(const rt_sigframe_t __user *frame, struct k_sigaction *ka)
 {
-	unsigned long long __user *cr0_hi_ptr;
-	struct extra_ucontext __user *uc_extra_ptr;
-	void __user *set_ptr;
+	const unsigned long long __user *cr0_hi_ptr;
+	const struct extra_ucontext __user *uc_extra_ptr;
+	const void __user *set_ptr;
 	sigset_t set;
 	int ret = 0;
 
@@ -382,6 +538,13 @@ int restore_rt_frame(rt_sigframe_t __user *frame, struct k_sigaction *ka)
 
 	if (ret || __copy_from_user(&set, set_ptr, sizeof(set)))
 		return -EFAULT;
+
+	/* Binary compiler treats %g16-g31 as global */
+	if (!TASK_IS_BINCO(current)) {
+		ret = sig_restore_local_gregs(&current->thread.u_gregs, uc_extra_ptr);
+		if (ret)
+			return ret;
+	}
 
 	if (ka->sa.sa_flags & SA_SIGINFO) {
 		e2k_ctpr_t ctpr1, ctpr2, ctpr3;
@@ -443,7 +606,6 @@ int restore_rt_frame(rt_sigframe_t __user *frame, struct k_sigaction *ka)
 }
 
 static int copy_context_to_signal_stack(struct signal_stack_context __priv *context,
-					struct local_gregs *l_gregs,
 					const struct pt_regs *regs, const struct ksignal *ksig)
 {
 	const struct trap_pt_regs *trap = regs->trap;
@@ -468,7 +630,7 @@ static int copy_context_to_signal_stack(struct signal_stack_context __priv *cont
 			/* IMPORTANT: must correspond to check in do_trap_cellar() */
 			if (tc_record_asynchronous(&trap->tcellar[i]))
 				continue;
-			tagged_memcpy_8(&tcellar[i], &trap->tcellar[i], sizeof(tcellar[i]));
+			tagged_memcpy_8(&tcellar[count], &trap->tcellar[i], sizeof(tcellar[i]));
 			count++;
 		}
 		if (copy_to_priv_tagged(&context->trap.tcellar,
@@ -494,9 +656,6 @@ static int copy_context_to_signal_stack(struct signal_stack_context __priv *cont
 	}
 
 	if (copy_to_priv(&context->sigact, &ksig->ka, sizeof(ksig->ka)))
-		return -EFAULT;
-
-	if (l_gregs && copy_to_priv_tagged(&context->l_gregs, l_gregs, sizeof(*l_gregs)))
 		return -EFAULT;
 
 	return 0;
@@ -580,7 +739,7 @@ static struct signal_stack_context __priv *push_signal_stack(void)
 	address = remap_e2k_stack(ti->signal_stack.base, ti->signal_stack.size,
 				  ti->signal_stack.size + context_size, false);
 	if (IS_ERR(address)) {
-		pr_err("%s(): stack base 0x%lx size 0x%lx used 0x%lx context size 0x%lx vm_mmap returned %ld\n",
+		pr_err("%s(): stack base 0x%px size 0x%lx used 0x%lx context size 0x%lx vm_mmap returned %ld\n",
 		       __func__, ti->signal_stack.base, ti->signal_stack.size,
 		       ti->signal_stack.used, context_size, PTR_ERR(address));
 		return address;
@@ -717,24 +876,13 @@ void free_signal_stack(struct signal_stack *signal_stack)
 int setup_signal_stack(struct pt_regs *regs, bool is_signal)
 {
 	struct signal_stack_context __priv *context;
-	struct local_gregs l_gregs, *gregs;
 	int ret;
-
-	/* FIXME; macros TASK_IS_BINCO() should be updated to provide */
-	/* guest user process case: is one running under binary compiler */
-	if (!TASK_IS_BINCO(current)) {
-		save_local_glob_regs(&l_gregs, is_signal);
-		gregs = &l_gregs;
-	} else {
-		gregs = NULL;
-	}
 
 	context = push_signal_stack();
 	if (IS_ERR(context))
 		return PTR_ERR(context);
 
-	ret = copy_context_to_signal_stack(context, gregs, regs,
-					   &current_thread_info()->ksig);
+	ret = copy_context_to_signal_stack(context, regs, &current_thread_info()->ksig);
 	if (ret)
 		pop_signal_stack();
 
@@ -748,12 +896,7 @@ int setup_signal_stack(struct pt_regs *regs, bool is_signal)
  */
 int reserve_signal_stack(void)
 {
-	struct signal_stack_context __priv *context = push_signal_stack();
-
-	if (IS_ERR(context))
-		return PTR_ERR(context);
-
-	return 0;
+	return PTR_ERR_OR_ZERO(push_signal_stack());
 }
 
 
@@ -765,11 +908,11 @@ int prepare_sighandler_trampoline(struct e2k_stacks *stacks)
 	int ret;
 
 	if (TASK_IS_PROTECTED(current)) {
-		trampoline = sighandler_trampoline_128;
+		trampoline = sighandler_trampoline_128(current->mm);
 	} else if (current->thread.flags & E2K_FLAG_32BIT) {
-		trampoline = sighandler_trampoline_32;
+		trampoline = sighandler_trampoline_32(current->mm);
 	} else {
-		trampoline = sighandler_trampoline_64;
+		trampoline = sighandler_trampoline_64(current->mm);
 	}
 
 	/*
@@ -903,17 +1046,16 @@ int prepare_sighandler_frame(struct e2k_stacks *stacks,
 		pframe[0 + reg1_offset] = (u64) u_si;
 		pframe[4] = (u64) uc;
 	} else {
+#ifdef CONFIG_PROTECTED_MODE
 		e2k_ap_t ap;
 		ap = new_ap((u64) rt_sigframe, 64, 0, RW_ENABLE);
-		__NATIVE_STORE_TAGGED_QWORD(&pframe[0],	ap.lo, ap.hi,
-			E2K_AP_LO_ETAG, E2K_AP_HI_ETAG, 8 * reg1_offset);
+		store_tagged_qword(&pframe[0],	ap.qword, ETAGAPQ, 8 * reg1_offset);
 		pframe[4] = ksig->sig;
 		ap = new_ap((u64)u_si, u_si_size, 0, RW_ENABLE);
-		__NATIVE_STORE_TAGGED_QWORD(&pframe[8], ap.lo, ap.hi,
-			E2K_AP_LO_ETAG, E2K_AP_HI_ETAG, 8 * reg1_offset);
+		store_tagged_qword(&pframe[8], ap.qword, ETAGAPQ, 8 * reg1_offset);
 		ap = new_ap((u64)uc, uc_size, 0, RW_ENABLE);
-		__NATIVE_STORE_TAGGED_QWORD(&pframe[12], ap.lo, ap.hi,
-			E2K_AP_LO_ETAG, E2K_AP_HI_ETAG, 8 * reg1_offset);
+		store_tagged_qword(&pframe[12], ap.qword, ETAGAPQ, 8 * reg1_offset);
+#endif
 	}
 
 	/*
@@ -1001,7 +1143,7 @@ int signal_rt_frame_setup(pt_regs_t *regs)
 	register rt_sigframe_t __user	*rt_sigframe;
 	u64 ss_sp, ss_stk_size, tmp_sp, tmp_sz;
 
-	DebugHS("start addr %lx regs %px fn %lx\n",
+	DebugHS("start addr %lx regs %px fn %px\n",
 		(trap) ? trap->tcellar[trap->curr_cnt].address : 0UL,
 		regs, ka->sa.sa_handler);
 
@@ -1146,15 +1288,19 @@ int native_signal_setup(struct pt_regs *regs)
 	/*
 	 * For e2k applications g16-g31 registers are local, initialize them
 	 */
-	if (!TASK_IS_BINCO(current))
-		memset(&ti->k_gregs, 0, sizeof(ti->k_gregs));
+	if (!TASK_IS_BINCO(current)) {
+		clear_memory_8(&current->thread.u_gregs.g,
+			       sizeof(current->thread.u_gregs.g), ETAGEWD);
+
+		current->thread.u_gregs.bgr = E2K_INITIAL_BGR;
+	}
 
 	DebugHS("signal handler: sig=%d siginfo=0x%px\n"
 		"\tIS_PROTECTED = 0x%lx\tsa_flags = 0x%lx\t->thread.flags=0x%lx\n",
 		ti->ksig.sig, &ti->ksig.info,
 		TASK_IS_PROTECTED(current), ti->ksig.ka.sa.sa_flags,
 		current->thread.flags);
-	DebugHS("will start handler() 0x%lx for sig #%d\n",
+	DebugHS("will start handler() 0x%px for sig #%d\n",
 		ti->ksig.ka.sa.sa_handler, ti->ksig.sig);
 
 	return 0;
@@ -1202,12 +1348,22 @@ void do_signal(struct pt_regs *regs)
 		switch (regs->sys_rval) {
 		case -ERESTART_RESTARTBLOCK:
 			regs->sys_num = __NR_restart_syscall;
+			fallthrough;
 		case -ERESTARTNOHAND:
 		case -ERESTARTSYS:
 		case -ERESTARTNOINTR:
 			restart_needed = true;
 			break;
 		}
+	} else {
+		/*
+		 * There is no signal to handle (e.g. we got here because of
+		 * io_uring setting TIF_NOTIFY_SIGNAL while we were handling
+		 * page fault and checked fault_signal_pending()).  This means
+		 * that there will be no sys_sigreturn to finish handling the
+		 * trap cellar, do it now.
+		 */
+		trap_cellar_resume(regs);
 	}
 	CHECK_PT_REGS_CHAIN(regs,
 			    NATIVE_NV_READ_USD_LO_REG().USD_lo_base,
@@ -1331,7 +1487,7 @@ static int __unwind_stack(e2k_mem_crs_t *frame, unsigned long real_frame_addr,
 		*args->dstack_free = usd_next_size;
 	}
 
-	if (likely(!might_be_sighandler_trampoline(frame))) {
+	if (likely(!might_be_sighandler_trampoline(current->mm, frame))) {
 		*args->ppsl_shift += 1;
 	} else {
 		/* We are at signal trampoline right now so
@@ -1778,7 +1934,6 @@ SYSCALL_DEFINE2(e2k_longjmp2, struct jmp_info __user *, env, u64, retval)
 {
 	struct jmp_info jmp_info;
 	u32 jmp_psize;
-	struct pt_regs *regs = current_pt_regs();
 	e2k_pcsp_t pcsp;
 	e2k_cr0_t cr0;
 	e2k_cr1_t cr1;

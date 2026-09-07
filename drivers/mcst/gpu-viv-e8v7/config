@@ -52,10 +52,10 @@
 #
 ##############################################################################
 
-ARCH_TYPE                         ?= arm
+ARCH_TYPE                         ?= e2k
 SDK_DIR                           ?= $(AQROOT)/build/sdk
 VIVANTE_ENABLE_DRM                ?= 1
-NO_DMA_COHERENT                   ?= 1
+NO_DMA_COHERENT                   ?= 0
 USE_PLATFORM_DRIVER               ?= 1
 ENABLE_GPU_CLOCK_BY_DRIVER        ?= 1
 CACHE_FUNCTION_UNIMPLEMENTED      ?= 0
@@ -65,4 +65,5 @@ BANK_BIT_END                      ?= 0
 BANK_CHANNEL_BIT                  ?= 0
 SECURITY                          ?= 0
 SOC_PLATFORM                      ?= mcst
-DEBUG                             ?= 1
+DEBUG                             ?= 0
+

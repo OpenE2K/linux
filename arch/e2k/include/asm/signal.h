@@ -70,9 +70,8 @@ do {									\
 	u64 used_dstack_size = round_up(64, \
 			max(E2K_ALIGN_USTACK_SIZE, E2K_ALIGN_PUSTACK_SIZE)); \
 									\
-	sbr.base = (u64)thread_info_task(ti)->stack +			\
-						KERNEL_C_STACK_SIZE +	\
-						KERNEL_C_STACK_OFFSET;	\
+	sbr = (e2k_sbr_t) { .base = (u64)thread_info_task(ti)->stack +	\
+				KERNEL_C_STACK_SIZE + KERNEL_C_STACK_OFFSET }; \
 	usd = (ti)->k_usd;						\
 	usd = decr_usd_ind(usd, used_dstack_size);			\
 } while (false)

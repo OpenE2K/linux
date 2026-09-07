@@ -1132,10 +1132,13 @@ static bool of_mmio_is_nonposted(struct device_node *np)
 {
 	struct device_node *parent;
 	bool nonposted;
-
+#ifdef CONFIG_MCST /*Backport from kernel.org (6.15-rc3)*/
+	if (of_property_read_bool(np, "nonposted-mmio"))
+		return true;
+#else
 	if (!IS_ENABLED(CONFIG_ARCH_APPLE))
 		return false;
-
+#endif
 	parent = of_get_parent(np);
 	if (!parent)
 		return false;

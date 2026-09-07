@@ -20,7 +20,7 @@ gcc)
 	echo 5.1.0
 	;;
 lcc)
-	echo 1.29.03
+	echo 1.29.12
 	;;
 icc)
 	# temporary

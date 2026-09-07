@@ -11,9 +11,7 @@
 
 typedef struct {
 	unsigned int __softirq_pending;
-	unsigned int __nmi_count;	/* arch dependent */
 #ifdef CONFIG_L_LOCAL_APIC
-	unsigned int irq_spurious_count;
 	unsigned int icr_read_retry_count;
 #endif
 #ifdef CONFIG_SMP
@@ -35,9 +33,6 @@ extern void ack_bad_irq(unsigned int irq);
 #define __IRQ_STAT(cpu, member) (per_cpu(irq_stat, cpu).member)
 
 #define inc_irq_stat(member)	__IRQ_STAT(raw_smp_processor_id(), member)++
-
-extern u64 arch_irq_stat_cpu(unsigned int cpu);
-#define arch_irq_stat_cpu	arch_irq_stat_cpu
 
 extern u64 arch_irq_stat(void);
 #define arch_irq_stat		arch_irq_stat

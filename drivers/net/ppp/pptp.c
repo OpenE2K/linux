@@ -636,6 +636,9 @@ static const struct proto_ops pptp_ops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = pppox_compat_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl      = pppox_ioctl,
+#endif
 };
 
 static const struct pppox_proto pppox_pptp_proto = {

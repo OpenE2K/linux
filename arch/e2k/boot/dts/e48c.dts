@@ -18,16 +18,16 @@
 #endif
 
 / {
-	version = "1.0_2025-02-14";
+	version = "2.0_2025-11-07";
 	model = "Elbrus-generic";
-	compatible = "mcst,e32c-generic";
+	compatible = "mcst,e48c-generic";
 
 	#address-cells = <CELLS>;
 	#size-cells = <CELLS>;
 
 
-#include "include/e2c3.dtsi"
-#include "include/e32c-node.dtsi"
+#include "include/e2k-v7.dtsi"
+#include "include/e2k-v7-uncore.dtsi"
 #include "include/eioh2.dtsi"
 #undef NODE
 

@@ -250,7 +250,11 @@ void *dma_common_contiguous_remap(struct page *page, size_t size, pgprot_t prot,
 		const void *caller);
 void *dma_common_pages_remap(struct page **pages, size_t size, pgprot_t prot,
 		const void *caller);
+#ifdef CONFIG_E2K
+void dma_common_free_remap(void *cpu_addr, size_t size, unsigned long attrs);
+#else
 void dma_common_free_remap(void *cpu_addr, size_t size);
+#endif
 
 struct page *dma_alloc_from_pool(struct device *dev, size_t size,
 		void **cpu_addr, gfp_t flags,

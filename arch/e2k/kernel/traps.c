@@ -123,6 +123,36 @@ static __noreturn void do_unknown_exc(struct pt_regs *regs);
 #endif
 static void do_recovery_point(struct pt_regs *regs);
 
+#if IS_ENABLED(CONFIG_SOFT_PM)
+
+/* soft_pm handlers */
+static soft_pm_handler soft_pm_illegal_operand;
+static soft_pm_handler soft_pm_diag_operand;
+static soft_pm_handler soft_pm_array_bounds;
+static soft_pm_handler soft_pm_illegal_instr_addr;
+
+void soft_pm_init_handlers(soft_pm_handler handle_illegal_operand,
+			    soft_pm_handler handle_diag_operand,
+			    soft_pm_handler handle_array_bounds,
+			    soft_pm_handler handle_illegal_instr_addr)
+{
+	WRITE_ONCE(soft_pm_illegal_operand, handle_illegal_operand);
+	WRITE_ONCE(soft_pm_diag_operand, handle_diag_operand);
+	WRITE_ONCE(soft_pm_array_bounds, handle_array_bounds);
+	WRITE_ONCE(soft_pm_illegal_instr_addr, handle_illegal_instr_addr);
+}
+EXPORT_SYMBOL_GPL(soft_pm_init_handlers);
+
+extern void soft_pm_remove_handlers()
+{
+	WRITE_ONCE(soft_pm_illegal_operand, NULL);
+	WRITE_ONCE(soft_pm_diag_operand, NULL);
+	WRITE_ONCE(soft_pm_array_bounds, NULL);
+	WRITE_ONCE(soft_pm_illegal_instr_addr, NULL);
+}
+EXPORT_SYMBOL_GPL(soft_pm_remove_handlers);
+#endif /* CONFIG_SOFT_PM */
+
 /* Exception table. */
 typedef void (*exceptions)(struct pt_regs *regs);
 const exceptions exc_tbl[] = {
@@ -161,7 +191,7 @@ const exceptions exc_tbl[] = {
 /*30*/	(exceptions)(do_macp),
 
 /*31*/	(exceptions)(do_recovery_point),
-/*32*/	(exceptions)(native_do_interrupt),
+/*32*/	(exceptions)(void *)(native_do_interrupt),
 /*33*/	(exceptions)(do_nm_interrupt),
 /*34*/	(exceptions)(do_division),
 /*35*/	(exceptions)(do_fp),
@@ -290,14 +320,6 @@ int proc_sigdebug_handler(struct ctl_table *ctl, int write, void *buffer, size_t
 			__sigdebug_setup, debug_signal);
 }
 
-int debug_trap = 0;
-static int __init debug_trap_setup(char *str)
-{
-	debug_trap = 1;
-	return 1;
-}
-__setup("trap_regs", debug_trap_setup);
-
 static int sig_on_mem_err = 0;
 static int __init sig_on_mem_err_setup(char *str)
 {
@@ -325,6 +347,12 @@ void trap_init(void)
 
 	set_MMU_TRAP_POINT(cellar_addr);
 	reset_MMU_TRAP_COUNT();
+
+	/*
+	 * Access from kernel threads to userspace is prohibited by
+	 * page tables switch, so it's safe to use user_addr_max().
+	 */
+	set_max_u_border();
 
 	kvm_trap_init(cellar_addr);
 }
@@ -619,10 +647,12 @@ notrace void parse_TIR_registers(struct pt_regs *regs, u64 exceptions)
 				trace_intc_tir(TIRs[i].lo, TIRs[i].hi);
 		}
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 		if (trace_intc_trap_cellar_enabled()) {
 			for (int cnt = 0; (3 * cnt) < trap->tc_count; cnt++)
 				trace_intc_trap_cellar(&trap->tcellar[cnt], cnt);
 		}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 		trace_intc_ctprs(&regs->ctpr1, &regs->ctpr2, &regs->ctpr3);
 
@@ -954,6 +984,13 @@ static void do_illegal_instr_addr(struct pt_regs *regs)
 	} else {
 		warn_on_legacy_app(regs);
 
+#if IS_ENABLED(CONFIG_SOFT_PM)
+		soft_pm_handler handler = READ_ONCE(soft_pm_illegal_instr_addr);
+		if (handler &&
+		    !handler(regs, exc_tbl_name[E2K_EXC_ILLEGAL_INSTR_ADDR_IND]))
+			return;
+#endif /* CONFIG_SOFT_PM */
+
 		S_SIG(regs, SIGILL, SEGV_MAPERR);
 		debug_signal_print("SIGILL. illegal_instr_addr", regs, true);
 	}
@@ -1044,13 +1081,10 @@ static void do_user_stack_bounds(struct pt_regs *regs)
 		DebugUS("do_user_stack_bounds. USINCR = %lld (0x%llx)\n",
 				native_read_USINCR_reg().incr, AW(native_read_USINCR_reg()));
 		s64 incr = native_read_USINCR_reg().incr;
-		if (unlikely(incr == 0)) {
+		if (unlikely(incr >= 0)) {
 			force_sig(SIGSEGV);
-			debug_signal_print("user_stack_bounds requires not 0 size changing",
+			debug_signal_print("user_stack_bounds requires negative size changing",
 				regs, true);
-		} else if (incr > 0 && constrict_user_data_stack(regs, incr)) {
-			force_sig(SIGSEGV);
-			debug_signal_print("SIGSEGV. constrict on USD bounds failed", regs, true);
 		} else if (incr < 0 && expand_user_data_stack(regs, (unsigned long)(-incr))) {
 			force_sig(SIGSEGV);
 			debug_signal_print("SIGSEGV. expand on USD bounds failed", regs, true);
@@ -1110,6 +1144,13 @@ static void do_diag_operand(struct pt_regs *regs)
 	die_if_kernel("diag_operand trap in kernel mode", regs, 0);
 	die_if_init("diag_operand trap in init process", regs, 0);
 
+#if IS_ENABLED(CONFIG_SOFT_PM)
+	soft_pm_handler handler = READ_ONCE(soft_pm_diag_operand);
+	if (handler &&
+	    !handler(regs, exc_tbl_name[E2K_EXC_DIAG_OPERAND_IND]))
+		return;
+#endif /* CONFIG_SOFT_PM */
+
 	S_SIG(regs, SIGILL, ILL_ILLOPN);
 	debug_signal_print("SIGILL. diag_operand", regs, true);
 }
@@ -1118,6 +1159,13 @@ static void do_illegal_operand(struct pt_regs *regs)
 {
 	die_if_kernel("illegal_operand trap in kernel mode", regs, 0);
 	die_if_init("illegal_operand trap in init process", regs, 0);
+
+#if IS_ENABLED(CONFIG_SOFT_PM)
+	soft_pm_handler handler = READ_ONCE(soft_pm_illegal_operand);
+	if (handler &&
+	    !handler(regs, exc_tbl_name[E2K_EXC_ILLEGAL_OPERAND_IND]))
+		return;
+#endif /* CONFIG_SOFT_PM */
 
 	S_SIG(regs, SIGILL, ILL_ILLOPN);
 	debug_signal_print("SIGILL. illegal_operand", regs, true);
@@ -1166,11 +1214,18 @@ static void do_array_bounds(struct pt_regs *regs)
 		debug_signal_print("SIGSEGV. array_bounds - could not read getsp instruction",
 				regs, true);
 		break;
-	case GETSP_OP_FAIL:
+	case GETSP_OP_FAIL: {
+#if IS_ENABLED(CONFIG_SOFT_PM)
+		soft_pm_handler handler = READ_ONCE(soft_pm_array_bounds);
+		if (handler &&
+		    !handler(regs, exc_tbl_name[E2K_EXC_ARRAY_BOUNDS_IND]))
+			break;
+#endif /* CONFIG_SOFT_PM */
 		S_SIG(regs, SIGSEGV, SEGV_BNDERR);
 		debug_signal_print("SIGSEGV. array_bounds on not a getsp instruction",
 				regs, true);
 		break;
+	}
 	default:
 		BUG();
 	}
@@ -1533,8 +1588,12 @@ static void do_macp(struct pt_regs *regs)
 	}
 	if (handle_uaccess_trap(regs, false)) {
 		/* Controlled access from kernel to user space failed. */
+		/* Flags ev_ld/ev_st need to be reset not to miss next macp exception */
+		madmr.ev_ld = 0;
+		madmr.ev_st = 0;
+		write_MADMR_reg(madmr);
 		/* Big chance interrupt is in uaccess borders, but it's not always true */
-		/* because this interrupt usualy not presice */
+		/* because this interrupt usualy not preсise */
 		return;
 	}
 
@@ -1592,9 +1651,9 @@ void __cpuidle handle_wtrap(struct pt_regs *regs)
 		struct c3_state *c3_state = &current->thread.C3;
 
 		/* Instruction prefetch is disabled, re-enable it. */
-		e2k_mmu_cr_t mmu_cr = READ_MMU_CR();
+		e2k_mmu_cr_t mmu_cr = get_MMU_CR();
 		mmu_cr.ipd = 1;
-		WRITE_MMU_CR(mmu_cr);
+		set_MMU_CR(mmu_cr);
 
 		/* NMIs from local exceptions are disabled, re-enable them. */
 		WRITE_DDBCR_REG(c3_state->ddbcr);
@@ -1780,7 +1839,7 @@ static notrace void do_mem_lock_as(struct pt_regs *regs)
 
 
 
-void do_poisoning(struct pt_regs *regs)
+static void do_poisoning(struct pt_regs *regs)
 {
 	struct trap_pt_regs *trap = regs->trap;
 	e2k_tir_t tir = trap->TIR;

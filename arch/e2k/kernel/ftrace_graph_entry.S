@@ -126,15 +126,30 @@ SYM_FUNC_START(return_to_hook)
 	/* Order is important: first we change cr0.hi
 	 * and then use it in return. */
 ALTERNATIVE_1_ALTINSTR
-/* CPU_NO_HWBUG_INTC_CR_WRITE version */
-	rwd %db[0], %cr0.hi
+	/* CPU_HWBUG_CR_BEFORE_WRITES version */
+	{
+		wait ma_c=1
+	}
 ALTERNATIVE_2_OLDINSTR
-/* Default version */
-{
-	wait ma_c=1
-	rwd %db[0], %cr0.hi
-}
-ALTERNATIVE_3_FEATURE(CPU_NO_HWBUG_INTC_CR_WRITE)
+	/* Default version */
+ALTERNATIVE_3_FEATURE(CPU_HWBUG_CR_BEFORE_WRITES)
+
+ALTERNATIVE_1_ALTINSTR
+	/* CPU_HWBUG_CR_EVERY_WRITE version */
+	{
+		wait ma_c=1
+		rwd %db[0], %cr0.hi
+	}
+ALTERNATIVE_2_ALTINSTR2
+	/* CPU_HWBUG_CR_FIRST_WRITE version */
+	{
+		wait ma_c=1
+		rwd %db[0], %cr0.hi
+	}
+ALTERNATIVE_3_OLDINSTR2
+	/* Default version */
+ 	rwd %db[0], %cr0.hi
+ALTERNATIVE_4_FEATURE2(CPU_HWBUG_CR_EVERY_WRITE, CPU_HWBUG_CR_FIRST_WRITE)
 {
 	nop 6
 	ipd 2

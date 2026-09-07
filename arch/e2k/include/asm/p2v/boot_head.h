@@ -78,13 +78,10 @@ extern e2k_size_t pages_of_phys_memory;	/* number of pages of physical memory */
 extern int		phys_nodes_num;		/* total number of online */
 						/* nodes */
 extern unsigned long	phys_nodes_map;		/* map of all online nodes */
-extern int		phys_mem_nodes_num;	/* number of online nodes */
-						/* only with memory */
 extern unsigned long	phys_mem_nodes_map;	/* map of online nodes */
 						/* only with memory */
 #define	boot_phys_nodes_num		boot_get_vo_value(phys_nodes_num)
 #define	boot_phys_nodes_map		boot_get_vo_value(phys_nodes_map)
-#define	boot_phys_mem_nodes_num		boot_get_vo_value(phys_mem_nodes_num)
 #define	boot_phys_mem_nodes_map		boot_get_vo_value(phys_mem_nodes_map)
 
 struct node_lock_single {
@@ -131,7 +128,7 @@ static inline void __boot_node_unlock(int node, struct node_lock *node_lock)
 /*
  * Native/guest VM indicator
  */
-#define	BOOT_IS_HV_GM()		(boot_machine.gmi)
+#define	BOOT_IS_HV_GM()			boot_cpu_has(CPU_FEAT_GUEST)
 
 #define	BOOT_IS_IRQ_MASK_GLOBAL()	boot_cpu_has(CPU_FEAT_GLOBAL_IRQ_MASK)
 

@@ -42,7 +42,7 @@ int e2k_swap_save_tags(struct page *page)
 		return 0;
 	}
 
-	DebugTM("e2k_swap_save_tags(): save tags 0x%llx for page 0x%llx (index %ld)\n",
+	DebugTM("e2k_swap_save_tags(): save tags 0x%px for page 0x%px (index %ld)\n",
 		tag_storage, page, page_private(page));
 
 	ret = xa_store(&tag_pages, page_private(page), tag_storage, GFP_KERNEL);
@@ -63,7 +63,7 @@ void e2k_swap_restore_tags(swp_entry_t entry, struct page *page)
 	if (!tags)
 		return;
 
-	DebugTM("e2k_swap_restore_tags(): restore tags 0x%llx for page 0x%llx (index %ld)\n",
+	DebugTM("e2k_swap_restore_tags(): restore tags 0x%px for page 0x%px (index %ld)\n",
 		tags, page, entry.val);
 
 	restore_tags_for_data(page_address(page), tags);
@@ -77,7 +77,7 @@ void e2k_swap_invalidate_tags(int type, pgoff_t offset)
 	if (!tags)
 		return;
 
-	DebugTM("e2k_swap_invalidate_tags(): invalidate tags 0x%llx for index %ld\n",
+	DebugTM("e2k_swap_invalidate_tags(): invalidate tags 0x%px for index %ld\n",
 		tags, entry.val);
 
 	e2k_swap_free_tag_storage(tags);

@@ -41,24 +41,6 @@
 	KVM_WRITE_UPSR_REG_VALUE(__upsr_val.UPSR_reg);			\
 })
 
-#define	KVM_INIT_KERNEL_UPSR_LOC_IRQ_REG(irq_en, nmirq_dis)		\
-({									\
-	e2k_upsr_t __upsr_val;						\
-									\
-	__upsr_val = nmirq_dis ? E2K_KERNEL_INITIAL_UPSR_WITH_DISABLED_NMI \
-				:					\
-				E2K_KERNEL_INITIAL_UPSR;		\
-	if (irq_en) {							\
-		__upsr_val.UPSR_ie = 1;					\
-	}								\
-	KVM_WRITE_UPSR_REG_VALUE(__upsr_val.UPSR_reg);			\
-})
-
-#define	KVM_INIT_KERNEL_UPSR_REG(irq_en, nmirq_dis)			\
-		((IS_IRQ_MASK_GLOBAL()) ?				\
-			KVM_INIT_KERNEL_UPSR_GLOB_IRQ_REG() :		\
-			KVM_INIT_KERNEL_UPSR_LOC_IRQ_REG(irq_en, nmirq_dis))
-
 #define	KVM_INIT_USER_UPSR_REG()	\
 		KVM_WRITE_UPSR_REG_VALUE(E2K_USER_INITIAL_UPSR.UPSR_reg)
 #define	KVM_INIT_USER_PSR()		\

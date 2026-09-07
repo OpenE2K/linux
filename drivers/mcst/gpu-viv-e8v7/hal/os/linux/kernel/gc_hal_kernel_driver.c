@@ -1372,11 +1372,20 @@ static struct platform_driver viv_dev_driver = {
     }
 };
 
+
+#if defined(CONFIG_MCST)
+static int viv_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
+#else
 static int __init viv_dev_init(void)
+#endif
 {
     int ret = 0;
 
+#if defined(CONFIG_MCST)
+    ret = gckPLATFORM_Init(pdev, &platform);
+#else
     ret = gckPLATFORM_Init(&viv_dev_driver, &platform);
+#endif
 
     if (ret || !platform) {
         pr_err("galcore: Soc platform init failed.\n");
@@ -1396,13 +1405,41 @@ static int __init viv_dev_init(void)
     return 0;
 }
 
+#if defined(CONFIG_MCST)
+static void viv_pci_remove(struct pci_dev *pdev)
+#else
 static void __exit viv_dev_exit(void)
+#endif
 {
     platform_driver_unregister(&viv_dev_driver);
 
     gckPLATFORM_Terminate(platform);
     platform = NULL;
 }
+
+#if defined(CONFIG_MCST)
+static struct pci_driver viv_pci_driver = {
+	.probe		= viv_pci_probe,
+	.remove		= viv_pci_remove,
+	.name		= DEVICE_NAME,
+	.id_table	= gc_pci_id_list,
+};
+
+static void __exit viv_dev_exit(void)
+{
+       pci_unregister_driver(&viv_pci_driver);
+}
+
+static int __init viv_dev_init(void)
+{
+	int status = pci_register_driver(&viv_pci_driver);
+
+	if (status != 0)
+		pr_err("galcore: Could not register driver!\n");
+
+	return status;
+}
+#endif
 
 module_init(viv_dev_init);
 

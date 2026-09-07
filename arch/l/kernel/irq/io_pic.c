@@ -2,12 +2,15 @@
  * SPDX-License-Identifier: GPL-2.0
  * Copyright (c) 2023 MCST
  */
+
 #include <linux/interrupt.h>
 #include <linux/irqchip.h>
 #include <linux/irq.h>
 #include <linux/of_platform.h>
 #include <linux/pci.h>
 #include <linux/idr.h>
+
+#include <asm/sic_regs_access.h>
 
 #include "io_pic.h"
 
@@ -151,33 +154,9 @@ static void l_irqdomain_free(struct irq_domain *dmn, unsigned int virq,
 	irq_domain_free_irqs_top(dmn, virq, nr_irqs);
 }
 
-static int l_irqdomain_activate(struct irq_domain *dmn,
-			  struct irq_data *irqd, bool reserve)
-{
-	unsigned long flags;
-	struct iopic *apic = l_irqdomain_iopic(dmn);
-
-	raw_spin_lock_irqsave(&apic->lock, flags);
-	apic->iopic_chip->iopic_configure_entry(irqd);
-	raw_spin_unlock_irqrestore(&apic->lock, flags);
-	return 0;
-}
-
-static void l_irqdomain_deactivate(struct irq_domain *dmn,
-			     struct irq_data *irqd)
-{
-
-	struct iopic *apic = l_irqdomain_iopic(dmn);
-	/* It won't be called for IRQ with multiple IOAPIC pins associated */
-	apic->iopic_chip->iopic_mask_entry(l_irqdomain_iopic(dmn),
-			  (int)irqd->hwirq);
-}
-
 const struct irq_domain_ops iopic_irqdomain_ops = {
 	.alloc		= l_irqdomain_alloc,
 	.free		= l_irqdomain_free,
-	.activate	= l_irqdomain_activate,
-	.deactivate	= l_irqdomain_deactivate,
 	.translate	= irq_domain_translate_twocell,
 };
 
@@ -276,6 +255,20 @@ static int __init iopic_init(struct device_node *np,
 err:
 	iopic_exit(ip);
 	return ret;
+}
+
+void get_io_pic_msi(int node, u32 *lo, u32 *hi)
+{
+	if (node < 0)
+		node = 0;
+	/* FIXME SIC reads with mas 0x13 aren't supported by hypervisor */
+	if (paravirt_enabled()) {
+		*lo = early_sic_read_node_nbsr_reg(node, SIC_rt_msi);
+		*hi = early_sic_read_node_nbsr_reg(node, SIC_rt_msi_h);
+	} else {
+		*lo = sic_read_node_nbsr_reg(node, SIC_rt_msi);
+		*hi = sic_read_node_nbsr_reg(node, SIC_rt_msi_h);
+	}
 }
 
 #ifdef CONFIG_L_IO_APIC

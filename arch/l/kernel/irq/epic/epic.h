@@ -190,21 +190,15 @@ static inline u32 epic_vector_prio(u32 vector)
 
 extern void ack_epic_irq(void);
 extern void epic_wait_icr_idle(void);
-extern void clear_cepic(void);
 extern void epic_send_IPI(unsigned int dest_id, int vector);
 extern void epic_send_IPI_mask(const struct cpumask *mask, int vector);
 extern void epic_send_IPI_self(int vector);
-extern void epic_send_IPI_mask_allbutself(const struct cpumask *mask,
-						int vector);
-
+extern void epic_send_IPI_mask_allbutself(const struct cpumask *mask, int vector);
 
 extern int epic_get_vector(void);
 
-
-extern int epic_processor_info(int epicid, int version,
-					unsigned int cepic_freq);
-
-extern void cepic_disable(void);
+extern int epic_processor_info(int epicid, int version, unsigned int cepic_freq);
+extern unsigned long cepic_timer_freq;
 
 #endif	/* __KERNEL__ */
 #endif	/* __ASM_L_EPIC_H */

@@ -21,30 +21,10 @@
 
 #define	boot_native_read_CORE_MODE_reg	native_read_CORE_MODE_reg
 #define	boot_native_write_CORE_MODE_reg	native_write_CORE_MODE_reg
-#define	boot_native_read_OSCUTD_reg() \
-({ \
-	typeof(boot_machine.boot_rrd) func; \
-	func = boot_func_to_pa(boot_machine.boot_rrd); \
-	func(E2K_REG_OSCUTD); \
-})
-#define	boot_native_write_OSCUTD_reg(v) \
-({ \
-	typeof(boot_machine.boot_rwd) func; \
-	func = boot_func_to_pa(boot_machine.boot_rwd); \
-	func(E2K_REG_OSCUTD, (v)); \
-})
-#define	boot_native_read_OSCUIR_reg() \
-({ \
-	typeof(boot_machine.boot_rrd) func; \
-	func = boot_func_to_pa(boot_machine.boot_rrd); \
-	func(E2K_REG_OSCUIR); \
-})
-#define	boot_native_write_OSCUIR_reg(v) \
-({ \
-	typeof(boot_machine.boot_rwd) func; \
-	func = boot_func_to_pa(boot_machine.boot_rwd); \
-	func(E2K_REG_OSCUIR, v); \
-})
+#define	boot_native_read_OSCUTD_reg	native_read_OSCUTD_reg
+#define	boot_native_write_OSCUTD_reg	native_write_OSCUTD_reg
+#define	boot_native_read_OSCUIR_reg	native_read_OSCUIR_reg
+#define	boot_native_write_OSCUIR_reg	native_write_OSCUIR_reg
 
 /*
  * Processor Core Mode Register (CORE_MODE)
@@ -125,7 +105,10 @@
 
 #define write_hw_stacks		native_write_hw_stacks
 #define write_hw_stacks_cr	native_write_hw_stacks_cr
+#define write_hw_stacks_cr__no_wait	native_write_hw_stacks_cr__no_wait
 #define write_cr		native_write_cr
+#define write_cr__no_wait	native_write_cr__no_wait
+
 /*
  * Read/write low/high quad-word Procedure Chain Stack Pointer Register (PCSP)
  */
@@ -221,12 +204,12 @@
  */
 static inline e2k_rndpr_t read_RNDPR_reg(void)
 {
-	return (e2k_rndpr_t) { .word = NATIVE_GET_DSREG_OPEN(wd) };
+	return (e2k_rndpr_t) { .word = NATIVE_GET_DREG_OPEN(wd) };
 }
 
 static inline void write_RNDPR_reg(e2k_rndpr_t rndpr)
 {
-	NATIVE_SET_DSREG_CLOSED_NOEXC(rndpr, AW(rndpr), 5, 7);
+	NATIVE_SET_DREG_NOEXC(3, rndpr, AW(rndpr));
 }
 
 
@@ -289,15 +272,18 @@ static inline void write_RNDPR_reg(e2k_rndpr_t rndpr)
  * Read/Write system clock registers (SCLKR, SCLKMx)
  */
 
-#define	read_SCLKR_reg_value	native_read_SCLKR_reg_value
+#define	read_SCLKR_reg		native_read_SCLKR_reg
 #define	read_SCLKM1_reg		native_read_SCLKM1_reg
 #define	read_SCLKM2_reg		native_read_SCLKM2_reg
 #define	read_SCLKM3_reg_value	native_read_SCLKM3_reg_value
 
-#define	write_SCLKR_reg_value	native_write_SCLKR_reg_value
+#define	write_SCLKR_reg		native_write_SCLKR_reg
 #define	write_SCLKM1_reg	native_write_SCLKM1_reg
 #define	write_SCLKM2_reg	native_write_SCLKM2_reg
 #define	write_SCLKM3_reg_value	native_write_SCLKM3_reg_value
+
+
+
 
 /*
  * Read/write CPU enhanced system clock registers (T_ABS, T_OFF)
@@ -322,8 +308,6 @@ static inline void write_RNDPR_reg(e2k_rndpr_t rndpr)
 #define	read_RPR_reg	native_read_RPR_reg
 #define	write_RPR_reg	native_write_RPR_reg
 
-#define	read_SBBP_reg_value	native_read_SBBR_reg_value
-
 /*
  * Read double-word CPU current Instruction Pointer register (IP)
  */
@@ -336,14 +320,14 @@ static inline void write_RNDPR_reg(e2k_rndpr_t rndpr)
 #define	read_DIBSR_reg		native_read_DIBSR_reg
 #define	read_DIMCR_reg		native_read_DIMCR_reg
 #define	read_DIMCR1_reg		native_read_DIMCR1_reg
-#define	read_DIBAR0_reg_value	native_read_DIBAR0_reg_value
-#define	read_DIBAR1_reg_value	native_read_DIBAR1_reg_value
-#define	read_DIBAR2_reg_value	native_read_DIBAR2_reg_value
-#define	read_DIBAR3_reg_value	native_read_DIBAR3_reg_value
-#define	read_DIMAR0_reg_value	native_read_DIMAR0_reg_value
-#define	read_DIMAR1_reg_value	native_read_DIMAR1_reg_value
-#define	read_DIMAR2_reg_value	native_read_DIMAR2_reg_value
-#define	read_DIMAR3_reg_value	native_read_DIMAR3_reg_value
+#define	read_DIBAR0_reg		native_read_DIBAR0_reg
+#define	read_DIBAR1_reg		native_read_DIBAR1_reg
+#define	read_DIBAR2_reg		native_read_DIBAR2_reg
+#define	read_DIBAR3_reg		native_read_DIBAR3_reg
+#define	read_DIMAR0_reg		native_read_DIMAR0_reg
+#define	read_DIMAR1_reg		native_read_DIMAR1_reg
+#define	read_DIMAR2_reg		native_read_DIMAR2_reg
+#define	read_DIMAR3_reg		native_read_DIMAR3_reg
 
 #define	write_DIBCR_reg		native_write_DIBCR_reg
 #define	write_DIBSR_reg		native_write_DIBSR_reg
@@ -353,14 +337,14 @@ static inline void write_RNDPR_reg(e2k_rndpr_t rndpr)
 #define	write_DIMCR1_reg	native_write_DIMCR1_reg
 #define	clear_DIMCR_reg		native_clear_DIMCR_reg
 #define	clear_DIMCR1_reg	native_clear_DIMCR1_reg
-#define	write_DIBAR0_reg_value	native_write_DIBAR0_reg_value
-#define	write_DIBAR1_reg_value	native_write_DIBAR1_reg_value
-#define	write_DIBAR2_reg_value	native_write_DIBAR2_reg_value
-#define	write_DIBAR3_reg_value	native_write_DIBAR3_reg_value
-#define	write_DIMAR0_reg_value	native_write_DIMAR0_reg_value
-#define	write_DIMAR1_reg_value	native_write_DIMAR1_reg_value
-#define	write_DIMAR2_reg_value	native_write_DIMAR2_reg_value
-#define	write_DIMAR3_reg_value	native_write_DIMAR3_reg_value
+#define	write_DIBAR0_reg	native_write_DIBAR0_reg
+#define	write_DIBAR1_reg	native_write_DIBAR1_reg
+#define	write_DIBAR2_reg	native_write_DIBAR2_reg
+#define	write_DIBAR3_reg	native_write_DIBAR3_reg
+#define	write_DIMAR0_reg	native_write_DIMAR0_reg
+#define	write_DIMAR1_reg	native_write_DIMAR1_reg
+#define	write_DIMAR2_reg	native_write_DIMAR2_reg
+#define	write_DIMAR3_reg	native_write_DIMAR3_reg
 
 /*
  * Read/write double-word Compilation Unit Table Register (CUTD)
@@ -380,7 +364,6 @@ static inline void write_RNDPR_reg(e2k_rndpr_t rndpr)
 #define	boot_read_PSR_reg		native_read_PSR_reg
 
 #define	write_PSR_reg			native_write_PSR_reg
-#define	boot_write_PSR_reg		native_write_PSR_reg
 #define	write_irq_barrier_PSR_reg	native_write_irq_barrier_PSR_reg
 
 /*
@@ -413,9 +396,7 @@ static inline void write_RNDPR_reg(e2k_rndpr_t rndpr)
 #define	read_FPCR_reg		native_read_FPCR_reg
 #define	read_FPSR_reg		native_read_FPSR_reg
 
-#define	write_PFPFR_reg		native_write_PFPFR_reg
-#define	write_FPCR_reg		native_write_FPCR_reg
-#define	write_FPSR_reg		native_write_FPSR_reg
+#define write_FPU_regs		native_write_FPU_regs
 
 /*
  * Read/write low/high double-word Intel segments registers (xS)

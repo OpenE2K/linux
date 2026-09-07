@@ -24,7 +24,6 @@ typedef int (*wext_ioctl_func)(struct net_device *, struct iwreq *,
 			       unsigned int, struct iw_request_info *,
 			       iw_handler);
 
-
 /*
  * Meta-data about all the standard Wireless Extension request we
  * know about.
@@ -1134,69 +1133,98 @@ int compat_wext_handle_ioctl(struct net *net, unsigned int cmd,
 #include <asm/protected_syscalls.h>
 
 struct ptr128_iw_point {
-	e2k_ptr_t __user dscr;	/* Pointer to the data  (in user space) */
-	__u16		length;	/* number of fields or size in bytes */
-	__u16		flags;	/* Optional params */
+	e2k_ap_t	ap;	/* AP to the data  (in user space) */
+	__u16		length;		/* number of fields or size in bytes */
+	__u16		flags;		/* Optional params */
 };
 
-static int ptr128_standard_call(struct net_device	*dev,
-				struct iwreq		*iwr,
-				unsigned int		cmd,
-				struct iw_request_info	*info,
-				iw_handler		handler)
-{
-	const struct iw_ioctl_description *descr;
-	struct ptr128_iw_point *iwp_128;
-	struct iw_point iwp;
-	int err;
+union ptr128_iwreq_data {
+	/* Config - generic */
+	char		name[IFNAMSIZ];
+	/* Name : used to verify the presence of  wireless extensions.
+	 * Name of the protocol/provider... */
 
-	descr = standard_ioctl + IW_IOCTL_IDX(cmd);
+	struct ptr128_iw_point pointer; /* essid, encoding, data */
+	struct iw_param	nwid;		/* network id (or domain - the cell) */
+	struct iw_freq	freq;		/* frequency or channel */
+	struct iw_param	sens;		/* signal level threshold */
+	struct iw_param	bitrate;	/* default bit rate */
+	struct iw_param	txpower;	/* default transmit power */
+	struct iw_param	rts;		/* RTS threshold */
+	struct iw_param	frag;		/* Fragmentation threshold */
+	__u32		mode;		/* Operation mode */
+	struct iw_param	retry;		/* Retry limits & lifetime */
 
-	if (descr->header_type != IW_HEADER_TYPE_POINT)
-		return ioctl_standard_call(dev, iwr, cmd, info, handler);
+	struct iw_param	power;		/* PM duration/timeout */
+	struct iw_quality qual;		/* Quality part of statistics */
 
-	iwp_128 = (struct ptr128_iw_point *) &iwr->u.data;
-	iwp.pointer = (void *) AP_PTR(iwp_128->dscr);
-	iwp.length = iwp_128->length;
-	iwp.flags = iwp_128->flags;
+	struct sockaddr	ap_addr;	/* Access point address */
+	struct sockaddr	addr;		/* Destination address (hw/mac) */
 
-	err = ioctl_standard_iw_point(&iwp, cmd, descr, handler, dev, info);
+	struct iw_param	param;		/* Other small parameters */
+};
+struct ptr128_iwreq {
+	union {
+		char	ifrn_name[IFNAMSIZ];	/* if name, e.g. "eth0" */
+	} ifr_ifrn;
 
-	iwp_128->length = iwp.length;
-	iwp_128->flags = iwp.flags;
-
-	return err;
-}
+	/* Data part (defined just above) */
+	union ptr128_iwreq_data	u;
+};
 
 int ptr128_wext_handle_ioctl(struct net *net, unsigned long cmd,
 			     unsigned long arg)
 {
-	void __user *argp = (void __user *)arg;
+	struct ptr128_iwreq __user *iwr128p =
+		(struct ptr128_iwreq __user *)arg;
 	struct iw_request_info info;
-	struct iwreq iwr;
+	struct ptr128_iwreq iwr128;
+	struct iwreq *iwrp = (struct iwreq *)&iwr128;
+	e2k_ap_t ap;
+	int tag;
+	u64 saved_ub = get_u_border();
 	char *colon;
 	int ret;
 
-	if (copy_from_user(&iwr, argp, sizeof(struct iwreq)))
+	BUILD_BUG_ON(offsetof(struct iwreq, u) != offsetof(struct ptr128_iwreq, u));
+	if (copy_from_user(&iwr128, iwr128p, sizeof(struct ptr128_iwreq)))
 		return -EFAULT;
 
-	iwr.ifr_name[IFNAMSIZ-1] = 0;
-	colon = strchr(iwr.ifr_name, ':');
+	iwr128.ifr_name[IFNAMSIZ-1] = 0;
+	colon = strchr(iwr128.ifr_name, ':');
 	if (colon)
 		*colon = 0;
 
-	info.cmd = cmd;
-	info.flags = IW_REQUEST_FLAG_COMPAT;
-
-	ret = wext_ioctl_dispatch(net, &iwr, cmd, &info,
-				  ptr128_standard_call,
-				  ptr128_private_call);
-
-	if (ret >= 0 &&
-	    IW_IS_GET(cmd) &&
-	    copy_to_user(argp, &iwr, sizeof(struct iwreq)))
+	if (get_user_tagged_16(ap.qword, tag, &iwr128p->u.pointer.ap))
 		return -EFAULT;
+	if (IS_AP(ap, tag)) {
+		iwrp->u.data.flags = iwr128.u.pointer.flags;
+		iwrp->u.data.length = iwr128.u.pointer.length;
+		iwrp->u.data.pointer = (void __user *)AP_PTR(ap);
+		set_ap_u_border(ap);
+	} else {
+		set_u_border(0);
+	}
 
+	info.cmd = cmd;
+
+	ret = wext_ioctl_dispatch(net, iwrp, cmd, &info,
+				  ioctl_standard_call,
+				  ioctl_private_call);
+
+	if (ret >= 0 && IW_IS_GET(cmd)) {
+		if (IS_AP(ap, tag)) {
+			u16 length = iwrp->u.data.length;
+			u16 flags  = iwrp->u.data.flags;
+			iwr128.u.pointer.flags = flags;
+			iwr128.u.pointer.length = length;
+			set_u_border(saved_ub);
+		}
+		if (copy_to_user(iwr128p, &iwr128, sizeof(iwr128)))
+			return -EFAULT;
+		if ((IS_AP(ap, tag) && put_user_tagged_16(ap.qword, tag, &iwr128p->u.pointer.ap)))
+			return -EFAULT;
+	}
 	return ret;
 }
 #endif /* CONFIG_PROTECTED_MODE */

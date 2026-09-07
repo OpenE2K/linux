@@ -12,6 +12,7 @@
 #undef TRACE_SYSTEM
 #define TRACE_SYSTEM gmm
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 TRACE_EVENT(host_gmm_root_hpa,
 
 	TP_PROTO(gmm_struct_t *gmm, hpa_t root, hpa_t gk_root,
@@ -40,6 +41,7 @@ TRACE_EVENT(host_gmm_root_hpa,
 		__entry->id, __entry->gmm, (void *)__entry->ip,
 		__entry->root, __entry->gk_root)
 );
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 TRACE_EVENT(
 	host_get_gmm_root_hpa,
@@ -70,6 +72,7 @@ TRACE_EVENT(
 		__entry->root, __entry->gk_root)
 );
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 TRACE_EVENT(
 	host_set_gmm_root_hpa,
 
@@ -105,6 +108,7 @@ TRACE_EVENT(
 		__entry->old_root, __entry->old_gk_root,
 		__entry->root, __entry->gk_root)
 );
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #endif /* _TRACE_HOST_GMM_H */
 

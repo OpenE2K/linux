@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
 #include <asm/kvm_host.h>
 #include <asm/machdep.h>
 #include <asm/kvm/cpu_hv_regs_access.h>

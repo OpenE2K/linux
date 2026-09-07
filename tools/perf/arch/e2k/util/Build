@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: GPL-2.0
 # Copyright (c) 2023 MCST
 
-perf-y += header.o
+perf-y += cpuinfo.o header.o
 
 perf-$(CONFIG_AUXTRACE) += pmu.o auxtrace.o
+
+CFLAGS_auxtrace.o = -Wno-declaration-after-statement

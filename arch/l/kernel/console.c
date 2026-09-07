@@ -419,7 +419,6 @@ static __interrupt void do_dump_vprintk(const char *fmt_v, va_list ap_v)
 				cp = buf;
 			} else if (c == 's') {
 				cp = va_arg(ap, char *);
-				cp = cp;
 				length = strlen(cp);
 			} else if (c == 'c') {
 				c = va_arg(ap, int);
@@ -598,6 +597,11 @@ static struct console early_dump_console = {
 __init void register_early_dump_console(void)
 {
 	if (early_console)
+		return;
+
+	/* Skip automatic early serial console if serial port
+	 * is not specified in command line */
+	if (!strstr(boot_command_line, "console=ttyS"))
 		return;
 
 	register_console(&early_dump_console);

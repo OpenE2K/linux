@@ -253,7 +253,7 @@ static struct coroutine *alloc_hw_context(bool main_context, size_t u_stk_size,
 		 */
 		ctx->ti.u_hw_stack = current_thread_info()->u_hw_stack;
 
-		DebugCTX("ctx %lx allocated for main\n", ctx);
+		DebugCTX("ctx %px allocated for main\n", ctx);
 		return ctx;
 	}
 
@@ -264,7 +264,7 @@ static struct coroutine *alloc_hw_context(bool main_context, size_t u_stk_size,
 				 get_hw_pcs_user_size(hw_stacks)))
 		goto free_context;
 
-	DebugCTX("allocated ctx %lx with key=0x%lx and user stacks p: %px, pc: %px\n",
+	DebugCTX("allocated ctx %px with key=0x%lx and user stacks p: %px, pc: %px\n",
 		 ctx, key, GET_PS_BASE(hw_stacks), GET_PCS_BASE(hw_stacks));
 
 	return ctx;
@@ -301,7 +301,7 @@ static void free_hw_context(struct coroutine *ctx, bool ctx_in_use,
 		}
 	}
 
-	DebugCTX("ctx %lx freed (%s stack areas, %s stack memory)\n",
+	DebugCTX("ctx %px freed (%s stack areas, %s stack memory)\n",
 		 ctx, ctx_in_use ? "without" : "with",
 		 keep_hw_stacks ? "without" : "with");
 
@@ -452,14 +452,14 @@ static int copy_context(struct task_struct *p,
 	if (ret)
 		return ret;
 
-	DebugCTX("context 0x%lx copied to 0x%lx, key 0x%llx\n",
+	DebugCTX("context 0x%px copied to 0x%px, key 0x%llx\n",
 		 src, dst, src->key);
 	return 0;
 }
 
 static void hw_context_destroy_one(void *ptr, void *unused)
 {
-	DebugCTX("ctx %lx free on exit\n", ptr);
+	DebugCTX("ctx %px free on exit\n", ptr);
 
 	/*
 	 * No 'mm' at this point so don't try to free user stacks
@@ -671,8 +671,10 @@ static int makecontext_prepare_user_stacks(struct longjmp_regs *user_regs,
 	 * Calculate user function frame's parameters.
 	 */
 	if (protected) {
-		args_registers_size = min(args_size, 128ULL);
-		func_frame_size = round_up(args_size, E2K_ALIGN_PUSTACK_SIZE);
+		/* `16` in protected mode is to account for %qr0 which holds
+		 * stack descriptor instead of function arguments. */
+		args_registers_size = min(args_size, _ULL(128 - 16));
+		func_frame_size = round_up(args_size + 16, E2K_ALIGN_PUSTACK_SIZE);
 	} else {
 		args_registers_size = min(args_size, 64ULL);
 		func_frame_size = round_up(args_size, E2K_ALIGN_USTACK_SIZE);
@@ -681,11 +683,12 @@ static int makecontext_prepare_user_stacks(struct longjmp_regs *user_regs,
 	func_frame_ptr = u_stk_base + u_stk_size - func_frame_size;
 	if (!access_ok(func_frame_ptr, func_frame_size))
 		return -EFAULT;
-	DebugCTX("arguments: base 0x%lx, size %lld (regs %lld + stack %lld)\n",
+	DebugCTX("arguments: base 0x%px, size %lld (regs %lld + stack %lld)\n",
 		 args, args_size, args_registers_size, args_stack_size);
 
 	stacks.top = (unsigned long) u_stk_base + u_stk_size;
 	if (protected) {
+#ifdef CONFIG_PROTECTED_MODE
 		e2k_ap_t qptr;
 
 		/* Check that the stack does not cross 4Gb boundary */
@@ -712,6 +715,7 @@ static int makecontext_prepare_user_stacks(struct longjmp_regs *user_regs,
 			return -EFAULT;
 
 		ps_frame += EXT_4_NR_SZ;
+#endif
 	} else {
 		stacks.usd = new_usd((unsigned long) u_stk_base, u_stk_size,
 				     u_stk_size - func_frame_size);
@@ -739,9 +743,9 @@ static int makecontext_prepare_user_stacks(struct longjmp_regs *user_regs,
 		return ret;
 
 	if (args_stack_size) {
-		DebugCTX("Copying stack arguments to 0x%lx\n", func_frame_ptr + 64);
+		DebugCTX("Copying stack arguments to 0x%px\n", func_frame_ptr + 64);
 		if (copy_in_user_with_tags(func_frame_ptr + (protected ? 128 : 64),
-					   args + args_registers_size,
+					   &args[args_registers_size / sizeof(args[0])],
 					   args_stack_size))
 			return -EFAULT;
 	}
@@ -967,7 +971,7 @@ static int makecontext_prepare_ucp_contents(void __user *ucp, int format,
 
 	if (format == CTX_32_BIT) {
 		ret = __clear_user(&ucp_32->uc_sigmask, sigsetsize);
-		ret = ret ?: __put_user(key, &ucp_32->uc_mcontext.sbr);
+		ret = ret ?: __put_user(key, uc_coroutine_key_32(ucp_32));
 		ret = ret ?: __put_user(LO(user_regs->cr0), &ucp_32->uc_mcontext.cr0_lo);
 		ret = ret ?: __put_user(HI(user_regs->cr0), &ucp_32->uc_mcontext.cr0_hi);
 		ret = ret ?: __put_user(LO(user_regs->cr1), &ucp_32->uc_mcontext.cr1_lo);
@@ -983,7 +987,7 @@ static int makecontext_prepare_ucp_contents(void __user *ucp, int format,
 		ret = ret ?: __put_user(AW(pfpfr), &ucp_32->uc_extra.pfpfr);
 	} else if (format == CTX_64_BIT) {
 		ret = __clear_user(&ucp_64->uc_sigmask, sigsetsize);
-		ret = ret ?: __put_user(key, &ucp_64->uc_mcontext.sbr);
+		ret = ret ?: __put_user(key, uc_coroutine_key_64(ucp_64));
 		ret = ret ?: __put_user(LO(user_regs->cr0), &ucp_64->uc_mcontext.cr0_lo);
 		ret = ret ?: __put_user(HI(user_regs->cr0), &ucp_64->uc_mcontext.cr0_hi);
 		ret = ret ?: __put_user(LO(user_regs->cr1), &ucp_64->uc_mcontext.cr1_lo);
@@ -1001,7 +1005,7 @@ static int makecontext_prepare_ucp_contents(void __user *ucp, int format,
 #ifdef CONFIG_PROTECTED_MODE
 	else { /* CTX_128_BIT */
 		ret = __clear_user(&ucp_128->uc_sigmask, sigsetsize);
-		ret = ret ?: __put_user(key, &ucp_128->uc_mcontext.sbr);
+		ret = ret ?: __put_user(key, uc_coroutine_key_128(ucp_128));
 		ret = ret ?: __put_user(LO(user_regs->cr0), &ucp_128->uc_mcontext.cr0_lo);
 		ret = ret ?: __put_user(HI(user_regs->cr0), &ucp_128->uc_mcontext.cr0_hi);
 		ret = ret ?: __put_user(LO(user_regs->cr1), &ucp_128->uc_mcontext.cr1_lo);
@@ -1057,7 +1061,7 @@ static long do_makecontext(void __user *ucp, void __user *func, u64 args_size,
 	u64 key;
 	int ret;
 
-	DebugCTX("ucp %lx started\n", ucp);
+	DebugCTX("ucp %px started\n", ucp);
 
 	ret = -EFAULT;
 	if (format == CTX_64_BIT &&
@@ -1118,7 +1122,7 @@ static long do_makecontext(void __user *ucp, void __user *func, u64 args_size,
 	u_stk_size -= PTR_ALIGN(u_stk_base, E2K_ALIGN_USTACK_BOUNDS) - u_stk_base;
 	u_stk_base = PTR_ALIGN(u_stk_base, E2K_ALIGN_USTACK_BOUNDS);
 	u_stk_size = round_down(u_stk_size, E2K_ALIGN_USTACK_BOUNDS);
-	DebugCTX("user stack at %lx, size=%lx\n", u_stk_base, u_stk_size);
+	DebugCTX("user stack at %px, size=%lx\n", u_stk_base, u_stk_size);
 
 	if (!access_ok(u_stk_base, u_stk_size))
 		return -EFAULT;
@@ -1160,7 +1164,7 @@ static long do_makecontext(void __user *ucp, void __user *func, u64 args_size,
 			return -EINVAL;
 		}
 
-		DebugCTX("ctx %lx reused, key=%llx\n", ctx, key);
+		DebugCTX("ctx %px reused, key=%llx\n", ctx, key);
 	} else {
 		/* Slow path: duly allocate a new context */
 		ctx = alloc_hw_context(false, u_stk_size, key);
@@ -1205,7 +1209,7 @@ static long do_makecontext(void __user *ucp, void __user *func, u64 args_size,
 				remove_ctx_signal_stack(same_key_ctx->key);
 
 				if (!ret) {
-					DebugCTX("removed duplicate ctx %lx with the same key\n",
+					DebugCTX("removed duplicate ctx %px with the same key\n",
 						 same_key_ctx);
 					context_free(same_key_ctx);
 				}
@@ -1215,7 +1219,7 @@ static long do_makecontext(void __user *ucp, void __user *func, u64 args_size,
 		/* Create signal stack on host side for this context */
 		add_ctx_signal_stack(ctx->key, false);
 
-		DebugCTX("added ctx %lx with key %llx\n", ctx, key);
+		DebugCTX("added ctx %px with key %llx\n", ctx, key);
 	}
 
 	return 0;
@@ -1268,7 +1272,7 @@ static long do_freecontext(u64 key)
 
 	rcu_read_unlock();
 
-	DebugCTX("ctx %lx for key 0x%llx, ret %ld\n", ctx, key, ret);
+	DebugCTX("ctx %px for key 0x%llx, ret %ld\n", ctx, key, ret);
 	if (ret)
 		return ret;
 
@@ -1284,7 +1288,7 @@ SYSCALL_DEFINE1(freecontext, struct ucontext __user *, ucp)
 {
 	u64 free_key;
 
-	if (get_user(free_key, &ucp->uc_mcontext.sbr))
+	if (get_user(free_key, uc_coroutine_key_64(ucp)))
 		return -EFAULT;
 
 	return do_freecontext(free_key);
@@ -1295,7 +1299,7 @@ COMPAT_SYSCALL_DEFINE1(freecontext, struct ucontext_32 __user *, ucp)
 {
 	u64 free_key;
 
-	if (get_user(free_key, &ucp->uc_mcontext.sbr))
+	if (get_user(free_key, uc_coroutine_key_32(ucp)))
 		return -EFAULT;
 
 	return do_freecontext(free_key);
@@ -1307,7 +1311,7 @@ long protected_sys_freecontext(struct ucontext_prot __user *ucp)
 {
 	u64 free_key;
 
-	if (get_user(free_key, &ucp->uc_mcontext.sbr))
+	if (get_user(free_key, uc_coroutine_key_128(ucp)))
 		return -EFAULT;
 
 	return do_freecontext(free_key);
@@ -1404,9 +1408,7 @@ static void switch_hw_contexts(struct pt_regs *__restrict regs,
 	regs->kernel_entry = next_ctx->regs.kernel_entry;
 
 	if (fpu_context) {
-		write_FPCR_reg(fpcr);
-		write_FPSR_reg(fpsr);
-		write_PFPFR_reg(pfpfr);
+		write_FPU_regs(fpcr, fpsr, pfpfr);
 	}
 
 	ti->u_stack = next_ctx->ti.u_stack;
@@ -1445,7 +1447,7 @@ long coroutine_switch_and_longjmp(unsigned long pcsp_base,
 	if (unlikely(IS_ERR(next_ctx)))
 		return PTR_ERR(next_ctx);
 
-	DebugCTX("found ctx 0x%lx with key 0x%llx for pcsp 0x%llx\n",
+	DebugCTX("found ctx 0x%px with key 0x%llx for pcsp 0x%llx\n",
 			next_ctx, next_ctx->key, jmp_info->pcsplo);
 
 	int format = next_ctx->ptr_format;
@@ -1480,7 +1482,7 @@ long coroutine_switch_and_longjmp(unsigned long pcsp_base,
 	/*
 	 * Do the switch
 	 */
-	DebugCTX("switching from ctx %lx to ctx %lx\n", prev_ctx, next_ctx);
+	DebugCTX("switching from ctx %px to ctx %px\n", prev_ctx, next_ctx);
 	switch_hw_contexts(regs, prev_ctx, next_ctx, NULL);
 	current_thread_info()->this_hw_context = next_ctx;
 
@@ -1500,9 +1502,9 @@ long coroutine_switch_and_longjmp(unsigned long pcsp_base,
 }
 
 
-#define LOAD_CTX(ucp, next_user_ctx, next_key) \
+#define LOAD_CTX(ucp, ucp_key, next_user_ctx, next_key) \
 do { \
-	USER_LD(*next_key, &ucp->uc_mcontext.sbr); \
+	USER_LD(*next_key, ucp_key); \
 	USER_LD(next_user_ctx->sigset, (u64 __user *) &ucp->uc_sigmask); \
 	USER_LD(AW(next_user_ctx->fpcr), &ucp->uc_extra.fpcr); \
 	USER_LD(AW(next_user_ctx->fpsr), &ucp->uc_extra.fpsr); \
@@ -1514,7 +1516,7 @@ do { \
 	USER_LD(HI(next_user_ctx->cr1), &ucp->uc_mcontext.cr1_hi); \
 } while (0)
 
-#define SAVE_CTX(oucp, regs, prev_key, k_crs, current_blocked_sigset) \
+#define SAVE_CTX(oucp, oucp_key, regs, prev_key, k_crs, current_blocked_sigset) \
 do { \
 	e2k_fpcr_t __fpcr = read_FPCR_reg(); \
 	e2k_fpsr_t __fpsr = read_FPSR_reg(); \
@@ -1525,7 +1527,7 @@ do { \
 	e2k_pcsp_t pcsp = regs->stacks.pcsp; \
 	pcsp = decr_pcsp_ind(pcsp, SZ_OF_CR); \
 	USER_ST(current_blocked_sigset.sig[0], ((u64 __user *) &oucp->uc_sigmask)); \
-	USER_ST(prev_key, &oucp->uc_mcontext.sbr); \
+	USER_ST(prev_key, oucp_key); \
 	USER_ST(HI(k_crs->cr0), &oucp->uc_mcontext.cr0_hi); \
 	USER_ST(LO(k_crs->cr1), &oucp->uc_mcontext.cr1_lo); \
 	USER_ST(HI(k_crs->cr1), &oucp->uc_mcontext.cr1_hi); \
@@ -1540,7 +1542,7 @@ UACCESS_FN_DEFINE3(load_ctx_32_fn, const struct ucontext_32 __user *, ucp,
 		   struct userspace_context *__restrict, next_user_ctx,
 		   u64 *__restrict, next_key)
 {
-	LOAD_CTX(ucp, next_user_ctx, next_key);
+	LOAD_CTX(ucp, uc_coroutine_key_32(ucp), next_user_ctx, next_key);
 	return 0;
 }
 
@@ -1548,7 +1550,7 @@ UACCESS_FN_DEFINE3(load_ctx_64_fn, const struct ucontext __user *, ucp,
 		   struct userspace_context *__restrict, next_user_ctx,
 		   u64 *__restrict, next_key)
 {
-	LOAD_CTX(ucp, next_user_ctx, next_key);
+	LOAD_CTX(ucp, uc_coroutine_key_64(ucp), next_user_ctx, next_key);
 	return 0;
 }
 
@@ -1557,7 +1559,7 @@ UACCESS_FN_DEFINE3(load_ctx_128_fn, const struct ucontext_prot __user *, ucp,
 		   struct userspace_context *__restrict, next_user_ctx,
 		   u64 *__restrict, next_key)
 {
-	LOAD_CTX(ucp, next_user_ctx, next_key);
+	LOAD_CTX(ucp, uc_coroutine_key_128(ucp), next_user_ctx, next_key);
 	return 0;
 }
 #endif
@@ -1567,7 +1569,7 @@ UACCESS_FN_DEFINE4(save_ctx_32_fn, struct ucontext_32 __user *, oucp,
 		   sigset_t, current_blocked_sigset)
 {
 	struct pt_regs *__restrict regs = current_thread_info()->pt_regs;
-	SAVE_CTX(oucp, regs, prev_key, k_crs, current_blocked_sigset);
+	SAVE_CTX(oucp, uc_coroutine_key_32(oucp), regs, prev_key, k_crs, current_blocked_sigset);
 	return 0;
 }
 
@@ -1576,7 +1578,7 @@ UACCESS_FN_DEFINE4(save_ctx_64_fn, struct ucontext __user *, oucp,
 		   sigset_t, current_blocked_sigset)
 {
 	struct pt_regs *__restrict regs = current_thread_info()->pt_regs;
-	SAVE_CTX(oucp, regs, prev_key, k_crs, current_blocked_sigset);
+	SAVE_CTX(oucp, uc_coroutine_key_64(oucp), regs, prev_key, k_crs, current_blocked_sigset);
 	return 0;
 }
 
@@ -1586,7 +1588,7 @@ UACCESS_FN_DEFINE4(save_ctx_128_fn, struct ucontext_prot __user *, oucp,
 		   sigset_t, current_blocked_sigset)
 {
 	struct pt_regs *__restrict regs = current_thread_info()->pt_regs;
-	SAVE_CTX(oucp, regs, prev_key, k_crs, current_blocked_sigset);
+	SAVE_CTX(oucp, uc_coroutine_key_128(oucp), regs, prev_key, k_crs, current_blocked_sigset);
 	return 0;
 }
 #endif
@@ -1600,8 +1602,8 @@ UACCESS_FN_DEFINE7(save_and_load_ctx_32_fn,
 		   sigset_t, current_blocked_sigset)
 {
 	struct pt_regs *__restrict regs = current_thread_info()->pt_regs;
-	SAVE_CTX(oucp, regs, prev_key, k_crs, current_blocked_sigset);
-	LOAD_CTX(ucp, next_user_ctx, next_key);
+	SAVE_CTX(oucp, uc_coroutine_key_32(oucp), regs, prev_key, k_crs, current_blocked_sigset);
+	LOAD_CTX(ucp, uc_coroutine_key_32(ucp), next_user_ctx, next_key);
 	return 0;
 }
 
@@ -1614,8 +1616,8 @@ UACCESS_FN_DEFINE7(save_and_load_ctx_64_fn,
 		   sigset_t, current_blocked_sigset)
 {
 	struct pt_regs *__restrict regs = current_thread_info()->pt_regs;
-	SAVE_CTX(oucp, regs, prev_key, k_crs, current_blocked_sigset);
-	LOAD_CTX(ucp, next_user_ctx, next_key);
+	SAVE_CTX(oucp, uc_coroutine_key_64(oucp), regs, prev_key, k_crs, current_blocked_sigset);
+	LOAD_CTX(ucp, uc_coroutine_key_64(ucp), next_user_ctx, next_key);
 	return 0;
 }
 
@@ -1629,8 +1631,8 @@ UACCESS_FN_DEFINE7(save_and_load_ctx_128_fn,
 		   sigset_t, current_blocked_sigset)
 {
 	struct pt_regs *__restrict regs = current_thread_info()->pt_regs;
-	SAVE_CTX(oucp, regs, prev_key, k_crs, current_blocked_sigset);
-	LOAD_CTX(ucp, next_user_ctx, next_key);
+	SAVE_CTX(oucp, uc_coroutine_key_128(oucp), regs, prev_key, k_crs, current_blocked_sigset);
+	LOAD_CTX(ucp, uc_coroutine_key_128(ucp), next_user_ctx, next_key);
 	return 0;
 }
 #endif
@@ -1663,7 +1665,7 @@ static long do_swapcontext(void __user *oucp, const void __user *ucp,
 	bool stacks_switched = false;
 	int ret;
 
-	DebugCTX("oucp=%lx ucp=%lx started\n", oucp, ucp);
+	DebugCTX("oucp=%px ucp=%px started\n", oucp, ucp);
 	BUILD_BUG_ON(sizeof(current->blocked.sig[0]) != 8);
 
 	prev_ctx = current_thread_info()->this_hw_context;
@@ -1783,7 +1785,7 @@ static long do_swapcontext(void __user *oucp, const void __user *ucp,
 		if (unlikely(IS_ERR(next_ctx)))
 			return PTR_ERR(next_ctx);
 
-		DebugCTX("switching from ctx %lx to ctx %lx\n", prev_ctx, next_ctx);
+		DebugCTX("switching from ctx %px to ctx %px\n", prev_ctx, next_ctx);
 
 		switch_hw_contexts(regs, prev_ctx, next_ctx, &next_user_ctx);
 		current_thread_info()->this_hw_context = next_ctx;
@@ -1792,9 +1794,7 @@ static long do_swapcontext(void __user *oucp, const void __user *ucp,
 
 		stacks_switched = true;
 	} else {
-		write_FPCR_reg(next_user_ctx.fpcr);
-		write_FPSR_reg(next_user_ctx.fpsr);
-		write_PFPFR_reg(next_user_ctx.pfpfr);
+		write_FPU_regs(next_user_ctx.fpcr, next_user_ctx.fpsr, next_user_ctx.pfpfr);
 	}
 
 	/*

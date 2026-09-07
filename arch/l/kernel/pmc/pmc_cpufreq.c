@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
@@ -302,8 +307,8 @@ static int pmc_l_cpufreq_set_target(struct cpufreq_policy *policy,
 				PMC_TRANSITION_LATENCY);
 		}
 
-		newstate = cpufreq_frequency_table_target(policy,
-						target_freq, relation);
+		newstate = cpufreq_frequency_table_target(policy, target_freq,
+				policy->min, policy->max, relation);
 		if (newstate < 0)
 			return newstate;
 
@@ -319,8 +324,8 @@ static int pmc_l_cpufreq_set_target(struct cpufreq_policy *policy,
 				PMC_TRANSITION_LATENCY);
 		}
 
-		newstate = cpufreq_frequency_table_target(policy,
-						target_freq, relation);
+		newstate = cpufreq_frequency_table_target(policy, target_freq,
+					policy->min, policy->max, relation);
 		if (newstate < 0)
 			return newstate;
 

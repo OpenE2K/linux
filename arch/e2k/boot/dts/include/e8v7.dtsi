@@ -1,0 +1,34 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2025 MCST
+ */
+
+#define NODES 1
+#define CELLS 2
+#define NODE 0
+
+#define E8V7
+
+#ifdef NODE0_DMN_A_OK
+# define DMN_1_STS "ok"
+#endif
+#ifdef NODE0_DMN_B_OK
+# define DMN_2_STS "ok"
+#endif
+#ifdef NODE0_DMN_C_OK
+# define DMN_3_STS "ok"
+#endif
+#ifdef NODE0_DMN_D_OK
+# define DMN_4_STS "ok"
+#endif
+
+/ {
+	#address-cells = <CELLS>;
+	#size-cells = <CELLS>;
+
+#include <e2k/e2k-v7.dtsi>
+#include <e2k/e2k-v7-uncore.dtsi>
+#include <e2k/eioh2.dtsi>
+#undef NODE
+
+};

@@ -29,6 +29,7 @@
 #include <linux/kthread.h>
 #include <linux/of_fdt.h>
 #include <linux/pgtable.h>
+#include <linux/smp.h>
 #include <linux/irqchip.h>
 #include <linux/kasan.h>
 
@@ -245,9 +246,6 @@ EXPORT_SYMBOL(machine);
 unsigned long cpu_features[(NR_CPU_FEATURES + 63) / 64] __ro_after_init;
 EXPORT_SYMBOL(cpu_features);
 
-mmu_features_t mmu_features __ro_after_init;
-EXPORT_SYMBOL(mmu_features);
-
 #ifdef	CONFIG_E2K_MACHINE
 /* 'native_machine_id' is defined in asm/e2k.h */
 #else /* ! CONFIG_E2K_MACHINE */
@@ -298,6 +296,7 @@ early_param("nodeiolinks", max_node_iolinks_num_setup);
 
 void thread_init(void)
 {
+	unsigned long flags;
 	thread_info_t *ti = current_thread_info();
 	struct pt_regs *regs = (void *) current->stack + KERNEL_C_STACK_OFFSET +
 					KERNEL_C_STACK_SIZE - KERNEL_PT_REGS_SIZE;
@@ -305,21 +304,24 @@ void thread_init(void)
 	kernel_trap_mask_init();
 
 	/* Arch-indep. part expects pt_regs to be always present.  Prepare
-	 * them for kernel threads too and initialize with some sane values. */
+	 * them for kernel threads too and initialize with sane & stale values. */
 	BUG_ON((unsigned long) regs <= (unsigned long) &ti);
 	memset(regs, 0, sizeof(*regs));
-	SAVE_STACK_REGS(regs, current_thread_info(), false, false);
+
+	raw_all_irq_save(flags);
+	SAVE_STACK_REGS(regs, false, false);
 	regs->stacks.usd = read_USD_reg();
 	regs->stacks.top = (unsigned long) regs;
 	ti->pt_regs = regs;
-	DebugP("kernel stack: bottom %llx pt_regs %px\n",
-	       (u64) current->stack, ti->pt_regs);
 
 	ti->k_usd = native_read_USD_reg();
 	ti->k_psp = native_read_PSP_reg();
 	ti->k_pcsp = native_read_PCSP_reg();
+	raw_all_irq_restore(flags);
 
-	DebugP("k_usd.base %llx\nk_psp.base %llx\nk_pcsp.base %llx\n",
+	DebugP("kernel stack: bottom %llx pt_regs %px\n"
+	       "k_usd.base %llx\nk_psp.base %llx\nk_pcsp.base %llx\n",
+	       (u64) current->stack, ti->pt_regs,
 	       USD_PTR(ti->k_usd), PSP_BASE(ti->k_psp), PCSP_BASE(ti->k_pcsp));
 
 	/* it needs only for guest booting threads */
@@ -357,14 +359,54 @@ static int __init parse_bootinfo(void)
 	return 0;
 }
 
+struct cpu_update_feature {
+	int feature;
+	bool set;
+};
+
+void cpu_update_feature_greg(void *arg)
+{
+	struct cpu_update_feature *args = arg;
+	int feature = args->feature;
+	bool set = args->set;
+
+	if (feature < 64) {
+		if (set) {
+			cpuhas_greg0 |= _BITULL(feature);
+		} else {
+			cpuhas_greg0 &= ~_BITULL(feature);
+		}
+	} else if (feature >= 64 && feature < 128) {
+		if (set) {
+			cpuhas_greg1 |= _BITULL(feature - 64);
+		} else {
+			cpuhas_greg1 &= ~_BITULL(feature - 64);
+		}
+	} else {
+		BUG();
+	}
+}
+
 
 notrace void cpu_set_feature(unsigned long *features, int feature)
 {
+	struct cpu_update_feature args = {
+		.feature = feature,
+		.set = true,
+	};
+
+	on_each_cpu(cpu_update_feature_greg, &args, true);
 	set_bit(feature, features);
 }
 
 notrace void cpu_clear_feature(unsigned long *features, int feature)
 {
+	struct cpu_update_feature args = {
+		.feature = feature,
+		.set = false,
+	};
+
+	on_each_cpu(cpu_update_feature_greg, &args, true);
 	clear_bit(feature, features);
 }
 
@@ -456,12 +498,7 @@ arch_initcall(mark_linear_kernel_alias_ro);
 
 static void __init setup_cmd_line(char **cmdline_p)
 {
-	char *src = command_line, *dst = boot_command_line;
-	/* Expand devtree command line with boot command line */
-	if (dst[0])
-		strlcat(dst, " ", COMMAND_LINE_SIZE);
-	strlcat(dst, src, COMMAND_LINE_SIZE);
-	*cmdline_p = dst;
+	*cmdline_p = boot_command_line;
 
 	jump_label_init();
 	parse_early_param();
@@ -478,7 +515,7 @@ static void __init rlim_init(void)
 #ifdef CONFIG_SECONDARY_SPACE_SUPPORT
 	init_task.signal->bin_comp_rlim[BC_RLIMIT_X86_DATA].rlim_cur = RLIM_INFINITY;
 	init_task.signal->bin_comp_rlim[BC_RLIMIT_X86_DATA].rlim_max = RLIM_INFINITY;
-	init_task.signal->bin_comp_rlim[BC_RLIMIT_X86_STACK].rlim_cur = _STK_LIM;
+	init_task.signal->bin_comp_rlim[BC_RLIMIT_X86_STACK].rlim_cur = _BINCOMP_STK_LIM;
 	init_task.signal->bin_comp_rlim[BC_RLIMIT_X86_STACK].rlim_max = RLIM_INFINITY;
 	init_task.signal->bin_comp_rlim[BC_RLIMIT_X86_AS].rlim_cur = RLIM_INFINITY;
 	init_task.signal->bin_comp_rlim[BC_RLIMIT_X86_AS].rlim_max = RLIM_INFINITY;
@@ -490,8 +527,13 @@ void __init setup_arch(char **cmdline_p)
 	extern int panic_timeout;
 	int cpu;
 
-	/* get cmdline from devtree */
+	BUILD_BUG_ON(ARCH_KMALLOC_MINALIGN != max(ARCH_SLAB_MINALIGN, ARCH_DMA_MINALIGN));
+
+	/*
+	 * get cmdline from devtree
+	 */
 	early_device_tree_init();
+
 	/*
 	 * Place it before arch_setup_machine()
 	 */
@@ -503,8 +545,8 @@ void __init setup_arch(char **cmdline_p)
 	 * This should be as early as possible to fill cpu_present_mask and
 	 * cpu_possible_mask.
 	 */
-#ifdef CONFIG_L_LOCAL_APIC
-	/*
+
+	 /*
 	 * Find (but now set) boot-time smp configuration.
 	 * Like in i386 arch. used MP Floating Pointer Structure.
 	 */
@@ -515,7 +557,6 @@ void __init setup_arch(char **cmdline_p)
 	 * system)
 	 */
 	get_smp_config();
-#endif
 
 #ifdef CONFIG_SMP
 	nmi_call_function_init();

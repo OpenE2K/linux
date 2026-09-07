@@ -8515,6 +8515,82 @@ out:
 	return ERR_PTR(err);
 }
 
+
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#include <asm/prot_compat.h>
+struct ptr128_megasas_iocpacket {
+	u16 host_no;
+	u16 __pad1;
+	u32 sgl_off;
+	u32 sge_count;
+	u32 sense_off;
+	u32 sense_len;
+	union {
+		u8 raw[128];
+		struct megasas_header hdr;
+	} frame;
+	struct prot_iovec sgl[MAX_IOCTL_SGE];
+} __attribute__ ((packed));
+
+#define MEGASAS_IOC_FIRMWARE128	_IOWR('M', 1, struct ptr128_megasas_iocpacket)
+static int megasas_mgmt_ioctl_fw(struct file *file, unsigned long arg);
+static int megasas_mgmt_ioctl_aen(struct file *file, unsigned long arg);
+
+static long
+megasas_mgmt_ptr128_ioctl(struct file *file, unsigned int cmd,
+			  unsigned long arg)
+{
+	switch (cmd) {
+	case MEGASAS_IOC_FIRMWARE128:
+		return megasas_mgmt_ioctl_fw(file, arg);
+	case MEGASAS_IOC_GET_AEN:
+		return megasas_mgmt_ioctl_aen(file, arg);
+	}
+
+	return -ENOTTY;
+}
+
+static struct megasas_iocpacket *
+megasas_ptr128_iocpacket_get_user(void __user *arg)
+{
+	struct megasas_iocpacket *ioc;
+	struct ptr128_megasas_iocpacket __user *cioc = arg;
+	int err = -EFAULT;
+	int i;
+
+	ioc = kzalloc(sizeof(*ioc), GFP_KERNEL);
+	if (!ioc)
+		return ERR_PTR(-ENOMEM);
+	if (copy_from_user(ioc, arg, offsetof(struct megasas_iocpacket, sgl)))
+		goto out;
+
+	for (i = 0; i < ioc->sge_count; i++) {
+		e2k_ap_t ap;
+		int tag;
+
+		if (get_user(ioc->sgl[i].iov_len, &cioc->sgl[i].iov_len))
+			goto out;
+		if (ioc->sgl[i].iov_len == 0) {
+			ioc->sgl[i].iov_base = NULL;
+			continue;
+		}
+		if (get_user_tagged_16(ap.qword, tag, &cioc->sgl[i].iov_base) ||
+				!IS_AP(ap, tag))
+			goto out;
+		if (ioc->sgl[i].iov_len > AP_OBJ_SIZE(ap))
+			goto out;
+		ioc->sgl[i].iov_base = (void __user *)AP_PTR(ap);
+	}
+	set_max_u_border();
+	return ioc;
+out:
+	kfree(ioc);
+	return ERR_PTR(err);
+}
+
+#endif
+
+
 static int megasas_mgmt_ioctl_fw(struct file *file, unsigned long arg)
 {
 	struct megasas_iocpacket __user *user_ioc =
@@ -8525,6 +8601,10 @@ static int megasas_mgmt_ioctl_fw(struct file *file, unsigned long arg)
 
 	if (in_compat_syscall())
 		ioc = megasas_compat_iocpacket_get_user(user_ioc);
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	else if (in_ptr128_syscall())
+		ioc = megasas_ptr128_iocpacket_get_user(user_ioc);
+#endif
 	else
 		ioc = memdup_user(user_ioc, sizeof(struct megasas_iocpacket));
 
@@ -8646,7 +8726,6 @@ megasas_mgmt_compat_ioctl(struct file *file, unsigned int cmd,
 	return -ENOTTY;
 }
 #endif
-
 /*
  * File operations structure for management interface
  */
@@ -8658,6 +8737,9 @@ static const struct file_operations megasas_mgmt_fops = {
 	.poll = megasas_mgmt_poll,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = megasas_mgmt_compat_ioctl,
+#endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl = megasas_mgmt_ptr128_ioctl,
 #endif
 	.llseek = noop_llseek,
 };

@@ -1120,6 +1120,117 @@ long vt_compat_ioctl(struct tty_struct *tty,
 #endif /* CONFIG_COMPAT */
 
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#include <net/ptr128.h>
+
+struct ptr128_console_font_op {
+	u32 op;        /* operation code KD_FONT_OP_* */
+	u32 flags;     /* KD_FONT_FLAG_* */
+	u32 width, height;     /* font size */
+	u32 charcount;
+	e2k_ap_t data;    /* font data with height fixed to 32 */
+};
+
+static inline int
+ptr128_kdfontop_ioctl(struct ptr128_console_font_op __user *fontop,
+			 int perm, struct console_font_op *op, struct vc_data *vc)
+{
+	int i;
+	e2k_ap_t ap;
+	int tag;
+
+	if (copy_from_user(op, fontop, sizeof(struct console_font_op)))
+		return -EFAULT;
+	if (!perm && op->op != KD_FONT_OP_GET)
+		return -EPERM;
+	if (op->op == KD_FONT_OP_COPY) {
+		/* was buggy and never really used */
+		return -EINVAL;
+	}
+	if (get_user_tagged_16(ap.qword, tag, &fontop->data)) {
+		return -EFAULT;
+	}
+	if (!IS_AP(ap, tag)) {
+		op->data = NULL;
+	} else {
+		op->data = (void *)AP_PTR(ap);
+		set_ap_u_border(ap);
+	}
+	i = con_font_op(vc, op);
+	if (i)
+		return i;
+	if (copy_to_user(fontop, op, offsetof(struct ptr128_console_font_op, data)))
+		return -EFAULT;
+	return 0;
+}
+
+struct ptr128_unimapdesc {
+	unsigned short entry_ct;
+	e2k_ap_t entries;
+};
+
+static inline int
+ptr128_unimap_ioctl(unsigned int cmd, struct ptr128_unimapdesc __user *user_ud,
+			 int perm, struct vc_data *vc)
+{
+	unsigned short entry_ct;
+	struct unipair __user *tmp_entries;
+	e2k_ap_t ap;
+	int tag;
+
+	if (get_user(entry_ct, &user_ud->entry_ct))
+		return -EFAULT;
+	if (get_user_tagged_16(ap.qword, tag, &user_ud->entries) || !IS_AP(ap, tag))
+		return -EFAULT;
+	tmp_entries = (void *)AP_PTR(ap);
+	set_ap_u_border(ap);
+	switch (cmd) {
+	case PIO_UNIMAP:
+		if (!perm)
+			return -EPERM;
+		return con_set_unimap(vc, entry_ct, tmp_entries);
+	case GIO_UNIMAP:
+		if (!perm && fg_console != vc->vc_num)
+			return -EPERM;
+		return con_get_unimap(vc, entry_ct, &(user_ud->entry_ct), tmp_entries);
+	}
+	return 0;
+}
+
+int vt_ptr128_ioctl(struct tty_struct *tty,
+	     unsigned int cmd, unsigned long arg)
+{
+	struct vc_data *vc = tty->driver_data;
+	struct console_font_op op;	/* used in multiple places here */
+	void __user *up = (void __user *)arg;
+	int perm;
+
+	/*
+	 * To have permissions to do most of the vt ioctls, we either have
+	 * to be the owner of the tty, or have CAP_SYS_TTY_CONFIG.
+	 */
+	perm = 0;
+	if (current->signal->tty == tty || capable(CAP_SYS_TTY_CONFIG))
+		perm = 1;
+
+	switch (cmd) {
+	/*
+	 * these need special handlers for incompatible data structures
+	 */
+
+	case KDFONTOP:
+		return ptr128_kdfontop_ioctl(up, perm, &op, vc);
+
+	case PIO_UNIMAP:
+	case GIO_UNIMAP:
+		return ptr128_unimap_ioctl(cmd, up, perm, vc);
+	default:
+		return vt_ioctl(tty, cmd, arg);
+	}
+}
+
+
+#endif /* CONFIG_PROTECTED_MODE */
 /*
  * Performs the back end of a vt switch. Called under the console
  * semaphore.

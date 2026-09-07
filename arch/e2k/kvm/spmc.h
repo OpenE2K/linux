@@ -113,7 +113,7 @@ static inline u32 kvm_get_sci_timer_limit_mask(struct kvm_spmc *spmc)
 {
 	if (kvm_sci_timer_32(spmc)) {
 		/* counter is 32 bits */
-		return ~0UL;
+		return ~0U;
 	} else {
 		/* counter is 24 bits */
 		return (1UL << 24) - 1;
@@ -123,7 +123,7 @@ static inline u32 kvm_get_sci_timer_limit_mask(struct kvm_spmc *spmc)
 static inline u32 kvm_get_sci_timer_max_mask(struct kvm_spmc *spmc)
 {
 	/* counter is 32 bits */
-	return ~0UL;
+	return ~0U;
 }
 
 static inline struct kvm_spmc *kvm_get_spmc(struct kvm *kvm, int node_id)

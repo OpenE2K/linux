@@ -68,12 +68,88 @@
 
 #define S1_PROTO	(0x0001)
 
-int dma_allocator_enable;
-
 static struct platform_device *mcst_dev;
 static int s1_proto;
 static u64 vram_start;
 static u64 vram_len;
+
+#if gcdSUPPORT_DEVICE_TREE_SOURCE
+static void parse_dt(struct platform_device *pdev, gcsMODULE_PARAMETERS *params)
+{
+    struct device_node *root = pdev->dev.of_node;
+    gctUINT32 i, data;
+    const gctUINT32 *value;
+
+    if (!root)
+        return;
+
+    /* parse the contiguous mem */
+    value = of_get_property(root, "contiguous-size", gcvNULL);
+    if (value && *value != 0) {
+        gctUINT64 addr;
+
+        of_property_read_u64(root, "contiguous-base", &addr);
+        params->contiguousSize = *value;
+        params->contiguousBase = addr;
+    }
+
+    value = of_get_property(root, "contiguous-requested", gcvNULL);
+    if (value)
+        params->contiguousRequested = *value ? gcvTRUE : gcvFALSE;
+    /* parse the external mem */
+    value = of_get_property(root, "external-size", gcvNULL);
+    if (value && *value != 0) {
+        gctUINT64 addr;
+
+        of_property_read_u64(root, "external-base", &addr);
+        params->externalSize[0] = *value;
+        params->externalBase[0] = addr;
+    }
+
+    value = of_get_property(root, "recovery", gcvNULL);
+    if (value)
+        params->recovery = *value;
+
+    value = of_get_property(root, "power-management", gcvNULL);
+    if (value)
+        params->powerManagement = *value;
+
+    value = of_get_property(root, "enable-mmu", gcvNULL);
+    if (value)
+        params->enableMmu = *value;
+
+    for (i = 0; i < gcvCORE_3D_MAX; i++) {
+        data = 0;
+        of_property_read_u32_index(root, "user-cluster-masks", i, &data);
+        if (data)
+            params->userClusterMasks[i] = data;
+    }
+    value = of_get_property(root, "stuck-dump", gcvNULL);
+    if (value)
+        params->stuckDump = *value;
+
+    value = of_get_property(root, "show-args", gcvNULL);
+    if (value)
+        params->showArgs = *value;
+
+    value = of_get_property(root, "mmu-page-table-pool", gcvNULL);
+    if (value)
+        params->mmuPageTablePool = *value;
+
+    value = of_get_property(root, "mmu-dynamic-map", gcvNULL);
+    if (value)
+        params->mmuDynamicMap = *value;
+
+    value = of_get_property(root, "all-map-in-one", gcvNULL);
+    if (value)
+        params->allMapInOne = *value;
+
+    value = of_get_property(root, "isr-poll-mask", gcvNULL);
+    if (value)
+        params->isrPoll = *value;
+}
+
+#endif
 
 /*******************************************************************************
 **
@@ -95,6 +171,9 @@ _AdjustParam (
     if (!mcst_dev || !mcst_dev->dev.parent)
 	return gcvSTATUS_NOT_FOUND;
 
+#if gcdSUPPORT_DEVICE_TREE_SOURCE
+    parse_dt(Platform->device, Args);
+#endif
     pdev = to_pci_dev(mcst_dev->dev.parent);
 
     switch (pdev->device) {
@@ -122,9 +201,8 @@ _AdjustParam (
 	gcmkPRINT("%s: registerSizes[%d]: 0x%lx\n",
               __FUNCTION__, core, Args->registerSizes[core]);
 
-	dma_allocator_enable = 1;
-	Platform->flagBits |= gcvPLATFORM_FLAG_LIMIT_4G_ADDRESS;
         break;
+
     case PCI_DEVICE_ID_MCST_3D_VIVANTE_R2000P:
 	{
 		int i;
@@ -183,7 +261,6 @@ _AdjustParam (
 		}
 		/* if r2000+ is a video card */
 		if (pdev->subsystem_device == 3) {
-			dma_allocator_enable = 1;
 			Platform->flagBits |= gcvPLATFORM_FLAG_LIMIT_4G_ADDRESS;
 
 			if (vram_start && vram_len) {
@@ -200,10 +277,6 @@ _AdjustParam (
     default:
 	return gcvSTATUS_INVALID_ARGUMENT;
     }
-
-    /* Do not forget set CONFIG_FORCE_MAX_ZONEORDER=16 ! */
-    Args->contiguousSize = (128 << 20);
-    Args->bankSize = 65536;
 
     return gcvSTATUS_OK;
 }
@@ -295,30 +368,41 @@ static void r2000p_load_3d(void *data, async_cookie_t cookie)
 	request_module_nowait("vivante");
 }
 
-int gckPLATFORM_Init(struct platform_driver *pdrv,
+int gckPLATFORM_Init(struct pci_dev *pdev,
             struct _gcsPLATFORM **platform)
 {
-    int ret, i;
-    struct pci_dev *pdev = NULL;
-
-    for (i = 0; i < ARRAY_SIZE(pciidlist); i++) {
-        pdev = pci_get_device(pciidlist[i].vendor, pciidlist[i].device, NULL);
-        if (pdev != NULL)
-            break;
-    }
+    int ret;
 
     if (!pdev)
         return -ENODEV;
 
 #ifdef DEBUG
-    gcmkPRINT("galcore: build: " __DATE__ " " __TIME__ "\n");
 #ifdef __HASH__
     gcmkPRINT("galcore: hash: " __HASH__ "\n");
 #endif
 #endif
-    gcmkPRINT("galcore: ven 0x%x dev 0x%x\n",
-              pciidlist[i].vendor, pciidlist[i].device);
+    gcmkPRINT("galcore: gcdFPGA_BUILD=%d\n", gcdFPGA_BUILD);
+    gcmkPRINT("galcore: ven 0x%x dev 0x%x\n", pdev->vendor, pdev->device);
+    if (pdev->dev.bus->dma_configure) {
+        struct pci_driver driver = { };
+        if (!pdev->dev.driver) /*HACK: dma_configure() uses the pointer*/
+            pdev->dev.driver = &driver.driver;
 
+        /* Bind iommu. Normally it is done just before pci-probe call,
+           but galcore is not pci driver */
+        ret = pdev->dev.bus->dma_configure(&pdev->dev);
+        if (pdev->dev.driver == &driver.driver)
+            pdev->dev.driver = NULL;
+        if (ret)
+            return ret;
+    }
+    /* Bind irq. Normally it is done just before pci-probe call,
+       but galcore is not pci driver */
+    ret = pcibios_alloc_irq(pdev);
+    if (ret < 0) {
+        pr_err("galcore: pcibios_alloc_irq failed.\n");
+	return ret;
+    }
     ret = pci_enable_device(pdev);
     if (ret < 0) {
         pr_err("galcore: pci_enable_device failed.\n");
@@ -326,14 +410,22 @@ int gckPLATFORM_Init(struct platform_driver *pdrv,
 
 
     pci_set_master(pdev);
+    dma_set_max_seg_size(&pdev->dev, UINT_MAX);
+    dma_set_seg_boundary(&pdev->dev, DMA_BIT_MASK(40));
+    dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(40));
 
-    mcst_dev = platform_device_alloc(pdrv->driver.name, -1);
+    mcst_dev = platform_device_alloc(pdev->driver->name, -1);
     if (!mcst_dev) {
         pr_err("galcore: platform_device_alloc failed.\n");
         return -ENOMEM;
     }
 
     mcst_dev->dev.parent = &pdev->dev;
+
+    set_dma_ops(&mcst_dev->dev, get_dma_ops(&pdev->dev));
+    dma_set_max_seg_size(&mcst_dev->dev, UINT_MAX);
+    dma_set_seg_boundary(&mcst_dev->dev, DMA_BIT_MASK(40));
+    dma_set_mask_and_coherent(&mcst_dev->dev, DMA_BIT_MASK(40));
 
     /* Add device */
     ret = platform_device_add(mcst_dev);
@@ -342,7 +434,6 @@ int gckPLATFORM_Init(struct platform_driver *pdrv,
         goto put_dev;
     }
 
-    set_dma_ops(&mcst_dev->dev, get_dma_ops(&pdev->dev));
     mcst_platform.device = mcst_dev;
     *platform = &mcst_platform;
 

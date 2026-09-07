@@ -621,6 +621,9 @@ static const struct proc_ops esas2r_proc_ops = {
 #ifdef CONFIG_COMPAT
 	.proc_compat_ioctl	= compat_ptr_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl		= esas2r_proc_ioctl,
+#endif
 };
 
 static struct Scsi_Host *esas2r_proc_host;

@@ -125,20 +125,12 @@ struct pci_dev *of_find_pci_device_by_node(struct device_node *np)
 	return pdev;
 }
 
-static void ioepic_setup_msg_from_msi(struct irq_data *irqd,
+static int ioepic_setup_msg_from_msi(struct irq_data *irqd,
 				      struct IO_EPIC_route_entry *e)
 {
-	int ret;
 	struct msi_msg msg;
-	struct ioepic_chip_data *d = irqd->chip_data;
-	struct device_node *np = d->d.pic->of_nodes[d->d.pin];
-	struct pci_dev *pdev = of_find_pci_device_by_node(np);
-	if (!pdev && (ret = of_property_read_u32(np, "requester-id",
-				&e->rid.raw)) < 0) {
-		WARN(1, "No pci device (%pOF %d) for irq %d (pic pin %d)\n",
-					np, ret, irqd->irq, d->d.pin);
-		return;
-	}
+	struct irq_desc *desc = irq_data_to_desc(irqd);
+	lockdep_assert_held(&desc->lock);
 
 	/* Let the parent dmn compose the MSI message */
 	irq_chip_compose_msi_msg(irqd, &msg);
@@ -146,20 +138,14 @@ static void ioepic_setup_msg_from_msi(struct irq_data *irqd,
 	e->addr_high	= msg.address_hi;
 	e->addr_low.raw	= msg.address_lo;
 	e->msg_data.raw	= msg.data;
-
-	if (!pdev)
-		return;
-
-	e->rid.raw = 0;
-	e->rid.bus = pdev->bus->number;
-	e->rid.dev = PCI_SLOT(pdev->devfn);
-	e->rid.fn = PCI_FUNC(pdev->devfn);
-	pci_dev_put(pdev);
+	return 0;
 }
 
 static void __ioepic_configure_entry(struct irq_data *irqd)
 {
 	struct ioepic_chip_data *data = irqd->chip_data;
+	lockdep_assert_held(&irq_data_to_desc(irqd)->lock);
+
 	ioepic_setup_msg_from_msi(irqd, &data->entry);
 	__ioepic_write_entry(data->d.pic, data->d.pin, data->entry);
 }
@@ -167,7 +153,8 @@ static void __ioepic_configure_entry(struct irq_data *irqd)
 static void ioepic_configure_entry(struct irq_data *irqd)
 {
 	struct ioepic_chip_data *data = irqd->chip_data;
-	data->entry.int_ctrl.mask = true;
+	lockdep_assert_held(&irq_data_to_desc(irqd)->lock);
+	data->entry.int_ctrl.mask = false;
 	__ioepic_configure_entry(irqd);
 }
 
@@ -178,16 +165,11 @@ static bool ioepic_has_fast_eoi(struct iopic *pic)
 
 static void ioepic_level_eoi_slow(struct iopic *pic, int pin)
 {
-	unsigned long flags;
 	union IO_EPIC_INT_CTRL reg;
-
-	raw_spin_lock_irqsave(&pic->lock, flags);
 
 	reg.raw = io_epic_read(pic, IOEPIC_TABLE_INT_CTRL(pin));
 	reg.delivery_status = 1;
 	io_epic_write(pic, IOEPIC_TABLE_INT_CTRL(pin), reg.raw);
-
-	raw_spin_unlock_irqrestore(&pic->lock, flags);
 }
 
 /* Writing W1C bits of int_ctrl does not change the RW bits (IOEPIC version 2) */
@@ -213,18 +195,13 @@ static void ioepic_level_eoi(struct iopic *pic, int pin)
 static bool io_epic_level_ack_pending(struct ioepic_chip_data *data)
 {
 	bool ret = false;
-	unsigned long flags;
 	union IO_EPIC_INT_CTRL reg;
 	struct iopic *pic = data->d.pic;
-
-	raw_spin_lock_irqsave(&pic->lock, flags);
 
 	reg.raw = io_epic_read(pic, IOEPIC_TABLE_INT_CTRL(data->d.pin));
 	/* Is the remote IRR bit set? */
 	if (reg.delivery_status)
 		ret = true;
-	raw_spin_unlock_irqrestore(&pic->lock, flags);
-
 	return ret;
 }
 
@@ -294,7 +271,7 @@ static void ioepic_ack_level(struct irq_data *irqd)
 	struct ioepic_chip_data *data = irqd->chip_data;
 	struct iopic *pic = data->d.pic;
 	bool moveit;
-
+	lockdep_assert_held(&irq_data_to_desc(irqd)->lock);
 	irq_complete_move(cfg);
 	moveit = ioepic_prepare_move(irqd);
 
@@ -306,24 +283,16 @@ static void ioepic_ack_level(struct irq_data *irqd)
 
 static void mask_ioepic_irq(struct irq_data *irqd)
 {
-	unsigned long flags;
 	struct ioepic_chip_data *data = irqd->chip_data;
-	struct iopic *pic = data->d.pic;
-
-	raw_spin_lock_irqsave(&pic->lock, flags);
+	lockdep_assert_held(&irq_data_to_desc(irqd)->lock);
 	io_epic_modify_irq(data, true, &io_epic_sync);
-	raw_spin_unlock_irqrestore(&pic->lock, flags);
 }
 
 static void unmask_ioepic_irq(struct irq_data *irqd)
 {
-	unsigned long flags;
 	struct ioepic_chip_data *data = irqd->chip_data;
-	struct iopic *pic = data->d.pic;
-
-	raw_spin_lock_irqsave(&pic->lock, flags);
+	lockdep_assert_held(&irq_data_to_desc(irqd)->lock);
 	__unmask_ioepic(data);
-	raw_spin_unlock_irqrestore(&pic->lock, flags);
 }
 
 static int ioepic_irq_set_type(struct irq_data *d, unsigned int flow_type)
@@ -359,22 +328,54 @@ static int ioepic_set_affinity(struct irq_data *irqd,
 			       const struct cpumask *mask, bool force)
 {
 	int ret;
-	unsigned long flags;
 	struct irq_data *parent = irqd->parent_data;
-	struct ioepic_chip_data *data = irqd->chip_data;
-	struct iopic *pic = data->d.pic;
 
 	ret = parent->chip->irq_set_affinity(parent, mask, force);
-	raw_spin_lock_irqsave(&pic->lock, flags);
 	if (ret >= 0 && ret != IRQ_SET_MASK_OK_DONE)
 		__ioepic_configure_entry(irqd);
-	raw_spin_unlock_irqrestore(&pic->lock, flags);
 
 	return ret;
 }
-static unsigned int startup_ioepic_irq(struct irq_data *data)
+
+static int ioepic_irq_request_resources(struct irq_data *irqd)
 {
-	unmask_ioepic_irq(data);
+	int ret;
+	unsigned long flags;
+	struct irq_desc *desc = irq_data_to_desc(irqd);
+	struct ioepic_chip_data *d = irqd->chip_data;
+	struct IO_EPIC_route_entry *e = &d->entry;
+	struct device_node *np = d->d.pic->of_nodes[d->d.pin];
+	struct pci_dev *pdev = of_find_pci_device_by_node(np);
+	u32 req_id;
+	lockdep_assert_not_held(&desc->lock);
+
+	/* We can not do this in startup_ioepic_irq()
+	 * because of invalid wait contex (spinlock
+	 * inside rawspinlock) */
+	if (!pdev && (ret = of_property_read_u32(np, "requester-id", &req_id)) < 0) {
+		WARN(1, "No pci device (%pOF %d) for irq %d (pic pin %d)\n",
+					np, ret, irqd->irq, d->d.pin);
+		return -ENODEV;
+	}
+	raw_spin_lock_irqsave(&desc->lock, flags);
+	if (!pdev) {
+		e->rid.raw = req_id;
+		raw_spin_unlock_irqrestore(&desc->lock, flags);
+		return 0;
+	}
+	e->rid.raw = 0;
+	e->rid.bus = pdev->bus->number;
+	e->rid.dev = PCI_SLOT(pdev->devfn);
+	e->rid.fn = PCI_FUNC(pdev->devfn);
+
+	raw_spin_unlock_irqrestore(&desc->lock, flags);
+	pci_dev_put(pdev);
+	return 0;
+}
+
+static unsigned int startup_ioepic_irq(struct irq_data *irqd)
+{
+	ioepic_configure_entry(irqd);
 	return 0;
 }
 
@@ -391,7 +392,6 @@ static int ioepic_irq_get_chip_state(struct irq_data *irqd,
 		return -EINVAL;
 
 	*state = false;
-	raw_spin_lock(&pic->lock);
 	reg.raw = io_epic_read(pic, IOEPIC_TABLE_INT_CTRL(p->d.pin));
 	level = reg.trigger;
 	/*
@@ -402,7 +402,6 @@ static int ioepic_irq_get_chip_state(struct irq_data *irqd,
 	*/
 	if (level && reg.delivery_status)
 		*state = true;
-	raw_spin_unlock(&pic->lock);
 	return 0;
 }
 
@@ -454,6 +453,7 @@ static int ioepic_setup_pin_passthrough(struct irq_data *irqd,
 		pt_pin->pic_id = cfg->pic->id;
 		pt_pin->pic_version = cfg->pic->version;
 		pt_pin->pin = cfg->pin;
+		pt_pin->node = cfg->pic->node;
 		INIT_LIST_HEAD(&pt_pin->list);
 		list_add_tail(&pt_pin->list, info->ioepic_pt_pin);
 
@@ -495,10 +495,12 @@ static int ioepic_set_vcpu_affinity(struct irq_data *irqd, void *vcpu_info)
 	for (i = 0, ret = -ENOENT; i < pic->nr_pins; i++) {
 		if (np == pic->of_nodes[i]) {
 			irqd = irq_get_irq_data(irq + (i - cfg->pin));
-			d = irq_data_get_irq_chip_data(irqd);
-			ret = ioepic_setup_pin_passthrough(irqd, info, &d->d);
-			if (ret)
-				break;
+			if (irqd) {
+				d = irq_data_get_irq_chip_data(irqd);
+				ret = ioepic_setup_pin_passthrough(irqd, info, &d->d);
+				if (ret)
+					break;
+			}
 		}
 	}
 	return ret;
@@ -509,6 +511,7 @@ static int ioepic_set_vcpu_affinity(struct irq_data *irqd, void *vcpu_info)
 
 struct irq_chip ioepic_chip __read_mostly = {
 	.name			= "IO-EPIC",
+	.irq_request_resources	= ioepic_irq_request_resources,
 	.irq_startup		= startup_ioepic_irq,
 	.irq_mask		= mask_ioepic_irq,
 	.irq_unmask		= unmask_ioepic_irq,
@@ -525,31 +528,18 @@ static void ioepic_get_id_ver_pins(struct iopic *pic,
 			int *id, int *version, int *pins)
 {
 
-	unsigned long flags;
 	union IO_EPIC_ID reg_id;
 	union IO_EPIC_VERSION reg_version;
-	raw_spin_lock_irqsave(&pic->lock, flags);
 	reg_id.raw = io_epic_read(pic, IOEPIC_ID);
 	reg_version.raw = io_epic_read(pic, IOEPIC_VERSION);
-	raw_spin_unlock_irqrestore(&pic->lock, flags);
 
 	*id      = reg_id.id;
 	*version = reg_version.version;
 	*pins    = reg_version.entries;
 }
 
-static void ioepic_mask_entry(struct iopic *pic, int pin)
-{
-	union IO_EPIC_INT_CTRL reg;
-	reg.raw = 0;
-	reg.mask = 1;
-	io_epic_write(pic, IOEPIC_TABLE_INT_CTRL(pin), reg.raw);
-}
-
 struct iopic_chip iopic_ioepic_chip = {
 	.iopic_get_id_ver_pins = ioepic_get_id_ver_pins,
-	.iopic_mask_entry = ioepic_mask_entry,
-	.iopic_configure_entry = ioepic_configure_entry,
 	.iopic_chip = &ioepic_chip,
 	.iopic_sizeof_entry = sizeof(struct IO_EPIC_route_entry),
 };

@@ -32,8 +32,7 @@ typedef e2k_addr_t			mmu_addr_t;
 #define _MMU_CR_NO		0x00	/* Control register */
 #define _MMU_CONT_NO		0x01	/* Context register */
 #define	_MMU_PID_NO		_MMU_CONT_NO	/* renamed name of CONT */
-#define _MMU_CR3_RG_NO		0x02	/* CR3 register for secondary space */
-#define	_MMU_U2_PPTB_NO		_MMU_CR3_RG_NO	/* renamed name of CR3 */
+#define	_MMU_U2_PPTB_NO		0x02	/* separate secondary space */
 #define _MMU_ELB_PTB_NO		0x03	/* ELBRUS page table virtual base */
 #define	_MMU_U_VPTB_NO		_MMU_ELB_PTB_NO	/* renamed name of ELB_PTB */
 #define _MMU_ROOT_PTB_NO	0x04	/* Root Page Table Base register */
@@ -90,8 +89,7 @@ typedef e2k_addr_t			mmu_addr_t;
 #define	MMU_ADDR_CR		MMU_REG_NO_TO_MMU_ADDR(_MMU_CR_NO)
 #define	MMU_ADDR_CONT		MMU_REG_NO_TO_MMU_ADDR(_MMU_CONT_NO)
 #define	MMU_ADDR_PID		MMU_ADDR_CONT	/* renamed name */
-#define	MMU_ADDR_CR3_RG		MMU_REG_NO_TO_MMU_ADDR(_MMU_CR3_RG_NO)
-#define	MMU_ADDR_U2_PGTB	MMU_ADDR_CR3_RG	/* renamed name */
+#define	MMU_ADDR_U2_PGTB	MMU_REG_NO_TO_MMU_ADDR(_MMU_U2_PPTB_NO)
 #define	MMU_ADDR_ELB_PTB	MMU_REG_NO_TO_MMU_ADDR(_MMU_ELB_PTB_NO)
 #define	MMU_ADDR_U_VPTB		MMU_ADDR_ELB_PTB	/* rename name */
 #define	MMU_ADDR_ROOT_PTB	MMU_REG_NO_TO_MMU_ADDR(_MMU_ROOT_PTB_NO)
@@ -163,7 +161,7 @@ typedef union {
 	/* Important: C dictates that exactly 1 union member is initialized, \
 	 * otherwise the later initialization will have priority. */ \
 	.tlb_en = 1, \
-	.svsc	= 0 /* rm 21283 boot_cpu_has(CPU_FEAT_ISET_V7) */, \
+	.svsc	= boot_cpu_has(CPU_FEAT_SVSC), \
 	.cd     = MMU_CR_CD_EN, \
 	.ipd    = MMU_CR_IPD_2_LINES, \
 	.set3   = 1, \
@@ -173,7 +171,7 @@ typedef union {
 	/* Important: C dictates that exactly 1 union member is initialized, \
 	 * otherwise the later initialization will have priority. */ \
 	.tlb_en = 1, \
-	.svsc	= 0 /* rm 21283 cpu_has(CPU_FEAT_ISET_V7) */, \
+	.svsc	= cpu_has(CPU_FEAT_SVSC), \
 	.cd     = MMU_CR_CD_EN, \
 	.ipd    = MMU_CR_IPD_2_LINES, \
 	.set3   = 1, \
@@ -204,18 +202,6 @@ typedef union {
 #define	MMU_PID(pid)		MMU_CONTEXT(pid)	/* renamed name */
 #define	MMU_KERNEL_PID		MMU_KERNEL_CONTEXT	/* renamed name */
 
-/*
- * MMU Control Register of secondary space table MMU_CR3_RG
- * The physical address of the INTEL page directory base,
- * aligned to table size
- */
-
-#define _MMU_CR3_PAGE_DIR	0x0000000fffff000UL
-#define	_MMU_CR3_PCD		0x000000000000010UL
-#define	_MMU_CR3_PWT		0x000000000000008UL
-
-#define	MMU_CR3_KERNEL(page_dir)	\
-				(((e2k_addr_t)(page_dir)) & _MMU_CR3_PAGE_DIR)
 
 /*
  * MMU Page Table virtual Base Registers MMU_OS_VPTB & MMU_U_VPTB
@@ -370,40 +356,35 @@ typedef dcache_addr_t	dcache_l2_addr_t;
 #define	dcache_l1_set_set(addr, set)					     \
 		(__dcache_l1_addr(					     \
 			(dcache_l1_addr_val(addr) & ~_E2K_DCACHE_L1_SET) |   \
-			((set) << _E2K_DCACHE_L1_SET_SHIFT) &		     \
-			_E2K_DCACHE_L1_SET))
+			(((set) << _E2K_DCACHE_L1_SET_SHIFT) & _E2K_DCACHE_L1_SET)))
 #define	dcache_l1_get_set(addr)						     \
 		(dcache_l1_addr_val(addr) & _E2K_DCACHE_L1_SET)
 
 #define	dcache_l1_set_type_h(addr, type_h)				      \
 		(__dcache_l1_addr(					      \
 			(dcache_l1_addr_val(addr) & ~_E2K_DCACHE_L1_TYPE_H) | \
-			((type_h) << _E2K_DCACHE_L1_TYPE_H_SHIFT) &	      \
-			_E2K_DCACHE_L1_TYPE_H))
+			(((type_h) << _E2K_DCACHE_L1_TYPE_H_SHIFT) & _E2K_DCACHE_L1_TYPE_H)))
 #define	dcache_l1_get_type_h(addr)					     \
 		(dcache_l1_addr_val(addr) & _E2K_DCACHE_L1_TYPE_H)
 
 #define	dcache_l1_set_type(addr, type)					     \
 		(__dcache_l1_addr(					     \
 			(dcache_l1_addr_val(addr) & ~_E2K_DCACHE_L1_TYPE) |  \
-			((type) << _E2K_DCACHE_L1_TYPE_SHIFT) &		     \
-			_E2K_DCACHE_L1_TYPE))
+			(((type) << _E2K_DCACHE_L1_TYPE_SHIFT) & _E2K_DCACHE_L1_TYPE)))
 #define	dcache_l1_get_type(addr)					     \
 		(dcache_l1_addr_val(addr) & _E2K_DCACHE_L1_TYPE)
 
 #define	dcache_l1_set_line(addr, line)					     \
 		(__dcache_l1_addr(					     \
 			(dcache_l1_addr_val(addr) & ~_E2K_DCACHE_L1_LINE) |  \
-			((line) << _E2K_DCACHE_L1_LINE_SHIFT) &		     \
-			_E2K_DCACHE_L1_LINE))
+			(((line) << _E2K_DCACHE_L1_LINE_SHIFT) & _E2K_DCACHE_L1_LINE)))
 #define	dcache_l1_get_line(addr)					     \
 		(dcache_l1_addr_val(addr) & _E2K_DCACHE_L1_LINE)
 
 #define	dcache_l1_set_word(addr, word)					     \
 		(__dcache_l1_addr(					     \
 			(dcache_l1_addr_val(addr) & ~_E2K_DCACHE_L1_WORD) |  \
-			((word) << _E2K_DCACHE_L1_WORD_SHIFT) &		     \
-			_E2K_DCACHE_L1_WORD))
+			(((word) << _E2K_DCACHE_L1_WORD_SHIFT) & _E2K_DCACHE_L1_WORD)))
 #define	dcache_l1_get_word(addr)					     \
 		(dcache_l1_addr_val(addr) & _E2K_DCACHE_L1_WORD)
 
@@ -564,42 +545,35 @@ typedef union {
 #define	dcache_l2_set_type(addr, type)					     \
 		(__dcache_l2_addr(					     \
 			(dcache_l2_addr_val(addr) & ~_E2K_DCACHE_L2_TYPE) |  \
-			((type) << _E2K_DCACHE_L2_TYPE_SHIFT) &		     \
-			_E2K_DCACHE_L2_TYPE))
+			(((type) << _E2K_DCACHE_L2_TYPE_SHIFT) & _E2K_DCACHE_L2_TYPE)))
 #define	dcache_l2_get_type(addr)					     \
 		(dcache_l2_addr_val(addr) & _E2K_DCACHE_L2_TYPE)
 
 #define	dcache_l2_set_line(addr, line)					     \
 		(__dcache_l2_addr(					     \
 			(dcache_l2_addr_val(addr) & ~_E2K_DCACHE_L2_LINE) |  \
-			((index) << _E2K_DCACHE_L2_LINE_SHIFT) &	     \
-			_E2K_DCACHE_L2_LINE))
+			(((index) << _E2K_DCACHE_L2_LINE_SHIFT) & _E2K_DCACHE_L2_LINE)))
 #define	dcache_l2_get_line(addr)					     \
 		(dcache_l2_addr_val(addr) & _E2K_DCACHE_L2_LINE)
 
 #define	dcache_l2_set_reg_num(addr, reg_num)				     \
 		(__dcache_l2_addr(					     \
-			(dcache_l2_addr_val(addr) &			     \
-				~_E2K_DCACHE_L2_REG_NUM) |		     \
-			((reg_num) << _E2K_DCACHE_L2_REG_NUM_SHIFT) &	     \
-			_E2K_DCACHE_L2_REG_NUM))
+			(dcache_l2_addr_val(addr) & ~_E2K_DCACHE_L2_REG_NUM) | \
+			(((reg_num) << _E2K_DCACHE_L2_REG_NUM_SHIFT) & _E2K_DCACHE_L2_REG_NUM)))
 #define	dcache_l2_get_reg_num(addr)					     \
 		(dcache_l2_addr_val(addr) & _E2K_DCACHE_L2_REG_NUM_SHIFT)
 
 #define	dcache_l2_set_bank_num(addr, bank_num)				     \
 		(__dcache_l2_addr(					     \
-			(dcache_l2_addr_val(addr) &			     \
-				~_E2K_DCACHE_L2_BANK_NUM) |		     \
-			((bank_num) << _E2K_DCACHE_L2_BANK_NUM_SHIFT) &      \
-			_E2K_DCACHE_L2_BANK_NUM))
+			(dcache_l2_addr_val(addr) & ~_E2K_DCACHE_L2_BANK_NUM) |		     \
+			(((bank_num) << _E2K_DCACHE_L2_BANK_NUM_SHIFT) & _E2K_DCACHE_L2_BANK_NUM)))
 #define	dcache_l2_get_bank_num(addr)					     \
 		(dcache_l2_addr_val(addr) & _E2K_DCACHE_L2_BANK_NUM_SHIFT)
 
 #define	dcache_l2_set_word(addr, word)					     \
 		(__dcache_l2_addr(					     \
 			(dcache_l2_addr_val(addr) & ~_E2K_DCACHE_L2_WORD) |  \
-			((word) << _E2K_DCACHE_L2_WORD_SHIFT) &		     \
-			_E2K_DCACHE_L2_WORD))
+			(((word) << _E2K_DCACHE_L2_WORD_SHIFT) & _E2K_DCACHE_L2_WORD)))
 #define	dcache_l2_get_word(addr)					     \
 		(dcache_l2_addr_val(addr) & _E2K_DCACHE_L2_WORD)
 
@@ -725,7 +699,7 @@ typedef e2k_addr_t clw_addr_t;
 /* CLW internel register contents */
 
 #ifndef __ASSEMBLY__
-typedef unsigned long clw_reg_t;
+typedef u64 clw_reg_t;
 #endif /* __ASSEMBLY__ */
 
 /*

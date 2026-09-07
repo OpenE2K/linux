@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: GPL-2.0
  * Copyright (c) 2023 MCST
  */
+
 #include <linux/bug.h>
 #include <linux/delay.h>
 #include <linux/init.h>
@@ -39,8 +40,6 @@ DEFINE_PER_CPU(vector_irq_t, vector_irq) = {
 	[0 ... NR_VECTORS - 1] = VECTOR_UNUSED
 };
 
-atomic_t irq_err_count;
-
 DEFINE_PER_CPU_SHARED_ALIGNED(irq_cpustat_t, irq_stat) ____cacheline_internodealigned_in_smp;
 EXPORT_PER_CPU_SYMBOL(irq_stat);
 #define irq_stats(cpu)		(&per_cpu(irq_stat, cpu))
@@ -51,16 +50,6 @@ EXPORT_PER_CPU_SYMBOL(irq_stat);
 int arch_show_interrupts(struct seq_file *p, int prec)
 {
 	int j;
-
-	seq_printf(p, "%*s: ", prec, "NMI");
-	for_each_online_cpu(j)
-		seq_printf(p, "%10u ", irq_stats(j)->__nmi_count);
-	seq_printf(p, "  Non-maskable interrupts\n");
-
-	seq_printf(p, "%*s: ", prec, "SPU");
-	for_each_online_cpu(j)
-		seq_printf(p, "%10u ", irq_stats(j)->irq_spurious_count);
-	seq_printf(p, "  Spurious interrupts\n");
 
 	seq_printf(p, "%*s: ", prec, "RTR");
 	for_each_online_cpu(j)
@@ -74,7 +63,6 @@ int arch_show_interrupts(struct seq_file *p, int prec)
 	seq_printf(p, "  TLB shootdowns\n");
 # endif
 #endif
-	seq_printf(p, "%*s: %10u\n", prec, "ERR", atomic_read(&irq_err_count));
 	seq_printf(p, "%*s: %10u\n", prec, "MIS", atomic_read(&irq_mis_count));
 	return 0;
 }
@@ -139,17 +127,9 @@ void ack_bad_irq(unsigned int irq)
 /*
  * /proc/stat helpers
  */
-u64 arch_irq_stat_cpu(unsigned int cpu)
-{
-	u64 sum = irq_stats(cpu)->__nmi_count;
-	sum += irq_stats(cpu)->irq_spurious_count;
-	return sum;
-}
-
 u64 arch_irq_stat(void)
 {
-	u64 sum = atomic_read(&irq_err_count) + atomic_read(&irq_mis_count);
-	return sum;
+	return atomic_read(&irq_mis_count);
 }
 
 noinline notrace void do_nmi(struct pt_regs *regs)

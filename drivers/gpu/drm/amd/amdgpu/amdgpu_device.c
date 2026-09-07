@@ -4286,7 +4286,9 @@ int amdgpu_device_suspend(struct drm_device *dev, bool fbcon)
 	if (amdgpu_acpi_smart_shift_update(dev, AMDGPU_SS_DEV_D3))
 		DRM_WARN("smart shift update failed\n");
 
+#ifndef CONFIG_MCST
 	drm_kms_helper_poll_disable(dev);
+#endif
 
 	if (fbcon)
 		drm_fb_helper_set_suspend_unlocked(adev_to_drm(adev)->fb_helper, true);
@@ -4388,7 +4390,9 @@ int amdgpu_device_resume(struct drm_device *dev, bool fbcon)
 	if (fbcon)
 		drm_fb_helper_set_suspend_unlocked(adev_to_drm(adev)->fb_helper, false);
 
+#ifndef CONFIG_MCST
 	drm_kms_helper_poll_enable(dev);
+#endif
 
 	amdgpu_ras_resume(adev);
 

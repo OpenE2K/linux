@@ -51,15 +51,15 @@
  *
  * For guest kernels without hardware virualization support we have
  * a similar situation.  Even if such kernel is built without
- * CONFIG_HALF_SPECULATIVE_KERNEL, modern lcc versions will still
- * use half-speculative loads (although rather carefully, just for
+ * CONFIG_SEMI_SPECULATIVE_KERNEL, modern lcc versions will still
+ * use semi-speculative loads (although rather carefully, just for
  * addresses that are known to be good).  So there might be a h.-s.
  * load from VMALLOC area, and we need to have shadow page tables
  * updated with valid bit to avoid putting empty PTEs into DTLB.
  */
 #define flush_cache_vmap(start, end) \
 do { \
-	if (IS_ENABLED(CONFIG_HALF_SPECULATIVE_KERNEL) || \
+	if (IS_ENABLED(CONFIG_SEMI_SPECULATIVE_KERNEL) || \
 			IS_ENABLED(CONFIG_KVM_GUEST_KERNEL)) \
 		flush_tlb_kernel_range(start, end); \
 } while (0)

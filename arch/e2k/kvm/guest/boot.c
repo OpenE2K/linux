@@ -154,12 +154,7 @@ boot_kvm_probe_memory(node_phys_mem_t *nodes_phys_mem,
 		return -ENOMEM;
 	}
 
-	ret = boot_bios_probe_memory(nodes_phys_mem, bootblock);
-	if (ret < 0) {
-		BOOT_BUG("Probe of physical memory failed, error %d|n",
-			ret);
-		return ret;
-	}
+	boot_bios_probe_memory(nodes_phys_mem, bootblock);
 
 	ret = boot_kvm_probe_vram_memory(bootblock);
 	if (ret < 0) {
@@ -229,17 +224,15 @@ void __init boot_kvm_check_bootblock(bool bsp, bootblock_struct_t *bootblock)
 }
 
 e2k_size_t __init
-boot_kvm_get_bootblock_size(boot_info_t *bblock)
+boot_kvm_get_bootblock_size(const boot_info_t *bblock)
 {
-	e2k_size_t area_size = 0;
-
-	if (bblock->signature == BOOTBLOCK_KVM_GUEST_SIGNATURE ||
-			bblock->signature == BOOTBLOCK_BOOT_SIGNATURE) {
-		area_size = sizeof(bootblock_struct_t);
-	} else {
+	switch (bblock->signature) {
+	case BOOTBLOCK_KVM_GUEST_SIGNATURE:
+	case BOOTBLOCK_BOOT_SIGNATURE:
+		return sizeof(bootblock_struct_t);
+	default:
 		BOOT_BUG("Unknown type of Boot information structure");
 	}
-	return area_size;
 }
 
 void __init_recv

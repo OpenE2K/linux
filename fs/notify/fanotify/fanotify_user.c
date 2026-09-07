@@ -996,6 +996,9 @@ static const struct file_operations fanotify_fops = {
 	.release	= fanotify_release,
 	.unlocked_ioctl	= fanotify_ioctl,
 	.compat_ioctl	= compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = fanotify_ioctl,
+#endif
 	.llseek		= noop_llseek,
 };
 

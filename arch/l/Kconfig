@@ -92,6 +92,9 @@ config MCST_4RT
 config CLKR_CLOCKSOURCE
 	def_bool E90S
 
+config LT_CLOCKSOURCE
+	def_bool E2K || E90S
+
 config CLKR_SYNCHRONIZATION_WARNING
 	bool
 	depends on CLKR_CLOCKSOURCE && SMP

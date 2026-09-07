@@ -21,6 +21,7 @@ typedef struct kvm_proc_ctxt_hw_stacks {
 	e2k_mem_ps_t *ps_frames;
 	e2k_mem_crs_t *cs_frames;
 	const void __user *uc_link;
+	unsigned long trampoline;
 } kvm_proc_ctxt_hw_stacks_t;
 
 #endif /* KVM_PROC_CTXT_TYPES */

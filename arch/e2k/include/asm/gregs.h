@@ -93,11 +93,7 @@
 ({									\
 	SET_KERNEL_GREGS(0, 0, 0);					\
 })
-#define	NATIVE_SAVE_KERNEL_GREGS_AND_SET(__ti)				\
-({									\
-	machine.save_kernel_gregs(&(__ti)->k_gregs);			\
-	ONLY_SET_KERNEL_GREGS(__ti);					\
-})
+
 /*
  * global registers used as pointers to current task & thread info
  * must be restored and current & current_thread_info() can not be
@@ -143,36 +139,11 @@
 #define	CLEAR_KERNEL_GREGS_COPY(__ti)	\
 		ONLY_COPY_TO_KERNEL_GREGS(&(__ti)->k_gregs, 0, 0, 0)
 
-#define NATIVE_RESTORE_KERNEL_GREGS_IN_SYSCALL(thread_info)		\
-({									\
-	thread_info_t *__ti = (thread_info);				\
-									\
-	NATIVE_RESTORE_KERNEL_GREG(__ti->k_gregs.g,			\
-		GUEST_VCPU_STATE_GREGS_PAIRS_INDEX,			\
-		CURRENT_TASK_GREGS_PAIRS_INDEX,				\
-		MY_CPU_OFFSET_GREGS_PAIRS_INDEX,			\
-		SMP_CPU_ID_GREGS_PAIRS_INDEX,				\
-			GUEST_VCPU_STATE_GREG, CURRENT_TASK_GREG,	\
-			MY_CPU_OFFSET_GREG, SMP_CPU_ID_GREG);		\
-})
-
-/* User global registers, used by kernel, keep into thread info structure */
-/* and save to/restore from while enter to/return from kernel */
-#define	CLEAR_GREGS_COPY_FROM_CURRENTS(thread_info)			\
-({									\
-	thread_info_t *__ti = (thread_info);				\
-									\
-	__ti->k_gregs.g[GUEST_VCPU_STATE_GREGS_PAIRS_INDEX].base = 0;	\
-	__ti->k_gregs.g[GUEST_VCPU_STATE_GREGS_PAIRS_INDEX].ext = 0;	\
-	__ti->k_gregs.g[CURRENT_TASK_GREGS_PAIRS_INDEX].base = 0;	\
-	__ti->k_gregs.g[CURRENT_TASK_GREGS_PAIRS_INDEX].ext = 0;	\
-})
-
 #if !defined(CONFIG_VIRTUALIZATION) || defined(CONFIG_KVM_HOST_MODE)
 /* it is native kernel without any virtualization */
 /* or it is native host kernel with virtualization support */
 
-#define	CLEAR_KERNEL_GREGS_IN_SYSCALL(thread_info) NATIVE_K_GREGS_SET_DIAG()
+#define	CLEAR_KERNEL_GREGS_IN_SYSCALL(...) NATIVE_SET_GREGS_EMPTY(false, true)
 
  #ifdef	CONFIG_VIRTUALIZATION
   /* it is native host kernel with virtualization support */
@@ -180,41 +151,24 @@
  #endif	/* CONFIG_VIRTUALIZATION */
 #endif	/* !CONFIG_VIRTUALIZATION || CONFIG_KVM_HOST_MODE */
 
-static inline void copy_k_gregs_to_gregs(struct e2k_global_regs *dst,
-		const struct kernel_gregs *src)
+static inline void copy_k_gregs_to_gregs(struct e2k_gregs *dst,
+		const struct local_gregs *src)
 {
 	tagged_memcpy_8(&dst->g[KERNEL_GREGS_PAIRS_START], src->g,
 			sizeof(src->g));
 }
 
-static inline void copy_k_gregs_to_k_gregs(struct kernel_gregs *dst,
-		const struct kernel_gregs *src)
+static inline void copy_scratch_gregs_from_local(struct scratch_gregs *scratch,
+		const struct local_gregs *local)
 {
-	tagged_memcpy_8(dst->g, src->g, sizeof(src->g));
+	tagged_memcpy_8(&scratch->g[0], &local->g[KERNEL_GREGS_MAX_NUM],
+			sizeof(scratch->g) + __must_be_array(scratch->g));
 }
 
-static inline void get_k_gregs_from_gregs(struct kernel_gregs *dst,
-		const struct e2k_global_regs *src)
+static inline void copy_local_gregs(struct local_gregs *dst, const struct local_gregs *src)
 {
-	tagged_memcpy_8(dst->g, &src->g[KERNEL_GREGS_PAIRS_START],
-			sizeof(dst->g));
-}
-
-static inline void copy_k_gregs_to_l_gregs(struct local_gregs *dst,
-		const struct kernel_gregs *src)
-{
-	BUG_ON(KERNEL_GREGS_PAIRS_START < LOCAL_GREGS_START);
-	tagged_memcpy_8(&dst->g[KERNEL_GREGS_PAIRS_START - LOCAL_GREGS_START],
-			src->g, sizeof(src->g));
-}
-
-static inline void get_k_gregs_from_l_regs(struct kernel_gregs *dst,
-		const struct local_gregs *src)
-{
-	BUG_ON(KERNEL_GREGS_PAIRS_START < LOCAL_GREGS_START);
-	tagged_memcpy_8(dst->g,
-			&src->g[KERNEL_GREGS_PAIRS_START - LOCAL_GREGS_START],
-			sizeof(dst->g));
+	tagged_memcpy_8(dst->g, src->g, sizeof(dst->g) + __must_be_array(dst->g));
+	dst->bgr = src->bgr;
 }
 
 #endif

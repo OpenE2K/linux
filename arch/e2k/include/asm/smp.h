@@ -93,8 +93,7 @@ extern void native_wait_for_cpu_wake_up(void);
 extern int native_activate_cpu(int vcpu_id);
 extern int native_activate_all_cpus(void);
 
-register unsigned long long __cpu_preempt_reg DO_ASM_GET_GREG_MEMONIC(
-							SMP_CPU_ID_GREG);
+register unsigned long long __cpu_preempt_reg ASM_GREG(SMP_CPU_ID_GREG);
 #define raw_smp_processor_id() ((unsigned int) __cpu_preempt_reg)
 
 #define set_smp_processor_id(cpu) \
@@ -116,7 +115,7 @@ do { \
  *	for a board with shared L2 cache it ought to decay fast as other
  *	processes are run.
  */
- 
+
 #define PROC_CHANGE_PENALTY	15		/* Schedule penalty */
 
 #else	/* ! CONFIG_SMP */
@@ -189,7 +188,7 @@ static inline int activate_cpu(int cpu_id)
 	if (likely(!IS_HV_GM())) {
 		return native_activate_cpu(cpu_id);
 	} else {
-		hv_vcpu_activate(cpu_id);
+		return hv_vcpu_activate(cpu_id);
 	}
 }
 

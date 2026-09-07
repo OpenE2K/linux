@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0
 # Copyright (c) 2023 MCST
+
 obj-y := libkeprof.o
 CFLAGS_REMOVE_libkeprof.o := $(CC_FLAGS_FTRACE)
 

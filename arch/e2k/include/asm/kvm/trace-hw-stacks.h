@@ -20,6 +20,7 @@
 
 #ifdef	CONFIG_KVM_HOST_MODE
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 TRACE_EVENT(
 	host_copy_hw_stack,
 
@@ -131,7 +132,9 @@ TRACE_EVENT(
 				__entry->is_pt_v6, __entry->is_pt_v7)
 	)
 );
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
+//TODO
 TRACE_EVENT(
 	host_proc_stack_frame,
 

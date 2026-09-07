@@ -1300,6 +1300,9 @@ static const struct file_operations evdev_fops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= evdev_ioctl_compat,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	= evdev_ioctl,
+#endif
 	.fasync		= evdev_fasync,
 	.llseek		= no_llseek,
 };

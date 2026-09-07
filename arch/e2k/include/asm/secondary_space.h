@@ -20,7 +20,8 @@
 #include <asm/smp.h>
 #endif /* !__ASSEMBLY__ */
 
-#define BINCO_PROTOCOL_VERSION	6
+
+#define BINCO_PROTOCOL_VERSION	7
 
 #define SS_SIZE	0x800000000000UL
 
@@ -107,7 +108,22 @@ struct bincomp_info_header_v0 {
 struct bincomp_info_header_v1 {
 	u64	version;
 	u64	args_offsets_offset;
-	u64 exec_type;
+	union {
+		u64 flags;
+		struct {
+			/*
+			 * exec_type:
+			 * 0 - open execfd
+			 * 1 - mmap x86 app with legacy_va_layout
+			 * 2 - mmap x86 app (TopDown)
+			 * 3-7 - reserved
+			 */
+			u64 exec_type : 3;
+
+			/* is bincomp supports em64t? */
+			u64 is_support_em64_t : 1;
+		};
+	};
 };
 
 union bincomp_info_header {

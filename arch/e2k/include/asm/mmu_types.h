@@ -381,8 +381,7 @@ typedef union {
 #define	LDST_QWORD_FMT		0x05UL	/* load/store quad-word (128 bits) */
 #define	LDST_INVALID_FMT6	0x06UL	/* invalid format value */
 #define	LDST_QP_FMT		0x07UL	/* load/store qpacked word (128 bits) */
-#define	LDST_MQP_FMT		0x08UL	/* ldrqp/strqp qpacked word (128 bits) */
-					/* without tags & MADM check */
+#define	LDST_INVALID_FMT8	0x08UL	/* invalid format value */
 #define	LDST_INVALID_FMT9	0x09UL	/* invalid format value */
 #define	LDST_INVALID_FMTa	0x0aUL	/* invalid format value */
 #define	LDST_INVALID_FMTb	0x0bUL	/* invalid format value */
@@ -412,7 +411,7 @@ static inline bool tc_fmt_check_reserved(const int fmt)
 {
 
 	return fmt == LDST_INVALID_FMT || fmt == LDST_INVALID_FMT6 ||
-	       (fmt > LDST_MQP_FMT && fmt < LDRD_FMT_QWORD_A) ||
+	       (fmt > LDST_QP_FMT && fmt < LDRD_FMT_QWORD_A) ||
 	       fmt == LDST_INVALID_FMTe ||
 	       (fmt > TC_FMT_QWORD_QP && fmt < TC_FMT_DWORD_Q) ||
 	       (fmt > TC_FMT_DWORD_Q && fmt < TC_FMT_DWORD_QP);

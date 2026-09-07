@@ -39,7 +39,6 @@ kvm_save_host_context(struct kvm_vcpu *vcpu, e2k_iset_ver_t iset)
 {
 	struct kvm_hw_cpu_context *hw_ctxt = &vcpu->arch.hw_ctxt;
 	unsigned long flags;
-	struct kvm_arch *ka = &vcpu->kvm->arch;
 	e2k_mmu_cr_t mmu_cr, old_mmu_cr;
 
 	/*
@@ -80,6 +79,9 @@ kvm_save_host_context(struct kvm_vcpu *vcpu, e2k_iset_ver_t iset)
 	hw_ctxt->sh_oscuir = read_SH_OSCUIR_reg();
 
 	hw_ctxt->sh_osr0 = read_SH_OSR0_reg_value();
+#ifdef CONFIG_CPU_HAS_OSR1
+	hw_ctxt->sh_osr1 = read_SH_OSR1_reg_value();
+#endif
 
 	/*
 	 * CPU/MMU iset specific shadow context
@@ -89,16 +91,6 @@ kvm_save_host_context(struct kvm_vcpu *vcpu, e2k_iset_ver_t iset)
 #ifdef CONFIG_SCLKR_CLOCKSOURCE
 	} else if (iset == E2K_ISET_V6) {
 		save_sh_context_v6(&vcpu->arch);
-#endif
-	} else {
-		BUG();
-	}
-
-	if (iset == E2K_ISET_V7) {
-		save_hst_context_v7(ka);
-#ifdef CONFIG_SCLKR_CLOCKSOURCE
-	} else if (iset == E2K_ISET_V6) {
-		save_hst_context_v6(ka);
 #endif
 	} else {
 		BUG();
@@ -118,7 +110,6 @@ kvm_save_host_context(struct kvm_vcpu *vcpu, e2k_iset_ver_t iset)
 	 * updated to recover ones if need.
 	 */
 	read_INTC_PTR_CU_reg_value();
-	kvm_set_intc_info_cu_is_updated(vcpu);
 	READ_INTC_PTR_MU();
 	kvm_set_intc_info_mu_is_updated(vcpu);
 
@@ -218,6 +209,9 @@ kvm_restore_host_context(const struct kvm_vcpu *vcpu, e2k_iset_ver_t iset)
 	write_SH_OSCUIR_reg(hw_ctxt->sh_oscuir);
 
 	write_SH_OSR0_reg_value(hw_ctxt->sh_osr0);
+#ifdef CONFIG_CPU_HAS_OSR1
+	write_SH_OSR1_reg_value(hw_ctxt->sh_osr1);
+#endif
 
 	/*
 	 * CPU/MMU iset specific shadow context

@@ -67,7 +67,7 @@ static unsigned long copy_instr(unsigned long *src, unsigned long *dst)
 			cs0->cof2.disp += delta >> 3L;
 		} else if (cs0->ctp_opc == CS0_CTP_OPC_PREF && !cs0->ctpr) {
 			signed long pref_dst = (signed long) src +
-				((signed long) cs0->pref.pdisp << 40L) >> 33L;
+				(((signed long) cs0->pref.pdisp << 40L) >> 33L);
 
 			delta = pref_dst - (signed long) dst;
 			cs0->pref.pdisp = delta >> 7L;
@@ -84,7 +84,6 @@ static unsigned long copy_instr(unsigned long *src, unsigned long *dst)
 
 		replace_instruction(instr, phys_ip_dst, instr_size);
 
-		/* Modules are not duplicated */
 		if (!is_duplicated_code((unsigned long) dst))
 			break;
 	}

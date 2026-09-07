@@ -842,7 +842,12 @@ long ksys_shmget(key_t key, size_t size, int shmflg)
 	struct ipc_params shm_params;
 
 	ns = current->nsproxy->ipc_ns;
-
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	if (cpu_has(CPU_FEAT_ISET_V7) && in_ptr128_syscall()) {
+		unsigned long align_mask = ap_align_mask(size);
+		size = (size + align_mask) & ~align_mask;
+	}
+#endif
 	shm_params.key = key;
 	shm_params.flg = shmflg;
 	shm_params.u.size = size;

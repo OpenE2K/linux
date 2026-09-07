@@ -24,15 +24,17 @@ echo Edit files:
 
 sed_i_d '/VIVANTE/d; /Vivante/d' arch/e2k/configs/build-config
 sed_i_d '/CONFIG_DRM_VIVANTE/d' arch/e2k/configs/defconfig
-sed_i_d '/CONFIG_DRM_VIVANTE/d; /Vivante/,/^$/d' arch/sparc/configs/sparc64_defconfig
 
 sed_i_d '/vivante/d' drivers/gpu/drm/Makefile
 sed_i_d '/gpu-viv/d' drivers/mcst/Makefile
 
-sed_i_d '/PCI_DEVICE_ID_MCST_3D_VIVANTE_R2000P/d' arch/l/kernel/l-iommu.c
+sed_i_d '/PCI_DEVICE_ID_MCST_3D_VIVANTE_R2000P/d' drivers/mcst/l-iommu.c
+sed_i_d '/PCI_DEVICE_ID_MCST_3D_VIVANTE_R2000P/d' drivers/pci/msi/msi.c
+sed_i_d '/PCI_DEVICE_ID_MCST_3D_VIVANTE_R2000P/d' include/linux/pci_ids.h
+sed_i_d '/PCI_DEVICE_ID_MCST_3D_VIVANTE_E8V7/d' include/linux/pci_ids.h
 sed_i_d '/Vivante/,/^$/d' drivers/gpu/drm/drm_lock.c
 
 sed_i_d '/config DRM_VIVANTE/,/^$/d' drivers/gpu/drm/Kconfig
 sed_i_d '/gpu-viv/,/^$/d' drivers/mcst/Kconfig
 
-rm -rf drivers/gpu/drm/vivante drivers/mcst/gpu-viv/
+rm -rf drivers/gpu/drm/vivante drivers/mcst/gpu-viv/ drivers/mcst/gpu-viv-e8v7/

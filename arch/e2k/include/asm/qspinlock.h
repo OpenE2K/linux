@@ -6,8 +6,10 @@
 #ifndef _ASM_E2K_QSPINLOCK_H
 #define _ASM_E2K_QSPINLOCK_H
 
+#include <linux/instrumented.h>
 #include <asm-generic/qspinlock_types.h>
 #include <asm/p2v/boot_v2p.h>
+#include <asm/atomic.h>
 #include <asm/barrier.h>
 
 /*
@@ -16,6 +18,13 @@
  * and atomic_cond_read_relaxed() iteration takes ~20 cycles.
  */
 #define _Q_PENDING_LOOPS	(1 << 5)
+
+#define queued_fetch_set_pending_acquire queued_fetch_set_pending_acquire
+static __always_inline u32 queued_fetch_set_pending_acquire(struct qspinlock *lock)
+{
+	instrument_atomic_read_write(&lock->val, sizeof(lock->val));
+	return arch_atomic_fetch_or_lock(_Q_PENDING_VAL, &lock->val);
+}
 
 #ifndef CONFIG_PARAVIRT_SPINLOCKS
 
@@ -71,6 +80,7 @@ static inline void native_queued_spin_unlock(struct qspinlock *lock)
 
 extern void __pv_queued_spin_lock_slowpath(struct qspinlock *lock, u32 val);
 extern void native_queued_spin_lock_slowpath(struct qspinlock *lock, u32 val);
+extern void e2k_queued_spin_lock_slowpath(struct qspinlock *lock, u32 val);
 static inline void queued_spin_lock_slowpath(struct qspinlock *lock, u32 val)
 {
 	if (IS_HV_GM())
@@ -88,6 +98,17 @@ static inline void queued_spin_unlock(struct qspinlock *lock)
 		__pv_queued_spin_unlock(lock);
 	else
 		native_queued_spin_unlock(lock);
+}
+
+# define queued_spin_lock queued_spin_lock
+static __always_inline void queued_spin_lock(struct qspinlock *lock)
+{
+	int val = 0;
+
+	if (likely(arch_atomic_try_cmpxchg_lock(&lock->val, &val, _Q_LOCKED_VAL)))
+		return;
+
+	queued_spin_lock_slowpath(lock, val);
 }
 
 #endif /* !CONFIG_PARAVIRT_SPINLOCKS */

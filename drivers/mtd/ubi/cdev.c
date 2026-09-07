@@ -1089,6 +1089,9 @@ const struct file_operations ubi_vol_cdev_operations = {
 	.fsync		= vol_cdev_fsync,
 	.unlocked_ioctl = vol_cdev_ioctl,
 	.compat_ioctl   = compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = vol_cdev_ioctl,
+#endif
 };
 
 /* UBI character device operations */
@@ -1097,6 +1100,9 @@ const struct file_operations ubi_cdev_operations = {
 	.llseek         = no_llseek,
 	.unlocked_ioctl = ubi_cdev_ioctl,
 	.compat_ioctl   = compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	ptr128_ioctl   = ubi_cdev_ioctl,
+#endif
 };
 
 /* UBI control character device operations */
@@ -1104,5 +1110,8 @@ const struct file_operations ubi_ctrl_cdev_operations = {
 	.owner          = THIS_MODULE,
 	.unlocked_ioctl = ctrl_cdev_ioctl,
 	.compat_ioctl   = compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = ctrl_cdev_ioctl,
+#endif
 	.llseek		= no_llseek,
 };

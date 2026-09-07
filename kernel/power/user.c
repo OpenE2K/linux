@@ -450,6 +450,9 @@ static const struct file_operations snapshot_fops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = snapshot_compat_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl = snapshot_ioctl,
+#endif
 };
 
 static struct miscdevice snapshot_device = {

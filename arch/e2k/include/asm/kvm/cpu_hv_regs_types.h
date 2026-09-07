@@ -27,7 +27,7 @@ typedef union virt_ctrl_cu {
 		u64 rr_dbg		:  1;	/*    [ 3]	*/
 		u64 rw_core_mode	:  1;	/*    [ 4]	*/
 		u64 rw_clkr		:  1;	/*    [ 5]	*/
-		u64 rw_sclkr		:  1;	/*    [ 6]	*/
+		u64			:  1;	/*    [ 6]	*/
 		u64 rw_sclkm3		:  1;	/*    [ 7]	*/
 		u64 rw_dbg		:  1;	/*    [ 8]	*/
 		u64 hcem		:  1;	/*    [ 9]	*/
@@ -47,8 +47,18 @@ typedef union virt_ctrl_cu {
 		u64 g_th		:  1;	/*    [24]	*/
 		u64 tir_fz		:  1;	/*    [25]	*/
 		u64 tir_rst		:  1;	/*    [26]	*/
-		u64 __resb		: 37;	/* [63:27]	*/
+		u64			: 37;	/* [63:27]	*/
 	};
+	struct {
+		u64			:  6;
+		u64 rw_sclkr		:  1;	/*    [ 6]	*/
+		u64			: 57;
+	} v6_only;
+	struct {
+		u64			: 27;
+		u64 sclk_v6		:  1;	/*    [27]	*/
+		u64			: 36;
+	} since_v7;
 	e2k_dreg_t;		/* as entire register   */
 } virt_ctrl_cu_t;
 
@@ -67,54 +77,46 @@ typedef union virt_ctrl_cu {
 					INTC_CU_UNCOND_EVENT_MAX)
 
 typedef union {
-	union {
-		struct {
-			u64 evn_c	: 16;
-			u64 exc_c	: 8;
-			u64 evn_u	: 8;
-			u64 tir_fz	: 1;
-		};
-		struct {
-			/* evn_c fields */
-			u64 rr_idr		: 1;
-			u64 rr_clkr		: 1;
-			u64 rr_sclkr		: 1;
-			u64 rr_dbg		: 1;
-			u64 rw_core_mode	: 1;
-			u64 rw_clkr		: 1;
-			u64 rw_sclkr		: 1;
-			u64 rw_sclkm3		: 1;
-			u64 rw_dbg		: 1;
-			u64 hcem		: 1;
-			u64 virt		: 1;	/* [10] */
-			u64 stop		: 1;
-			u64 hret_last_wish	: 1;
-			u64 __reserved_evn_c	: 3;
-			/* exc_c fields */
-			u64 exc_instr_debug	: 1;
-			u64 exc_data_debug	: 1;
-			u64 exc_instr_page	: 1;
-			u64 exc_data_page	: 1;
-			u64 exc_mova		: 1;	/* [20] */
-			u64 exc_interrupt	: 1;
-			u64 exc_nm_interrupt	: 1;
-			u64 __reserved_exc_c	: 1;
-			/* evn_u fields */
-			u64 hv_int		: 1;
-			u64 hv_nm_int		: 1;
-			u64 g_tmr		: 1;
-			u64 rr			: 1;
-			u64 rw			: 1;
-			u64 exc_mem_error	: 1;
-			u64 wait_trap		: 1;	/* [30] */
-			u64 dbg			: 1;
-		};
-		struct {
-			u64 evn_c_rr_mask	: 4;	/* rr_idr, rr_clkr,
-							   rr_sclkr, rr_dbg */
-			u64 evn_c_rw_mask	: 5;	/* rw_core_mode, rw_clkr,
-							   rw_sclkr, rw_sclkm3, rw_dbg */
-		};
+	struct {
+		u64 evn_c	: 16;
+		u64 exc_c	: 8;
+		u64 evn_u	: 8;
+		u64 tir_fz	: 1;
+	};
+	struct {
+		/* evn_c fields */
+		u64 rr_idr		: 1;
+		u64 rr_clkr		: 1;
+		u64 rr_sclkr		: 1;
+		u64 rr_dbg		: 1;
+		u64 rw_core_mode	: 1;
+		u64 rw_clkr		: 1;
+		u64 rw_sclkr		: 1;
+		u64 rw_sclkm3		: 1;
+		u64 rw_dbg		: 1;
+		u64 hcem		: 1;
+		u64 virt		: 1;	/* [10] */
+		u64 stop		: 1;
+		u64 hret_last_wish	: 1;
+		u64 __reserved_evn_c	: 3;
+		/* exc_c fields */
+		u64 exc_instr_debug	: 1;
+		u64 exc_data_debug	: 1;
+		u64 exc_instr_page	: 1;
+		u64 exc_data_page	: 1;
+		u64 exc_mova		: 1;	/* [20] */
+		u64 exc_interrupt	: 1;
+		u64 exc_nm_interrupt	: 1;
+		u64 __reserved_exc_c	: 1;
+		/* evn_u fields */
+		u64 hv_int		: 1;
+		u64 hv_nm_int		: 1;
+		u64 g_tmr		: 1;
+		u64 rr			: 1;
+		u64 rw			: 1;
+		u64 exc_mem_error	: 1;
+		u64 wait_trap		: 1;	/* [30] */
+		u64 dbg			: 1;
 	};
 	e2k_qreg_t;
 } intc_info_cu_hdr_t;
@@ -283,25 +285,23 @@ typedef union {
 #define	INTC_CU_TIR_FZ_NO			32
 #define intc_cu_hdr_lo_tir_fz_mask		(1UL << INTC_CU_TIR_FZ_NO)
 
-typedef struct {
-	union {
-		struct {
-			u64 event_code		: 8;
-			u64 ch_code		: 4;
-			u64 reg_num		: 8;
-			u64 dst			: 8;
-			u64 vm_dst		: 3;
-			u64			: 33;
-		};
-		e2k_qreg_t;
+typedef union {
+	struct {
+		u64 event_code		: 8;
+		u64 ch_code		: 4;
+		u64 reg_num		: 8;
+		u64 dst			: 8;
+		u64 vm_dst		: 3;
+		u64			: 33;
 	};
-	bool no_restore;
+	e2k_qreg_t;
 } intc_info_cu_entry_t;
 
 #define intc_cu_info_lo_get_event_code(x) ((x) & 0xff)
 
 /* Possible values for `INTC_INFO_CU[2 * j].event_code' */
 typedef enum info_cu_event_code {
+	/* Can be used by hypervisor to skip entry */
 	ICE_FORCED = 0,
 	ICE_READ_CU = 1,
 	ICE_WRITE_CU = 2,

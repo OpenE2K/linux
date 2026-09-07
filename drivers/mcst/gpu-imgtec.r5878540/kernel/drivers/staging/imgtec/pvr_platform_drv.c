@@ -163,12 +163,36 @@ static void pvr_devices_unregister(void)
 #endif /* defined(MODULE) && !defined(PVR_LDM_PLATFORM_PRE_REGISTERED) */
 }
 
+#if defined(CONFIG_MCST)
+static int pvr_drv_init;
+#endif
+
 static int pvr_probe(struct platform_device *pdev)
 {
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 18, 0))
 	struct drm_device *ddev;
 	int ret;
+#endif
 
+#if defined(CONFIG_MCST)
+	if (!pvr_drv_init) {
+		pvr_drm_platform_driver = pvr_drm_generic_driver;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 18, 0)) && \
+	(LINUX_VERSION_CODE < KERNEL_VERSION(4, 5, 0))
+		pvr_drm_platform_driver.set_busid = drm_platform_set_busid;
+#endif
+
+		ret = PVRSRVDriverInit();
+		if (ret)
+			return ret;
+
+		ret =  pvr_devices_register();
+
+		if (ret)
+			return ret;
+	}
+#endif
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 18, 0))
 	DRM_DEBUG_DRIVER("device %p\n", &pdev->dev);
 
 	ddev = drm_dev_alloc(&pvr_drm_platform_driver, &pdev->dev);
@@ -207,6 +231,9 @@ static int pvr_probe(struct platform_device *pdev)
 		pvr_drm_platform_driver.patchlevel,
 		pvr_drm_platform_driver.date,
 		ddev->primary->index);
+#endif
+#if defined(CONFIG_MCST)
+	pvr_drv_init = 1;
 #endif
 	return 0;
 
@@ -294,6 +321,9 @@ static struct platform_driver pvr_platform_driver = {
 
 static int __init pvr_init(void)
 {
+#if defined(CONFIG_MCST)
+	return platform_driver_register(&pvr_platform_driver);
+#else
 	int err;
 
 	DRM_DEBUG_DRIVER("\n");
@@ -313,6 +343,7 @@ static int __init pvr_init(void)
 		return err;
 
 	return pvr_devices_register();
+#endif
 }
 
 static void __exit pvr_exit(void)
@@ -322,7 +353,6 @@ static void __exit pvr_exit(void)
 	pvr_devices_unregister();
 	platform_driver_unregister(&pvr_platform_driver);
 	PVRSRVDriverDeinit();
-
 	DRM_DEBUG_DRIVER("done\n");
 }
 

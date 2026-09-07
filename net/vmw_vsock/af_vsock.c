@@ -2400,6 +2400,9 @@ static const struct file_operations vsock_device_ops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= vsock_dev_compat_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	= vsock_dev_ioctl,
+#endif
 	.open		= nonseekable_open,
 };
 

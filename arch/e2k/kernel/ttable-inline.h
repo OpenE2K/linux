@@ -189,6 +189,7 @@ user_hw_stacks_restore__sw(e2k_stacks_t *stacks, u64 cur_window_q,
 			   clear_rf_t clear_fn, void (*sw_fill_sequel),
 			   u64 sw_fill_window_q)
 {
+	struct task_struct *p = (struct task_struct *) read_CURRENT_reg_value();
 	e2k_pshtp_t u_pshtp = stacks->pshtp;
 	e2k_pcshtp_t u_pcshtp = stacks->pcshtp;
 	e2k_psp_t u_psp = stacks->psp;
@@ -212,10 +213,10 @@ user_hw_stacks_restore__sw(e2k_stacks_t *stacks, u64 cur_window_q,
 	u_psp = decr_psp_ind(u_psp, u_pshtp_size);
 	u_pcsp = decr_pcsp_ind(u_pcsp, u_pcshtp_size);
 
-	current->thread.fill.u_psp = u_psp;
-	current->thread.fill.u_pcsp = u_pcsp;
-	current->thread.fill.cr0 = read_CR0_reg();
-	current->thread.fill.cr1 = read_CR1_reg();
+	p->thread.fill.u_psp = u_psp;
+	p->thread.fill.u_pcsp = u_pcsp;
+	p->thread.fill.cr0 = read_CR0_reg();
+	p->thread.fill.cr1 = read_CR1_reg();
 
 #ifndef CONFIG_CPU_HW_CLEAR_RF
 	clear_fn();
@@ -226,7 +227,6 @@ user_hw_stacks_restore__sw(e2k_stacks_t *stacks, u64 cur_window_q,
 
 	wbs = (u64) u_pshtp_size >> 5UL;
 	set_cr0_ip(new_cr0, fill_handlers_table[wbs]);
-	write_CR0_ip(new_cr0);
 
 	new_cr1 = (e2k_cr1_t) {	0};
 	new_cr1.psr = AW(E2K_KERNEL_PSR_DISABLED_ALL);
@@ -237,10 +237,12 @@ user_hw_stacks_restore__sw(e2k_stacks_t *stacks, u64 cur_window_q,
 	new_cr1.wbs = wbs;
 	new_cr1 = set_cr1_ussz(new_cr1, (cpu_has(CPU_FEAT_V7_CPU_REGS)) ?
 						0 : USD_IND(read_USD_reg()));
-	write_CR1_reg(new_cr1);
 
-	prefetch_nospec(&current->thread.fill.cr0);
-	prefetch_nospec(&current->thread.fill.return_to_user);
+	/* Other barriers will be inserted later when restoring user's CRs */
+	write_cr__no_wait(new_cr0, new_cr1);
+
+	prefetch_nospec(&p->thread.fill.cr0);
+	prefetch_nospec(&p->thread.fill.return_to_user);
 
 	if (!cpu_has(CPU_FEAT_FILLC)) {
 		/*
@@ -260,8 +262,9 @@ user_hw_stacks_restore__sw(e2k_stacks_t *stacks, u64 cur_window_q,
 	FILL_HARDWARE_STACKS__SW(sw_fill_sequel);
 
 set_new_regs:
-	write_hw_stacks_cr(current->thread.fill.u_psp, current->thread.fill.u_pcsp,
-			   current->thread.fill.cr0, current->thread.fill.cr1);
+	/* Other barriers will be inserted later when restoring user's CRs */
+	write_hw_stacks_cr__no_wait(p->thread.fill.u_psp, p->thread.fill.u_pcsp,
+			   p->thread.fill.cr0, p->thread.fill.cr1);
 }
 
 static __always_inline void user_hw_stacks_restore__sw_sequel(void)
@@ -276,12 +279,8 @@ static __always_inline void user_hw_stacks_restore__sw_sequel(void)
 	if (cpu_has(CPU_FEAT_FILLC))
 		NATIVE_FILL_CHAIN_STACK__HW();
 
-	if (!cpu_has(CPU_NO_HWBUG_INTC_CR_WRITE)) {
-		E2K_WAIT(_ma_c);
-		E2K_NOP(7);
-	}
-
-	write_hw_stacks_cr(u_psp, u_pcsp, cr0, cr1);
+	/* Other barriers will be inserted later when restoring user's CRs */
+	write_hw_stacks_cr__no_wait(u_psp, u_pcsp, cr0, cr1);
 }
 
 static __always_inline void
@@ -341,13 +340,12 @@ jump_to_ttable_entry(struct pt_regs *regs, enum restore_caller from)
 }
 #endif /* !CONFIG_VIRTUALIZATION || !CONFIG_KVM_GUEST_KERNEL) */
 
-extern int copy_context_from_signal_stack(struct local_gregs *l_gregs, struct pt_regs *regs,
-					  struct trap_pt_regs *trap, u64 *sbbp,
-					  e2k_aau_t *aau_context, struct k_sigaction *ka);
+extern int copy_context_from_signal_stack(struct pt_regs *regs, struct trap_pt_regs *trap,
+		e2k_aau_t *aau_context, struct k_sigaction *ka);
 
 static inline int copy_pt_regs_from_signal_stack(struct pt_regs *regs)
 {
-	return copy_context_from_signal_stack(NULL, regs, NULL, NULL, NULL, NULL);
+	return copy_context_from_signal_stack(regs, NULL, NULL, NULL);
 }
 
 static __always_inline bool signal_pending_usermode_loop(struct pt_regs *regs)
@@ -414,12 +412,14 @@ static __always_inline e2k_pshtp_t exit_to_usermode_loop(struct pt_regs *regs,
 	 */
 	PSR_IRQ_ALL_CLI();
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (unlikely(host_test_intc_emul_mode(regs))) {
 		/* host is at guest VCPU interception emulation mode */
 		host_exit_to_usermode_loop(regs, syscall,
 					   signal_pending_usermode_loop(regs));
 		return pshtp;
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	/*
 	 * Check under closed interrupts to avoid races
@@ -444,7 +444,7 @@ static __always_inline e2k_pshtp_t exit_to_usermode_loop(struct pt_regs *regs,
 			 * restored - we want APB to restart from the last
 			 * *used* address. So recalculate proper values here. */
 			if (!syscall && aau_regs &&
-			    unlikely(AAU_STOPPED(regs->aasr))) {
+			    unlikely(aau_stopped(regs->aasr))) {
 				machine.calculate_aau_aaldis_aaldas(regs,
 					current_thread_info()->aalda, aau_regs);
 			}
@@ -481,7 +481,9 @@ static __always_inline e2k_pshtp_t exit_to_usermode_loop(struct pt_regs *regs,
 			} else if (!signal_pending(current)) {
 				/* There are no signal handlers and no more
 				 * signals so we can restart this system call */
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 				BUG_ON(host_test_intc_emul_mode(regs));
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 				*return_to_user = false;
 			}
 		}
@@ -530,14 +532,16 @@ static __noreturn __always_inline void finish_user_trap_handler_done(struct thre
 	 * RESTORE_COMMON_REGS() must be called before RESTORE_AAU_MASK_REGS()
 	 * because of ctpr2 and AAU registers restoring dependencies.
 	 */
-	if (likely(!AAU_STOPPED(regs->aasr))) {
+	if (likely(!aau_stopped(regs->aasr))) {
 		RESTORE_COMMON_REGS(regs);
 		RESTORE_AAU_MASK_REGS((e2k_aaldm_t) { .word = 0 },
 				(e2k_aaldv_t) { .word = 0 }, regs->aasr);
 		if (from & FROM_SIGRETURN) {
 			CLEAR_DO_SIGRETURN_INTERRUPT(rndpr);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 		} else if (from & (FROM_RETURN_PV_VCPU_TRAP)) {
 			CLEAR_RETURN_PV_VCPU_TRAP_WINDOW(rndpr);
+#endif
 		} else {
 			CLEAR_USER_TRAP_HANDLER_WINDOW(rndpr);
 		}
@@ -547,8 +551,10 @@ static __noreturn __always_inline void finish_user_trap_handler_done(struct thre
 		RESTORE_AAU_MASK_REGS(aau_regs->aaldm, aau_regs->aaldv, regs->aasr);
 		if (from & FROM_SIGRETURN) {
 			CLEAR_DO_SIGRETURN_INTERRUPT(rndpr);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 		} else if (from & (FROM_RETURN_PV_VCPU_TRAP)) {
 			CLEAR_RETURN_PV_VCPU_TRAP_WINDOW(rndpr);
+#endif
 		} else {
 			CLEAR_USER_TRAP_HANDLER_WINDOW(rndpr);
 		}
@@ -562,12 +568,37 @@ static __noreturn __always_inline void finish_user_trap_handler_done(struct thre
  * function calls are allowed after this point.
  */
 static __noreturn __always_inline void
-finish_user_trap_handler_switched_stacks(struct pt_regs *regs, struct trap_pt_regs *trap,
+finish_user_trap_handler_switched_hw_stacks(struct pt_regs *regs, struct trap_pt_regs *trap,
 					 restore_caller_t from)
 {
 	e2k_aau_t *aau_regs = regs->aau_context;
-	thread_info_t *ti;
+	struct thread_info *ti;
 	e2k_wd_t wd;
+
+	RESTORE_USER_TRAP_STACK_REGS(regs);
+#if DEBUG_TRACE_TRAP_USD_CR1
+	E2K_WAIT(_all_e);
+	current_thread_info()->d_usd = native_read_USD_reg();
+	current_thread_info()->d_cr1  = native_read_CR1_reg();
+	if (cpu_has(CPU_FEAT_V7_CPU_REGS)) {
+		current_thread_info()->d_usfs  = native_read_USFS_reg();
+	}
+#endif
+	if (current->thread.flags & E2K_FLAG_PROTECTED_MODE)
+		ENABLE_US_CLW();
+
+	if (unlikely(cpu_has(CPU_HWBUG_SS) && test_ts_flag(TS_SINGLESTEP_USER))) {
+		/*
+		 * Hardware can lose singlestep flag on interrupt if it
+		 * arrives earlier, so we must always manually reset it.
+		 */
+		e2k_cr1_t cr1 = read_CR1_reg();
+
+		if (!cr1.pm) {
+			cr1.ss = 1;
+			write_CR1_reg(cr1);
+		}
+	}
 
 	/*
 	 * Dequeue current pt_regs structure
@@ -580,10 +611,6 @@ finish_user_trap_handler_switched_stacks(struct pt_regs *regs, struct trap_pt_re
 
 	/* restore some guest context, if trap was on guest */
 	ti = current_thread_info();
-	trap_guest_enter(ti, regs, EXIT_FROM_TRAP_SWITCH, from);
-	BUG_ON(ti != read_CURRENT_reg_value());
-	/* WARNING: from here should not use current, current_thread_info() */
-	/* only variable 'ti' */
 
 	if (cpu_has(CPU_HWBUG_AAU_AALDV))
 		__E2K_WAIT(_ma_c);
@@ -597,6 +624,13 @@ finish_user_trap_handler_switched_stacks(struct pt_regs *regs, struct trap_pt_re
 		if (regs->aasr.iab)
 			RESTORE_AADS(aau_regs);
 	}
+
+	trap_guest_enter(ti, regs, EXIT_FROM_TRAP_SWITCH, from);
+
+	/*
+	 * WARNING: from here should not use current, current_thread_info(),
+	 * cpu_has() - only variable 'ti'
+	 */
 
 	/*
 	 * There must not be any branches after restoring ctpr register
@@ -613,7 +647,7 @@ finish_user_trap_handler_switched_stacks(struct pt_regs *regs, struct trap_pt_re
 }
 
 /*
- * This calculation is based on user_hw_stacks_restore() calculation of register window size 
+ * This calculation is based on user_hw_stacks_restore() calculation of register window size
  */
 static __always_inline u64 get_finish_handler_wbs(struct e2k_stacks *stacks, u64 finish_wsz)
 {
@@ -637,7 +671,7 @@ finish_user_trap_handler(struct pt_regs *regs, restore_caller_t from)
 	e2k_ctpr_t ctpr3;
 	u64 wsz, finish_wsz, num_q;
 
-	if (unlikely(AAU_STOPPED(regs->aasr)))
+	if (unlikely(aau_stopped(regs->aasr)))
 		machine.calculate_aau_aaldis_aaldas(regs,
 				current_thread_info()->aalda, aau_regs);
 
@@ -653,7 +687,7 @@ finish_user_trap_handler(struct pt_regs *regs, restore_caller_t from)
 
 	clear_apb();
 
-	debug_inject_half_spec_loads(true);
+	debug_inject_semi_spec_loads(true);
 
 	exception_exit(trap->prev_state);
 
@@ -703,22 +737,10 @@ finish_user_trap_handler(struct pt_regs *regs, restore_caller_t from)
 	}
 
 	/* MMU registers must be written with not active CLW/AAU */
-	uaccess_enable_irqs_off();
+	uaccess_enable();
 
 	/* complete intercept emulation mode */
 	trap_guest_enter(current_thread_info(), regs, EXIT_FROM_INTC_SWITCH, from);
-
-	RESTORE_USER_TRAP_STACK_REGS(regs);
-#if DEBUG_TRACE_TRAP_USD_CR1
-	E2K_WAIT(_all_e);
-	current_thread_info()->d_usd = native_read_USD_reg();
-	current_thread_info()->d_cr1  = native_read_CR1_reg();
-	if (cpu_has(CPU_FEAT_V7_CPU_REGS)) {
-		current_thread_info()->d_usfs  = native_read_USFS_reg();
-	}
-#endif
-	if (current->thread.flags & E2K_FLAG_PROTECTED_MODE)
-		ENABLE_US_CLW();
 
 	info_restore_stack_reg(clock);
 
@@ -732,31 +754,18 @@ finish_user_trap_handler(struct pt_regs *regs, restore_caller_t from)
 	E2K_SAVE_CLOCK_REG(trap_times->end);
 #endif /* CONFIG_KERNEL_TIMES_ACCOUNT */
 
-	if (unlikely(cpu_has(CPU_HWBUG_SS) && test_ts_flag(TS_SINGLESTEP_USER))) {
-		/*
-		 * Hardware can lose singlestep flag on interrupt if it
-		 * arrives earlier, so we must always manually reset it.
-		 */
-		e2k_cr1_t cr1 = read_CR1_reg();
-
-		if (!cr1.pm) {
-			cr1.ss = 1;
-			write_CR1_reg(cr1);
-		}
-	}
-
 	if (!cpu_has(CPU_FEAT_FILLC) || !cpu_has(CPU_FEAT_FILLR))
 		current->thread.fill.from = from;
 
 	/*
 	 * If either FILLC or FILLR isn't supported, jump to finish_user_trap_handler_sw_fill.
-	 * Otherwise, fall through and call finish_user_trap_handler_switched_stacks directly.
+	 * Otherwise, fall through and call finish_user_trap_handler_switched_hw_stacks directly.
 	 */
 	user_hw_stacks_restore(trap_guest_get_restore_stacks(current_thread_info(), regs),
-			       wsz, clear_fn, &finish_user_trap_handler_sw_fill,
+			       wsz, clear_fn, finish_user_trap_handler_sw_fill,
 			       finish_user_trap_handler_sw_fill_wsz);
 
-	finish_user_trap_handler_switched_stacks(regs, trap, from);
+	finish_user_trap_handler_switched_hw_stacks(regs, trap, from);
 
 	unreachable();
 }
@@ -766,7 +775,7 @@ finish_user_trap_handler(struct pt_regs *regs, restore_caller_t from)
  * function calls are allowed after this point.
  */
 static __always_inline __noreturn
-void finish_syscall_switched_stacks(struct pt_regs *regs, enum restore_caller from,
+void finish_syscall_switched_hw_stacks(struct pt_regs *regs, enum restore_caller from,
 				    bool return_to_user, bool ts_host_at_vcpu_mode)
 {
 	e2k_rndpr_t rndpr = regs->rndpr;
@@ -792,7 +801,6 @@ void finish_syscall_switched_stacks(struct pt_regs *regs, enum restore_caller fr
 		ENABLE_US_CLW();
 	}
 	/* %gN-%gN+3 must be restored last as they hold pointers to current */
-	/* now N=16 (see asm/glob_regs.h) */
 	CLEAR_KERNEL_GREGS_IN_SYSCALL(current_thread_info());
 
 	if (likely(return_to_user)) {
@@ -829,10 +837,12 @@ void finish_syscall_switched_stacks(struct pt_regs *regs, enum restore_caller fr
 		} else if (from & FROM_SYSCALL_PROT_8) {
 			CLEAR_TTABLE_ENTRY_8_WINDOW(rval, rndpr);
 #endif
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 		} else if (from & FROM_PV_VCPU_SYSCALL) {
 			CLEAR_HANDLE_PV_VCPU_SYS_CALL_WINDOW(rval, rndpr);
 		} else if (from & FROM_PV_VCPU_SYSFORK) {
 			CLEAR_HANDLE_PV_VCPU_SYS_FORK_WINDOW(rval, rndpr);
+#endif
 		} else {
 			BUG();
 		}
@@ -866,7 +876,7 @@ void finish_syscall(struct pt_regs *regs, enum restore_caller from, bool return_
 
 	num_q = get_ps_clear_size(finish_wsz, pshtp);
 
-	debug_inject_half_spec_loads(true);
+	debug_inject_semi_spec_loads(true);
 
 	if (!cpu_has(CPU_FEAT_FILLC) || !cpu_has(CPU_FEAT_FILLR)) {
 		current->thread.fill.from = from;
@@ -885,20 +895,20 @@ void finish_syscall(struct pt_regs *regs, enum restore_caller from, bool return_
 	clear_fn = get_clear_rf_fn(num_q);
 
 	/* MMU registers must be written with not active CLW/AAU */
-	uaccess_enable_irqs_off();
+	uaccess_enable();
 
 	/* complete intercept emulation mode */
 	guest_exit_intc(regs, intc_emul_flag, from);
 
 	/*
 	 * If either FILLC or FILLR isn't supported, jump to finish_syscall_sw_fill.
-	 * Otherwise, fall through and call finish_syscall_switched_stacks directly.
+	 * Otherwise, fall through and call finish_syscall_switched_hw_stacks directly.
 	 */
 	user_hw_stacks_restore(syscall_guest_get_restore_stacks(ts_host_at_vcpu_mode, regs),
 			       wsz, clear_fn, &finish_syscall_sw_fill,
 			       finish_syscall_sw_fill_wsz);
 
-	finish_syscall_switched_stacks(regs, from, return_to_user, ts_host_at_vcpu_mode);
+	finish_syscall_switched_hw_stacks(regs, from, return_to_user, ts_host_at_vcpu_mode);
 
 	unreachable();
 }

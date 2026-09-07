@@ -176,7 +176,6 @@ boot_recovery_mem_init(bool bsp, int cpuid, bootblock_struct_t *bootblock,
 	 * old state of bootblock info and flags
 	 */
 	if (BOOT_IS_BSP(bsp)) {
-		bootblock->kernel_flags &= ~(RECOVERY_BB_FLAG | NO_READ_IMAGE_BB_FLAG);
 		bootblock->boot_flags &= ~(RECOVERY_BB_FLAG | NO_READ_IMAGE_BB_FLAG);
 		write_back_CACHE_L12();
 		__E2K_WAIT_ALL;
@@ -294,12 +293,11 @@ boot_recovery_setup(bool bsp, bootblock_struct_t *bootblock)
 	 */
 
 	if (BOOT_IS_BSP(bsp)) {
-		boot_bootinfo_phys_base = (e2k_addr_t)boot_pa_to_high_pa(bootblock, recovery_info);
-
-		if (boot_bootinfo_phys_base != (e2k_addr_t)boot_bootblock_phys) {
-			BOOT_BUG("address of bootblock 0x%lx != source bootblock address 0x%lx\n",
-				boot_bootinfo_phys_base,
-				(e2k_addr_t)boot_bootblock_phys);
+		void *bootblock_addr = boot_pa_to_high_pa(bootblock,
+							  recovery_info);
+		if (bootblock_addr != boot_bootblock_phys) {
+			BOOT_BUG("address of bootblock 0x%px != source bootblock address 0x%px\n",
+					bootblock_addr, boot_bootblock_phys);
 		}
 		boot_printk("Recovery information physical address: 0x%lx\n", boot_bootblock_phys);
 

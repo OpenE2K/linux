@@ -8,14 +8,8 @@
 #define ALIGN(x, a)		__ALIGN_KERNEL((x), (a))
 #define ALIGN_DOWN(x, a)	__ALIGN_KERNEL((x) - ((a) - 1), (a))
 #define __ALIGN_MASK(x, mask)	__ALIGN_KERNEL_MASK((x), (mask))
-#ifdef CONFIG_E2K
-#define PTR_ALIGN(p, a)		((typeof(p))ALIGN((unsigned long __force)(p), (a)))
-#define PTR_ALIGN_DOWN(p, a)	((typeof(p))ALIGN_DOWN((unsigned long __force)(p), (a)))
-#define IS_ALIGNED(x, a)		(((x) & ((typeof(x) __force)(a) - 1)) == 0)
-#else
 #define PTR_ALIGN(p, a)		((typeof(p))ALIGN((unsigned long)(p), (a)))
 #define PTR_ALIGN_DOWN(p, a)	((typeof(p))ALIGN_DOWN((unsigned long)(p), (a)))
 #define IS_ALIGNED(x, a)		(((x) & ((typeof(x))(a) - 1)) == 0)
-#endif
 
 #endif	/* _LINUX_ALIGN_H */

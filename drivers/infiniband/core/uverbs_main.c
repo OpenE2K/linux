@@ -983,6 +983,9 @@ static const struct file_operations uverbs_fops = {
 	.llseek	 = no_llseek,
 	.unlocked_ioctl = ib_uverbs_ioctl,
 	.compat_ioctl = compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = ib_uverbs_ioctl,
+#endif
 };
 
 static const struct file_operations uverbs_mmap_fops = {
@@ -994,6 +997,9 @@ static const struct file_operations uverbs_mmap_fops = {
 	.llseek	 = no_llseek,
 	.unlocked_ioctl = ib_uverbs_ioctl,
 	.compat_ioctl = compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = ib_uverbs_ioctl,
+#endif
 };
 
 static int ib_uverbs_get_nl_info(struct ib_device *ibdev, void *client_data,

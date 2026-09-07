@@ -34,11 +34,13 @@
 
 #ifdef	CONFIG_SERIAL_BOOT_PRINTK
 
-bool serial_console_enable = false;
+static bool serial_console_enable = false;
 static bool serial_console_cmd = false;
 static bool lms_console_cmd = false;
 bool hvc_console_cmd = false;
-unsigned long io_area_phys_base = -1;
+#ifdef	CONFIG_LMS_CONSOLE
+static unsigned long io_area_phys_base = -1;
+#endif
 static int serial_console_index = -1;
 #ifdef	CONFIG_LMS_CONSOLE
 static bool lms_console_enable = false;
@@ -51,7 +53,9 @@ static bool lms_console_enable = false;
 #define boot_serial_console_enable boot_get_vo_value(serial_console_enable)
 #define boot_serial_console_cmd	boot_get_vo_value(serial_console_cmd)
 #define boot_lms_console_cmd	boot_get_vo_value(lms_console_cmd)
+#ifdef	CONFIG_LMS_CONSOLE
 #define boot_io_area_phys_base	boot_get_vo_value(io_area_phys_base)
+#endif
 #define boot_serial_console_index boot_get_vo_value(serial_console_index)
 
 /*

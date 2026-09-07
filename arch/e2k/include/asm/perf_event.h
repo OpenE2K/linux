@@ -12,15 +12,6 @@
 #include <asm/ptrace.h>
 #include <asm/regs_state.h>
 
-#define EVENT_VAR(_id)  event_attr_##_id
-#define EVENT_PTR(_id) &event_attr_##_id.attr.attr
-
-#define EVENT_ATTR(_name, _id)						\
-static struct perf_pmu_events_attr EVENT_VAR(_id) = {			\
-	.attr		= __ATTR(_name, 0444, events_sysfs_show, NULL),	\
-	.id		= PERF_COUNT_HW_##_id,				\
-	.event_str	= NULL,						\
-};
 
 static inline void set_perf_event_pending(void) {}
 static inline void clear_perf_event_pending(void) {}
@@ -53,7 +44,7 @@ static __always_inline void perf_arch_fetch_caller_regs(struct pt_regs *regs,
 	unsigned long flags;
 
 	raw_all_irq_save(flags);
-	SAVE_STACK_REGS(regs, current_thread_info(), false, false);
+	SAVE_STACK_REGS(regs, false, false);
 	regs->stacks.usd = read_USD_reg();
 	regs->stacks.top = (unsigned long) current->stack +
 			   KERNEL_C_STACK_OFFSET + KERNEL_C_STACK_SIZE;

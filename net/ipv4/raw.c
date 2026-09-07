@@ -947,6 +947,9 @@ struct proto raw_prot = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	   = compat_raw_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	   = raw_ioctl,
+#endif
 	.diag_destroy	   = raw_abort,
 };
 

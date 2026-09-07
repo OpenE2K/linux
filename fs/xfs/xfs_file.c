@@ -1482,6 +1482,9 @@ const struct file_operations xfs_file_operations = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= xfs_file_compat_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	= xfs_file_ptr128_ioctl,
+#endif
 	.mmap		= xfs_file_mmap,
 	.mmap_supported_flags = MAP_SYNC,
 	.open		= xfs_file_open,
@@ -1501,6 +1504,9 @@ const struct file_operations xfs_dir_file_operations = {
 	.unlocked_ioctl	= xfs_file_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= xfs_file_compat_ioctl,
+#endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	= xfs_file_ptr128_ioctl,
 #endif
 	.fsync		= xfs_dir_fsync,
 };

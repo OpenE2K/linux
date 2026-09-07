@@ -31,7 +31,6 @@
 
 extern int __verify_write(const void *addr, unsigned long size);
 extern int __verify_read(const void *addr, unsigned long size);
-
 static inline bool __range_ok(unsigned long addr, unsigned long size,
 		unsigned long limit)
 {
@@ -40,16 +39,21 @@ static inline bool __range_ok(unsigned long addr, unsigned long size,
 
 	if (__builtin_constant_p(size) && size <= TASK32_SIZE)
 		return likely(__addr <= limit - size);
-
 	/* Arbitrary sizes? Be careful about overflow */
 	return likely(__addr + size >= size && __addr + size <= limit);
 }
 
+register u64 uaccess_max ASM_GREG(UACCESS_MAX_GREG);
+#define MAX_U_BORDER		user_addr_max()
+#define get_u_border()		uaccess_max
+#define set_u_border(v)		(uaccess_max = (v))
+#define set_ap_u_border(ap)	set_u_border(AP_PTR(ap) + AP_OBJ_SIZE(ap))
+#define set_max_u_border()	set_u_border(MAX_U_BORDER)
+
 #define __access_ok(addr, size) \
 ({ \
 	__chk_user_ptr(addr); \
-	likely(__range_ok((unsigned long) (addr), (size), \
-			  user_addr_max())); \
+	likely(__range_ok((unsigned long) (addr), (size), get_u_border())); \
 })
 
 /*
@@ -168,7 +172,7 @@ struct exception_table_entry
 	 *  - manually fault-in any missing pages. \
 	 * This pattern works only if user access function touches \
 	 * only the memory it was explicitly asked to, thus such \
-	 * functions must not use half-speculative loads.  To make \
+	 * functions must not use semi-speculative loads.  To make \
 	 * sure this is the case, we disable corresponding mode. \
 	 * \
 	 * TODO bug 140465 - replace O1 with only needed options */ \
@@ -516,9 +520,13 @@ extern int __get_user_bad(void) __attribute__((noreturn));
 
 extern int __put_user_bad(void) __attribute__((noreturn));
 
-/* __put_user() but caller must manually switch to user page tables.
+/*
+ * __put_user() but caller must manually switch to user page tables.
  * Useful in protected fast syscalls since we can't access user space
- * directly (PTE.int_pr prohibits that) but page tables are from user. */
+ * directly (PTE.int_pr prohibits that) but page tables are from user.
+ *
+ * Returns -EFAULT on unhandled page fault and 0 otherwise.
+ */
 #define __put_user_switched_pt(x, ptr) \
 ({									\
 	__typeof__(*(ptr)) __user *__pusp_ptr = (ptr);			\
@@ -748,16 +756,33 @@ fill_user(void __user *to, unsigned long n, const u8 b)
 
 
 __must_check unsigned long __fill_user_with_tags(void __user *dst,
-		unsigned long n, unsigned long tag, unsigned long dw);
+		unsigned long n, unsigned long tag, unsigned long dw, ldst_rec_op_t strd_opcode);
 
 /* Filling aligned user pointer 'to' with 'n' bytes of 'dw' double words: */
 static inline __must_check unsigned long
 fill_user_with_tags(void __user *to, unsigned long n, unsigned long tag, unsigned long dw)
 {
+	ldst_rec_op_t opc = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT, .mas = MAS_BYPASS_L1_CACHE,
+					      .prot = 1 };
+	int ret = 0;
+
 	if (!access_ok(to, n))
 		return n;
 
-	return __fill_user_with_tags(to, n, tag, dw);
+	if (__builtin_constant_p(n) && IS_ALIGNED((unsigned long) to, 16) && n <= 64 &&
+			!(n % 16)) {
+		if (n >= 16)
+			ret = ASM_USER_STRD_16(to, dw, tag, AW(opc));
+		if (n >= 32)
+			ret |= ASM_USER_STRD_16(to, dw, tag, AW(opc) | 16);
+		if (n >= 48)
+			ret |= ASM_USER_STRD_16(to, dw, tag, AW(opc) | 32);
+		if (n == 64)
+			ret |= ASM_USER_STRD_16(to, dw, tag, AW(opc) | 48);
+		return ret ? n : 0;
+	}
+
+	return __fill_user_with_tags(to, n, tag, dw, opc);
 }
 
 static inline __must_check unsigned long
@@ -1123,8 +1148,47 @@ clear_priv(void __priv *to, unsigned long n)
 
 #ifdef CONFIG_PROTECTED_MODE
 
+static __always_inline e2k_ap_t
+new_ap(u64 base, u64 size, u64 ind, u64 rw)
+{
+	if (unlikely(!access_ok((void __user *)base, size))) {
+		base = 0;
+		size = 1; /* For v7 maxind */
+		ind = 0;
+		rw = 0;
+	}
+
+	if (cpu_has(CPU_FEAT_V7_CPU_REGS)) {
+		e2k_ap_t ap = (e2k_ap_t){.qword = NEW_V7_CPU_REG(base, ind, size)};
+		ap.rw_v7 = rw;
+		ap.itag_v7 = ITAG_AP;
+		return ap;
+	} else {
+		e2k_ap_t ap = (e2k_ap_t) {.Base	= base, .Size	= size, .Curptr	= ind};
+		ap.rw_v6 = rw;
+		ap.itag_v6 = E2K_AP_ITAG;
+		return ap;
+	}
+}
+
+#define AP_NULL(ap, tag)	(!tag && !LO(ap))
+#define MAKE_AP_RW(base, len, rw)      new_ap((u64)(base), (u64)(len), 0, rw)
+#define MAKE_AP(base, len)      MAKE_AP_RW(base, len, RW_ENABLE)
+
+#define MAKE_TAGGED_AP_RW(ap, tag, base, len, rw)			\
+{								\
+	ap = new_ap((u64)(base), (u64)(len), 0, RW_ENABLE);	\
+	if (cpu_has(CPU_FEAT_V7_CPU_REGS)) {			\
+		tag = ETAGAPQ_V7;				\
+	} else {						\
+		tag = ETAGAPQ_V6;				\
+	}							\
+}
+#define MAKE_TAGGED_AP(ap, tag, base, len)	MAKE_TAGGED_AP_RW(ap, tag, base, len, RW_ENABLE)
+
+
 static inline __must_check int PUT_USER_AP(e2k_ptr_t __user *ptr, u64 base,
-        u64 len, u64 off, u64 rw)
+	u64 len, u64 off, u64 rw)
 {
 	e2k_ap_t tmp;
 	u32 tag;

@@ -11,6 +11,7 @@
 #include <linux/module.h>
 #include <linux/err.h>
 #include <linux/platform_device.h>
+#include <linux/io.h>
 #include <linux/hwmon.h>
 #include <linux/hwmon-sysfs.h>
 #include <linux/node.h>
@@ -23,7 +24,7 @@
 #include <asm/sic_regs_access.h>
 
 
-#define DRIVER_VERSION		"1.4"
+#define DRIVER_VERSION		"1.5"
 
 /* Regs index */
 #define PCS_CTRL5	0x0CC4
@@ -64,18 +65,18 @@ struct pcs_data {
 	struct device *hdev;
 	struct thermal_zone_device *tz;
 	int node;
+	void __iomem *base;
 };
 
-static int read_temp(int node, int idx)
+static int read_temp(int node, int idx, void __iomem *base)
 {
 	int val;
 
-	val = sic_read_node_nbsr_reg(node, pcs_ctrls[idx].offset);
+	val = readl(base + pcs_ctrls[idx].offset - 0xcc4);
 	val = (val >> pcs_ctrls[idx].shift) & PCS_CTRL_MASK;
 
 	int temp_mc = val; /* 12b signed integer temperature value in 125 mC */
 	temp_mc = ((temp_mc << 20) / 0x100000) * 125;
-
 	return temp_mc;
 } /* read_temp */
 
@@ -86,7 +87,7 @@ static ssize_t show_temp(struct device *dev,
 	struct pcs_data *pcs = dev_get_drvdata(dev);
 	int idx = to_sensor_dev_attr(attr)->index;
 
-	return sprintf(buf, "%d\n", read_temp(pcs->node, idx));
+	return sprintf(buf, "%d\n", read_temp(pcs->node, idx, pcs->base));
 } /* show_temp */
 
 
@@ -246,11 +247,8 @@ static int pcs_get_temp(struct thermal_zone_device *tz, int *temp)
 	struct pcs_data *pcs = tz->devdata;
 	int val;
 
-	val = sic_read_node_nbsr_reg(pcs->node, pcs_ctrls[8].offset);
-	val = (val >> pcs_ctrls[8].shift) & PCS_CTRL_MASK;
-
+	val = readl(pcs->base + pcs_ctrls[8].offset - 0xcc4);
 	*temp = ((val << 20) / 0x100000) * 125;
-
 	return 0;
 }
 
@@ -307,13 +305,55 @@ static void pcs_init_thermal(struct pcs_data *pcs)
 	}
 }
 
+static int initialize_machine(void)
+{
+	if (machine.native_id != MACHINE_ID_E8C &&
+			machine.native_id != MACHINE_ID_E8C2)
+		return -ENODEV;
+	if (machine.native_id == MACHINE_ID_E8C)
+		sensors = SENSORS_E8C;
+	else if (machine.native_id == MACHINE_ID_E8C2)
+		sensors = SENSORS_E8C2;
+	return 0;
+}
+
+static int initialize_sensors(struct device *dev)
+{
+	int ret;
+	int sensors_some = initialize_machine();
+
+	ret = create_sensor_device_attr(dev);
+	if (ret)
+		return -ENOMEM;
+	ret = create_pcs_group(dev);
+	if (ret)
+		return -ENOMEM;
+	return 0;
+}
+
 static int pcs_probe(struct platform_device *pdev)
 {
+	struct device *dev = &pdev->dev;
+	void __iomem *base;
+	struct resource *r;
 	char str[64];
 	int node;
 	struct pcs_data *pcs;
 	struct device_node *np;
 	struct device *hwmon_dev;
+
+	if (!sensors)
+		initialize_sensors(dev);
+	r = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	if (!r) {
+		dev_err(dev, "failed to get mem resource %d\n", 0);
+		return -ENOMEM;
+	}
+	base = devm_ioremap(dev, r->start, resource_size(r));
+	if (IS_ERR(base)) {
+		dev_err(dev, "failed to map resource %d\n", 0);
+		return PTR_ERR(base);
+	}
 
 	np = pdev->dev.of_node;
 
@@ -336,6 +376,7 @@ static int pcs_probe(struct platform_device *pdev)
 		if (!pcs)
 			return -ENOMEM;
 
+	pcs->base = base;
 	pcs->node = node;
 	pcs->pdev = pdev;
 
@@ -360,70 +401,37 @@ static int pcs_probe(struct platform_device *pdev)
 	return 0;
 } /* pcs_probe */
 
+
 static int pcs_remove(struct platform_device *pdev)
 {
 	struct pcs_data *pcs = platform_get_drvdata(pdev);
-	hwmon_device_unregister(pcs->hdev);
 
+	hwmon_device_unregister(pcs->hdev);
 	return 0;
 
 } /* pcs_remove */
 
 static const struct of_device_id l_pcs_of_match[] = {
-	{ .compatible = "mcst,pcs" },
+	{ .compatible = "mcst,l_pcs" },
 	{},
 };
+
 MODULE_DEVICE_TABLE(of, l_pcs_of_match);
 
-static const struct platform_device_id l_pcs_id[] = {
-	{ "pcs" },
-	{},
-};
-MODULE_DEVICE_TABLE(platform, l_pcs_id);
-
 static struct platform_driver l_pcs_driver = {
+	.driver = {
+		.name = "pcs",
+		.of_match_table = l_pcs_of_match,
+	},
 	.probe = pcs_probe,
 	.remove = pcs_remove,
-	.driver = { .name = "pcs", .of_match_table = of_match_ptr(l_pcs_of_match) },
 
 };
 
-
-static int pcs_init(void)
-{
-	int ret;
-	struct device *dev = cpu_subsys.dev_root;
-
-	if (machine.native_id != MACHINE_ID_E8C &&
-			machine.native_id != MACHINE_ID_E8C2)
-		return -ENODEV;
-
-	if (machine.native_id == MACHINE_ID_E8C)
-		sensors = SENSORS_E8C;
-	else if (machine.native_id == MACHINE_ID_E8C2)
-		sensors = SENSORS_E8C2;
-
-	ret = create_sensor_device_attr(dev);
-	if (ret)
-		return -ENOMEM;
-	ret = create_pcs_group(dev);
-	if (ret)
-		return -ENOMEM;
-
-	return platform_driver_register(&l_pcs_driver);
-
-} /* pcs_init */
-
-static void pcs_exit(void)
-{
-	platform_driver_unregister(&l_pcs_driver);
-
-} /* pcs_exit */
-
-module_init(pcs_init);
-module_exit(pcs_exit);
+module_platform_driver(l_pcs_driver);
 
 MODULE_AUTHOR("MCST");
 MODULE_DESCRIPTION("e8c/e8c2 pcs driver");
 MODULE_LICENSE("GPL v2");
 MODULE_VERSION(DRIVER_VERSION);
+

@@ -101,7 +101,7 @@ arch_get_unmapped_area(struct file *filp, unsigned long addr,
 	info.length = len + 2 * hole_size;
 	info.low_limit = begin;
 	info.high_limit = end;
-	info.align_mask = 0;
+	info.align_mask = (is_protected && cpu_has(CPU_FEAT_V7_CPU_REGS)) ? ap_align_mask(len) : 0;
 	info.align_offset = 0;
 
 	ret = vm_unmapped_area(&info);

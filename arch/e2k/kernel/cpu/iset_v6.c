@@ -35,15 +35,6 @@
 #define	DebugPF(...)	DebugPrint(DEBUG_PF_MODE ,##__VA_ARGS__)
 /******************************************************************************/
 
-#if CONFIG_CPU_ISET_MIN < 6
-
-
-void v6_native_write_MMU_TRAP_COUNT_reg(mmu_reg_t tc)
-{
-	NATIVE_SET_MMUREG(trap_count, tc);
-}
-
-#endif
 
 #ifdef CONFIG_MLT_STORAGE
 static bool read_MLT_entry_v6(e2k_mlt_entry_t *mlt, int entry_num)
@@ -80,36 +71,6 @@ void get_and_invalidate_MLT_context_v6(e2k_mlt_t *mlt_state)
 	NATIVE_SET_MMUREG(mlt_inv, 0);
 }
 #endif
-
-unsigned long native_read_MMU_OS_PPTB_reg_value(void)
-{
-	return NATIVE_READ_MMU_OS_PPTB_REG_VALUE();
-}
-
-void native_write_MMU_OS_PPTB_reg_value(unsigned long value)
-{
-	NATIVE_WRITE_MMU_OS_PPTB_REG_VALUE(value);
-}
-
-unsigned long native_read_MMU_OS_VPTB_reg_value(void)
-{
-	return NATIVE_READ_MMU_OS_VPTB_REG_VALUE();
-}
-
-void native_write_MMU_OS_VPTB_reg_value(unsigned long value)
-{
-	NATIVE_WRITE_MMU_OS_VPTB_REG_VALUE(value);
-}
-
-unsigned long native_read_MMU_OS_VAB_reg_value(void)
-{
-	return NATIVE_READ_MMU_OS_VAB_REG_VALUE();
-}
-
-void native_write_MMU_OS_VAB_reg_value(unsigned long value)
-{
-	NATIVE_WRITE_MMU_OS_VAB_REG_VALUE(value);
-}
 
 #if	defined(CONFIG_KVM_HW_VIRTUALIZATION) && !defined(CONFIG_KVM_GUEST_KERNEL)
 /* it is hardware virtualized host */
@@ -289,9 +250,16 @@ die:
  * wakeups as only whole cache lines can be watched. */
 static void __cpuidle mem_wait_idle(void)
 {
+	unsigned long flags;
 	unsigned long need_resched_mask = (1ul << TIF_NEED_RESCHED) |
 			(IS_ENABLED(CONFIG_PREEMPT_LAZY) ? (1ul << TIF_NEED_RESCHED_LAZY) : 0);
+	bool cpu_hwbug_wait_int = cpu_has(CPU_HWBUG_WAIT_INT);
+
+	if (cpu_hwbug_wait_int)
+		raw_all_irq_save(flags);
 	E2K_WATCH_FOR_MODIFICATION_64(&current_thread_info()->flags, need_resched_mask);
+	if (cpu_hwbug_wait_int)
+		raw_all_irq_restore(flags);
 }
 
 void __cpuidle C1_enter_v6(void)

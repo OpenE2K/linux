@@ -513,6 +513,9 @@ static const struct file_operations dma_buf_fops = {
 	.poll		= dma_buf_poll,
 	.unlocked_ioctl	= dma_buf_ioctl,
 	.compat_ioctl	= compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = dma_buf_ioctl,
+#endif
 	.show_fdinfo	= dma_buf_show_fdinfo,
 };
 

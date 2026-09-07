@@ -1,0 +1,110 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
+#include <dt-bindings/interrupt-controller/irq.h>
+#include "apic-vectors.h"
+
+#ifndef NODE
+# error NODE undefined
+#endif
+
+/*
+ * NODE REGS (e16c, e2c3, e12c) - "mcst,sic"
+ *
+ * Offset Regs Name     Group
+ * ------ ------------- ----
+ * 0x0000 ST_P          (1)
+ * 0x0008 RT_*          (1)
+ * 0x0100 ST_CORE*      (1)
+ * 0x0200 BT_REG0       (1)
+ * 0x0340 HC_*          (2) hc
+ * 0x0380 IOMMU_*       (3) iommu
+ * 0x0400 MC_*          (4) mc
+ * 0x0500 PLLMC_CTRL*   (4) mc
+ * 0x0604 IPCC_*        (5)
+ * 0x0800 BC_MM_*       (2) hc
+ * 0x0830 BC_MP_*       (2) hc
+ * 0x0c60 XMU_*         (2) hc
+ * 0x0cc0 EFUSE_*       (6)
+ * 0x0d00 HMU*, DIR*    (7) hmu
+ * 0x1000 PCS (PMC+PVT) (8)
+ * 0x3000 L3*           (9)
+ * 0x3800 OCN*          (10)
+ * 0x4000 DDRREG_*      (4) mc
+ * 0x5080 ED*_IOMMU_*   (3) iommu
+ * 0x8000 PREPIC/LVT    (11) "mcst,epic-linp"
+ */
+
+	LVT: lvt@NODE {
+		compatible = "mcst,epic-linp";
+		interrupt-parent = <&lpic>;
+		interrupt-controller;
+		numa-node-id = <NODE>;
+		reg = <NSR_ADDR(08000) 0 0x1000>;
+		nonposted-mmio;
+		interrupts-extended = <&lpic 0xff0f0f0f 0xff0f0f0f>, /*stub for linux to find parent*/
+					 <&LVT PREPIC_ERROR_VECTOR 32 0>;
+		interrupt-names = "stub", "PREPIC error interrupts";
+		#interrupt-cells = <3>;
+	};
+	SIC {
+		compatible = "mcst,sic";
+		/* reg = <0x1 0x10000000 0 0x100000>; not used */
+		nonposted-mmio;
+		interrupt-parent = <&LVT>;
+		numa-node-id = <NODE>;
+		interrupts = <LINP2_INTERRUPT_VECTOR 2 0>;
+		interrupt-names = "SIC error interrupts";
+	};
+#if CELLS == 2
+	PMC_FREQ: pmc_freq@NODE,1200 {
+		compatible = "mcst,pmc-freq";
+		reg = <NSR_ADDR(01200) 0 0xfc>, <NSR_ADDR(00cc0) 0 0x8>;
+		numa-node-id = <NODE>;
+		nonposted-mmio;
+	};
+	PCSM_DRV: pcsm_drv@NODE,1008 {
+		compatible = "mcst,pcsm-drv";
+		reg = <NSR_ADDR(01008) 0 0x28>,
+		      <NSR_ADDR(021b8) 0 0x200>,
+		      <NSR_ADDR(01540) 0 0x4>,
+		      <NSR_ADDR(01510) 0 0x14>;
+		numa-node-id = <NODE>;
+		nonposted-mmio;
+	};
+	UNCORE_MC: uncore_mc@NODE,0 {
+		compatible = "mcst,uncore_mc";
+		reg = <NSR_ADDR(00000) 0 0x1000>, <NSR_ADDR(04000) 0 0x1000>;
+		nonposted-mmio;
+	};
+
+#ifdef E2C3
+#ifndef LINUX_PATCH /* devtree version < 2.0 has theese devices too */
+	devfreq_mga2: devfreq_mga2@0,1410 {
+		compatible = "mcst,devfreq_pmc_dev";
+		reg = <NSR_ADDR(01410) 0 0x8>;
+		nonposted-mmio;
+	};
+
+	devfreq_3dgpu: devfreq_3dgpu@0,1420 {
+		compatible = "mcst,devfreq_pmc_dev";
+		reg = <NSR_ADDR(01420) 0 0x8>;
+		nonposted-mmio;
+	};
+
+	devfreq_encoders: devfreq_encoders@0,1430 {
+		compatible = "mcst,devfreq_pmc_dev";
+		reg = <NSR_ADDR(01430) 0 0x8>;
+		nonposted-mmio;
+	};
+
+	devfreq_hantrodec: devfreq_decoders@0,1440 {
+		compatible = "mcst,devfreq_pmc_dev";
+		reg = <NSR_ADDR(01440) 0 0x8>;
+		nonposted-mmio;
+	};
+#endif /* LINUX_PATCH */
+#endif /* E2C3 */
+#endif /* CELLS */

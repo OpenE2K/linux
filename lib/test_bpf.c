@@ -10390,13 +10390,13 @@ static struct bpf_test tests[] = {
 		 * is rejected by bpf_convert_filter().
 		 *
 		 * However, this filter is absolutely correct
-		 * from cBPF point of view, and JIT compiler
-		 * for e2k has no reason to reject it.
+		 * from cBPF point of view, and cBPF JIT compiler
+		 * for e2k has no reason to reject it. So this
+		 * test fails with error "UNEXPECTED_PASS" when
+		 * cBPF JIT is turned on.
 		 */
-		CLASSIC,
-#else
-		CLASSIC | FLAG_EXPECTED_FAIL,
 #endif
+		CLASSIC | FLAG_EXPECTED_FAIL,
 		{ 0xfa, 0xfb, 0xfc, 0xfd, },
 		{ { 4, 0xabababab } },
 		.fill_helper = bpf_fill_maxinsns12,

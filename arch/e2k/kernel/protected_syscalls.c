@@ -9,6 +9,7 @@
  *					const struct pt_regs *regs);
  */
 
+#include "linux/export.h"
 #include <linux/syscalls.h>
 #include <asm/e2k_debug.h>
 
@@ -19,6 +20,7 @@
 #include <asm/shmbuf.h>
 #include <asm/prot_compat.h>
 
+#include <linux/eventpoll.h>
 #include <linux/fdtable.h>
 #include <linux/filter.h>
 #include <linux/futex.h>
@@ -171,6 +173,42 @@ int check_pm_sc_debug_feature(const int debug_mask)
 	return current->mm->context.pm_sc_debug_mode & debug_mask;
 }
 
+/**
+ * protected_mode_write_to_current_stderr() - Write a string to the current's stderr.
+ * @message: Text to write.
+ *
+ * Return: Number of bytes written.
+ */
+ssize_t protected_mode_write_to_current_stderr(const char *message, size_t msglen)
+{
+	struct file *fstderr = fget(2);
+
+	if (!fstderr) {
+		pr_err_ratelimited("%s:%d : kernel_write(fstderr, 0x%px, %zd) - could not write to stderr since it is not available\n",
+				__FILE__, __LINE__, &message, msglen);
+		return -EBADF;
+	}
+
+	ssize_t ret = kernel_write(fstderr, message, msglen, NULL);
+	fput(fstderr);
+
+	if (ret == -ERESTARTSYS || ret == -ERESTARTNOINTR ||
+	    ret == -ERESTARTNOHAND || ret == -ERESTART_RESTARTBLOCK) {
+		/* Write to tty will not go through anyway
+		 * if signal_pending() so just return - we
+		 * will get here again after syscall restart. */
+	} else if (ret <= 0 &&
+		   check_pm_sc_debug_feature(PM_SC_DBG_WARNINGS)) {
+		pr_err("%s:%d : kernel_write(2, 0x%px, %zd) failed with error code (%ld)\n",
+				__FILE__, __LINE__, &message, msglen, ret);
+	} else if (ret < msglen) {
+		pr_err("%s:%d : kernel_write(2, 0x%px, %zd) failed; %ld of %zd bytes written\n",
+				__FILE__, __LINE__, &message, msglen, ret, msglen);
+	}
+	return ret;
+}
+EXPORT_SYMBOL_GPL(protected_mode_write_to_current_stderr);
+
 static
 int issue_prot_message_vl(const int msg_ID, const char *fmt, va_list argptr)
 {
@@ -199,34 +237,9 @@ int issue_prot_message_vl(const int msg_ID, const char *fmt, va_list argptr)
 		pr_err("%s", message);
 
 	if (check_pm_sc_debug_feature(PM_DIAG_MESSAGES_IN_STDERR)) {
-		struct file *fstderr = fget(2);
-		size_t msglen = strlen(message);
-
-		if (!fstderr) {
-			pr_err_ratelimited("%s:%d : kernel_write(fstderr, 0x%px, %zd) - could not write to stderr since it is not available\n",
-					__FILE__, __LINE__, &message, msglen);
-			return -EBADF;
-		}
-
-		ret = kernel_write(fstderr, message, msglen, NULL);
-		fput(fstderr);
-
-		if (ret == -ERESTARTSYS || ret == -ERESTARTNOINTR ||
-				ret == -ERESTARTNOHAND || ret == -ERESTART_RESTARTBLOCK) {
-			/* Write to tty will not go through anyway
-			 * if signal_pending() so just return - we
-			 * will get here again after syscall restart. */
-		} else if (ret <= 0) {
-			pr_err("%s:%d : kernel_write(2, 0x%px, %zd) failed with error code (%d)\n",
-				       __FILE__, __LINE__, &message, msglen, ret);
-			if (check_pm_sc_debug_feature(PM_DIAG_MESSAGES_IN_JOURNAL) == 0)
-				pr_err("%s", message);
-		} else if (ret < msglen) {
-			pr_err("%s:%d : kernel_write(2, 0x%px, %zd) failed; %d of %zd bytes written\n",
-					__FILE__, __LINE__, &message, msglen, ret, msglen);
-			if (check_pm_sc_debug_feature(PM_DIAG_MESSAGES_IN_JOURNAL) == 0)
-				pr_err("%s", message);
-		}
+		if (protected_mode_write_to_current_stderr(message, strlen(message)) &&
+		    check_pm_sc_debug_feature(PM_DIAG_MESSAGES_IN_JOURNAL) == 0)
+			pr_err("%s", message);
 	}
 
 	return ret;
@@ -248,11 +261,11 @@ int issue_prot_message(const char *fmt, ...)
 /* Delivering diagnostic messages that protected mode issues:
  * header_type: 0 - no header; 1 - error header; 2 - warning header; 3 - program warning.
  */
+
 void protected_mode_message(int header_type,
 			    enum pm_syscall_err_msg_id MSG_ID, ...)
 {
 	va_list argptr;
-
 	if ((check_pm_sc_debug_feature(PM_SC_DBG_MODE_CHECK
 					| PM_DIAG_MESSAGES_IN_JOURNAL
 					| PM_DIAG_MESSAGES_IN_STDERR) == 0)
@@ -293,59 +306,24 @@ void protected_mode_message(int header_type,
 	va_end(argptr);
 }
 
-
-static inline
-int prot_arg_is_ap(const struct pt_regs *regs,
-		   int arg_num) /* argument # in syscall */
-/* Checks that argument #argnum is descriptor: */
-{
-	int tag = (regs->tags >> (arg_num * 8)) & 0xff;
-
-	return (tag == ETAGAPQ);
-}
-
-static inline
-int prot_arg_is_int(const struct pt_regs *regs,
-		    int arg_num) /* argument # in syscall */
-/* Checks that argument #argnum is of type 'int': */
-{
-	int tag = (regs->tags >> (arg_num * 8)) & 0xff;
-
-	return ((tag & 3) == 0);
-}
-
-
-/* Here we check that descriptor specified in argument #arg_num is read-able: */
-static inline
-int check_buffer_is_readable(const struct pt_regs	*regs,
-			     const int			arg_num)
-{
-	if (cpu_has(CPU_FEAT_ISET_V7)) {
-		if (regs->qargs[arg_num - 1].rw_v7 & PROT_READ)
-			return 1;
-	} else {
-		if (regs->qargs[arg_num - 1].rw_v6 & PROT_READ)
-			return 1;
-	}
-	PROTECTED_MODE_ALERT(PMSCERRMSG_DSCR_WITHOUT_READ_PERM,
-			     sys_call_ID_to_name[regs->sys_num], arg_num);
-	return 0;
-}
-
 #if (!DYNAMIC_DEBUG_SYSCALLP_ENABLED)
 #define print_buffer(a1, a2, a3)
 #else
 static void print_buffer(const char	*title,
-			 void		*buffer,
+			 void __user	*buffer,
 			 const int	buff_size)
 {
-	unsigned long *arr;
+	unsigned long __user *arr;
 	e2k_ptr_t descr;
 	int size = buff_size, err = 0, tags;
 	unsigned long vlong;
 
-	arr = (unsigned long *)buffer;
-	pr_info("\t##### %s[%d] : 0x%lx #####\n", title, size, buffer);
+	if (!check_pm_sc_debug_feature(PM_SC_DBG_MODE_COMPLEX_WRAPPERS))
+		return;
+
+	arr = (unsigned long __user *)buffer;
+	if (title)
+		pr_info("\t##### %s[%d] : 0x%px #####\n", title, size, buffer);
 
 	for (; size > 0; size -= 8, arr++) {
 		if (size < 16 || (unsigned long)arr & 0xf) {
@@ -358,8 +336,8 @@ static void print_buffer(const char	*title,
 			if (err)
 				break;
 			pr_info("\t[0x%.2x] 0x%.8x.%.8x    0x%.8x.%.8x\n", tags,
-				(int)(descr.qword.lo), (int)(descr.qword.lo >> 32),
-				(int)(descr.qword.hi), (int)(descr.qword.hi >> 32));
+				(int)(descr.qword.lo >> 32), (int)(descr.qword.lo),
+				(int)(descr.qword.hi >> 32), (int)(descr.qword.hi));
 			size -= 8;
 			arr++;
 		}
@@ -370,24 +348,6 @@ static void print_buffer(const char	*title,
 
 }
 #endif /* print_buffer  */
-
-/* Here we check that descriptor specified in argument #arg_num is write-able: */
-static inline
-int check_buffer_is_writeable(const struct pt_regs	*regs,
-			      const int			arg_num)
-{
-	if (cpu_has(CPU_FEAT_ISET_V7)) {
-		if (regs->qargs[arg_num - 1].rw_v7 & PROT_WRITE)
-			return 1;
-	} else {
-		if (regs->qargs[arg_num - 1].rw_v6 & PROT_WRITE)
-			return 1;
-	}
-
-	PROTECTED_MODE_ALERT(PMSCERRMSG_DSCR_WITHOUT_WRITE_PERM,
-			     sys_call_ID_to_name[regs->sys_num], arg_num);
-	return 0;
-}
 
 
 /* Converts protected iov structure(s) to regular one(s):
@@ -401,147 +361,183 @@ static int convert_iov(const void __user *iov128, const void __user *iov64,
 {
 	struct prot_iovec __user *iovec_p128 = (struct prot_iovec __user *)iov128;
 	struct iovec __user *iovec_p64 = (struct iovec __user *)iov64;
-	e2k_ptr_t buff;
+	e2k_ap_t buff;
 	__kernel_size_t buff_len;
 	void __user *ptr;
-	int tags, err = 0, i;
+	int tags, i;
 
 	for (i = 0; i < iov_len; i++) {
-		err = get_user_tagged_16(buff.qword, tags, &iovec_p128->iov_base);
-		err = err ?: get_user(buff_len, &iovec_p128->iov_len);
-		if (err)
-			return err;
+		if (get_user_tagged_16(buff.qword, tags, &iovec_p128->iov_base) ||
+		    get_user(buff_len, &iovec_p128->iov_len))
+			return -EFAULT;
 		if (buff_len) {
 			if (unlikely((long)buff_len < 0)) {
 				return -EINVAL;
-			} else if (unlikely(!IS_AP(buff, tags))) {
+			}
+			if (unlikely(!IS_AP(buff, tags))) {
 				DbgSCP("bad iov_base 0x%llx:0x%llx tags 0x%x\n",
 				       buff.lo, buff.hi, tags);
 				return -EFAULT;
-			} else if (unlikely(buff_len > AP_OBJ_SIZE(buff))) {
+			}
+			if (unlikely(buff_len > AP_OBJ_SIZE(buff))) {
 				PROTECTED_MODE_ALERT(PMSCERRMSG_PTR_SIZE_TOO_LITTLE, __func__,
-				     "iov", buff_len, (size_t) AP_OBJ_SIZE(buff));
+				     "iov", (size_t) AP_OBJ_SIZE(buff), buff_len);
+				   //  "iov", buff_len, (size_t) AP_OBJ_SIZE(buff));
 				return -EFAULT;
 			}
-		} else if (unlikely(tags && !IS_AP(buff, tags) && buff.lo)) {
+			ptr = (void __user *)AP_PTR(buff);
+		} else if (!AP_NULL(buff, tags)) {
 			DbgSCP("bad iov_base 0x%llx:0x%llx tags 0x%x or iov_len=%zd\n",
 			       buff.lo, buff.hi, tags, buff_len);
 			return -EFAULT;
+		} else {
+			ptr = NULL;
 		}
-		if (AP_OBJ_SIZE(buff) < buff_len) {
-			DbgSCP("bad iov_base 0x%llx:0x%llx insufficient iov_len=%zd\n",
-			       buff.lo, buff.hi, buff_len);
+		if (put_user(ptr, &iovec_p64->iov_base) || put_user(buff_len, &iovec_p64->iov_len))
 			return -EFAULT;
-		}
-		ptr = (void __user *)e2k_ptr_objptr(buff, 0);
-		err = put_user(ptr, &iovec_p64->iov_base);
-		err = err ?: put_user(buff_len, &iovec_p64->iov_len);
-		if (err)
-			return err;
-		iovec_p128 = (struct prot_iovec __user *)
-			((char __user *)iovec_p128 + sizeof(struct prot_iovec));
-		iovec_p64 = (struct iovec __user *)
-			((char __user *)iovec_p64 + sizeof(struct iovec));
+		iovec_p128++;
+		iovec_p64++;
 	}
 
-	return err;
+	return 0;
 }
 
 /* # elements in msg_iov field of protected msghdr structure: */
-static long get_prot_msghdr_iovlen(const struct protected_user_msghdr __user *umsghdr)
+static long set_prot_msghdr_iovlen(const struct protected_user_msghdr __user *umsghdr,
+				   struct user_msghdr  *umh64)
 {
-	long iovlen;
-	int err;
+	ssize_t iovlen;
+	e2k_ap_t iov;
+	int tags;
+	long err;
 
 	if (unlikely(!umsghdr))
 		return 0L;
 	err = get_user(iovlen, &umsghdr->msg_iovlen);
 	if (unlikely(err)) {
-		return (long)err;
-	} else if (unlikely(iovlen <= 0)) { /* checking if 'iov' isn't empty */
-		e2k_ptr_t iov;
-		int tags;
-
-		err = get_user_tagged_16(iov.qword, tags, &umsghdr->msg_iov);
-		if (unlikely(err))
-			return (long)err;
-		if (unlikely(tags && !IS_AP(iov, tags)))
-			iovlen = -EINVAL;
-		else if (!tags)
-			iovlen = 0;
-		else
-			iovlen = -EMSGSIZE;
-	} else if (unlikely(iovlen > SOMAXCONN)) {
-		iovlen = -EMSGSIZE;
+		return err;
+	}
+	if (unlikely(iovlen < 0)) {
+		return (long)-EMSGSIZE;
+	}
+	if (unlikely(iovlen == 0)) {
+		umh64->msg_iovlen = 0;
+		umh64->msg_iov = NULL;
+		return 0;
+	}
+	if (unlikely(iovlen > SOMAXCONN)) {
+		return (long) -EMSGSIZE;
 	}
 
-	return iovlen;
+	err = get_user_tagged_16(iov.qword, tags, &umsghdr->msg_iov);
+	if (unlikely(err))
+		return (long)err;
+	if (unlikely(!IS_AP(iov, tags)))
+		return (long) -EFAULT;
+	if (AP_OBJ_SIZE(iov) < iovlen * sizeof(struct prot_iovec))
+		return (long)-EFAULT;
+
+	umh64->msg_iovlen = iovlen;
+	umh64->msg_iov = (void __user *)AP_PTR(iov);
+
+	return 0;
 }
 
-static struct user_msghdr __user *convert_msghdr(
-			const void	__user *prot_msghdr,
-			unsigned int		size,
+static struct user_msghdr __user *convert_user_msghdr(
+			struct protected_user_msghdr __user *msghdr_p128,
+			struct user_msghdr __user *msghdr_p64,
 			const char		*syscall_name,
 			const char		*arg_name,
-			void		__user	*user_buff,
 			const struct pt_regs	*regs)
 /* Converts user msghdr structure from protected to regular structure format.
  * Outputs converted structure (allocated in user space if (user_buff == NULL)).
- * 'prot_msghdr' - protected message header structure.
- * 'size' - size of the input structure.
- * 'user_buff' - buffer for converted structure in user space.
+ * 'msghdr_p128' - protected message header structure.
  */
 {
-	long __user *args = (long __user *) user_buff;
-	struct protected_user_msghdr __user *msghdr_p128 =
-				(struct protected_user_msghdr __user *) prot_msghdr;
-	struct user_msghdr __user *msghdr_p64 = NULL;
-	struct prot_iovec __user *msg_iov;
-	e2k_ptr_t buff;
+	e2k_ap_t buff;
+	int tags;
 	__kernel_size_t buff_len;
-	long iovlen;
-	int tags, err;
+	struct user_msghdr mh64;
+	long  err;
 
-#define MASK_MSGHDR_TYPE     0x0773 /* type mask for struct msghdr */
-#define MASK_MSGHDR_ALIGN    0x17ff /* alignment mask for msghdr structure */
-#define MASK_MSGHDR_RW       0x2000 /* WRITE-only msg_flags field */
-#define SIZE_MSGHDR          sizeof(struct protected_user_msghdr)
 
-	if (!prot_msghdr)
-		return NULL;
-	if (size < SIZE_MSGHDR) {
-		PROTECTED_MODE_ALERT(PMSCERRMSG_PTR_SIZE_TOO_LITTLE, __func__,
-				     "msghdr", size, SIZE_MSGHDR);
+	 /* Structure 'user_msghdr' contains pointers inside;
+	  * therefore they need to be converted to 64-bit mode
+	  * and results to be saved in these structures afterwards.
+	  */
+	if (msghdr_p64 == NULL) {
+		msghdr_p64 = (struct user_msghdr __user *)get_user_space(sizeof(struct user_msghdr));
+		if (msghdr_p64 == NULL) {
+			err = -ENOMEM;
+			goto out_err;
+		}
+	}
+
+	err = set_prot_msghdr_iovlen(msghdr_p128, &mh64);
+	if (unlikely(err < 0)) {
+		DbgSCP("%s: wrong msg_iovlen/msg_iov\n", __func__);
+		return (struct user_msghdr __user *)ERR_PTR(err);
+	}
+
+	/* Check for proper msg_name fields: */
+	if (get_user(buff_len, &msghdr_p128->msg_namelen)) {
 		err = -EFAULT;
 		goto out_err;
 	}
-
-	/*
-	 * Structures 'user_msghdr' and 'iovec' contain pointers inside;
-	 * therefore they need to be converted to 64-bit mode
-	 * and results to be saved in these structures afterwards.
-	 */
-
-	iovlen = get_prot_msghdr_iovlen(prot_msghdr);
-	if (unlikely(iovlen < 0)) {
-		DbgSCP("get_prot_msghdr_iovlen(0x%ld) returned %ld\n",
-				(unsigned long)prot_msghdr, iovlen);
-		return (void __user *) iovlen;
+	if (buff_len) {
+		if ((int)buff_len < 0) {
+			PROTECTED_MODE_ALERT(PMSCERRMSG_SC_BAD_FIELD_STRUCT_IN_ARG_NAME,
+					syscall_name, "msg_namelen", "msghdr", "message");
+			protected_mode_message(0, PMSCERRMSG_STRUCT_BAD_TAG_INT_FIELD,
+					"user_msghdr", 0, 2, (long)(int)buff_len);
+			err = -EINVAL;
+			goto out_err;
+		}
+		if (get_user_tagged_16(buff.qword, tags, &msghdr_p128->msg_name)) {
+			err = -EFAULT;
+			goto out_err;
+		}
+		if (unlikely(!IS_AP(buff, tags))) {
+			PROTECTED_MODE_WARNING(PMSCERRMSG_SC_NOT_DESCR_IN_STRUCT_FIELD,
+					       syscall_name, tags, "user_msghdr",
+					       "msg_name", buff.lo, buff.hi);
+			err = -EFAULT;
+			goto out_err;
+		}
+		if (buff_len > AP_OBJ_SIZE(buff)) {
+			PROTECTED_MODE_ALERT(PMSCERRMSG_SC_ARG_SIZE_MISMATCHES_FIELD_VAL,
+					syscall_name, "msghdr",
+					(size_t) AP_OBJ_SIZE(buff), "msg_name", buff_len);
+			DbgSCP("bad msg_name 0x%lld:0x%lld buff_len %zd\n",
+			       buff.lo, buff.hi, buff_len);
+			err = -EINVAL;
+			goto out_err;
+		}
+		mh64.msg_namelen = buff_len;
+		mh64.msg_name = (void __user *)AP_PTR(buff);
+	} else {
+		mh64.msg_namelen = 0;
+		mh64.msg_name = NULL;
 	}
 
 	/* Check for proper msg_control fields: */
-	err = get_user_tagged_16(buff.qword, tags, &msghdr_p128->msg_control);
-	err = err ?: get_user(buff_len, &msghdr_p128->msg_controllen);
-	if (err)
-		return (void __user *) (long) err;
+	if (get_user(buff_len, &msghdr_p128->msg_controllen)) {
+		err = -EFAULT;
+		goto out_err;
+	}
 	if (buff_len) {
+		if (get_user_tagged_16(buff.qword, tags, &msghdr_p128->msg_control)) {
+			err = -EFAULT;
+			goto out_err;
+		}
 		if (unlikely(!IS_AP(buff, tags))) {
 			PROTECTED_MODE_WARNING(PMSCERRMSG_SC_NOT_DESCR_IN_STRUCT_FIELD,
 					       syscall_name, tags, "user_msghdr",
 					       "msg_control", buff.lo, buff.hi);
 			err = -EFAULT;
 			goto out_err;
-		} else if (buff_len > AP_OBJ_SIZE(buff)) {
+		}
+		if (buff_len > AP_OBJ_SIZE(buff)) {
 			PROTECTED_MODE_ALERT(PMSCERRMSG_PTR_SIZE_TOO_LITTLE, __func__,
 					"msg_control",
 					(size_t) AP_OBJ_SIZE(buff), buff_len);
@@ -554,61 +550,44 @@ static struct user_msghdr __user *convert_msghdr(
 			buff_len = AP_OBJ_SIZE(buff);
 			PROTECTED_MODE_MESSAGE(0, PMSCERRMSG_SC_ARG_COUNT_TRUNCATED, buff_len);
 		}
-	}
-
-	/* Allocating space on user stack for converted structures: */
-	if (!args)
-		args = get_user_space(sizeof(struct user_msghdr) +
-					iovlen * sizeof(struct iovec));
-
-	/* Convert struct msghdr: */
-	msghdr_p64 = (struct user_msghdr __user *) args;
-	err = convert_array_3(prot_msghdr, args, SIZE_MSGHDR, 7, 1, MASK_MSGHDR_TYPE,
-			      MASK_MSGHDR_ALIGN, MASK_MSGHDR_RW, CONV_ARR_WRONG_DSCR_FLD,
-			      regs);
-	if (err)
-		goto out_err;
-
-	err = get_user(msg_iov, &msghdr_p64->msg_iov);
-	if (err) {
-		PROTECTED_MODE_ALERT(PMSCERRMSG_FATAL_READ_ERR_FROM,
-				     __func__, (unsigned long) &msghdr_p64->msg_iov);
-		return  (void __user *) (long) err;
-	}
-	if (msg_iov) {
-		struct iovec __user *iovec_p64;
-
-		/* Converting struct iovec from msghdr->msg_iov: */
-		iovec_p64 = (struct iovec __user *)
-			((char __user *) msghdr_p64 + sizeof(struct user_msghdr));
-		err = convert_iov(msg_iov, iovec_p64, iovlen);
-		if (err) {
-			PROTECTED_MODE_ALERT(PMSCERRMSG_SC_BAD_FIELD_STRUCT_IN_ARG_NAME,
-					syscall_name, "iovec", "user_msghdr", arg_name);
-			PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EINVAL);
-			return  (void __user *) (long) err;
-		}
-
-		/* Assign converted iovec pointer to converted msghdr structure: */
-		err = put_user(iovec_p64, &msghdr_p64->msg_iov);
-		if (err) {
-			PROTECTED_MODE_ALERT(PMSCERRMSG_FATAL_WRITE_AT,
-				     __func__, (unsigned long) &msghdr_p64->msg_iov);
-			goto out_err;
-		}
+		mh64.msg_controllen = buff_len;
+		mh64.msg_control = (void __user *)AP_PTR(buff);
 	} else {
-		PROTECTED_MODE_WARNING(PMSCERRMSG_EMPTY_STRUCTURE_FIELD,
-				       syscall_name, "msg_iov", "user_msghdr", "msghdr");
-		PM_EXCEPTION_ON_WARNING(SIGABRT, SI_KERNEL, EINVAL);
+		mh64.msg_controllen = 0;
+		mh64.msg_control = NULL;
 	}
 
-	return (struct user_msghdr __user *) args;
+	if (copy_to_user(msghdr_p64, &mh64, sizeof(mh64)))
+		return (struct user_msghdr __user *)ERR_PTR(-EFAULT);
+	return msghdr_p64;
 
 out_err:
 	PROTECTED_MODE_ALERT(PMSCERRMSG_SC_BAD_STRUCT_IN_ARG_NAME,
 			     syscall_name, "protected_msghdr", "msghdr", arg_name);
 	PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EINVAL);
-	return  (void __user *) (long) err;
+	return (struct user_msghdr __user *)ERR_PTR(err);
+}
+
+static int convert_mmsghdr(const struct protected_mmsghdr __user *prot_mmsghdr,
+			   struct mmsghdr __user		 *mmsghdr_p64,
+			   const char		*syscall_name,
+			   const char		*arg_name,
+			   const struct pt_regs	*regs)
+/* Converts user nmsghdr structure from protected to regular format.
+ * Outputs error number or '0' if OK.
+ * 'prot_mmsghdr' - protected message header structure.
+ * 'mmsghdr_p64'  - 64-bit message header structure.
+ */
+{
+	struct user_msghdr __user *ret;
+
+	ret = convert_user_msghdr((struct protected_user_msghdr __user *)prot_mmsghdr,
+				  (struct user_msghdr __user *)mmsghdr_p64,
+				  syscall_name, arg_name, regs);
+	if (IS_ERR(ret))
+		return (int)(unsigned long)ret;
+
+	return 0;
 }
 
 notrace __section(".entry.text")
@@ -644,7 +623,14 @@ long protected_sys_clean_descriptors(void __user *addr,
 	if (unlikely(!addr || !size))
 		return 0L;
 
-	descr_size = (prot_sc_arg_not_ptr(1, regs)) ? 0 : AP_OBJ_SIZE(regs->qargs[0]);
+	if (prot_sc_arg_not_ptr(1, regs)) {
+		PROTECTED_MODE_ALERT(PMSCERRMSG_NOT_DESCR_IN_SC_ARG,
+				regs->dargs[0], regs->dargs[1], 1);
+		PM_BNDERR_EXCEPTION_IF_ORTH_MODE(1/*arg_num*/, regs);
+		return -EFAULT;
+	} else {
+		descr_size = AP_OBJ_SIZE(regs->qargs[0]);
+	}
 	if (!(flags & CLEAN_DESCRIPTORS_SINGLE))
 		size_to_clean *= sizeof(e2k_ptr_t);
 	if (descr_size < size_to_clean) {
@@ -654,8 +640,8 @@ long protected_sys_clean_descriptors(void __user *addr,
 		return -EFAULT;
 	}
 
-	if (flags & (CLEAN_DESCRIPTORS_SINGLE | CLEAN_DESCRIPTORS_NO_GARB_COLL) ==
-		(CLEAN_DESCRIPTORS_SINGLE | CLEAN_DESCRIPTORS_NO_GARB_COLL)) {
+	if ((flags & (CLEAN_DESCRIPTORS_SINGLE | CLEAN_DESCRIPTORS_NO_GARB_COLL)) ==
+			(CLEAN_DESCRIPTORS_SINGLE | CLEAN_DESCRIPTORS_NO_GARB_COLL)) {
 		rval = mem_set_empty_tagged_dw(addr, size, 0x0baddead0baddead);
 	} else if (flags & CLEAN_DESCRIPTORS_SINGLE) {
 		e2k_ptr_t old_descriptor;
@@ -783,12 +769,12 @@ static inline int get_u64_from_user(u64 __user *u64_uptr, u64 *pu64,
 	int tags, ret;
 	u64 uval64;
 
-	if ((long)u64_uptr & 0xf) { /* unaligned address */
+	if ((unsigned long)u64_uptr & 0xf) { /* unaligned address */
 		ret = get_user_tagged_8(uval64, tags, u64_uptr);
 	} else { /* aligned address */
 		e2k_ptr_t descr;
 
-		ret = get_user_tagged_16(descr.qword, tags, (void *)u64_uptr);
+		ret = get_user_tagged_16(descr.qword, tags, u64_uptr);
 		if (ret == EFAULT) { /* seems there is no extra 8 bytes in the buffer */
 			ret = get_user_tagged_8(uval64, tags, u64_uptr);
 		} else {
@@ -799,7 +785,7 @@ static inline int get_u64_from_user(u64 __user *u64_uptr, u64 *pu64,
 
 	if (unlikely(ret)) {
 		PROTECTED_MODE_ALERT(PMSCERRMSG_FATAL_READ_FROM,
-				sys_call_ID_to_name[regs->sys_num], (long)u64_uptr);
+				sys_call_ID_to_name[regs->sys_num], (unsigned long)u64_uptr);
 		protected_mode_message(0, PMSCERRMSG_SC_BAD_STRUCT_IN_ARG_NAME,
 				sys_call_ID_to_name[regs->sys_num], field_name, arg_name);
 		if (PM_SYSCALL_WARN_ONLY == 0)
@@ -844,7 +830,7 @@ int get_descriptor_from_user(e2k_ptr_t __user *dscr_uptr, e2k_ptr_t *pdescr, siz
 
 	if (unlikely(ret)) {
 		PROTECTED_MODE_ALERT(PMSCERRMSG_FATAL_READ_FROM,
-				sys_call_ID_to_name[regs->sys_num], (long)dscr_uptr);
+				sys_call_ID_to_name[regs->sys_num], (unsigned long)dscr_uptr);
 		protected_mode_message(0, PMSCERRMSG_SC_BAD_STRUCT_IN_ARG_NAME,
 				sys_call_ID_to_name[regs->sys_num], field_name, arg_name);
 		if (PM_SYSCALL_WARN_ONLY == 0)
@@ -865,6 +851,20 @@ int get_descriptor_from_user(e2k_ptr_t __user *dscr_uptr, e2k_ptr_t *pdescr, siz
 
 	return 0;
 }
+
+struct protected_clone_args {
+	__aligned_u64 flags;
+	e2k_ptr_t     pidfd;
+	e2k_ptr_t     child_tid;
+	e2k_ptr_t     parent_tid;
+	__aligned_u64 exit_signal;
+	e2k_ptr_t     stack;
+	__aligned_u64 stack_size;
+	e2k_ptr_t     tls;
+	e2k_ptr_t     set_tid;
+	__aligned_u64 set_tid_size;
+	__aligned_u64 cgroup;
+};
 
 /*
  * protected_clone_args_to_uargs64() - Converts protected structure 'prot_uargs'
@@ -1035,7 +1035,7 @@ done:
 
 	/* Converted array contents: */
 	if (check_pm_sc_debug_feature(PM_SC_DBG_MODE_CONV_STRUCT)) {
-		u64 *uarr = (u64 *)uargs64;
+		u64 __user *uarr = (u64 __user *)uargs64;
 		size_t str_size = sizeof(struct clone_args);
 		int err, i;
 
@@ -1061,14 +1061,16 @@ done:
 }
 
 notrace __section(".entry.text")
-long protected_sys_clone3(struct protected_clone_args __user	*prot_uargs,
-			  const size_t				size,
+long protected_sys_clone3(void __user	*uargs,
+			  const size_t	size,
 			  const unsigned long unused3,
 			  const unsigned long unused4,
 			  const unsigned long unused5,
 			  const unsigned long unused6,
 			  struct pt_regs	*regs)
 {
+	struct protected_clone_args __user *prot_uargs =
+				(struct protected_clone_args __user *) uargs;
 	int rval = -EINVAL; /* syscall return value if bad 'uargs' */
 	long args_size, size64;
 	struct clone_args __user *uargs64; /* protected 'uargs' converted to regular mode */
@@ -1121,7 +1123,7 @@ long protected_sys_clone3(struct protected_clone_args __user	*prot_uargs,
 		goto out;
 	}
 	rval = sys_clone3(uargs64, size64);
-	DbgSCP("sys_clone3(uargs64=0x%lx, size64=0x%zx) = %d\n", uargs64, size64, rval);
+	DbgSCP("sys_clone3(uargs64=0x%px, size64=0x%zx) = %d\n", uargs64, size64, rval);
 
 out:
 	return rval;
@@ -1261,7 +1263,7 @@ long protected_sys_execveat(int dirfd, const char __user *filename,
 		char *kfname = strcopy_from_user_prot_arg(filename, regs, 2);
 
 		if (kfname) {
-			DbgSCP(" dirfd=%d path=%s argv=0x%lx envp=0x%lx flags=0x%x\n",
+			DbgSCP(" dirfd=%d path=%s argv=0x%px envp=0x%px flags=0x%x\n",
 				dirfd, kfname, u_argv, u_envp, flags);
 			kfree(kfname);
 		}
@@ -1660,58 +1662,55 @@ static struct iovec __user *convert_prot_iovec_struct(const void __user *iov,
 
 notrace __section(".entry.text")
 long protected_sys_readv(unsigned long fd, const void __user *vec,
-			 unsigned long vlen, unsigned long a4,
+			 int vlen, unsigned long a4,
 			 unsigned long a5, unsigned long a6,
 			 const struct pt_regs *regs)
 {
-	const struct iovec __user *k_vec;
+	e2k_ap_t ap;
 	long rval; /* syscall return value */
 
-	if (!vlen)
-		return 0;
-	if ((int) fd < 0)
+	if ((long)fd < 0)
 		return -EBADF;
-	if ((int)vlen < 0)
+	else if (vlen == 0)
+		return 0;
+	else if (warn_if_not_descr(2, CHECK4DESCR_WARNING, regs) || vlen < 0)
 		return -EINVAL;
 
-	if (warn_if_not_descr(2, CHECK4DESCR_WARNING, regs)) {
-		k_vec = vec;
-	} else {
-		k_vec = convert_prot_iovec_struct(vec, vlen, 2, "iov", regs);
-		if (unlikely(IS_ERR(k_vec)))
-			return PTR_ERR(k_vec);
-		else if (!k_vec)
-			return -EFAULT;
+	ap = regs->qargs[1];
+	if (AP_OBJ_SIZE(ap) < vlen * sizeof(struct prot_iovec)) {
+		return -EFAULT;
 	}
 
-	rval = sys_readv(fd, k_vec, vlen);
+	rval = sys_readv(fd, (void __user *)AP_PTR(ap), vlen);
 
-	DbgSCP(" rval = %ld new_arg=%px\n", rval, k_vec);
+	DbgSCP("(fd=%ld, vec=%px, vlen=0x%x) rval = %ld\n", fd, vec, vlen, rval);
 	return rval;
 }
 
+
 notrace __section(".entry.text")
 long protected_sys_preadv(unsigned long fd, const void __user *vec,
-			  unsigned long vlen, unsigned long pos_l,
+			  int vlen, unsigned long pos_l,
 			  unsigned long pos_h, unsigned long a6,
 			  const struct pt_regs *regs)
 {
-	const struct iovec __user *k_vec;
+	e2k_ap_t ap;
 	long rval; /* syscall return value */
 
-	if (warn_if_not_descr(2, CHECK4DESCR_WARNING, regs)) {
-		k_vec = vec;
-	} else {
-		k_vec = convert_prot_iovec_struct(vec, vlen, 2, "iov", regs);
-		if (unlikely(IS_ERR(k_vec)))
-			return PTR_ERR(k_vec);
-		else if (!k_vec)
-			return -EFAULT;
+	if (vlen == 0)
+		return 0;
+	if (warn_if_not_descr(2, CHECK4DESCR_WARNING, regs) || vlen < 0) {
+		return -EINVAL;
 	}
+	ap = regs->qargs[1];
+	if (AP_OBJ_SIZE(ap) < vlen * sizeof(struct prot_iovec)) {
+		return -EFAULT;
+	}
+	set_ap_u_border(ap);
 
-	rval = sys_preadv(fd, k_vec, vlen, pos_l, pos_h);
+	rval = sys_preadv(fd, vec, vlen, pos_l, pos_h);
 
-	DbgSCP(" rval = %ld new_arg=%px\n", rval, k_vec);
+	DbgSCP(" rval = %ld new_arg= 0x%llx\n", rval, AP_PTR(ap));
 	return rval;
 }
 
@@ -1838,103 +1837,579 @@ long protected_sys_write(const unsigned int	fd,
 
 notrace __section(".entry.text")
 long protected_sys_writev(unsigned long fd, const void __user *vec,
-			  unsigned long vlen, unsigned long a4,
+			  int vlen, unsigned long a4,
 			  unsigned long a5, unsigned long a6,
 			  const struct pt_regs *regs)
 {
-	const struct iovec __user *k_vec;
+
+	e2k_ap_t ap;
 	long rval; /* syscall return value */
 
-	if (!vlen)
+	if (vlen == 0)
 		return 0;
-
+	if (vlen < 0)
+		return -EINVAL;
 	if (warn_if_not_descr(2, CHECK4DESCR_WARNING, regs)) {
-		k_vec = vec;
-	} else {
-		k_vec = convert_prot_iovec_struct(vec, vlen, 2, "iov", regs);
-		if (unlikely(IS_ERR(k_vec)))
-			return PTR_ERR(k_vec);
-		else if (!k_vec)
-			return -EFAULT;
+		return -EINVAL;
+	}
+	ap = regs->qargs[1];
+	if (AP_OBJ_SIZE(ap) < vlen * sizeof(struct prot_iovec)) {
+		return -EFAULT;
 	}
 
-	rval = sys_writev(fd, k_vec, vlen);
+	rval = sys_writev(fd, (void __user *)AP_PTR(ap), vlen);
 
-	DbgSCP(" rval = %ld new_arg=%px\n", rval, k_vec);
+	DbgSCP(" rval = %ld new_arg= 0x%llx\n", rval, AP_PTR(ap));
 	return rval;
 }
 
 notrace __section(".entry.text")
 long protected_sys_pwritev(unsigned long fd, const void __user *vec,
-		unsigned long vlen, unsigned long pos_l, unsigned long pos_h,
+		int vlen, unsigned long pos_l, unsigned long pos_h,
 		unsigned long a6, const struct pt_regs *regs)
 {
-	const struct iovec __user *k_vec;
+	e2k_ap_t ap;
 	long rval; /* syscall return value */
 
+	if (vlen == 0)
+		return 0;
 	if (warn_if_not_descr(2, CHECK4DESCR_WARNING, regs)) {
-		k_vec = vec;
-	} else {
-		k_vec = convert_prot_iovec_struct(vec, vlen, 2, "iov", regs);
-		if (unlikely(IS_ERR(k_vec)))
-			return PTR_ERR(k_vec);
-		else if (!k_vec)
-			return -EFAULT;
+		return -EINVAL;
+	}
+	if (vlen < 0)
+		return -EINVAL;
+	ap = regs->qargs[1];
+	if (AP_OBJ_SIZE(ap) < vlen * sizeof(struct prot_iovec)) {
+			PROTECTED_MODE_ALERT(PMSCERRMSG_SC_ARG_SIZE_MISMATCHES_FIELD_VAL,
+				     sys_call_ID_to_name[regs->sys_num], "vec", AP_OBJ_SIZE(ap),
+				     "vlen", sizeof(struct prot_iovec) * vlen);
+			PM_BNDERR_EXCEPTION_IF_ORTH_MODE(2/*arg_num*/, regs);
+		return -EFAULT;
 	}
 
-	rval = sys_pwritev(fd, k_vec, vlen, pos_l, pos_h);
+	rval = sys_pwritev(fd, vec, vlen, pos_l, pos_h);
 
-	DbgSCP(" rval = %ld new_arg=%px\n", rval, k_vec);
+	DbgSCP(" rval = %ld new_arg= 0x%llx\n", rval, AP_PTR(ap));
 	return rval;
 }
 
 notrace __section(".entry.text")
 long protected_sys_preadv2(unsigned long fd, const void __user *vec,
-		unsigned long vlen, unsigned long pos_l, unsigned long pos_h,
+		int vlen, unsigned long pos_l, unsigned long pos_h,
 		rwf_t flags, const struct pt_regs *regs)
 {
-	const struct iovec __user *k_vec;
+	e2k_ap_t ap;
 	long rval; /* syscall return value */
 
+	if (vlen == 0)
+		return 0;
+	if (vlen == 0)
+		return 0;
 	if (warn_if_not_descr(2, CHECK4DESCR_WARNING, regs)) {
-		k_vec = vec;
-	} else {
-		k_vec = convert_prot_iovec_struct(vec, vlen, 2, "iov", regs);
-		if (unlikely(IS_ERR(k_vec)))
-			return PTR_ERR(k_vec);
-		else if (!k_vec)
-			return -EINVAL;
+		return -EINVAL;
+	}
+	if (vlen < 0)
+		return -EINVAL;
+	ap = regs->qargs[1];
+	if (AP_OBJ_SIZE(ap) < vlen * sizeof(struct prot_iovec)) {
+		return -EFAULT;
 	}
 
-	rval = sys_preadv2(fd, k_vec, vlen, pos_l, pos_h, flags);
+	rval = sys_preadv2(fd, (void __user *)AP_PTR(ap), vlen, pos_l, pos_h, flags);
 
-	DbgSCP(" rval = %ld new_arg=%px\n", rval, k_vec);
+	DbgSCP(" rval = %ld new_arg= 0x%llx\n", rval, AP_PTR(ap));
 	return rval;
 }
 
 notrace __section(".entry.text")
 long protected_sys_pwritev2(unsigned long fd, const void __user *vec,
-			    unsigned long vlen, unsigned long offset_l,
+			    int vlen, unsigned long offset_l,
 			    unsigned long offset_h, rwf_t flags,
 			    struct pt_regs *regs)
 {
-	const struct iovec __user *k_vec;
+	e2k_ap_t ap;
 	long rval; /* syscall return value */
 
+	if (vlen == 0)
+		return 0;
 	if (warn_if_not_descr(2, CHECK4DESCR_WARNING, regs)) {
-		k_vec = vec;
-	} else {
-		k_vec = convert_prot_iovec_struct(vec, vlen, 2, "iov", regs);
-		if (unlikely(IS_ERR(k_vec)))
-			return PTR_ERR(k_vec);
-		else if (!k_vec)
-			return -EINVAL;
+		return -EINVAL;
+	}
+	if (vlen < 0)
+		return -EINVAL;
+	ap = regs->qargs[1];
+	if (AP_OBJ_SIZE(ap) < vlen * sizeof(struct prot_iovec)) {
+		return -EFAULT;
 	}
 
-	rval = sys_pwritev2(fd, k_vec, vlen, offset_l, offset_h, flags);
+	rval = sys_pwritev2(fd, (void __user *)AP_PTR(ap), vlen, offset_l, offset_h, flags);
 
-	DbgSCP(" rval = %ld new_arg=%px\n", rval, k_vec);
+	DbgSCP(" rval = %ld new_arg= 0x%llx\n", rval, AP_PTR(ap));
 	return rval;
+}
+
+notrace __section(".entry.text")
+long protected_sys_socketcall(const unsigned long        call,
+			      const unsigned long __user *args,
+			      const unsigned long unused3,
+			      const unsigned long unused4,
+			      const unsigned long unused5,
+			      const unsigned long unused6,
+			      const struct pt_regs	*regs)
+{
+#define ETAGINT (ETAGEWD << 4)
+	long ret = -EINVAL; /* default error result */
+	struct pt_regs new_regs;
+	long args_size;
+	unsigned long arg64[6], arg_tags;
+	protected_system_call_func sys_call = (protected_system_call_func) (void *) sys_ni_syscall;
+	int sys_num, tag, argN, ind;
+	int top_64bit_args_num = 6; /* 64-bit interface by default  */
+	int extra_64bit_arg_num = -1; /* second int arg in 128-bit interface; f.e. see 'send' */
+
+	if (!args)
+		goto out_err;
+	if (warn_if_not_descr(2, CHECK4DESCR_SILENT, regs)) {
+		ret = -EFAULT;
+		goto out_err;
+	}
+	args_size = AP_OBJ_SIZE(regs->qargs[1]);
+	if (args_size <= 0)
+		goto out_err;
+
+	/*
+	 * NB> 'top_64bit_args_num' specifies the number of the top 8-bit arguments
+	 *	in the 'args' array; other arguments store 128-bit pointers (descriptors).
+	 *	Zero value means every argument occupies 16 bytes per arg.
+	 *	Value 4 means first four args are integers, 8 bytes per arg;
+	 *		and 5th and 6th args are pointers, 16 bytes each.
+	 *	Value 6 means all args are of integer type and occupy 8 bytes per arg.
+	 * NB> 'extra_64bit_arg_num' is double int arg number (starting from 1) stored along
+	 *	with another int arg in 128-bit interface. For example:
+	 *	27   struct
+	 *	28   {
+	 *	29     long int a; <-- arg #1
+	 *	30     void *b;
+	 *	31     long int c; <-- arg #3
+	 *	32     long int d; <-- extra_64bit_arg_num == 4
+	 *	33     void *e;
+	 *	34     long int f;
+	 *	35   }
+	 */
+	switch (call) {
+	case SYS_ACCEPT:
+		sys_num = __NR_accept;
+		top_64bit_args_num = 0;
+		break;
+	case SYS_ACCEPT4:
+		sys_num = __NR_accept4;
+		top_64bit_args_num = 0;
+		extra_64bit_arg_num = 4;
+		break;
+	case SYS_BIND:
+		sys_num = __NR_bind;
+		top_64bit_args_num = 0;
+		break;
+	case SYS_CONNECT:
+		sys_num = __NR_connect;
+		top_64bit_args_num = 0;
+		break;
+	case SYS_GETPEERNAME:
+		sys_num = __NR_getpeername;
+		top_64bit_args_num = 0;
+		break;
+	case SYS_GETSOCKNAME:
+		sys_num = __NR_getsockname;
+		top_64bit_args_num = 0;
+		break;
+	case SYS_GETSOCKOPT:
+		sys_num = __NR_getsockopt;
+		top_64bit_args_num = 3;
+		break;
+	case SYS_LISTEN:
+		sys_num = __NR_listen;
+		top_64bit_args_num = 2;
+		break;
+	case SYS_RECV:
+	case SYS_RECVFROM:
+		sys_num = __NR_recvfrom;
+		top_64bit_args_num = 0;
+		extra_64bit_arg_num = 4;
+		break;
+	case SYS_RECVMSG:
+		sys_num = __NR_recvmsg;
+		top_64bit_args_num = 0;
+		break;
+	case SYS_RECVMMSG:
+		sys_num = __NR_recvmmsg;
+		top_64bit_args_num = 0;
+		extra_64bit_arg_num = 4;
+		break;
+	case SYS_SENDMSG:
+		sys_num = __NR_sendmsg;
+		top_64bit_args_num = 0;
+		break;
+	case SYS_SENDMMSG:
+		sys_num = __NR_sendmmsg;
+		top_64bit_args_num = 0;
+		extra_64bit_arg_num = 4;
+		break;
+	case SYS_SEND:
+	case SYS_SENDTO:
+		sys_num = __NR_sendto;
+		top_64bit_args_num = 0;
+		extra_64bit_arg_num = 4;
+		break;
+	case SYS_SETSOCKOPT:
+		sys_num = __NR_setsockopt;
+		top_64bit_args_num = 3;
+		break;
+	case SYS_SHUTDOWN:
+		sys_num = __NR_shutdown;
+		break;
+	case SYS_SOCKET:
+		sys_num = __NR_socket;
+		break;
+	case SYS_SOCKETPAIR:
+		sys_num = __NR_socketpair;
+		top_64bit_args_num = 3;
+		break;
+	default:
+		/* unsupported call: */
+		PROTECTED_MODE_ALERT(PMSCERRMSG_SC_ARG_VAL_UNSUPPORTED,
+				     sys_call_ID_to_name[regs->sys_num], "call", (int)call);
+		PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EINVAL);
+		return -EINVAL;
+	}
+	new_regs.sys_num = sys_num;
+
+	/* Extracting 'args' into 'arg64[]' array: */
+
+	memset(&arg64[0], 0, sizeof(arg64));
+	DbgSCP("(call=%ld, args=0x%lx) args_size=%ld\n", call, args, args_size);
+	print_buffer("### args: ###", (void __user *)args,
+		     (args_size < 96 ? args_size : 96)); /* 16*6 */
+	DbgSCP("\t### new_regs/args:\n");
+	argN = 0; /* argyment number */
+	ind = 0; /* index (in long's) in 'args' */
+	for (arg_tags = 0; argN < 6; argN++, args_size -= 8, ind++) {
+		e2k_ptr_t descr;
+
+		if (top_64bit_args_num && argN < top_64bit_args_num) {
+			/* this is 8 byte arg section: */
+			if (args_size < 8)
+				break;
+			ret = get_user_tagged_8(arg64[argN], tag, (long __user *) &args[ind]);
+			if (ret) {
+				DbgSCP("\t[#%d]: get_user_tagged_8(args[0x%x]) returned %ld\n",
+				       argN, ind, ret);
+				goto out_err;
+			}
+			if (tag == ETAGINT) { /* 0x50 */
+				arg64[argN] &= 0xffffffff; /* zeroing trash in higher word */
+			} else if (tag) {
+				goto bad_arg_tag;
+			}
+			DbgSCP("\t[0x%x#%d] %ld / 0x%lx\n", ind, argN, arg64[argN], arg64[argN]);
+			new_regs.dargs[argN * 2] = arg64[argN];
+			new_regs.dargs[argN * 2 + 1] = 0L;
+		} else { /* this is descriptor section */
+			/* Fixing alignment if any: */
+			if (argN == top_64bit_args_num && (argN & 1)) { /* even number */
+				args_size -= 8;
+				ind++;
+			}
+			if (args_size < 16)
+				break;
+			/* Extracting argument out of 'args': */
+			ret = get_user_tagged_16(descr.qword, tag, (long __user *) &args[ind]);
+			if (ret)
+				goto out_err;
+			if (tag == ETAGAPQ) {
+				arg64[argN] = AP_PTR(descr);
+				new_regs.qargs[argN] = descr;
+				if (check_pm_sc_debug_feature(PM_SC_DBG_MODE_COMPLEX_WRAPPERS) &&
+						arg64[argN] & 0xf) {
+					long size = AP_OBJ_SIZE(descr);
+
+					if (size > 8)
+						PROTECTED_MODE_WARNING(
+							PMSCWARN_UNALIGNED_DSCR_IN_ARG,
+							sys_call_ID_to_name[regs->sys_num],
+							arg64[argN], argN);
+				}
+				DbgSCP("\t[0x%x#%d] 0x%llx : 0x%llx\n",
+				       ind, argN, descr.lo, descr.hi);
+			} else if (tag == ETAGINT) { /* 0x50 */
+				arg64[argN] = (unsigned long) (int) descr.lo;
+				new_regs.dargs[argN * 2] = arg64[argN];
+				new_regs.dargs[argN * 2 + 1] = 0L;
+				DbgSCP("\t[0x%x#%d] %lld / 0x%llx\n",
+				       ind, argN, descr.lo, descr.lo);
+			} else if (tag) {
+				goto bad_arg_tag;
+			} else {
+				arg64[argN] = descr.lo;
+				new_regs.dargs[argN * 2] = arg64[argN];
+				new_regs.dargs[argN * 2 + 1] = 0L;
+				DbgSCP("\t[0x%x#%d] %lld / 0x%llx\n",
+				       ind, argN, descr.lo, descr.lo);
+				if ((argN + 2) == extra_64bit_arg_num) {
+					argN++;
+					arg64[argN] = descr.hi;
+					new_regs.dargs[argN * 2] = arg64[argN];
+					new_regs.dargs[argN * 2 + 1] = 0L;
+					DbgSCP("\t[#%d] %lld / 0x%llx\n", argN, descr.hi, descr.hi);
+				}
+			}
+			args_size -= 8;
+			ind++;
+		}
+		arg_tags |= ((unsigned long)tag) << ((argN + 1) * 8);
+		DbgSCP("\t\ttag=0x%x argN=%d arg_tags=0x%lx\n", tag, argN, arg_tags);
+	}
+
+	if (!argN) { /* failed to read from 'args' */
+		ret = -EFAULT;
+		goto out_err;
+	}
+
+	new_regs.tags = arg_tags;
+
+	sys_call = sys_call_table_entry8[sys_num];
+
+	DbgSCP("==> #%d/%s(0x%lx, 0x%lx, 0x%lx, 0x%lx, 0x%lx, 0x%lx) arg_tags=0x%lx\n",
+	       sys_num, sys_call_ID_to_name[sys_num],
+	       arg64[0], arg64[1], arg64[2], arg64[3], arg64[4], arg64[5], arg_tags);
+
+	ret = sys_call(arg64[0], arg64[1], arg64[2], arg64[3], arg64[4], arg64[5], &new_regs);
+	DbgSCP("rval = %ld\n", ret);
+
+	return ret;
+
+bad_arg_tag:
+	DbgSCP("\t!!! [#%d] bad arg tag 0x%x !!!\n", argN, tag);
+out_err:
+	PROTECTED_MODE_WARNING(PMSCERRMSG_SC_CMD_WRONG_ARG_VALUE_LX,
+			       sys_call_ID_to_name[regs->sys_num],
+			       "call", (int) call, "args", args);
+	PM_EXCEPTION_ON_WARNING(SIGABRT, SI_KERNEL, EINVAL);
+	return ret;
+}
+
+
+static inline
+int check_for_socketcall_args(void __user *addr_val, long *addr_len,
+			const int argN, const char *addrValArgName,
+			const char *addrLenArgName, int expected_error,
+			const struct pt_regs *regs)
+{
+	long dlen;
+	int out_error = expected_error ? expected_error : EINVAL;
+
+	if (!addr_val)
+		return 0; /* 'addr_val' may be NULL */
+
+	if (warn_if_not_descr(argN, CHECK4DESCR_WARNING, regs))
+		return (out_error > 0) ? -out_error : out_error;
+
+	dlen = AP_OBJ_SIZE(regs->qargs[argN - 1]);
+	if (dlen < *addr_len) {
+		PROTECTED_MODE_ALERT(PMSCERRMSG_SC_ARG_VAL_EXCEEDS_DSCR_SIZE,
+				     sys_call_ID_to_name[regs->sys_num],
+				     addrLenArgName, *addr_len, addrValArgName, (unsigned int)dlen);
+		PM_BNDERR_EXCEPTION_IF_ORTH_MODE(argN, regs);
+		if (dlen)
+			*addr_len = dlen; /* not user address */
+		PROTECTED_MODE_MESSAGE(0, PMSCERRMSG_SC_ARG_COUNT_TRUNCATED, dlen);
+	}
+	/* Check for proper alignment of 'addr_val': */
+	if (!IS_ALIGNED((unsigned long)addr_val, 16)) {
+		long size = AP_OBJ_SIZE(regs->qargs[argN - 1]);
+
+		if (size > 8) {
+			PROTECTED_MODE_WARNING(PMSCWARN_UNALIGNED_DSCR_IN_ARG,
+						sys_call_ID_to_name[regs->sys_num],
+						(unsigned long)addr_val, argN);
+			PM_EXCEPTION_ON_WARNING(SIGABRT, SI_KERNEL, EINVAL);
+		}
+	}
+
+	return 0;
+}
+
+static inline
+int check_for_socketcall_args_long_len(void __user *addr_val, long __user *addr_len,
+			const int argN, const char *addrValArgName, const char *addrLenArgName,
+			const struct pt_regs *regs)
+{
+	long alen, ulen, ret;
+
+	if (!addr_val)
+		return 0; /* 'addr_val' may be NULL */
+	else if (!addr_len)
+		return -EFAULT;
+
+	ret = get_user(alen, addr_len);
+	if (ret)
+		return ret;
+	ulen = alen;
+	ret = check_for_socketcall_args(addr_val, &ulen,
+					argN, addrValArgName, addrLenArgName, 0, regs);
+	if (alen != ulen) {
+		ret = put_user(ulen, addr_len);
+		if (ret)
+			return (int)ret;
+	}
+
+	return 0;
+}
+
+static inline
+int check_for_socketcall_args_int_len(void __user *addr_val, int __user *addr_len,
+			const int argN, const char *addrValArgName, const char *addrLenArgName,
+			const struct pt_regs *regs)
+{
+	long llen;
+	int ilen = 0, ret;
+
+	if (!addr_val)
+		return 0;
+	else if (!addr_len)
+		return -EFAULT;
+
+	ret = get_user(llen, addr_len);
+	if (ret)
+		return ret;
+	llen = ilen;
+
+	ret = check_for_socketcall_args(addr_val, &llen,
+					argN, addrValArgName, addrLenArgName, 0, regs);
+	if (ret)
+		return ret;
+
+	if (ilen != (int)llen) {
+		ilen = (int)llen;
+		ret = put_user(ilen, addr_len);
+		if (ret)
+			return ret;
+	}
+	return 0;
+}
+
+notrace __section(".entry.text")
+long protected_sys_accept(const int sockfd, struct sockaddr __user *addr, int __user *addrlen,
+			const unsigned long unused4,
+			const unsigned long unused5,
+			const unsigned long unused6,
+			const struct pt_regs *regs)
+{
+	long ret;
+
+	ret =  check_for_socketcall_args_int_len(addr, addrlen, 2, "addr", "addrlen", regs);
+	if (ret)
+		return ret;
+
+	ret = sys_accept(sockfd, addr, addrlen);
+	DbgSCP("(sfd=%d, addr=%px, alen) rval = %ld\n", sockfd, addr, ret);
+
+	return ret;
+}
+
+notrace __section(".entry.text")
+long protected_sys_accept4(const int sockfd, struct sockaddr __user *addr, int __user *addrlen,
+			   const int flags,
+			const unsigned long unused5,
+			const unsigned long unused6,
+			const struct pt_regs *regs)
+{
+	long ret;
+
+	ret =  check_for_socketcall_args_int_len(addr, addrlen, 2, "addr", "addrlen", regs);
+	if (ret)
+		return ret;
+
+	ret = sys_accept4(sockfd, addr, addrlen, flags);
+	DbgSCP("(sfd=%d, addr=%px, alen, fl=0x%x) rval = %ld\n", sockfd, addr, flags, ret);
+
+	return ret;
+}
+
+notrace __section(".entry.text")
+long protected_sys_getpeername(const int sockfd,
+			       struct sockaddr __user *addr, int __user *addrlen,
+			const unsigned long unused4,
+			const unsigned long unused5,
+			const unsigned long unused6,
+			const struct pt_regs *regs)
+{
+	long ret;
+
+	ret =  check_for_socketcall_args_int_len(addr, addrlen, 2, "addr", "addrlen", regs);
+	if (!ret)
+		ret = sys_getpeername(sockfd, addr, addrlen);
+	DbgSCP("(sfd=%d, addr=%px, addrlen=%px) rval = %ld\n", sockfd, addr, addrlen, ret);
+
+	return ret;
+}
+
+notrace __section(".entry.text")
+long protected_sys_getsockname(const int sockfd,
+			       struct sockaddr __user *addr, int __user *addrlen,
+			const unsigned long unused4,
+			const unsigned long unused5,
+			const unsigned long unused6,
+			const struct pt_regs *regs)
+{
+	long ret;
+
+	ret =  check_for_socketcall_args_int_len(addr, addrlen, 2, "addr", "addrlen", regs);
+	if (!ret)
+		ret = sys_getsockname(sockfd, addr, addrlen);
+	DbgSCP("(sfd=%d, addr=%px, addrlen=%px) rval = %ld\n", sockfd, addr, addrlen, ret);
+
+	return ret;
+}
+
+notrace __section(".entry.text")
+long protected_sys_getsockopt(const int sockfd, const int level, const int optname,
+			      char __user *optval,
+			      int __user *restrict optlen,
+			const unsigned long unused6,
+			const struct pt_regs *regs)
+{
+	long ret;
+
+	ret =  check_for_socketcall_args_int_len(optval, optlen, 4, "optval", "optlen", regs);
+	if (ret)
+		return ret;
+
+	ret = sys_getsockopt(sockfd, level, optname, optval, optlen);
+	DbgSCP("(sfd=%d, level=%d, oname=%d, oval=%px, olen) rval = %ld\n",
+	       sockfd, level, optname, optval, ret);
+
+	return ret;
+}
+
+notrace __section(".entry.text")
+long protected_sys_setsockopt(const int sockfd, const int level, const int optname,
+			      char __user	*optval,
+			      int		optlen,
+			const unsigned long unused6,
+			const struct pt_regs *regs)
+{
+	long ret;
+	long ulen = (int)optlen;
+
+	ret =  check_for_socketcall_args(optval, &ulen, 4, "optval", "optlen", 0, regs);
+	if (ret)
+		return ret;
+
+	ret = sys_setsockopt(sockfd, level, optname, optval, (int)ulen);
+	DbgSCP("(sfd=%d, level=%d, oname=%d, oval=%px, olen=%d) rval = %ld\n",
+	       sockfd, level, optname, optval, optlen, ret);
+
+	return ret;
 }
 
 notrace __section(".entry.text")
@@ -2017,8 +2492,7 @@ long protected_sys_mremap(const unsigned long old_address,
 
 	if (old_address & ~PAGE_MASK)
 		goto nr_mremap_err;
-
-	ptr_size = (prot_sc_arg_not_ptr(1, regs)) ? 0 : AP_OBJ_SIZE(regs->qargs[0]);
+	ptr_size = AP_OBJ_SIZE(regs->qargs[0]);
 
 	DbgSCP("old_address=0x%lx old_size=0x%lx new_size=0x%lx flags=0x%lx new_address=0x%lx\n",
 	       old_address, old_size, new_size, flags, new_address);
@@ -2032,26 +2506,18 @@ long protected_sys_mremap(const unsigned long old_address,
 		goto nr_mremap_err;
 	}
 
-	if (AP_ITAG(regs->qargs[0]) != ITAG_AP) {
-		PROTECTED_MODE_ALERT(PMSCERRMSG_FATAL_DESCR_IN_STACK,
-				     sys_call_ID_to_name[regs->sys_num],
-				     old_address, "old_address");
-		PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EINVAL);
-		goto nr_mremap_err;
-	}
 	base = sys_mremap(old_address, old_size, new_size, flags, new_address);
 	if (base & ~PAGE_MASK) { /* this is error code */
 		rval = base;
 		goto nr_mremap_err;
-	} else {
-		e2k_ap_t ap = new_ap(base, new_size, 0, AP_RW(regs->qargs[0]));
-		regs->rval1 = ap.lo;
-		regs->rval2 = ap.hi;
-		regs->rv1_tag = E2K_AP_LO_ETAG;
-		regs->rv2_tag = E2K_AP_HI_ETAG;
-		regs->return_desk = 1;
-		rval = 0;
 	}
+	e2k_ap_t ap = MAKE_AP_RW(base, new_size, AP_RW(regs->qargs[0]));
+	regs->rval1 = LO(ap);
+	regs->rval2 = HI(ap);
+	regs->rv1_tag = E2K_AP_LO_ETAG;
+	regs->rv2_tag = E2K_AP_HI_ETAG;
+	regs->return_desk = 1;
+	rval = 0;
 	if (old_address != base
 			&& check_pm_sc_debug_feature(PM_MM_CHECK_4_DANGLING_POINTERS)) {
 		e2k_ptr_t old_descriptor;
@@ -2085,265 +2551,6 @@ nr_mremap_err:
 	return rval;
 }
 
-/*
- * The structure of the second argument to socket call depends on
- *                                         the socket call number.
- * This function calculates mask/align type arguments to process
- *                               the structure by 'convert+array'.
- */
-notrace __section(".entry.text")
-static void get_socketcall_mask(long call, long *mask_type, long *mask_align,
-				int *fields)
-{
-	switch (call) {
-/*	Following calls don't require args conversion:
- *	case SYS_SOCKET:
- *		err = sys_socket(a[0], a[1], a[2]);
- *	case SYS_LISTEN:
- *		err = sys_listen(a[0], a[1]);
- *	case SYS_SHUTDOWN:
- *		err = sys_shutdown(a[0], a[1]);
- *		break;
- */
-	case SYS_BIND:
-		/* err = sys_bind(a[0],				*/
-		/*	(struct sockaddr __user *) a[1], a[2]); */
-	case SYS_CONNECT:
-		/* err = sys_connect(a[0],			*/
-		/*	(struct sockaddr __user *) a[1], a[2]); */
-		*mask_type = 0x1d;
-		*mask_align = 0x1f;
-		*fields = 3;
-		break;
-	case SYS_ACCEPT:
-		/* err = sys_accept(a[0],				*/
-		/*		(struct sockaddr __user *) a[1],	*/
-		/*		(int __user*) a[2]);			*/
-	case SYS_GETSOCKNAME:
-		/* err = sys_getsockname(a[0],				*/
-		/*		(struct sockaddr __user*) a[1],		*/
-		/*		(int __user *) a[2]);			*/
-	case SYS_GETPEERNAME:
-		/* err = sys_getpeername(a[0],				*/
-		/*		(struct sockaddr __user *) a[1],	*/
-		/*		(int __user *)a[2]);			*/
-		*mask_type = 0x3d;
-		*mask_align = 0x3f;
-		*fields = 3;
-		break;
-	case SYS_ACCEPT4:
-		*mask_type = 0x7d;
-		*mask_align = 0xff;
-		*fields = 4;
-		/* err = sys_accept4(a[0],				*/
-		/*		(struct sockaddr __user *) a[1],	*/
-		/*		(int	__user*)	a[2]		*/
-		/*		(int)			a[3]);		*/
-		break;
-	case SYS_SOCKETPAIR:
-		*mask_type = 0xd5;
-		*mask_align = 0xf5;
-		*fields = 4;
-		/*err = sys_socketpair(a[0], a[1], a[2],	*/
-		/*			(int __user *)a[3]);	*/
-		break;
-	case SYS_SEND:
-		*mask_type = 0x5d;
-		*mask_align = 0x5f;
-		*fields = 4;
-		/* err = sys_send(a[0], (void __user *) a[1], a[2],	*/
-		/*					a[3]);		*/
-		break;
-	case SYS_SENDTO:
-		*mask_type = 0x75d;
-		*mask_align = 0x7df;
-		*fields = 6;
-		/* err = sys_sendto(a[0], (void __user *) a[1], a[2],	*/
-		/* a[3], (struct sockaddr __user *) a[4], a[5]);	*/
-		break;
-	case SYS_RECV:
-		*mask_type = 0x5d;
-		*mask_align = 0x5f;
-		*fields = 4;
-		/* err = sys_recv(a[0], (void __user *) a[1],	*/
-		/*			a[2], a[3]);		*/
-		break;
-	case SYS_RECVFROM:
-		*mask_type = 0xf5d;
-		*mask_align = 0xfdf;
-		*fields = 6;
-		/* err = sys_recvfrom(a[0], (void __user *) a[1], a[2],	*/
-		/*		a[3], (struct sockaddr __user *) a[4],	*/
-		/*		(int __user *) a[5]);			*/
-		break;
-	case SYS_SETSOCKOPT:
-		*mask_type = 0x1d5;
-		*mask_align = 0x1f5;
-		*fields = 5;
-		/* err = sys_setsockopt(a[0], a[1], a[2],	*/
-		/*		(char __user *)a[3], a[4]);	*/
-		break;
-	case SYS_GETSOCKOPT:
-		*mask_type = 0x3d5;
-		*mask_align = 0x3f5;
-		*fields = 5;
-		/* err = sys_getsockopt(a[0], a[1], a[2],		*/
-		/*	(char __user *) a[3], (int __user *)a[4]);	*/
-		break;
-	case SYS_SENDMSG:
-		/* err = sys_sendmsg(a[0],				*/
-		/*		(struct msghdr __user *) a[1], a[2]);	*/
-	case SYS_RECVMSG:
-		/* err = sys_recvmsg(a[0],				*/
-		/*		(struct msghdr __user *) a[1], a[2]);	*/
-		*mask_type = 0x1d;
-		*mask_align = 0x1f;
-		*fields = 3;
-		break;
-	default:
-		DbgSCP("Empty masks used for socketcall #%ld\n", call);
-		*mask_type = 0x0;
-		*mask_align = 0x0;
-		*fields = 0;
-		break;
-	}
-}
-
-notrace __section(".entry.text")
-long protected_sys_socketcall(const unsigned long        a1, /* call */
-			      const unsigned long __user *a2, /* args */
-			      const unsigned long unused3,
-			      const unsigned long unused4,
-			      const unsigned long unused5,
-			      const unsigned long unused6,
-			      const struct pt_regs	*regs)
-{
-	unsigned long __user *args;
-	long size;
-	long mask_type, mask_align;
-	int fields;
-	long rval; /* syscall return value */
-	struct protected_user_msghdr __user *prot_msghdr;
-	struct user_msghdr __user *converted_msghdr;
-
-	get_socketcall_mask(a1, &mask_type, &mask_align, &fields);
-
-	if (!a2) {
-		PROTECTED_MODE_WARNING(PMSCERRMSG_SC_CMD_WRONG_ARG_VALUE_LX,
-				       sys_call_ID_to_name[regs->sys_num],
-				       "call", (int) a1, "args", a2);
-		PM_EXCEPTION_ON_WARNING(SIGABRT, SI_KERNEL, EINVAL);
-		return -EFAULT;
-	}
-	if (warn_if_not_descr(2, CHECK4DESCR_SILENT, regs))
-		return -EFAULT;
-	size = AP_OBJ_SIZE(regs->qargs[1]);
-	/* NB> `convert_array' below will check if size is large
-	 *                               enough for this request.
-	 *
-	 * Need an additional conversions of arguments
-	 * for syscalls recvmsg/sendmsg
-	 */
-	if ((a1 == SYS_SENDMSG) || (a1 == SYS_RECVMSG)) {
-		e2k_ptr_t descr; /* protected_user_msghdr in the arg array */
-		void __user *ptr;
-		long iov_len;
-		int tags;
-
-		rval = get_user_tagged_16(descr.qword, tags, &a2[2]);
-		if (unlikely(rval)) {
-			goto err_out_bad_array;
-		} else if (unlikely(!IS_AP(regs->qargs[1], tags))) {
-			rval = -EFAULT;
-			goto err_out_bad_array;
-		}
-		ptr = (void __user *)e2k_ptr_objptr(descr, 0);
-		iov_len = get_prot_msghdr_iovlen(ptr);
-		if (iov_len < 0) {
-			rval = iov_len;
-			goto err_out_bad_array;
-		}
-		/*
-		 * Allocate space in user stack for args conversion.
-		 * NB> We allocate extra field for final zero-element.
-		 */
-		args = get_user_space(((fields + 1) * sizeof(args[0])) +
-			sizeof(struct user_msghdr) + iov_len * sizeof(struct iovec));
-		/* Convert args array for socketcall from ptr */
-		rval = convert_array_3(a2, args, size, fields, 1,
-					mask_type, mask_align, 0,
-					CONV_ARR_WRONG_DSCR_FLD, regs);
-
-		if (unlikely(rval))
-			goto err_out_bad_array;
-
-		/* Convert struct msghdr from args[1] */
-		if (get_user(prot_msghdr,
-				(struct protected_user_msghdr __user * __user *) &args[1]))
-			return -EFAULT;
-		converted_msghdr = (struct user_msghdr __user *) (args + (fields + 1));
-		if (prot_msghdr) {
-			converted_msghdr = convert_msghdr(prot_msghdr,
-				SIZE_MSGHDR, "socketcall", "args[1]", converted_msghdr, regs);
-			if (IS_ERR(converted_msghdr))
-				return PTR_ERR(converted_msghdr);
-			/* Set args[1] to pointer to converted structure */
-			if (put_user((unsigned long) converted_msghdr, &args[1]))
-				return -EFAULT;
-		} else {
-			if (put_user(0, &args[1]))
-				return -EFAULT;
-			DbgSCP("Empty user_msghdr in args[1]\n");
-		}
-	/* Other socketcalls */
-	} else {
-		if (fields) {
-			/* Allocate space on user stack for args array */
-			args = get_user_space((fields + 1) * sizeof(args[0]));
-			/* Convert args array for socketcall from ptr */
-			rval = convert_array(a2, args, size,
-					fields, 1, mask_type, mask_align, regs);
-			if (rval)
-				goto err_out_bad_array;
-		} else {
-			DbgSCP("Using args as is; convert_array not called.\n");
-			args = (unsigned long __user *) a2;
-		}
-	}
-
-	/* Calling regular socketcall function with converted arguments: */
-	rval = sys_socketcall((int) a1, args);
-
-	if (!rval && (a1 == SYS_RECVMSG)) {
-		long ret;
-		rval = copy_in_user(&prot_msghdr->msg_flags, &converted_msghdr->msg_flags,
-						sizeof(converted_msghdr->msg_flags));
-		if (rval) {
-			PROTECTED_MODE_WARNING(PMSCWARN_SOCKETCALL_FAILED_TO_UPDATE_FLD,
-					       "msg_flags");
-			PM_EXCEPTION_ON_WARNING(SIGABRT, SI_KERNEL, EINVAL);
-		}
-		ret = copy_in_user(&prot_msghdr->msg_controllen,
-				   &converted_msghdr->msg_controllen,
-				   sizeof(converted_msghdr->msg_controllen));
-		if (ret) {
-			PROTECTED_MODE_WARNING(PMSCWARN_SOCKETCALL_FAILED_TO_UPDATE_FLD,
-					       "controllen");
-			PM_EXCEPTION_ON_WARNING(SIGABRT, SI_KERNEL, EINVAL);
-			rval = ret;
-		}
-	}
-
-	DbgSCP(" (%d) returned %ld\n", (int) a1, rval);
-	return rval;
-
-err_out_bad_array:
-	PROTECTED_MODE_ALERT(PMSCERRMSG_BAD_STRUCT_IN_SC_ARG,
-			     regs->sys_num, sys_call_ID_to_name[regs->sys_num], "args", 2);
-	PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EINVAL);
-	return rval;
-}
-
 notrace __section(".entry.text")
 long protected_sys_sendmsg(const unsigned long		sockfd,
 			   const void __user		*msg,
@@ -2353,22 +2560,11 @@ long protected_sys_sendmsg(const unsigned long		sockfd,
 			   const unsigned long unused6,
 			   const struct pt_regs		*regs)
 {
-	long size;
 	long rval; /* syscall return value */
 	struct user_msghdr __user *converted_msghdr;
-	long iovlen;
 
-	if (warn_if_not_descr(2, CHECK4DESCR_SILENT, regs))
-		return -EFAULT;
-	size = AP_OBJ_SIZE(regs->qargs[1]);
-	iovlen = get_prot_msghdr_iovlen(msg);
-	if (unlikely(iovlen < 0)) {
-		DbgSCP("get_prot_msghdr_iovlen(%ld) returned %ld\n", (unsigned long)msg, iovlen);
-		return iovlen;
-	}
-	converted_msghdr = get_user_space(sizeof(struct user_msghdr) +
-						iovlen * sizeof(struct iovec));
-	converted_msghdr = convert_msghdr(msg, size, "sendmsg", "msg", converted_msghdr, regs);
+	converted_msghdr = convert_user_msghdr((struct protected_user_msghdr __user *)msg,
+					       NULL, "sendmsg", "msg", regs);
 	if (IS_ERR(converted_msghdr))
 		return PTR_ERR(converted_msghdr);
 
@@ -2380,6 +2576,31 @@ long protected_sys_sendmsg(const unsigned long		sockfd,
 }
 
 notrace __section(".entry.text")
+long protected_sys_recvfrom(const int sockfd,
+			    void __user *buff, size_t size, const unsigned flags,
+			    struct sockaddr __user *src_addr, int __user *strlen,
+				const struct pt_regs	*regs)
+{
+	long ret;
+	long usize = size;
+
+	ret =  check_for_socketcall_args(buff, &usize, 2, "buff", "size", EFAULT, regs);
+	if (ret)
+		return ret;
+	ret =  check_for_socketcall_args_int_len(src_addr, strlen, 5, "addr", "addrlen", regs);
+	if (ret) {
+		if (ret == -EFAULT) /* NB> LTP expects another error cade in this case */
+		return -ENOTSOCK;
+	}
+
+	ret = sys_recvfrom(sockfd, buff, usize, flags, src_addr, strlen);
+	DbgSCP("(sfd=%d, buff=%px, size=0x%zx, fl=0x%x, addr=%px, strlen) rval = %ld\n",
+	       sockfd, buff, size, flags, src_addr, ret);
+
+	return ret;
+}
+
+notrace __section(".entry.text")
 long protected_sys_recvmsg(const unsigned long		socket,
 			   const void __user		*message,
 			   const unsigned long		flags,
@@ -2388,26 +2609,12 @@ long protected_sys_recvmsg(const unsigned long		socket,
 			   const unsigned long unused6,
 			   const struct pt_regs		*regs)
 {
-	long size;
 	long rval; /* syscall return value */
 	struct user_msghdr __user *converted_msghdr;
 	struct protected_user_msghdr __user *prot_msghdr =
 					(struct protected_user_msghdr __user *)message;
-	long iovlen;
 
-	if (warn_if_not_descr(2, CHECK4DESCR_SILENT, regs))
-		return -EFAULT;
-	size = AP_OBJ_SIZE(regs->qargs[1]);
-	iovlen = get_prot_msghdr_iovlen(message);
-	if (unlikely(iovlen < 0)) {
-		DbgSCP("get_prot_msghdr_iovlen(%ld) returned %ld\n",
-				(unsigned long)message, iovlen);
-		return iovlen;
-	}
-	converted_msghdr = get_user_space(sizeof(struct user_msghdr) +
-						iovlen * sizeof(struct iovec));
-	converted_msghdr = convert_msghdr(prot_msghdr, size, "recvmsg", "message",
-					  converted_msghdr, regs);
+	converted_msghdr = convert_user_msghdr(prot_msghdr, NULL, "recvmsg", "message", regs);
 	if (IS_ERR(converted_msghdr))
 		return PTR_ERR(converted_msghdr);
 
@@ -2456,177 +2663,29 @@ long protected_sys_recvmsg(const unsigned long		socket,
 }
 
 
-/* Calculates total iovec buff number in the 'mmsghdr' structure.
- * Returns: total iovec buff number in the 'mmsghdr' structure;
- *       or (-1) if size of 'mmsghdr' exceeds the one required by 'vlen';
- *       or negative error number to report.
- */
-static long iovec_num_in_mmsghdr(const void __user *prot_mmsghdr,
-				 const unsigned long prot_mmsghdr_size,
-				 const unsigned int vlen)
-{
-	void __user *msghdr128 = (void __user *)prot_mmsghdr;
-	long iov_len, iovec_num = 0;
-	long size = prot_mmsghdr_size;
-	int i;
-
-	for (i = 0; i < vlen; i++) {
-		iov_len = get_prot_msghdr_iovlen(msghdr128);
-		if (iov_len < 0)
-			return iov_len;
-		iovec_num += iov_len;
-		msghdr128 += sizeof(struct protected_mmsghdr);
-		size -= sizeof(struct protected_mmsghdr);
-		if (i < (vlen - 1) && size < sizeof(struct protected_mmsghdr))
-			return -1L;
-	}
-
-	return iovec_num;
-}
-
-#define MMSGHDR_STRUCT_SIZE_LONGS \
-	(sizeof(struct mmsghdr) / sizeof(long))
-#define MMSGHDR_VECT_SIZE_LONGS(vlen) \
-	((sizeof(struct mmsghdr) * vlen) / sizeof(long))
-
-static long convert_mmsghdr(void __user *prot_mmsghdr,
-			    void __user *kernel_mmsghdr,
-			    unsigned int		size,
-			    unsigned int		vlen,
-			    const char			*syscall_name,
-			    const struct pt_regs	*regs)
-/* Converts user msghdr structure from protected to regular structure format.
- * Outputs: 0 if converted OK; error code otherwise.
- * 'prot_msghdr' - protected message header structure.
- * 'kernel_mmsghdr' - converted structure (to be allocated in syscall
- *                    to avoid re-using stack area if allocated over here).
- * 'size' - size of the input structure.
- * 'vlen' - vector length if vector of structures is converted.
- * 'syscall_name' - reference to particular syscall in diagnostic output.
- */
-{
-	long __user *args = kernel_mmsghdr;
-	long __user *v_mmsrhdr;
-	struct mmsghdr __user *converted_mmsghdr;
-	struct user_msghdr __user *converted_msghdr;
-	long __user *converted_iovec;
-	int err, iov_len, i;
-
-#define MASK_MMSGHDR_TYPE     0x0773 /* type mask for struct mmsghdr */
-#define MASK_MMSGHDR_ALIGN    0xd7ff /* alignment mask for mmsghdr structure */
-#define MASK_MMSGHDR_RW       MASK_MSGHDR_RW
-	/*
-	 * Structures user_msghdr and iovec contain pointers
-	 * inside, therefore they need to be additionally
-	 * converted with saving results in these structures
-	 */
-
-	/* (1) Converting 'mmsghdr' structure array: */
-
-	converted_mmsghdr = (struct mmsghdr __user *) args;
-	err = convert_array_3(prot_mmsghdr, (long __user *) converted_mmsghdr,
-				size, 8, vlen, MASK_MMSGHDR_TYPE,
-				MASK_MMSGHDR_ALIGN, MASK_MMSGHDR_RW,
-				CONV_ARR_WRONG_DSCR_FLD, regs);
-	if (err) {
-		PROTECTED_MODE_ALERT(PMSCERRMSG_SC_BAD_STRUCT_IN_ARG_NAME,
-				     syscall_name, "mmsghdr", "msgvec");
-		PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EINVAL);
-		return -EINVAL;
-	}
-
-	/* (2) Converting struct iovec fields in msghdr structures
-	 *            (msghdr->msg_iov):
-	 */
-	converted_iovec = args + MMSGHDR_VECT_SIZE_LONGS(vlen);
-	for (i = 0, v_mmsrhdr = args; i < vlen; i++) {
-		struct iovec __user *msg_iov;
-
-		converted_mmsghdr = (struct mmsghdr __user *) v_mmsrhdr;
-		converted_msghdr = &converted_mmsghdr->msg_hdr;
-		if (get_user(iov_len, &converted_msghdr->msg_iovlen)) {
-			PROTECTED_MODE_ALERT(PMSCERRMSG_FATAL_READ_FROM, __func__,
-					(unsigned long) &converted_msghdr->msg_iovlen);
-			PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EFAULT);
-			return -EFAULT;
-		}
-		if (get_user(msg_iov, &converted_msghdr->msg_iov)) {
-			PROTECTED_MODE_ALERT(PMSCERRMSG_FATAL_READ_FROM,
-					__func__, (unsigned long) &converted_msghdr->msg_iov);
-			PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EFAULT);
-			return -EFAULT;
-		}
-		if (msg_iov) {
-			err = convert_iov(msg_iov, converted_iovec, iov_len);
-			if (err) {
-				PROTECTED_MODE_ALERT(PMSCERRMSG_SC_BAD_FIELD_STRUCT_IN_ARG_NAME,
-						     syscall_name, "iovec", "mmsghdr", "mmsghdr");
-				PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EINVAL);
-			}
-		} else {
-			PROTECTED_MODE_WARNING(PMSCERRMSG_EMPTY_STRUCTURE_FIELD,
-					       syscall_name, "msg_iov", "user_msghdr", "mmsghdr");
-			PM_EXCEPTION_ON_WARNING(SIGABRT, SI_KERNEL, EINVAL);
-			converted_iovec = NULL;
-		}
-
-		/* Replacing iovec pointer in converted msghdr structure: */
-		if (put_user((void __user *) converted_iovec,
-				&converted_msghdr->msg_iov)) {
-			PROTECTED_MODE_WARNING(PMSCERRMSG_FATAL_WRITE_AT_FIELD,
-				syscall_name, &converted_msghdr->msg_iov, "msghdr->msg_iov");
-			PM_EXCEPTION_ON_WARNING(SIGABRT, SI_KERNEL, EFAULT);
-			return -EFAULT;
-		}
-
-		v_mmsrhdr += MMSGHDR_STRUCT_SIZE_LONGS;
-		converted_iovec += iov_len * sizeof(struct iovec) / sizeof(long);
-	}
-
-	return 0;
-}
-
-#if 1
+#if (!DYNAMIC_DEBUG_SYSCALLP_ENABLED)
 #define print_mmsghdr_struct(a1, a2, a3)
 #else
 static void print_mmsghdr_struct(const char *title,
-				 long __user *mmsghdr_arr,
+				 struct mmsghdr __user *mmsghdr_arr,
 				 const int vlen)
 {
 	if (check_pm_sc_debug_feature(PM_SC_DBG_MODE_CONV_STRUCT)) {
-		long __user *larr = mmsghdr_arr;
-		struct mmsghdr __user *mmsghdrp;
-		struct iovec __user *iovp;
-		long lval;
-		int i, j;
+		int i;
 
-		/* Print structure content: */
-		pr_info("%s[%d]:\n", title, vlen);
+		pr_info("\t##### %s #####\n", title);
 		for (i = 0; i < vlen; i++) {
-			mmsghdrp = (struct mmsghdr *)larr;
-			pr_info("\t##### mmsghdr[%d] : 0x%lx #####\n",
-				i, (long)mmsghdrp);
-			for (j = 0; j < MMSGHDR_STRUCT_SIZE_LONGS; j++) {
-				pr_info("\t0x%.8x.%.8x\n",
-					(int)(*larr), (int)(*larr >> 32));
-				lar++;
-			}
-			iovp = mmsghdrp->msg_hdr.msg_iov;
-			for (j = 0; j < mmsghdrp->msg_hdr.msg_iovlen; j++) {
-				lval = (long) iovp;
-				pr_info("\t->msg_iov[%d: 0x%lx]: base = 0x%lx  len = %ld\n",
-					j, lval,
-					(long)iovp->iov_base, iovp->iov_len);
-				lval += sizeof(struct iovec);
-				iovp = (struct iovec *)lval;
-			}
+			pr_info("\t##### mmsghdr[%d] : 0x%lx #####\n", i,
+				(void __user *) &mmsghdr_arr[i]);
+			print_buffer(NULL, (void __user *) &mmsghdr_arr[i], sizeof(struct mmsghdr));
 		}
 	}
 }
-#endif /* print_mmsghdr_struct */
+#endif /* DYNAMIC_DEBUG_SYSCALLP_ENABLED */
 
-static long update_prot_mmsghdr_struct(long __user *mmsghdr_arr,
-				       long __user *prot_msgvec,
+static long update_prot_mmsghdr_struct(int write,
+				       struct mmsghdr      __user *mmsghdr_arr,
+				       struct protected_mmsghdr __user *prot_msgvec,
 				       const int vlen)
 /* This is post-syscall post-processing procedure.
  * Propagate .msg_len values from processed 'mmsghdr_arr' back to 'prot_msgvec'.
@@ -2634,48 +2693,50 @@ static long update_prot_mmsghdr_struct(long __user *mmsghdr_arr,
  * Returns error code or 0 if OK.
  */
 {
-#define MMSGHDR_STR_LEN_OFFSET 96
-	/* .msg_len field offset in the protected structure */
-#define PROT_MMSGHDR_SIZE     sizeof(struct protected_mmsghdr)
-	/* size of struct mmsghdr in prot. user space */
-	long __user *from = mmsghdr_arr;
-	long __user *to = prot_msgvec;
-	struct mmsghdr __user *mmsghdr_from;
 	long val;
-	int i;
+	int flags, i;
 
-	to += MMSGHDR_STR_LEN_OFFSET / sizeof(long);
+	print_mmsghdr_struct("### mmsghdr_arr[#]: ###", mmsghdr_arr, vlen);
 
 	for (i = 0; i < vlen; i++) {
-		mmsghdr_from = (struct mmsghdr __user *) from;
-		if (get_user(val, &mmsghdr_from->msg_len)) {
+		if (get_user(val, &mmsghdr_arr[i].msg_len)) {
 			PROTECTED_MODE_ALERT(PMSCERRMSG_FATAL_READ_FROM, __func__,
-					(unsigned long) &mmsghdr_from->msg_len);
+					(unsigned long) &mmsghdr_arr[i].msg_len);
 			PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EFAULT);
 			return -EFAULT;
 		}
 		DbgSCP("mmsghdr[%d].msg_len = %ld\n", i, val);
-		if (put_user(val, to)) {
+		if (put_user(val, &prot_msgvec[i].msg_len)) {
 			PROTECTED_MODE_ALERT(PMSCERRMSG_FATAL_WRITE_AT,
-					     __func__, (unsigned long) to);
+					     __func__, (unsigned long) &prot_msgvec[i].msg_len);
 			PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EFAULT);
 			return -EFAULT;
 		}
-
-		from += MMSGHDR_STRUCT_SIZE_LONGS;
-		to += PROT_MMSGHDR_SIZE / sizeof(long);
+		if (write)
+			continue;
+		if (get_user(flags, &mmsghdr_arr[i].msg_hdr.msg_flags)) {
+			PROTECTED_MODE_ALERT(PMSCERRMSG_FATAL_READ_FROM, __func__,
+					(unsigned long) &mmsghdr_arr[i].msg_hdr.msg_flags);
+			PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EFAULT);
+			return -EFAULT;
+		}
+		DbgSCP("mmsghdr[%d].msg_flags = 0x%x\n", i, flags);
+		if (put_user(flags, &prot_msgvec[i].msg_hdr.msg_flags)) {
+			PROTECTED_MODE_ALERT(PMSCERRMSG_FATAL_WRITE_AT,
+					     __func__, (unsigned long) &prot_msgvec[i].msg_hdr.msg_flags);
+			PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EFAULT);
+			return -EFAULT;
+		}
 	}
 
 	return 0;
 }
 
-#define PROTECTED_MMSGHDR_SIZE(vlen) \
-			(PROT_MMSGHDR_SIZE * vlen)
 
 notrace __section(".entry.text")
 long protected_sys_sendmmsg(const unsigned long		sockfd,
-			    void __user			*msgvec,
-			    const unsigned long		vlen, /* vector lngth */
+			    struct protected_mmsghdr __user	*msgvec,
+			    const unsigned int		vlen, /* vector lngth */
 			    const unsigned long		flags,
 			    const unsigned long unused5,
 			    const unsigned long unused6,
@@ -2683,132 +2744,107 @@ long protected_sys_sendmmsg(const unsigned long		sockfd,
 {
 	long size;
 	long rval; /* syscall return value */
-	long iov_total_num;
-	void __user *kernel_mmsghdr;
+	int tag, i;
+	struct mmsghdr __user *mmsghdr64;
 
-	DbgSCP(" sockfd=%ld  vlen=%ld\n", sockfd, vlen);
+	DbgSCP(" sockfd=%ld  vlen=0x%x\n", sockfd, vlen);
 
-	if (warn_if_not_descr(2, CHECK4DESCR_SILENT, regs))
+	tag = (regs->tags >> 16 /*2x8*/) & 0xff;
+	if (!IS_AP(regs->qargs[1], tag))
 		return -EINVAL;
+
 	size = AP_OBJ_SIZE(regs->qargs[1]);
-	if (size < PROTECTED_MMSGHDR_SIZE(vlen)) {
+	if (size < vlen * sizeof(struct protected_mmsghdr)) {
 		PROTECTED_MODE_ALERT(PMSCERRMSG_SC_ARG_SIZE_MISMATCHES_FIELD_VAL,
-			"sendmmsg", "msgvec", size, "vlen", PROTECTED_MMSGHDR_SIZE(vlen));
+				     "sendmmsg", "msgvec", size,
+				     "vlen", vlen * sizeof(struct protected_mmsghdr));
 		PM_BNDERR_EXCEPTION_IF_ORTH_MODE(2/*arg_num*/, regs);
-		return -EINVAL;
+		return -EFAULT;
 	}
 
-	iov_total_num = iovec_num_in_mmsghdr(msgvec, size, vlen);
-	if (unlikely(iov_total_num == -1)) {
-		PROTECTED_MODE_ALERT(PMSCERRMSG_SC_ARG_SIZE_MISMATCHES_FIELD_VAL,
-			"sendmmsg", "msgvec", size, "vlen", PROTECTED_MMSGHDR_SIZE(vlen));
-		PM_BNDERR_EXCEPTION_IF_ORTH_MODE(2/*arg_num*/, regs);
-		return -EINVAL;
-	} else if (unlikely(iov_total_num < 0)) {
-		return iov_total_num;
-	}
-	/* NB> For the sake of performance we don't calculate exact vector size.
-	 *     Instead, we allocate same space as in PM, which is bigger
-	 *     and is quite enough for kernel structire for sure.
-	 */
-	kernel_mmsghdr = get_user_space(size + (iov_total_num * sizeof(struct iovec)));
-	if (!kernel_mmsghdr) {
+	mmsghdr64 = get_user_space(vlen * sizeof(struct mmsghdr));
+	if (!mmsghdr64) {
 		pr_err("%s:%d : FATAL ERROR: failed to allocate %ld bytes on stack !!!",
 		       __FILE__, __LINE__, size);
 		return -EINVAL;
 	}
 
-	if (convert_mmsghdr(msgvec, kernel_mmsghdr, size, vlen, "sendmmsg", regs))
-		return -EINVAL;
+	for (i = 0; i < vlen; i++) {
+		rval = convert_mmsghdr(&msgvec[i], &mmsghdr64[i], "sendmmsg", "msgvec", regs);
+		if (rval)
+			goto out;
+	}
+
+	rval = sys_sendmmsg(sockfd, (struct mmsghdr __user *)mmsghdr64, vlen, flags);
+	DbgSCP("sys_sendmmsg(%ld, %px, 0x%x, 0x%lx) returned %ld\n",
+	       sockfd, mmsghdr64, vlen, flags, rval);
 
 	if (check_pm_sc_debug_feature(PM_SC_DBG_MODE_CONV_STRUCT))
-		print_mmsghdr_struct("protected sendmmsg: converted mmsghdr",
-				     kernel_mmsghdr, vlen);
-
-	rval = sys_sendmmsg(sockfd, kernel_mmsghdr, vlen, flags);
-	if (rval <= 0)
-		DbgSCP("sys_sendmmsg() failed with error code %ld\n", rval);
-
-	if (check_pm_sc_debug_feature(PM_SC_DBG_MODE_CONV_STRUCT))
-		print_mmsghdr_struct("protected sendmmsg: post-syscall mmsghdr",
-				     kernel_mmsghdr, vlen);
-
-	if (rval > 0) {
+		print_mmsghdr_struct("prot.sendmmsg: post-syscall mmsghdr",
+				     mmsghdr64, vlen);
+out:
+	if (rval <= 0) {
+		DbgSCP("failed with error code %ld\n", rval);
+	} else {
 		/* Propagating .msg_len values back to 'msgvec' */
 		long ret;
 
-		ret = update_prot_mmsghdr_struct(kernel_mmsghdr, msgvec, (int) vlen);
+		ret = update_prot_mmsghdr_struct(1, (struct mmsghdr __user *)mmsghdr64,
+						 msgvec, rval);
 		if (ret)
 			rval = ret;
 	}
-
 	DbgSCP(" returned %ld\n", rval);
 	return rval;
 }
 
 notrace __section(".entry.text")
-long protected_sys_recvmmsg(const unsigned long		sockfd,
-			    const unsigned long msgvec,
-			    const unsigned long		vlen, /* vector lngth */
-			    const unsigned long		flags,
+long protected_sys_recvmmsg(const unsigned long	sockfd,
+			    const struct protected_mmsghdr __user *msgvec,
+			    const unsigned int	vlen, /* vector length */
+			    const unsigned int	flags,
 			    const unsigned long timeout,
 			    const unsigned long unused6,
-			    const struct pt_regs		*regs)
+			    const struct pt_regs	*regs)
 {
 	long size;
+	int i;
 	long rval; /* syscall return value */
-	long iov_total_num;
-	long __user *kernel_mmsghdr;
+	struct mmsghdr __user *mmsghdr64;
 
-	DbgSCP(" sockfd=%ld  vlen=%ld\n", sockfd, vlen);
+	DbgSCP(" sockfd=%ld  vlen=%d\n", sockfd, vlen);
 
-	if (warn_if_not_descr(2, CHECK4DESCR_SILENT, regs))
-		return -EFAULT;
 	size = AP_OBJ_SIZE(regs->qargs[1]);
-	if (size < PROTECTED_MMSGHDR_SIZE(vlen)) {
+	if (size < vlen * sizeof(struct protected_mmsghdr)) {
 		PROTECTED_MODE_ALERT(PMSCERRMSG_SC_ARG_SIZE_MISMATCHES_FIELD_VAL,
-			"recvmmsg", "msgvec", size, "vlen", PROTECTED_MMSGHDR_SIZE(vlen));
+			"recvmmsg", "msgvec", size, "vlen", vlen * sizeof(struct protected_mmsghdr));
 		PM_BNDERR_EXCEPTION_IF_ORTH_MODE(2/*arg_num*/, regs);
 		return -EINVAL;
 	}
-
-	iov_total_num = iovec_num_in_mmsghdr((void __user *)msgvec, size, vlen);
-	if (unlikely(iov_total_num == -1)) {
-		PROTECTED_MODE_ALERT(PMSCERRMSG_SC_ARG_SIZE_MISMATCHES_FIELD_VAL,
-			"sendmmsg", "msgvec", size, "vlen", PROTECTED_MMSGHDR_SIZE(vlen));
-		PM_BNDERR_EXCEPTION_IF_ORTH_MODE(2/*arg_num*/, regs);
-		return -EINVAL;
-	} else if (unlikely(iov_total_num < 0)) {
-		return iov_total_num;
-	}
-
-	/* NB> For the sake of performance we allocate same space as in PM. */
-	kernel_mmsghdr = get_user_space(size + (iov_total_num * sizeof(struct iovec)));
-	if (!kernel_mmsghdr) {
+	mmsghdr64 = get_user_space(vlen * sizeof(struct mmsghdr));
+	if (!mmsghdr64) {
 		pr_err("%s:%d : FATAL ERROR: failed to allocate %ld bytes on stack !!!",
-		       __FILE__, __LINE__,  size);
-		PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EINVAL);
+		       __FILE__, __LINE__, size);
 		return -EINVAL;
 	}
 
-	if (convert_mmsghdr((long __user *) msgvec, kernel_mmsghdr,
-					size, vlen, "recvmmsg", regs))
-		return -EINVAL;
+	for (i = 0; i < vlen; i++) {
+		rval = convert_mmsghdr(&msgvec[i], &mmsghdr64[i], "recvmmsg", "msgvec", regs);
+		if (rval)
+			goto out;
+	}
 
-	if (check_pm_sc_debug_feature(PM_SC_DBG_MODE_CONV_STRUCT))
-		print_mmsghdr_struct("protected recvmmsg: converted mmsghdr",
-				     kernel_mmsghdr, vlen);
 
-	rval = sys_recvmmsg(sockfd, (struct mmsghdr __user *) kernel_mmsghdr, vlen,
-			    flags, (struct __kernel_timespec __user *) timeout);
-
+	rval = sys_recvmmsg(sockfd, mmsghdr64, vlen, flags,
+			    (struct __kernel_timespec __user *)timeout);
+out:
 	if (rval <= 0) {
-		DbgSCP("sys_recvmmsg() failed with error code %ld\n", rval);
+		DbgSCP("failed with error code %ld\n", rval);
 	} else { /* (rval > 0) */
 		long ret;
 
-		ret = update_prot_mmsghdr_struct(kernel_mmsghdr,
-						 (long __user *)msgvec, (int)vlen);
+		ret = update_prot_mmsghdr_struct(0, (struct mmsghdr __user *)mmsghdr64,
+						 (struct protected_mmsghdr __user *)msgvec, rval);
 		if (ret)
 			rval = ret;
 	}
@@ -2873,39 +2909,6 @@ static inline void get_ipc_mask(long call, long *mask_type, long *mask_align,
 	       call, *mask_type, *mask_align, *fields);
 }
 
-static long process_shmat_syscall_result(const int shmid, const int shmflg,
-							ulong __user *raddr)
-{
-	/* This is 'shmat' syscall post-processing for protected execution mode.
-	 * We need to convert obtained shm pointer to descriptor
-	 *          (must have been available in *raddr) and pass it to 'raddr':
-	 */
-	unsigned long segm_size;
-	ulong base;
-	e2k_ptr_t dscr;
-	int access;
-	long rval; /* return value */
-
-	/* taking shm parameters from shmid: */
-	segm_size = get_shm_segm_size(shmid);
-	DbgSCP("(%d): segm_size = %ld\n", shmid, segm_size);
-
-	if (IS_ERR_VALUE(segm_size))
-		return (long) segm_size;
-
-	access = (shmflg & SHM_RDONLY) ? R_ENABLE : RW_ENABLE;
-
-	if (get_user(base, raddr))
-		return -EFAULT;
-
-	dscr = new_ap(base, segm_size, 0, access);
-
-	DbgSCP("(%d): lo = 0x%llx  hi = 0x%llx\n", shmid, dscr.lo, dscr.hi);
-
-	rval = put_user_tagged_16(dscr.qword, ETAGAPQ, raddr);
-	DbgSCP("(%d) returned %ld\n", shmid, rval);
-	return rval;
-}
 
 static inline
 int check_prot_semun_struct(const struct pt_regs *regs,
@@ -2913,12 +2916,6 @@ int check_prot_semun_struct(const struct pt_regs *regs,
 			    size_t size) /* min size of descriptor */
 /* Returns: 1 - if check passed OK; 0 - otherwise */
 {
-	if (!regs->qargs[arg_num - 1].lo) {
-		PROTECTED_MODE_ALERT(PMSCERRMSG_BAD_STRUCT_IN_SC_ARG,
-			regs->sys_num, sys_call_ID_to_name[regs->sys_num], "semun", arg_num);
-		PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EINVAL);
-		return 0;
-	}
 	/* Check that union semun arg #arg_num contains proper pointer: */
 	if (!prot_arg_is_ap(regs, arg_num)) {
 		unsigned long ptr = e2k_ptr_objptr(regs->qargs[arg_num - 1], 0);
@@ -2970,7 +2967,7 @@ long protected_sys_semctl(const long	semid,	/* a1 */
 	case IPC_SET:
 	case SEM_STAT:
 	case SEM_STAT_ANY:
-		if (!check_prot_semun_struct(regs, 4/*arg#*/, sizeof(struct semid_ds))) {
+		if (!check_prot_semun_struct(regs, 4/*arg#*/, sizeof(struct semid64_ds))) {
 			rval = -EFAULT;
 			goto out;
 		}
@@ -3008,9 +3005,9 @@ long protected_sys_semctl(const long	semid,	/* a1 */
 		break;
 	}
 
-	rval = sys_old_semctl((int) semid, (int) semnum, (int) cmd, (unsigned long) fourth);
+	rval = sys_semctl((int) semid, (int) semnum, (int) cmd, (unsigned long) fourth);
 out:
-	DbgSCP("(cmd=%d, semnum=%d, semun=0x%lx) returned %ld\n",
+	DbgSCP("(cmd=%d, semnum=%d, semun=0x%px) returned %ld\n",
 	       (int) cmd, (int) semnum, fourth, rval);
 	return rval;
 }
@@ -3018,20 +3015,30 @@ out:
 /* long sys_shmat(int shmid, char __user *shmaddr, int shmflg); */
 notrace __section(".entry.text")
 long protected_sys_shmat(const long		shmid,		/* a1 */
-			 const unsigned long shmaddr,	/* a2 */
+			 const unsigned long	shmaddr,	/* a2 */
 			 const long		shmflg,		/* a3 */
 			 const unsigned long	unused4,
 			 const unsigned long	unused5,
 			 const unsigned long	unused6,
 			 struct pt_regs		*regs)
 {
-	unsigned long segm_size;
-	ulong base;
-	e2k_ap_t ap;
-	int access;
-	int rv1_tag = E2K_NUMERIC_ETAG, rv2_tag = E2K_NUMERIC_ETAG;
+	unsigned long segm_size = 0;
+	ulong base = 0;
+	e2k_ap_t ap = (e2k_ap_t){ 0 };
+	int  rv1_tag = E2K_NUMERIC_ETAG, rv2_tag = E2K_NUMERIC_ETAG;
 	long rval; /* syscall return value */
 
+	segm_size = get_shm_segm_size(shmid);
+	DbgSCP("(%ld): segm_size = %ld\n", shmid, segm_size);
+	if (IS_ERR_VALUE(segm_size)) {
+		rval = (long) segm_size;
+		goto err_out;
+	}
+	if (cpu_has(CPU_FEAT_ISET_V7) &&
+	    (shmaddr & ap_align_mask(segm_size) || segm_size & ap_align_mask(segm_size))) {
+		rval = -ENOTSUPP;
+		goto err_out;
+	}
 	rval = sys_shmat((int) shmid, (char __user *) shmaddr, (int) shmflg);
 
 	if (IS_ERR_VALUE(rval))
@@ -3043,18 +3050,7 @@ long protected_sys_shmat(const long		shmid,		/* a1 */
 	 * We need to convert obtained shm pointer to descriptor
 	 */
 
-	segm_size = get_shm_segm_size(shmid);
-	DbgSCP("(%ld): segm_size = %ld\n", shmid, segm_size);
-
-	if (IS_ERR_VALUE(segm_size)) {
-		rval = (long) segm_size;
-		goto err_out;
-	}
-
-	access = (shmflg & SHM_RDONLY) ? R_ENABLE : RW_ENABLE;
-
-	ap = new_ap(base, segm_size, 0, access);
-
+	ap = MAKE_AP(base, segm_size); 
 	rv1_tag = E2K_AP_LO_ETAG;
 	rv2_tag = E2K_AP_HI_ETAG;
 	rval = 0;
@@ -3084,6 +3080,8 @@ long protected_sys_ipc(const unsigned long call, /* a1 */
 	void __user *fourth = ptr; /* fourth arg to 'ipc' syscall */
 	long rval; /* syscall return value */
 
+printk("%s called with call %ld\n", __func__, call);
+return -ENOSYS;
 	get_ipc_mask(call, &mask_type, &mask_align, &fields);
 	if ((fields == 0) || (unlikely(fields > 5))) {
 		pr_err("%s:%d : Bad syscall_ipc field number %ld\n",
@@ -3178,14 +3176,24 @@ long protected_sys_ipc(const unsigned long call, /* a1 */
 		break;
 	}
 	case SHMAT:
-		if (unlikely(third && !prot_arg_is_ap(regs, 4))) {
+		if (unlikely(!prot_arg_is_ap(regs, 4))) {
 			PROTECTED_MODE_ALERT(PMSCERRMSG_NOT_DESCR_IN_SC_ARG_NAME_TAG,
 				     sys_call_ID_to_name[regs->sys_num],
 				     "third", prot_sc_arg_tag(4, regs));
 			PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EINVAL);
 			return -EINVAL;
 		}
-		break;
+		unsigned long raddr;
+		rval = do_shmat(first, (char __user *)ptr, second, &raddr, SHMLBA);
+		if (rval)
+			return rval;
+		e2k_ap_t ap;
+		int tag;
+		unsigned long segm_size = get_shm_segm_size(first);
+		if (IS_ERR_VALUE(segm_size))
+			return (long) segm_size;
+		MAKE_TAGGED_AP(ap, tag, raddr, segm_size); 
+		return put_user_tagged_16(ap.qword, tag, (void __user *) third);
 	default: /* other options don't require extra arg processing */
 		break;
 	}
@@ -3202,13 +3210,6 @@ long protected_sys_ipc(const unsigned long call, /* a1 */
 	rval = sys_ipc((u32) call, (int) first, (unsigned long) second,
 			(unsigned long) third, fourth, fifth);
 
-	if (!IS_ERR_VALUE(rval) && (call == SHMAT)) {
-		/* we need to return descriptor to pointer in args[1] */
-		rval = process_shmat_syscall_result(
-			(int) first /*shmid*/,
-			(int) second /*shmflg*/,
-			(ulong __user *) third /**raddr*/);
-	}
 out:
 	DbgSCP("(%d) returned %ld\n", (int) call, rval);
 	return rval;
@@ -3216,7 +3217,7 @@ out:
 
 __section(".entry.text")
 static long prot_sys_mmap(const unsigned long start,
-		const unsigned long length, const unsigned long prot,
+		unsigned long length, const unsigned long prot,
 		const unsigned long flags, const unsigned long fd,
 		const unsigned long offset, const int offset_in_bytes,
 		struct pt_regs *regs)
@@ -3224,6 +3225,8 @@ static long prot_sys_mmap(const unsigned long start,
 	long rval = -EINVAL; /* syscall return value */
 	e2k_addr_t base;
 	e2k_ap_t ap;
+	unsigned long initial_length = round_up(length, PAGE_SIZE);
+	unsigned long align_mask = 0;
 	int rv1_tag = E2K_NUMERIC_ETAG, rv2_tag = E2K_NUMERIC_ETAG;
 
 	DbgSCP("start = %ld, len = %ld (0x%lx), prot = 0x%lx ", start, length, length, prot);
@@ -3232,23 +3235,30 @@ static long prot_sys_mmap(const unsigned long start,
 	if (!length)
 		goto nr_mmap_err;
 
-	if ((length > 0) && (length >> 31) && unlikely(cpu_has(CPU_FEAT_ISET_V7))) {
-		/* NB> For details on this limitation see bug #99875 */
-		PROTECTED_MODE_ALERT(PMMMAPMSG_ATTEMPT_TO_MAP_BYTES,
+	if (cpu_has(CPU_FEAT_ISET_V7)) {
+		align_mask = ap_align_mask(length);
+		length = (length + align_mask) & ~align_mask;
+		if (length >= E2K_VA_END) {
+			PROTECTED_MODE_ALERT(PMMMAPMSG_ATTEMPT_TO_MAP_BYTES,
 				     "mmap()", length, length);
-		PROTECTED_MODE_MESSAGE(0, PMMMAPMSG_CANT_MAP_OVER_2GB);
-		PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EINVAL);
-		/* NB> We cannot simply return error code as
-		 *     this syscall returns structured result.
-		 */
-		goto nr_mmap_err;
-	}
-	if (offset < 0) {
-		PROTECTED_MODE_WARNING(PMSCERRMSG_NEGATIVE_SIZE_VALUE,
-				regs->sys_num, sys_call_ID_to_name[regs->sys_num],
-				offset, 2/*argnum*/);
-		PM_EXCEPTION_ON_WARNING(SIGABRT, 0, EINVAL);
-		goto nr_mmap_err;
+			PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EINVAL);
+			goto nr_mmap_err;
+		}
+		if (flags & MAP_FIXED && start & align_mask) {
+			goto nr_mmap_err;
+		}
+	} else {
+		if (length >> 31) {
+			/* NB> For details on this limitation see bug #99875 */
+			PROTECTED_MODE_ALERT(PMMMAPMSG_ATTEMPT_TO_MAP_BYTES,
+				     "mmap()", length, length);
+			PROTECTED_MODE_MESSAGE(0, PMMMAPMSG_CANT_MAP_OVER_2GB);
+			PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EINVAL);
+			/* NB> We cannot simply return error code as
+			 *     this syscall returns structured result.
+			 */
+			goto nr_mmap_err;
+		}
 	}
 	if (size_exceeds_descr_max_capacity((offset_in_bytes ? offset : (offset * PAGE_SIZE)),
 						"offset", offset, regs)) {
@@ -3269,8 +3279,18 @@ static long prot_sys_mmap(const unsigned long start,
 		rval = base;
 		goto nr_mmap_err;
 	}
+	if (base & align_mask) {
+		/* file operations entry point get_unmaped_area() of requested file does not
+		 * support v7 AP alignment rules
+		 */
+		rval = ENOTSUPP;
+		goto nr_mmap_err;
+	}
+	if (cpu_has(CPU_FEAT_ISET_V7) && length > initial_length) {
+		sys_mprotect(base + initial_length, length - initial_length, PROT_NONE);
+	}
 
-	if (unlikely(cpu_has(CPU_FEAT_ISET_V7)) && flags & MAP_SHARED)
+	if ((flags & MAP_SHARED) && cpu_has(CPU_FEAT_ISET_V6))
 		PROTECTED_MODE_WARNING(PMSCWARN_MMAP_SHARED_FLAG,
 				regs->sys_num, sys_call_ID_to_name[regs->sys_num], (long)base);
 
@@ -3470,13 +3490,13 @@ struct prot_robust_list {
 	e2k_ptr_t	next;
 };
 
-static struct prot_robust_list_head {
+struct prot_robust_list_head {
 	struct prot_robust_list		list;
 	long				futex_offset;
 	e2k_ptr_t			list_op_pending;
-} prot_robust_list_head_t;
+};
 
-#define SIZEOF_PROT_HEAD_STRUCT	(sizeof(prot_robust_list_head_t))
+#define SIZEOF_PROT_HEAD_STRUCT	(sizeof(struct prot_robust_list_head))
 
 notrace __section(".entry.text")
 long protected_sys_set_robust_list(const unsigned long listhead, /* a1 */
@@ -3527,7 +3547,7 @@ long protected_sys_get_robust_list(const unsigned long pid,
 	e2k_ptr_t dscr;
 	long len;
 
-	DbgSCP("(pid=%ld, head_ptr=0x%lx, len_ptr=0x%lx)\n",
+	DbgSCP("(pid=%ld, head_ptr=0x%px, len_ptr=0x%px)\n",
 	       pid, head_ptr, len_ptr);
 
 	rcu_read_lock();
@@ -3596,69 +3616,46 @@ long protected_sys_process_vm_readwritev(const unsigned long pid,
 				 const int              vm_write)
 {
 	pid_t id = pid;
-	long lsize, rsize;
-	struct iovec __user *lv = NULL;
-	struct iovec __user *rv = NULL;
 	long rval;
 
-	DbgSCP("(%ld, lvec=0x%lx, lcnt=%ld, rvec=0x%lx, rcnt=%ld, flg=0x%lx)\n",
+	if (!check_pm_sc_debug_mode(PROTECTED_MODE_SOFT)) {
+		PROTECTED_MODE_ALERT(PMSCERRMSG_SC_ALLOWED_IN_SOFT_MODE,
+				     regs->sys_num, sys_call_ID_to_name[regs->sys_num]);
+		return -ENOSYS;
+	}
+
+	DbgSCP("(%ld, lvec=0x%px, lcnt=%ld, rvec=0x%px, rcnt=%ld, flg=0x%lx)\n",
 	       pid, lvec, liovcnt, rvec, riovcnt, flags);
-
-	lsize = (prot_sc_arg_not_ptr(2, regs)) ? 0 : AP_OBJ_SIZE(regs->qargs[1]);
-	if (lsize < (sizeof(struct prot_iovec) * liovcnt)) {
-		PROTECTED_MODE_ALERT(PMSCERRMSG_SC_ARG_SIZE_MISMATCHES_FIELD_VAL,
-				     sys_call_ID_to_name[regs->sys_num], "lvec", lsize,
+	if (liovcnt) {
+		if (prot_sc_arg_not_ptr(2, regs))
+			return -EFAULT;
+		if (AP_OBJ_SIZE(regs->qargs[1]) < (sizeof(struct prot_iovec) * liovcnt)) {
+			PROTECTED_MODE_ALERT(PMSCERRMSG_SC_ARG_SIZE_MISMATCHES_FIELD_VAL,
+				     sys_call_ID_to_name[regs->sys_num], "lvec",
+				     AP_OBJ_SIZE(regs->qargs[1]),
 				     "liovcnt", sizeof(struct prot_iovec) * liovcnt);
-		PM_BNDERR_EXCEPTION_IF_ORTH_MODE(2/*arg_num*/, regs);
-		return -EFAULT;
+			PM_BNDERR_EXCEPTION_IF_ORTH_MODE(2/*arg_num*/, regs);
+			return -EFAULT;
+		}
 	}
-	rsize = (prot_sc_arg_not_ptr(4, regs)) ? 0 : AP_OBJ_SIZE(regs->qargs[3]);
-	if (rsize < (sizeof(struct prot_iovec) * riovcnt)) {
-		PROTECTED_MODE_ALERT(PMSCERRMSG_SC_ARG_SIZE_MISMATCHES_FIELD_VAL,
-				     sys_call_ID_to_name[regs->sys_num], "rvec", rsize,
+	if (riovcnt) {
+		if (prot_sc_arg_not_ptr(4, regs))
+			return -EFAULT;
+		if (AP_OBJ_SIZE(regs->qargs[3]) < (sizeof(struct prot_iovec) * riovcnt)) {
+			PROTECTED_MODE_ALERT(PMSCERRMSG_SC_ARG_SIZE_MISMATCHES_FIELD_VAL,
+				     sys_call_ID_to_name[regs->sys_num], "rvec",
+				     AP_OBJ_SIZE(regs->qargs[3]),
 				     "riovcnt", sizeof(struct prot_iovec) * riovcnt);
-		PM_BNDERR_EXCEPTION_IF_ORTH_MODE(4/*arg_num*/, regs);
-		return -EFAULT;
-	}
-
-	if (liovcnt || riovcnt) {
-		char __user *new_arg;
-
-		new_arg = get_user_space(lsize + rsize);
-		lv = (struct iovec __user *) new_arg;
-		rv = (struct iovec __user *)(new_arg + lsize);
-
-		if (liovcnt) {
-			rval = get_pm_struct(lvec, lv, lsize, 2, liovcnt/*nr_segs*/,
-					     0x13, 0x33, 0x0, 0x0, regs);
-			if (rval) {
-				PROTECTED_MODE_ALERT(PMSCERRMSG_SC_BAD_STRUCT_IN_ARG_NAME,
-						     sys_call_ID_to_name[regs->sys_num],
-						     "iovec", "lvec");
-				PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EINVAL);
-				return -EINVAL;
-			}
+			PM_BNDERR_EXCEPTION_IF_ORTH_MODE(4/*arg_num*/, regs);
+			return -EFAULT;
 		}
-
-		if (riovcnt) {
-			rval = get_pm_struct(rvec, rv, rsize, 2, riovcnt/*nr_segs*/,
-					     0x15, 0x33, 0x0, 0x0, regs);
-			if (rval) {
-				PROTECTED_MODE_ALERT(PMSCERRMSG_SC_BAD_STRUCT_IN_ARG_NAME,
-						     sys_call_ID_to_name[regs->sys_num],
-						     "iovec", "rvec");
-				PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EINVAL);
-				return -EINVAL;
-			}
-		}
-	}
-
+	}		
 	if (vm_write)
-		rval = sys_process_vm_writev(id, lv, liovcnt,
-						rv, riovcnt, flags);
+		rval = sys_process_vm_writev(id, (const struct iovec __user *)lvec, liovcnt,
+					     (const struct iovec __user *)rvec, riovcnt, flags);
 	else
-		rval = sys_process_vm_readv(id, lv, liovcnt,
-						rv, riovcnt, flags);
+		rval = sys_process_vm_readv(id, (const struct iovec __user *)lvec, liovcnt,
+					    (const struct iovec __user *)rvec, riovcnt, flags);
 
 	return rval;
 }
@@ -3705,37 +3702,26 @@ long protected_sys_vmsplice(int				fd,      /* a1 */
 {
 	long rval = -EINVAL;
 	long size;
-	struct iovec __user *kiov;
 
-	DbgSCP("(fd=%d, iov=0x%lx, nr_segs=%ld, flg=0x%x)\n", fd, iov, nr_segs, flags);
+	DbgSCP("(fd=%d, iov=0x%px, nr_segs=%ld, flg=0x%x)\n", fd, iov, nr_segs, flags);
 
 	if (fd < 0)
 		return -EBADF;
-	if (!iov || nr_segs < 0)
-		return -EINVAL;
+	if (nr_segs == 0)
+		return 0;
 
 	if (warn_if_not_descr(2, CHECK4DESCR_SILENT, regs))
 		return -EINVAL;
 
 	size = AP_OBJ_SIZE(regs->qargs[1]);
-	if (size < sizeof(struct iovec)) {
+	if (size < sizeof(struct prot_iovec) * nr_segs) {
 		PROTECTED_MODE_ALERT(PMSCERRMSG_PTR_SIZE_TOO_LITTLE,
 				     sys_call_ID_to_name[regs->sys_num],
 				     "iov", size, sizeof(struct iovec));
 		PM_BNDERR_EXCEPTION_IF_ORTH_MODE(2/*arg_num*/, regs);
 		return rval;
 	}
-
-	kiov = get_user_space(size);
-	rval = convert_array(iov, kiov, size, 2, 1/*nr_segs*/, 0x7, 0x7, regs);
-	if (rval) {
-		PROTECTED_MODE_ALERT(PMSCERRMSG_BAD_STRUCT_IN_SC_ARG,
-			regs->sys_num, sys_call_ID_to_name[regs->sys_num], "iovec", 2);
-		PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EINVAL);
-		return -EINVAL;
-	}
-
-	rval = sys_vmsplice(fd, kiov, nr_segs, flags);
+	rval = sys_vmsplice(fd, (void __user *)AP_PTR(regs->qargs[1]), nr_segs, flags);
 	return rval;
 }
 
@@ -3810,7 +3796,6 @@ err_out:
 	return rval;
 }
 
-
 notrace __section(".entry.text")
 long protected_sys_prctl(const int	option,
 			const unsigned long	arg2,
@@ -3820,13 +3805,8 @@ long protected_sys_prctl(const int	option,
 			const unsigned long	unused6,
 			const struct pt_regs	*regs)
 {
-	long rval = -EINVAL;
-	long size, min_size;
-	void __user *intptr;
-	void __user *kintptr;
-	struct sock_fprog __user *sfprog;
-	struct sock_fprog __user *ksfprog;
-	char *str_name;
+	long rval;
+	char str_args[64] = " ";
 
 	switch (option) {
 	case PR_GET_CHILD_SUBREAPER:
@@ -3836,99 +3816,44 @@ long protected_sys_prctl(const int	option,
 	case PR_GET_PDEATHSIG:
 	case PR_GET_TSC:
 	case PR_GET_UNALIGN:
-		if (!arg2)
-			break;
-		if (warn_if_not_descr(2, CHECK4DESCR_WARNING, regs))
-			return -EFAULT;
-		size = (prot_sc_arg_not_ptr(2, regs)) ? 0 : AP_OBJ_SIZE(regs->qargs[1]);
-		if (size < sizeof(int)) {
-			str_name = "(int *) arg2";
-			PROTECTED_MODE_ALERT(PMSCERRMSG_SC_ARGPTR_SIZE_TOO_LITTLE,
-					     sys_call_ID_to_name[regs->sys_num],
-					     str_name, size, sizeof(int));
-			PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EINVAL);
-			return rval;
-		}
-		break;
 	case PR_GET_NAME:
-		if (!arg2)
-			break;
-		if (warn_if_not_descr(2, CHECK4DESCR_WARNING, regs))
-			return -EFAULT;
-		size = (prot_sc_arg_not_ptr(2, regs)) ? 0 : AP_OBJ_SIZE(regs->qargs[1]);
-		min_size = 16; /* this is specified in Linux Pages */
-		if (size < min_size) {
-			str_name = "(char *) arg2";
-			PROTECTED_MODE_ALERT(PMSCERRMSG_SC_ARGPTR_SIZE_TOO_LITTLE,
-					     sys_call_ID_to_name[regs->sys_num],
-					     str_name, size, min_size);
-			PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EINVAL);
-			return rval;
-		}
-		break;
 	case PR_SET_NAME:
-		if (!arg2)
-			break;
-		if (warn_if_not_descr(2, CHECK4DESCR_WARNING, regs))
-			return -EFAULT;
-		size = (prot_sc_arg_not_ptr(2, regs)) ? 0 : AP_OBJ_SIZE(regs->qargs[1]);
-		if (e2k_ptr_str_check((char __user *) arg2, size)) {
-			PROTECTED_MODE_ALERT(PMSCERRMSG_NOT_STRING_IN_SC_ARG,
-				regs->sys_num, sys_call_ID_to_name[regs->sys_num], 2/*arg#*/);
-			PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EINVAL);
+	case PR_GET_TID_ADDRESS:
+		if (prot_sc_arg_is_ap(2, regs)) {
+			if (WARN_ON_ONCE(arg2 != AP_PTR(regs->qargs[1]))) {
+				rval = -EFAULT;
+				snprintf(str_args, sizeof(str_args), "cmd = %d, arg2 = 0x%lx, arg3 = 0x%lx", option, arg2, arg3);
+				PROTECTED_MODE_ALERT(PMSCERRMSG_BAD_STRUCT_IN_SC_ARG,
+					regs->sys_num, sys_call_ID_to_name[regs->sys_num], str_args, 2);
+				PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, rval);
+				return rval;
+			}
+			set_ap_u_border(regs->qargs[1]);
 		}
 		break;
-	case PR_GET_TID_ADDRESS:
-		intptr = (void __user *) arg2;
-		if (!intptr)
-			break;
-		if (warn_if_not_descr(2, CHECK4DESCR_WARNING, regs))
-			return -EFAULT;
-		str_name = "(int **) arg2";
-		size = (prot_sc_arg_not_ptr(2, regs)) ? 0 : AP_OBJ_SIZE(regs->qargs[1]);
-		if (size < sizeof(int **)) {
-			PROTECTED_MODE_ALERT(PMSCERRMSG_SC_ARGPTR_SIZE_TOO_LITTLE,
-					     sys_call_ID_to_name[regs->sys_num],
-					     str_name, size, sizeof(int **));
-			PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EINVAL);
-			return rval;
-		}
-		kintptr = get_user_space(size);
-		rval = convert_array(intptr, kintptr,
-				     size, 1, 1/*nr_segs*/, 0x3, 0x3, regs);
-		if (rval)
-			goto err_out;
-		return sys_prctl(option, (unsigned long) kintptr, arg3,
-				 arg4, arg5);
 	case PR_SET_SECCOMP:
-		sfprog = (struct sock_fprog __user *) arg3;
-		if (!sfprog)
-			break;
-		if (warn_if_not_descr(3, CHECK4DESCR_WARNING, regs))
-			return -EFAULT;
-		str_name = "(sock_fprog *) arg3";
-		size = (prot_sc_arg_not_ptr(3, regs)) ? 0 : AP_OBJ_SIZE(regs->qargs[2]);
-		if (size < sizeof(struct sock_fprog)) {
-			PROTECTED_MODE_ALERT(PMSCERRMSG_SC_ARGPTR_SIZE_TOO_LITTLE,
-					     sys_call_ID_to_name[regs->sys_num],
-					     str_name, size, sizeof(struct sock_fprog));
-			PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EINVAL);
-			return rval;
+		if (prot_sc_arg_is_ap(3, regs)) {
+			if (WARN_ON_ONCE(arg3 != AP_PTR(regs->qargs[2]))) {
+				rval = -EFAULT;
+				snprintf(str_args, sizeof(str_args), "cmd = %d, arg2 = 0x%lx, arg3 = 0x%lx", option, arg2, arg3);
+				PROTECTED_MODE_ALERT(PMSCERRMSG_BAD_STRUCT_IN_SC_ARG,
+					regs->sys_num, sys_call_ID_to_name[regs->sys_num], str_args, 3);
+				PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, rval);
+				return rval;
+			}
+			set_ap_u_border(regs->qargs[2]);
 		}
-		ksfprog = get_user_space(size);
-		rval = convert_array(sfprog, ksfprog, size, 2, 1/*nr_segs*/, 0xc, 0xf, regs);
-		if (rval)
-			goto err_out;
-		return sys_prctl(option, arg2, (unsigned long) ksfprog,
-				 arg4, arg5);
+		break;
 	}
 
-	return sys_prctl(option, arg2, arg3, arg4, arg5);
+	rval = sys_prctl(option, arg2, arg3, arg4, arg5);
 
-err_out:
-	PROTECTED_MODE_ALERT(PMSCERRMSG_BAD_STRUCT_IN_SC_ARG,
-			     regs->sys_num, sys_call_ID_to_name[regs->sys_num], str_name, 2);
-	PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EINVAL);
+	if (rval) {
+		snprintf(str_args, sizeof(str_args), "cmd = %d, arg2 = 0x%lx, arg3 = 0x%lx", option, arg2, arg3);
+		PROTECTED_MODE_WARNING(PMSCWARN_PROC_RETURNED_ERROR,
+				sys_call_ID_to_name[regs->sys_num], str_args, rval);
+		PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, rval);
+	}
 	return rval;
 }
 
@@ -4227,7 +4152,7 @@ long protected_sys_mincore(const unsigned long	addr,	/* a1 */
 	size_t min_length = (length + PAGE_SIZE - 1) / PAGE_SIZE;
 
 	size = (prot_sc_arg_not_ptr(3, regs)) ? 0 : AP_OBJ_SIZE(regs->qargs[2]);
-	DbgSCP("addr=0x%lx length=0x%zx vec=0x%lx size=0x%lx min_length=0x%zx",
+	DbgSCP("addr=0x%lx length=0x%zx vec=0x%px size=0x%lx min_length=0x%zx",
 	       addr, length, vec, size, min_length);
 	if (size > 0 && size < min_length) {
 		PROTECTED_MODE_ALERT(PMSCERRMSG_SC_ARG_SIZE_TOO_LITTLE,
@@ -4238,7 +4163,7 @@ long protected_sys_mincore(const unsigned long	addr,	/* a1 */
 	} else {
 		rval = sys_mincore(addr, length, vec);
 	}
-	DbgSCP("sys_mincore(addr=0x%lx, length=0x%zx, vec=0x%lx) returned %ld\n",
+	DbgSCP("sys_mincore(addr=0x%lx, length=0x%zx, vec=0x%px) returned %ld\n",
 		addr, length, vec, rval);
 
 	return rval;
@@ -4247,7 +4172,7 @@ long protected_sys_mincore(const unsigned long	addr,	/* a1 */
 notrace __section(".entry.text")
 long protected_sys_process_madvise(const long		pidfd,		/* a1 */
 				   void __user		*vec,		/* a2 */
-				   const unsigned long	vlen,		/* a3 */
+				   const long		vlen,		/* a3 */
 				   const unsigned long	behavior,	/* a4 */
 				   const unsigned long	flags,		/* a5 */
 				   const unsigned long unused6,		/* a6 */
@@ -4258,7 +4183,7 @@ long protected_sys_process_madvise(const long		pidfd,		/* a1 */
 	int err_iov;
 
 	if (vec) {
-		if (warn_if_not_descr(2, CHECK4DESCR_SILENT, regs))
+		if (warn_if_not_descr(2, CHECK4DESCR_SILENT, regs) || vlen < 0)
 			return -EINVAL;
 		/* Converting iovec structure: */
 		/* Allocating space on user stack for converted_iovec: */
@@ -4279,12 +4204,6 @@ long protected_sys_process_madvise(const long		pidfd,		/* a1 */
 
 	return rval;
 }
-
-/*
- * Converting protected structure siginfo_t into 64-bit format.
- * Allocates converted structure on user stack and returns it in the 2nd arg.
- * Returns error code or 0 if converted OK.
- */
 
 /* Post-processor aimed to return syscall termination status
  *          from temporal structure used to run syscall back
@@ -4319,7 +4238,7 @@ int update_protected_siginfo_t(void __user *siginfo64,
 	*/
 
 	if (!siginfo64 || !siginfo128) {
-		DbgSCP("Empty input: siginfo64=0x%lx siginfo128=0x%lx\n",
+		DbgSCP("Empty input: siginfo64=0x%px siginfo128=0x%px\n",
 		       siginfo64, siginfo128);
 		return rval;
 	}
@@ -4331,49 +4250,6 @@ int update_protected_siginfo_t(void __user *siginfo64,
 		return -EFAULT;
 	}
 	return 0;
-}
-
-/* rt_sigqueueinfo/rt_tgsigqueueinfo conversion masks siginfo_t structure: */
-#define MASK_SIGINFO_T_RT_PID_UID	0xc9c400088 /* field type mask */
-#define MASK_SIGINFO_T_RT		0xc9c488088 /* field type mask */
-
-static inline
-unsigned long get_siginfo_mask_on_layout(int signo, int code)
-/* This function implements check similar to the one in has_si_pid_and_uid() */
-{
-	unsigned long mask;
-
-	switch (siginfo_layout(signo, code)) {
-	case SIL_KILL:
-	case SIL_CHLD:
-	case SIL_RT:
-		mask = MASK_SIGINFO_T_RT_PID_UID;
-		break;
-	default:
-		mask = MASK_SIGINFO_T_RT;
-		break;
-	}
-
-	return mask;
-}
-
-static inline
-unsigned long get_siginfo_mask_on_siginfo(const int __user *usiginfo)
-{
-	int signo, code;
-	long mask;
-
-	if (get_user(signo, usiginfo) || get_user(code, usiginfo + 8)) {
-		PROTECTED_MODE_ALERT(PMSCERRMSG_FATAL_READ_FROM,
-				     __func__, (unsigned long) usiginfo);
-		PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EFAULT);
-		return 0L;
-	}
-
-	mask =  get_siginfo_mask_on_layout(signo, code);
-	DbgSCP("signo=%d, code=%d ==> mask = 0x%lx\n", signo, code, mask);
-
-	return mask;
 }
 
 
@@ -4389,7 +4265,7 @@ long protected_sys_waitid(const long		which,		/* a1 */
 	void __user *siginfo64 = NULL;
 	long rval;
 
-	DbgSCP("which=%ld, pid=%ld, infop=0x%lx, options=0x%x, ru=0x%lx\n",
+	DbgSCP("which=%ld, pid=%ld, infop=0x%lx, options=0x%x, ru=0x%px\n",
 	       which, pid, (unsigned long) infop, (int) options, ru);
 
 	if (infop) {
@@ -4468,7 +4344,7 @@ long protected_sys_io_uring_register(unsigned int fd,
 	long rval;
 	long size;
 
-	DbgSCP("fd=%d, opcode=%d, arg=0x%lx, nr_args=0x%x\n",
+	DbgSCP("fd=%d, opcode=%d, arg=0x%px, nr_args=0x%x\n",
 	       fd, opcode, arg, nr_args);
 
 	if (!arg)
@@ -4614,8 +4490,9 @@ long protected_sys_ptrace(long		request,
 	int ret;
 
 	if (check_pm_sc_debug_mode(PM_SC_PTRACE_ENABLED) == 0) {
-		PROTECTED_MODE_WARNING(PMSCERRMSG_SC_NOT_AVAILABLE_IN_PM,
+		PROTECTED_MODE_WARNING(PMSCERRMSG_SC_NOT_ENABLED,
 				     regs->sys_num, sys_call_ID_to_name[regs->sys_num]);
+		PM_EXCEPTION_ON_WARNING(SIGABRT, SI_KERNEL, EPERM);
 		return sys_ni_syscall();
 	}
 
@@ -5051,10 +4928,8 @@ int convert_futex_waitv_128_to_64(struct prot_futex_waitv __user *waiters_128,
 	int err = 0, i, tags;
 	unsigned long p;
 
-	if (check_pm_sc_debug_feature(PM_SC_DBG_MODE_CONV_STRUCT)) {
-		print_buffer("Input waiters_128", waiters_128,
-			     nr_futexes * sizeof(struct prot_futex_waitv));
-	}
+	print_buffer("Input waiters_128", waiters_128,
+		     nr_futexes * sizeof(struct prot_futex_waitv));
 
 	w_64 = get_user_space(nr_futexes * sizeof(struct futex_waitv));
 	*waiters_64 = w_64;
@@ -5084,10 +4959,8 @@ int convert_futex_waitv_128_to_64(struct prot_futex_waitv __user *waiters_128,
 		w_64++;
 	}
 
-	if (check_pm_sc_debug_feature(PM_SC_DBG_MODE_CONV_STRUCT)) {
-		print_buffer("Output waiters_64", *waiters_64,
-			     nr_futexes * sizeof(struct futex_waitv));
-	}
+	print_buffer("Output waiters_64", *waiters_64,
+		     nr_futexes * sizeof(struct futex_waitv));
 
 	if (err)
 		*waiters_64 = NULL;
@@ -5340,6 +5213,448 @@ long protected_sys_brk(unsigned long uaddr,
 out:
 	DbgSCP("(0x%ld) ==> rval=0x%lx\n", uaddr, rval);
 	return rval;
+}
+
+notrace __section(".entry.text")
+long protected_sys_move_pages(int pid,
+				unsigned long nr_pages,
+				const void __user * __user *pages,
+				const int __user *nodes,
+				int __user *status,
+				int flags,
+				const struct pt_regs *regs)
+{
+	int size;
+	const void __user * __user *pages64;
+	long ret;
+
+	if (!nr_pages) {
+		pages64 = pages;
+		goto out;
+	}
+
+	/* Check that size of 'pages' fits to keep 'nr_pages' pointers: */
+
+	size = AP_OBJ_SIZE(regs->qargs[2]);
+	if (size < (nr_pages * sizeof(e2k_ptr_t))) {
+		PROTECTED_MODE_ALERT(PMSCERRMSG_COUNT_EXCEEDS_DESCR_SIZE, regs->sys_num,
+				     sys_call_ID_to_name[regs->sys_num],
+				     nr_pages * sizeof(e2k_ptr_t), size, 3);
+		PM_BNDERR_EXCEPTION_IF_ORTH_MODE(3/*arg_num*/, regs);
+		return -EINVAL;
+	}
+
+	/* Converting 'pages-128' into 'pages-64': */
+
+	pages64 = get_user_space(sizeof(void *) * nr_pages);
+	ret = convert_array(pages, pages64, size, 1, nr_pages, 0x3, 0x3, regs);
+	if (ret) {
+		PM_BNDERR_EXCEPTION_IF_ORTH_MODE(3/*arg_num*/, regs);
+		return ret;
+	}
+
+	/* Check that size of 'nodes' fits to keep 'nr_pages' elements: */
+
+	size = AP_OBJ_SIZE(regs->qargs[3]);
+	if (size < (nr_pages * sizeof(*nodes))) {
+		PROTECTED_MODE_ALERT(PMSCERRMSG_COUNT_EXCEEDS_DESCR_SIZE, regs->sys_num,
+				     sys_call_ID_to_name[regs->sys_num],
+				     nr_pages * sizeof(*nodes), size, 4);
+		PM_BNDERR_EXCEPTION_IF_ORTH_MODE(4/*arg_num*/, regs);
+		return -EINVAL;
+	}
+
+	/* Check that size of 'status' fits to keep 'nr_pages' elements: */
+
+	size = AP_OBJ_SIZE(regs->qargs[4]);
+	if (size < (nr_pages * sizeof(*status))) {
+		PROTECTED_MODE_ALERT(PMSCERRMSG_COUNT_EXCEEDS_DESCR_SIZE, regs->sys_num,
+				     sys_call_ID_to_name[regs->sys_num],
+				     nr_pages * sizeof(*status), size, 5);
+		PM_BNDERR_EXCEPTION_IF_ORTH_MODE(5/*arg_num*/, regs);
+		return -EINVAL;
+	}
+
+out:
+	return sys_move_pages(pid, nr_pages, pages, nodes, status, flags);
+}
+
+
+notrace __section(".entry.text")
+long protected_sys_msgctl(int msqid, int cmd, void __user * buf,
+		      long a4, long a5, long a6, const struct pt_regs *regs)
+{
+	e2k_ap_t ap = regs->qargs[2];
+	set_ap_u_border(ap);
+	return sys_msgctl(msqid, cmd, (void __user *)AP_PTR(ap));
+}
+
+
+#if 0 /* debug print */
+static void print_epoll_event(void __user *ptr, const char *header, const char *comm)
+{
+	long hi, lo;
+	int ret;
+	ret  = get_user(lo, (long *)ptr);
+	ret |= get_user(hi, ((long *)ptr + 1));
+	pr_info("%s%s: 0x%lx :: event64.lo=0x%lx, event64.hi=0x%lx\n",
+		header, comm, (long)ptr, lo, hi);
+}
+
+#else
+#define print_epoll_event(...)
+#endif /* debug print */
+
+/* Converting user protected event structure into (user) regular structure:
+ * NB> We exploit the fact that protected epoll event structure size is
+ *     twice bigger than the regular structure size.
+ *     Therefore we can fill in alignment dword in the protected structure with address
+ *     while keeping descriptor field untouched, and use it as input regular epoll_event structure.
+ *     Also we save descriptor size in the 'size' field of the prot_epoll_event structure.
+ * Returns error number or 0 if OK.
+ */
+static int convert_epoll_event_128_to_64(struct prot_epoll_event __user *event,
+					 const struct pt_regs *regs, const int arg_num)
+{
+	e2k_ap_t data;
+	unsigned long address, size;
+	int tag, rval;
+
+	if (!event)
+		return 0;
+	if (((unsigned long)&event->data) & (DESCRIPTOR_SIZE - 1)) {
+		/* descriptor 'event' appeared improperly aligned */
+		rval = -EINVAL;
+		PROTECTED_MODE_ALERT(PMCNVSTRMSG_STRUCT_DESCR_UNALIGNED,
+				sys_call_ID_to_name[regs->sys_num],
+				"event->data", (unsigned long)&event->data);
+		goto err_out;
+	}
+
+	rval = get_user_tagged_16(data.qword, tag, &event->data);
+	if (unlikely(rval))
+		goto err_out;
+
+	if (!IS_AP(data, tag)) {
+		if (!(tag & 0x3)) /* Numerical tag in the lowest word */
+		    tag = 0; /* This is definitely 'fd' field in the union */
+		else
+		    goto err_out;
+	}
+	if (tag) {
+		/* This is pointer; filling field 'address' in: */
+		address = AP_PTR(data);
+		size = AP_OBJ_SIZE(data);
+		if (size >> 32) {
+			PROTECTED_MODE_ALERT(PMSCERRMSG_SC_ARGNAME_VAL_EXCEEDS_DSCR_MAX,
+				regs->sys_num, sys_call_ID_to_name[regs->sys_num],
+				(size_t) size, "event");
+			rval = -EINVAL;
+			goto err_out;
+		}
+	} else {
+		address = (unsigned long) (unsigned int) AP_BASE(data);
+		size = 0;
+	}
+	/* Filling regular epoll_event fields in: */
+	rval = put_user(address, &((struct epoll_event __user *)event)->data);
+	rval |= put_user(size, &event->size);
+	print_epoll_event(event, __func__, "[128]");
+	print_epoll_event((char *)event + 16, __func__, "[128]");
+	if (likely(!rval))
+		return 0;
+
+err_out:
+	PROTECTED_MODE_ALERT(PMSCERRMSG_BAD_STRUCT_IN_SC_ARG,
+	     regs->sys_num, sys_call_ID_to_name[regs->sys_num],
+	     "epoll_event", arg_num);
+	PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EINVAL);
+	return -EFAULT;
+}
+
+/* Converting user protected event structures into (user) regular structures: */
+static
+int prot_epoll_events_to_64(struct prot_epoll_event __user *events_128,
+			    struct epoll_event __user *events_64,
+			    const int count,
+			    const struct pt_regs *regs, const int arg_num)
+{
+	int rval = 0, i;
+
+	if (!events_128 || !events_64 || !count)
+		return 0;
+
+	for (i = 0; i < count; i++) {
+		rval = convert_epoll_event_128_to_64(&events_128[i], regs, arg_num);
+		if (unlikely(rval)) {
+			PROTECTED_MODE_ALERT(PMSCERRMSG_BAD_STRUCT_IN_SC_ARG,
+			     regs->sys_num, sys_call_ID_to_name[regs->sys_num],
+			     "epoll_event", arg_num);
+			PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, rval);
+			return -EFAULT;
+		}
+
+		rval = copy_in_user(&events_64[i], &events_128[i], sizeof(*events_64));
+		if (unlikely(rval)) {
+			PROTECTED_MODE_ALERT(PMSCERRMSG_FATAL_WRITE_AT,
+				     __func__, (unsigned long) &events_128[i].data);
+			PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, rval);
+			return -EFAULT;
+		}
+	}
+
+	return rval;
+}
+
+/* Converting (user) regular event structure into (user) protected structure: */
+static int copy_epoll_event_64_to_128(struct epoll_event __user *event64,
+				      struct prot_epoll_event __user *event128,
+				      const struct pt_regs *regs, const int arg_num)
+{
+	unsigned long base;
+	unsigned size, tag;
+	e2k_ap_t ap;
+	int ret;
+
+	ret = copy_in_user(event128, event64, sizeof(*event64));
+	if (ret) {
+		PROTECTED_MODE_ALERT(PMSCERRMSG_FATAL_WRITE_AT, __func__, (unsigned long) event128);
+		return -EFAULT;
+	}
+
+	ret = get_user(base, &((struct prot_epoll_event __user *)event64)->address);
+	ret = ret ?: get_user(size, &((struct prot_epoll_event __user *)event64)->size);
+	if (ret) {
+		PROTECTED_MODE_ALERT(PMSCERRMSG_FATAL_WRITE_AT, __func__, (unsigned long)event128);
+		return -EFAULT;
+	}
+
+	if (base && size) {
+		ap = new_ap(base, size, 0, AP_RW(regs->qargs[arg_num - 1]));
+		tag = ETAGAPQ;
+	} else {
+		ap = new_ap(base, 0, 0, 0);
+		tag = 0;
+	}
+
+	ret = put_user_tagged_16(ap.qword, tag, &event128->data);
+
+	if (ret)
+		PROTECTED_MODE_ALERT(PMSCERRMSG_FATAL_WRITE_AT, __func__,
+						(unsigned long) &event128->data);
+
+	print_epoll_event(event128, __func__, "[128]");
+	print_epoll_event((char *)event128 + 16, __func__, "[128]");
+
+	return ret;
+}
+
+/* Converting user protected event structures into (user) regular structures: */
+static
+int epoll_events_64_to_128(struct epoll_event __user *events_64,
+			   struct prot_epoll_event __user *events_128,
+			   const int count,
+			   const struct pt_regs *regs, const int arg_num)
+{
+	int rval, i;
+
+	if (!events_128 || !events_64 || !count)
+		return 0;
+
+	for (i = 0; i < count; i++) {
+		rval = copy_epoll_event_64_to_128(&events_64[i], &events_128[i], regs, arg_num);
+		if (unlikely(rval)) {
+			PROTECTED_MODE_ALERT(PMSCERRMSG_BAD_STRUCT_IN_SC_ARG,
+			     regs->sys_num, sys_call_ID_to_name[regs->sys_num],
+			     "epoll_event", arg_num);
+			PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, rval);
+			return rval;
+		}
+	}
+
+	return rval;
+}
+
+notrace __section(".entry.text")
+long protected_sys_epoll_ctl(const unsigned long epfd,	/* a1 */
+			     const unsigned long op,	/* a2 */
+			     const unsigned long fd,	/* a3 */
+			     void __user	*event,	/* a4 */
+				const unsigned long unused5,
+				const unsigned long unused6,
+				const struct pt_regs *regs)
+{
+	long rval;
+
+	DbgSCP("(epfd=0x%lx, op=0x%lx, fd=0x%lx, event=0x%px)\n",
+					epfd, op, fd, event);
+
+/* Linux Programmer's Manual for epoll_ctl states:
+ * NB> In kernel versions before 2.6.9, the EPOLL_CTL_DEL operation
+ *     required a non-null pointer in event, even though this argument
+ *     is ignored.  Since Linux 2.6.9, event can be specified as NULL
+ *     when using EPOLL_CTL_DEL.  Applications that need to be portable
+ *     to kernels before 2.6.9 should specify a non-null pointer in event.
+ */
+	if (ep_op_has_event(op)) {
+		rval = convert_epoll_event_128_to_64(event, regs, 4/*arg_num*/);
+		if (rval)
+			return rval;
+	}
+
+	rval = sys_epoll_ctl(epfd, op, fd, event);
+	DbgSCP("(epfd=0x%lx, op=0x%lx, fd=0x%lx, event=0x%px) == %ld\n",
+					epfd, op, fd, event, rval);
+
+	return rval;
+}
+
+notrace __section(".entry.text")
+long protected_sys_epoll_wait(const unsigned long epfd,		/* a1 */
+			      void __user	*event,		/* a2 */
+			      const long	maxevents,	/* a3 */
+			      const long	timeout,	/* a4 */
+				const unsigned long unused5,
+				const unsigned long unused6,
+				const struct pt_regs *regs)
+{
+	long rval;
+	size_t events_size;
+	void __user *events64; /* converted array of epoll events */
+	int size, ret;
+
+	DbgSCP("(epfd=0x%lx, event=0x%px, maxevents=%ld, timeout=%ld)\n",
+					epfd, event, maxevents, timeout);
+	if (maxevents <= 0)
+		return -EINVAL;
+
+	size = AP_OBJ_SIZE(regs->qargs[1]);
+	events_size = sizeof(struct prot_epoll_event) * maxevents;
+	if (size < events_size) {
+		if (size) {
+			if (!size_exceeds_descr_max_capacity(events_size, "maxevents",
+								maxevents, regs))
+				PROTECTED_MODE_ALERT(PMSCERRMSG_SC_ARG_SIZE_TOO_LITTLE,
+					     regs->sys_num, sys_call_ID_to_name[regs->sys_num],
+					     (int) size, events_size, 2);
+			PM_BNDERR_EXCEPTION_IF_ORTH_MODE(2/*arg_num*/, regs);
+		}
+		return -EFAULT;
+	}
+
+	events64 = get_user_space(sizeof(struct epoll_event) * maxevents);
+	ret = sys_epoll_wait(epfd, events64, maxevents, timeout);
+	if (ret < 0)
+		return ret;
+
+	rval = epoll_events_64_to_128(events64, event, maxevents, regs, 2/*arg_num*/);
+	if (rval)
+		return rval;
+
+	return ret;
+}
+
+notrace __section(".entry.text")
+long protected_sys_epoll_pwait(const unsigned long	epfd,		/* a1 */
+			       void __user		*event,		/* a2 */
+			       const long		maxevents,	/* a3 */
+			       const long		timeout,	/* a4 */
+			       const unsigned long	sigmask,	/* a5 */
+			       const unsigned long	sigsetsize,	/* a6 */
+			       const struct pt_regs *regs)
+{
+	long rval;
+	size_t events_size;
+	void __user *events64; /* converted array of epoll events */
+	int size, ret;
+
+	DbgSCP("(epfd=0x%lx, event=0x%px, maxevents=%ld, timeout=%ld, sigmask, sigsetsize=%ld)\n",
+		epfd, event, maxevents, timeout, sigsetsize);
+
+	if (maxevents <= 0)
+		return -EINVAL;
+
+	size = AP_OBJ_SIZE(regs->qargs[1]);
+	events_size = sizeof(struct epoll_event) * maxevents;
+	if (size < events_size) {
+		if (size) {
+			if (!size_exceeds_descr_max_capacity(events_size, "maxevents",
+								maxevents, regs))
+				PROTECTED_MODE_ALERT(PMSCERRMSG_SC_ARG_SIZE_TOO_LITTLE,
+					     regs->sys_num, sys_call_ID_to_name[regs->sys_num],
+					     (int) size, events_size, 2);
+			PM_BNDERR_EXCEPTION_IF_ORTH_MODE(2/*arg_num*/, regs);
+		}
+		return -EFAULT;
+	}
+
+	events64 = get_user_space(events_size);
+	rval = prot_epoll_events_to_64(event, events64, maxevents, regs, 2/*arg_num*/);
+	if (rval)
+		return rval;
+
+	ret = sys_epoll_pwait(epfd, events64, maxevents,
+			      timeout, (sigset_t __user *) sigmask, sigsetsize);
+	if (ret < 0)
+		return ret;
+
+	rval = epoll_events_64_to_128(events64, event, maxevents, regs, 2/*arg_num*/);
+	if (rval)
+		return rval;
+
+	return ret;
+}
+
+notrace __section(".entry.text")
+long protected_sys_epoll_pwait2(const unsigned long  epfd,	/* a1 */
+		void __user	*event,				/* a2 */
+		const long	maxevents,			/* a3 */
+		const unsigned long  timeout,		/* a4 */
+		const unsigned long  sigmask,		/* a5 */
+		const unsigned long  sigsetsize,		/* a6 */
+		const struct pt_regs *regs)
+{
+	long rval;
+	size_t events_size;
+	void __user *events64; /* converted array of epoll events */
+	int size, ret;
+
+	DbgSCP("(epfd=0x%lx, event=0x%px, maxevents=%ld, timeout=%ld, sigmask, sigsetsize=%ld)\n",
+		epfd, event, maxevents, timeout, sigsetsize);
+
+	if (maxevents <= 0)
+		return -EINVAL;
+
+	size = AP_SIZE(regs->qargs[2]);
+	events_size = sizeof(struct epoll_event) * maxevents;
+	if (size < events_size) {
+		if (size) {
+			if (!size_exceeds_descr_max_capacity(events_size, "maxevents",
+								maxevents, regs))
+				PROTECTED_MODE_ALERT(PMSCERRMSG_SC_ARG_SIZE_TOO_LITTLE,
+					     regs->sys_num, sys_call_ID_to_name[regs->sys_num],
+					     (int) size, events_size, 2);
+			PM_BNDERR_EXCEPTION_IF_ORTH_MODE(2/*arg_num*/, regs);
+		}
+		return -EINVAL;
+	}
+
+	events64 = get_user_space(events_size);
+	rval = prot_epoll_events_to_64(event, events64, maxevents, regs, 2/*arg_num*/);
+	if (rval)
+		return rval;
+
+	ret = sys_epoll_pwait2(epfd, events64, maxevents,
+			(struct __kernel_timespec __user *) timeout,
+			(sigset_t __user *) sigmask, sigsetsize);
+	if (ret < 0)
+		return ret;
+
+	rval = epoll_events_64_to_128(events64, event, maxevents, regs, 2/*arg_num*/);
+	if (rval)
+		return rval;
+
+	return ret;
 }
 
 #endif /* CONFIG_PROTECTED_MODE */

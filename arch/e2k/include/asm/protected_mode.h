@@ -9,6 +9,7 @@
 #define _E2K_ASM_PROTECTED_MODE_H_
 
 #include <uapi/asm/protected_mode.h>
+#include <linux/kconfig.h>
 
 /*
  * This structure specifies attributes of protected syscall arguments:
@@ -28,6 +29,15 @@ struct prot_syscall_arg_attrs {
 	short size6; /* minimum allowed size of arg6  */
 } __aligned(sizeof(void *)) /* For faster address calculation */;
 extern const struct prot_syscall_arg_attrs prot_syscall_arg_masks[];
+
+#if IS_ENABLED(CONFIG_SOFT_PM)
+extern void init_arch_init_soft_pm_mode(void (*initer)(void *context_ptr));
+extern void remove_arch_init_soft_pm_mode(void);
+#endif /* CONFIG_SOFT_PM */
+
+extern unsigned long protected_mode_check_env_debug_mask(const char *env_var_name,
+							 const size_t max_len,
+							 const unsigned long mask);
 
 extern void arch_init_secure_computing_mode(void *context_ptr);
 

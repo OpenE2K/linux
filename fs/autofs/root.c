@@ -36,6 +36,9 @@ const struct file_operations autofs_root_operations = {
 	.iterate_shared	= dcache_readdir,
 	.llseek		= dcache_dir_lseek,
 	.unlocked_ioctl	= autofs_root_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	= autofs_root_ioctl,
+#endif
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= autofs_root_compat_ioctl,
 #endif

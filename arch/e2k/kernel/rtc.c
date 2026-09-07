@@ -36,18 +36,7 @@ static int iohub_rtc_set_mmss(unsigned long nowtime)
 	if (rtc == NULL)
 		return -1;
 
-#if defined(CONFIG_SCLKR_CLOCKSOURCE)
-	if (strcmp(curr_clocksource->name, "sclkr") == 0 &&
-			sclkr_mode == SCLKR_RTC) {
-		prepare_sclkr_rtc_set();
-		ret = rtc_set_time(rtc, &tm);
-		finish_sclkr_rtc_set();
-	} else {
-		ret = rtc_set_time(rtc, &tm);
-	}
-#else
 	ret = rtc_set_time(rtc, &tm);
-#endif
 	rtc_class_close(rtc);
 
 	return ret;

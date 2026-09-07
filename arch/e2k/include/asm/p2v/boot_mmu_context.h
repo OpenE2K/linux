@@ -27,8 +27,11 @@ static inline void boot_native_set_kernel_MMU_state_before(void)
 
 	E2K_WAIT_ALL;
 
-	boot_write_OSCUIR_reg(0);
-	boot_write_OSCUTD_reg((u64) boot_kernel_CUT);
+	if (boot_cpu_has(CPU_FEAT_ISET_V6)) {
+		unsigned long cut_base = (unsigned long) boot_kernel_CUT; /* See #158590 */
+		boot_write_OSCUIR_reg((e2k_cuir_t) { .word = 0 });
+		boot_write_OSCUTD_reg((e2k_cutd_t) { .base = cut_base });
+	}
 
 	if (MMU_IS_SEPARATE_PT()) {
 		e2k_core_mode_t core_mode;
@@ -65,7 +68,10 @@ static inline void boot_native_set_kernel_MMU_state_before(void)
 static inline void boot_native_set_kernel_MMU_state_after(void)
 {
 	E2K_WAIT_ALL;
-	boot_write_OSCUTD_reg((u64) kernel_CUT);
+	if (cpu_has(CPU_FEAT_ISET_V6)) {
+		unsigned long cut_base = (unsigned long) kernel_CUT; /* See #158590 */
+		boot_write_OSCUTD_reg((e2k_cutd_t) { .base = cut_base });
+	}
 	if (MMU_IS_SEPARATE_PT()) {
 		BOOT_WRITE_MMU_OS_VAB(MMU_SEPARATE_KERNEL_VAB);
 	}

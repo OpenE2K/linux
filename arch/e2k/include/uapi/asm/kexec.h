@@ -14,7 +14,7 @@
 struct kexec_reboot_param {
 	char	__user *cmdline;
 	int	cmdline_size;
-	void	*image;
+	void	__user *image;
 	__u64	image_size;
 	void	*initrd;
 	__u64	initrd_size;

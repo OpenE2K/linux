@@ -1,34 +1,6 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
- *	Intel IO-APIC support for multi-Pentium hosts.
- *
- *	Copyright (C) 1997, 1998, 1999, 2000, 2009 Ingo Molnar, Hajnalka Szabo
- *
- *	Many thanks to Stig Venaas for trying out countless experimental
- *	patches and reporting/debugging problems patiently!
- *
- *	(c) 1999, Multiple IO-APIC support, developed by
- *	Ken-ichi Yaku <yaku@css1.kbnes.nec.co.jp> and
- *      Hidemi Kishimoto <kisimoto@css1.kbnes.nec.co.jp>,
- *	further tested and cleaned up by Zach Brown <zab@redhat.com>
- *	and Ingo Molnar <mingo@redhat.com>
- *
- *	Fixes
- *	Maciej W. Rozycki	:	Bits for genuine 82489DX APICs;
- *					thanks to Eric Gilmore
- *					and Rolf G. Tews
- *					for testing these extensively
- *	Paul Diefenbaugh	:	Added full ACPI support
- *
- * Historical information which is worth to be preserved:
- *
- * - SiS APIC rmw bug:
- *
- *	We used to have a workaround for a bug in SiS chips which
- *	required to rewrite the index register for a read-modify-write
- *	operation as the chip lost the index information which was
- *	setup for the read already. We cache the data now, so that
- *	workaround has been removed.
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
  */
 
 #include <linux/mm.h>
@@ -54,6 +26,7 @@
 #include "apic-msidef.h"
 #include "../io_pic.h"
 
+static void ioapic_configure_entry(struct irq_data *irqd);
 
 #define	for_each_pin(apic, pin)		\
 	for ((pin) = 0; (pin) < apic->nr_pins; (pin)++)
@@ -85,6 +58,7 @@ static inline void io_apic_eoi(struct iopic *apic, unsigned int vector)
 static unsigned int io_apic_read(struct iopic *apic, unsigned int reg)
 {
 	struct io_apic __iomem *io_apic = io_apic_base(apic);
+	lockdep_assert_held(&apic->lock);
 	writel(reg, &io_apic->index);
 	return readl(&io_apic->data);
 }
@@ -93,6 +67,7 @@ static void io_apic_write(struct iopic *apic, unsigned int reg,
 			  unsigned int value)
 {
 	struct io_apic __iomem *io_apic = io_apic_base(apic);
+	lockdep_assert_held(&apic->lock);
 	writel(reg, &io_apic->index);
 	writel(value, &io_apic->data);
 }
@@ -137,22 +112,6 @@ static void ioapic_write_entry(struct iopic *apic, int pin, struct IO_APIC_route
 
 	raw_spin_lock_irqsave(&apic->lock, flags);
 	__ioapic_write_entry(apic, pin, e);
-	raw_spin_unlock_irqrestore(&apic->lock, flags);
-}
-
-/*
- * When we mask an IO APIC routing entry, we need to write the low
- * word first, in order to set the mask bit before we change the
- * high bits!
- */
-static void ioapic_mask_entry(struct iopic *apic, int pin)
-{
-	struct IO_APIC_route_entry e = { .masked = true };
-	unsigned long flags;
-
-	raw_spin_lock_irqsave(&apic->lock, flags);
-	io_apic_write(apic, 0x10 + 2*pin, e.w1);
-	io_apic_write(apic, 0x11 + 2*pin, e.w2);
 	raw_spin_unlock_irqrestore(&apic->lock, flags);
 }
 
@@ -280,7 +239,7 @@ static int restore_ioapic_entries(struct iopic *apic)
  */
 static unsigned int startup_ioapic_irq(struct irq_data *irqd)
 {
-	unmask_ioapic_irq(irqd);
+	ioapic_configure_entry(irqd);
 	return 0;
 }
 
@@ -453,6 +412,8 @@ static void ioapic_setup_msg_from_msi(struct irq_data *irqd,
 	ioapic_msi_msg_addr_lo_t *lo = (ioapic_msi_msg_addr_lo_t *)&msg.address_lo;
 	ioapic_msi_msg_data_t *d = (ioapic_msi_msg_data_t *)&msg.data;
 
+	lockdep_assert_held(&irq_data_to_desc(irqd)->lock);
+
 	/* Let the parent dmn compose the MSI message */
 	irq_chip_compose_msi_msg(irqd, &msg);
 
@@ -464,15 +425,21 @@ static void ioapic_setup_msg_from_msi(struct irq_data *irqd,
 
 static void __ioapic_configure_entry(struct irq_data *irqd)
 {
+	unsigned long flags;
 	struct ioapic_chip_data *data = irqd->chip_data;
+	struct iopic *pic = data->d.pic;
 	ioapic_setup_msg_from_msi(irqd, &data->entry);
-	__ioapic_write_entry(data->d.pic, data->d.pin, data->entry);
+
+	raw_spin_lock_irqsave(&pic->lock, flags);
+	__ioapic_write_entry(pic, data->d.pin, data->entry);
+	raw_spin_unlock_irqrestore(&pic->lock, flags);
 }
 
 static void ioapic_configure_entry(struct irq_data *irqd)
 {
 	struct ioapic_chip_data *data = irqd->chip_data;
-	data->entry.masked = true;
+	lockdep_assert_held(&irq_data_to_desc(irqd)->lock);
+	data->entry.masked = false;
 	__ioapic_configure_entry(irqd);
 }
 
@@ -480,16 +447,11 @@ static int ioapic_set_affinity(struct irq_data *irqd,
 			       const struct cpumask *mask, bool force)
 {
 	int ret;
-	unsigned long flags;
 	struct irq_data *parent = irqd->parent_data;
-	struct ioapic_chip_data *data = irqd->chip_data;
-	struct iopic *apic = data->d.pic;
 
 	ret = parent->chip->irq_set_affinity(parent, mask, force);
-	raw_spin_lock_irqsave(&apic->lock, flags);
 	if (ret >= 0 && ret != IRQ_SET_MASK_OK_DONE)
 		__ioapic_configure_entry(irqd);
-	raw_spin_unlock_irqrestore(&apic->lock, flags);
 
 	return ret;
 }
@@ -660,8 +622,6 @@ static void ioapic_get_id_ver_pins(struct iopic *apic,
 
 struct iopic_chip iopic_ioapic_chip = {
 	.iopic_get_id_ver_pins = ioapic_get_id_ver_pins,
-	.iopic_mask_entry = ioapic_mask_entry,
-	.iopic_configure_entry = ioapic_configure_entry,
 	.iopic_chip = &ioapic_chip,
 	.iopic_sizeof_entry = sizeof(struct IO_APIC_route_entry),
 };

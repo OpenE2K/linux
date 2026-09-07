@@ -960,7 +960,11 @@ _ZeroPageArray(IMG_UINT32 uiNumToClean,
 		                        uiNumToClean;
 
 #if !defined(CONFIG_64BIT) || defined(PVRSRV_FORCE_SLOWER_VMAP_ON_64BIT_BUILDS)
+#ifdef CONFIG_MCST
+		pvAddr = vmap(ppsCleanArray, uiToClean, VM_MAP, pgprot);
+#else
 		pvAddr = vmap(ppsCleanArray, uiToClean, VM_WRITE, pgprot);
+#endif
 #else
 		pvAddr = vm_map_ram(ppsCleanArray, uiToClean, -1);
 #endif
@@ -1508,8 +1512,6 @@ _ApplyCacheMaintenance(PVRSRV_DEVICE_NODE *psDevNode,
 
 	if (OSCPUCacheOpAddressType() == OS_CACHE_OP_ADDR_TYPE_VIRTUAL)
 	{
-		pgprot_t pgprot = PAGE_KERNEL;
-
 		IMG_UINT32 uiNumToClean = uiNumPages;
 		struct page **ppsCleanArray = ppsPage;
 
@@ -3459,7 +3461,11 @@ PMRAcquireKernelMappingDataOSMem(PMR_IMPL_PRIVDATA pvPriv,
 	}
 
 #if !defined(CONFIG_64BIT) || defined(PVRSRV_FORCE_SLOWER_VMAP_ON_64BIT_BUILDS)
+#ifdef CONFIG_MCST
+	pvAddress = vmap(pagearray, ui32PageCount, VM_MAP, prot);
+#else
 	pvAddress = vmap(pagearray, ui32PageCount, VM_READ | VM_WRITE, prot);
+#endif
 #else
 	pvAddress = vm_map_ram(pagearray, ui32PageCount, -1);
 #endif

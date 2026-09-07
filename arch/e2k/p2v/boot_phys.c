@@ -18,6 +18,7 @@
 #include <asm/boot_profiling.h>
 #include <asm/mmu_types.h>
 #include <asm/l-iommu.h>
+#include <linux/crash_dump.h>
 
 #include "boot_string.h"
 
@@ -93,31 +94,20 @@ static boot_spinlock_t __initdata_recv boot_phys_mem_lock[MAX_NUMNODES] = {
 __init
 void boot_expand_phys_banks_reserved_areas(void)
 {
-	boot_phys_mem_t	*all_nodes_mem = NULL;
-	int		nodes_num;
-	int		cur_nodes_num = 0;
-	int		node;
-	int		bank;
+	boot_phys_mem_t	*all_nodes_mem = boot_vp_to_pp((boot_phys_mem_t *)boot_phys_mem);
+	unsigned long *nodes_map = &boot_phys_mem_nodes_map;
+	int node;
 
-	all_nodes_mem = boot_vp_to_pp((boot_phys_mem_t *)boot_phys_mem);
-	nodes_num = boot_phys_mem_nodes_num;
-
-	for (node = 0; node < L_MAX_MEM_NUMNODES; node++) {
+	for_each_set_bit(node, nodes_map, L_MAX_MEM_NUMNODES) {
 		node_phys_mem_t *node_mem = &all_nodes_mem[node];
-		boot_phys_bank_t *node_banks;
-		boot_phys_bank_t *phys_bank;
+		boot_phys_bank_t *node_banks, *phys_bank;
 
-		if (cur_nodes_num >= nodes_num)
-			break;		/* no more nodes with memory */
 		if (node_mem->pfns_num == 0)
 			continue;	/* node has not memory */
 
 		node_banks = node_mem->banks;
-		cur_nodes_num++;
 
-		for (bank = node_mem->first_bank;
-				bank >= 0;
-					bank = phys_bank->next) {
+		for (short bank = node_mem->first_bank; bank >= 0; bank = phys_bank->next) {
 			e2k_addr_t area_base;
 
 			phys_bank = &node_banks[bank];
@@ -149,35 +139,28 @@ void boot_expand_phys_banks_reserved_areas(void)
 e2k_size_t __init
 boot_do_create_physmem_maps(boot_info_t *boot_info, bool create)
 {
-	boot_phys_mem_t	*all_nodes_mem = NULL;
-	int		nodes_num;
-	int		cur_nodes_num = 0;
+	boot_phys_mem_t	*all_nodes_mem = boot_vp_to_pp((boot_phys_mem_t *)boot_phys_mem);
 	e2k_size_t	pages_num = 0;
 	e2k_addr_t	top_addr;
 	int		node;
-	short		bank;
+	unsigned long *nodes_map = &boot_phys_mem_nodes_map;
 
-	all_nodes_mem = boot_vp_to_pp((boot_phys_mem_t *)boot_phys_mem);
 	boot_start_of_phys_memory = 0xffffffffffffffffUL;
 	boot_end_of_phys_memory = 0x0000000000000000UL;
 
-	nodes_num = boot_phys_mem_nodes_num;
-	for (node = 0; node < L_MAX_MEM_NUMNODES; node ++) {
+	for_each_set_bit(node, nodes_map, L_MAX_MEM_NUMNODES) {
 		node_phys_mem_t *node_mem = &all_nodes_mem[node];
 		boot_phys_bank_t *node_banks;
 		boot_phys_bank_t *phys_bank;
 
-		if (cur_nodes_num >= nodes_num)
-			break;	/* no more nodes with memory */
 		if (node_mem->pfns_num == 0)
 			continue;	/* node has not memory */
+
 		node_banks = node_mem->banks;
 		DebugMAP("Node #%d: physical memory banks number %d\n",
 			node, node_mem->banks_num);
-		cur_nodes_num ++;
-		for (bank = node_mem->first_bank;
-				bank >= 0;
-					bank = phys_bank->next) {
+
+		for (short bank = node_mem->first_bank; bank >= 0; bank = phys_bank->next) {
 			phys_bank = &node_banks[bank];
 			if (phys_bank->pages_num == 0) {
 				/* bank in the list has not pages */
@@ -207,10 +190,8 @@ boot_do_create_physmem_maps(boot_info_t *boot_info, bool create)
 		}
 	}
 	boot_pages_of_phys_memory = pages_num;
-	DebugMAP("Total phys memory pages number is 0x%lx on %d node(s), "
-		"start from 0x%lx to end 0x%lx\n",
-		pages_num, nodes_num,
-		boot_start_of_phys_memory, boot_end_of_phys_memory);
+	DebugMAP("Total phys memory pages number is 0x%lx, start from 0x%lx to end 0x%lx\n",
+		pages_num, boot_start_of_phys_memory, boot_end_of_phys_memory);
 	return pages_num;
 }
 
@@ -222,30 +203,21 @@ boot_delete_busy_area(int node, e2k_phys_bank_t *phys_bank,
 	if (prev_area == NULL) {
 		/* area should be at head of the list */
 		if (phys_bank->first_area != area_id) {
-			BOOT_BUG("Node #%d busy area #%d from 0x%lx to 0x%lx "
-				"should be at head, but head point to area #%d",
+			BOOT_BUG("Node #%d busy area #%d from 0x%lx to 0x%lx should be at head, but head point to area #%d",
 				node, area_id,
-				phys_bank->base_addr +
-					(busy_area->start_page << PAGE_SHIFT),
-				phys_bank->base_addr +
-					(busy_area->start_page +
-						busy_area->pages_num) <<
-								PAGE_SHIFT);
+				phys_bank->base_addr + (busy_area->start_page << PAGE_SHIFT),
+				phys_bank->base_addr + ((busy_area->start_page +
+							 busy_area->pages_num) << PAGE_SHIFT));
 		}
 		phys_bank->first_area = busy_area->next;
 	} else {
 		/* previous area should point to the deleted area */
 		if (prev_area->next != area_id) {
-			BOOT_BUG("Node #%d busy area #%d from 0x%lx to 0x%lx "
-				"should be pointed by previous area, "
-				"but it point to area #%d",
+			BOOT_BUG("Node #%d busy area #%d from 0x%lx to 0x%lx should be pointed by previous area, but it point to area #%d",
 				node, area_id,
-				phys_bank->base_addr +
-					(busy_area->start_page << PAGE_SHIFT),
-				phys_bank->base_addr +
-					(busy_area->start_page +
-						busy_area->pages_num) <<
-								PAGE_SHIFT,
+				phys_bank->base_addr + (busy_area->start_page << PAGE_SHIFT),
+				phys_bank->base_addr + ((busy_area->start_page +
+							 busy_area->pages_num) << PAGE_SHIFT),
 				prev_area->next);
 		}
 		prev_area->next = busy_area->next;
@@ -258,7 +230,7 @@ boot_delete_busy_area(int node, e2k_phys_bank_t *phys_bank,
 }
 
 /* lock should be taken by caller */
-static inline short __init
+static inline short __init_recv
 boot_get_free_busy_area(int node, e2k_phys_bank_t *phys_bank)
 {
 	e2k_busy_mem_t	*busy_areas;
@@ -663,7 +635,9 @@ again:
 						"CAN REMAP TO HIGH MEM");
 			flags |= BOOT_IGNORE_AT_HIGH_PHYS_MEM;
 		}
-		if (mem_type != busy_area->type) {
+		/* Check this is not panic kernel,
+		 * where only one node available */
+		if (mem_type != busy_area->type && !is_kdump_kernel()) {
 			BOOT_WARNING("The area from 0x%lx to 0x%lx type %d "
 				"intersects with area from 0x%lx to 0x%lx "
 				"type %d",
@@ -820,28 +794,32 @@ boot_reserve_bank_physmem(int node_id, boot_phys_mem_t *node_mem,
  * NULL, if memory bank did not found.
  */
 static	boot_phys_bank_t * __init_recv
-boot_find_bank_of_addr(e2k_addr_t phys_addr, int *node_id, short *bank_index)
+boot_find_bank_of_addr(e2k_addr_t phys_addr, int *node_id,
+		short *bank_index, bool *skip)
 {
 	boot_phys_mem_t	*all_nodes_mem = NULL;
-	int		nodes_num;
-	int		cur_nodes_num = 0;
 	int		node;
 	int		bank;
 
+	bool		has_upper = false;
+	boot_phys_bank_t *upper = NULL;
+	int		upper_node_id;
+	short		upper_bank_index;
+
 	all_nodes_mem = boot_vp_to_pp((boot_phys_mem_t *)boot_phys_mem);
-	nodes_num = boot_phys_mem_nodes_num;
+
+	if (skip != NULL)
+		*skip = false;
 
 	for (node = 0; node < L_MAX_MEM_NUMNODES; node++) {
 		node_phys_mem_t *node_mem = &all_nodes_mem[node];
 		boot_phys_bank_t *node_banks;
 		boot_phys_bank_t *phys_bank;
 
-		if (cur_nodes_num >= nodes_num)
-			break;	/* no more nodes with memory */
 		if (node_mem->pfns_num == 0)
 			continue;	/* node has not memory */
+
 		node_banks = node_mem->banks;
-		cur_nodes_num++;
 		boot_the_node_spin_lock(node, boot_phys_mem_lock);
 		for (bank = node_mem->first_bank;
 				bank >= 0;
@@ -855,6 +833,14 @@ boot_find_bank_of_addr(e2k_addr_t phys_addr, int *node_id, short *bank_index)
 				BOOT_BUG("Node #%d bank #%d at the list "
 					"has not memory pages",
 					node, bank);
+			}
+			if (phys_addr < phys_bank->base_addr &&
+				(!has_upper || phys_bank->base_addr <
+					upper->base_addr)) {
+				upper_bank_index = bank;
+				upper_node_id = node;
+				upper = phys_bank;
+				has_upper = true;
 			}
 			if (phys_addr >= phys_bank->base_addr &&
 				phys_addr < phys_bank->base_addr +
@@ -870,6 +856,17 @@ boot_find_bank_of_addr(e2k_addr_t phys_addr, int *node_id, short *bank_index)
 		}
 		boot_the_node_spin_unlock(node, boot_phys_mem_lock);
 	}
+
+	if (has_upper) {
+		if (bank_index != NULL)
+			*bank_index = upper_bank_index;
+		if (node_id != NULL)
+			*node_id = upper_node_id;
+		if (skip != NULL)
+			*skip = true;
+		return upper;
+	}
+
 	if (bank_index != NULL)
 		*bank_index = -1;
 	if (node_id != NULL)
@@ -924,8 +921,10 @@ void __init_recv boot_reserve_physmem(const char *name,
 		node_phys_mem_t *node_mem;
 		int node_id;
 		short bank;
+		bool skip;
 
-		phys_bank = boot_find_bank_of_addr(base_addr, &node_id, &bank);
+		phys_bank = boot_find_bank_of_addr(base_addr, &node_id,
+			&bank, &skip);
 		if (phys_bank == NULL) {
 			DebugBank("boot_reserve_physmem() bank including "
 				"address 0x%lx was not found\n",
@@ -946,6 +945,15 @@ void __init_recv boot_reserve_physmem(const char *name,
 				base_addr);
 			continue;
 		}
+
+		if (skip) {
+			DebugBank("No one bank includes address 0x%lx, skip until 0x%lx\n",
+				base_addr, phys_bank->base_addr);
+			pages_num -= (phys_bank->base_addr - base_addr)
+				>> PAGE_SHIFT;
+			base_addr = phys_bank->base_addr;
+		}
+
 		node_mem = &all_nodes_mem[node_id];
 		boot_the_node_spin_lock(node_id, boot_phys_mem_lock);
 		bank_pages_num = boot_reserve_bank_physmem(node_id, node_mem,
@@ -1573,26 +1581,22 @@ boot_find_busy_area_of_addr(e2k_addr_t phys_addr)
 {
 	boot_phys_mem_t	*all_nodes_mem = NULL;
 	e2k_busy_mem_t	*area;
-	int		nodes_num;
-	int		cur_nodes_num = 0;
 	int		node;
+	unsigned long *nodes_map = &boot_phys_mem_nodes_map;
 
 	all_nodes_mem = boot_vp_to_pp((boot_phys_mem_t *)boot_phys_mem);
-	nodes_num = boot_phys_mem_nodes_num;
 
-	for (node = 0; node < L_MAX_MEM_NUMNODES; node++) {
+	for_each_set_bit(node, nodes_map, L_MAX_MEM_NUMNODES) {
 		node_phys_mem_t *node_mem = &all_nodes_mem[node];
 
-		if (cur_nodes_num >= nodes_num)
-			break;	/* no more nodes with memory */
 		if (node_mem->pfns_num == 0)
 			continue;	/* node has not memory */
-		cur_nodes_num++;
+
 		boot_the_node_spin_lock(node, boot_phys_mem_lock);
 		area = boot_find_node_buse_area_of_addr(phys_addr,
 							node, node_mem);
 		boot_the_node_spin_unlock(node, boot_phys_mem_lock);
-		if (area != NULL)
+		if (area)
 			return area;	/* area is found */
 	}
 	return NULL;	/* area is not found */
@@ -1678,13 +1682,12 @@ boot_update_bootblock_addr(bool bsp, boot_info_t *boot_info)
 
 	if (BOOT_IS_BSP(bsp)) {
 		/* kernel <-> boot loader BOOTINFO area */
-		old_addr = boot_bootinfo_phys_base;
+		old_addr = (unsigned long) boot_bootblock_phys;
 		new_addr = boot_get_remapped_area_addr(boot_info,
 					old_addr, boot_loader_mem_type);
 		if (new_addr != old_addr) {
-			boot_bootinfo_phys_base = new_addr;
-			boot_bootblock_virt =
-				(bootblock_struct_t *)
+			boot_bootblock_phys = (bootblock_struct_t *) new_addr;
+			boot_bootblock_virt = (bootblock_struct_t *)
 					__boot_va(boot_vpa_to_pa(new_addr));
 			DebugRMLT("kernel <-> boot loader info was remapped "
 				"from low memory 0x%lx to high 0x%lx (0x%lx)\n",
@@ -1714,7 +1717,6 @@ boot_update_bootblock_addr(bool bsp, boot_info_t *boot_info)
 		}
 #endif	/* CONFIG_BLK_DEV_INITRD */
 
-#ifdef	CONFIG_L_IO_APIC
 		if (boot_info->mp_table_base == (e2k_addr_t)0UL)
 			/* nothing additional tables */
 			return;
@@ -1727,7 +1729,6 @@ boot_update_bootblock_addr(bool bsp, boot_info_t *boot_info)
 					old_addr, boot_loader_mem_type);
 		if (new_addr != old_addr) {
 			boot_info->mp_table_base = new_addr;
-			boot_mpf_phys_base = new_addr;
 			DebugRMLT("MP floating table was remapped "
 				"from low memory 0x%lx to high 0x%lx\n",
 				old_addr, new_addr);
@@ -1747,7 +1748,6 @@ boot_update_bootblock_addr(bool bsp, boot_info_t *boot_info)
 		if (new_addr != old_addr) {
 			mpf->mpf_checksum = 0;
 			mpf->mpf_physptr = new_addr;
-			boot_mpc_phys_base = new_addr;
 			/* recalculate structure sum */
 			mpf->mpf_checksum =
 				boot_mpf_do_checksum((unsigned char *)mpf,
@@ -1760,7 +1760,6 @@ boot_update_bootblock_addr(bool bsp, boot_info_t *boot_info)
 				"from low memory 0x%lx to high\n",
 				old_addr);
 		}
-#endif	/* CONFIG_L_IO_APIC */
 	}
 }
 
@@ -2152,7 +2151,6 @@ boot_alloc_node_mem(int node_id, e2k_size_t mem_size,
 	node_phys_mem_t *all_nodes_mem = NULL;
 	void	*node_mem;
 	int	cur_node = node_id;
-	int	node;
 	int	nodes_num;
 	int	cur_nodes_num = 0;
 	int	cur_try;
@@ -2161,10 +2159,11 @@ boot_alloc_node_mem(int node_id, e2k_size_t mem_size,
 		node_id, mem_size,
 		(flags & BOOT_ONLY_ON_NODE_ALLOC_MEM) ?
 			"only on this node" : "may be on other node");
-	nodes_num = boot_phys_mem_nodes_num;
+
+	nodes_num = hweight_long(boot_phys_mem_nodes_map);
 	all_nodes_mem = boot_vp_to_pp((boot_phys_mem_t *)boot_phys_mem);
 	for (cur_try = 0; cur_try < 3; cur_try ++) {
-	for (node = 0; node < L_MAX_MEM_NUMNODES; node ++) {
+	for (int i = 0; i < L_MAX_MEM_NUMNODES; i++) {
 		if (cur_nodes_num >= nodes_num)
 			goto next_try;	/* no more nodes with memory */
 		if (all_nodes_mem[cur_node].pfns_num == 0) {
@@ -2176,15 +2175,16 @@ node_next_try:
 		node_mem = boot_alloc_node_physmem(cur_node, mem_size, align,
 					page_size, mem_type, flags);
 		if (node_mem != (void *)-1) {
-			if (cur_node != node_id) {
+			/* Check this is not panic kernel,
+			 * where only one node available */
+			if (cur_node != node_id && !is_kdump_kernel()) {
 				BOOT_WARNING("Could allocate area on node #%d "
 					"insteed of #%d, addr 0x%lx size 0x%lx "
 					"align 0x%lx page size 0x%lx",
 					cur_node, node_id, node_mem,
 					mem_size, align, page_size);
 			}
-			DebugAM("boot_alloc_node_mem() node #%d: allocated "
-				"on node #%d from 0x%px, size 0x%lx\n",
+			DebugAM("boot_alloc_node_mem() node #%d: allocated on node #%d from 0x%px, size 0x%lx\n",
 				node_id, cur_node, node_mem, mem_size);
 			return (node_mem);
 		}
@@ -2342,104 +2342,74 @@ boot_map_banks_physmem(e2k_addr_t phys_start, e2k_addr_t phys_end,
 
 static e2k_addr_t __init
 boot_get_adjacent_phys_bank_addr(int start_node, short start_bank,
-			e2k_addr_t start_addr,
-			bool lowest	/* if false then highest */)
+		e2k_addr_t start_addr, bool lowest	/* if false then highest */)
 {
 	boot_phys_mem_t	*all_phys_banks = NULL;
 	int		my_node_id = boot_numa_node_id();
-	int		nodes_num;
-	int		cur_nodes_num = 0;
-	e2k_addr_t	bank_base;
-	e2k_addr_t	bank_end;
-	e2k_addr_t	new_start;
-	e2k_addr_t	phys_addr;
-	int		nodes;
-	int		node;
-	short		bank;
 
 	all_phys_banks = boot_vp_to_pp((boot_phys_mem_t *)boot_phys_mem);
-	nodes_num = boot_phys_mem_nodes_num;
-	node = start_node;
-	for (nodes = 0; nodes < L_MAX_MEM_NUMNODES; nodes++) {
+	for (int i = 0; i < L_MAX_MEM_NUMNODES; i++) {
+		int node = (start_node + i) % L_MAX_MEM_NUMNODES;
 		boot_phys_mem_t	*node_mem = &all_phys_banks[node];
-		boot_phys_bank_t *node_banks;
+		boot_phys_bank_t *node_banks = node_mem->banks;
 		boot_phys_bank_t *phys_bank;
+		short bank;
 
-		if (cur_nodes_num >= nodes_num)
-			break;	/* no more nodes with memory */
 		if (node_mem->pfns_num == 0)
-			goto next_node;	/* node has not memory */
-		node_banks = node_mem->banks;
-		if (node == start_node)
-			bank = node_banks[start_bank].next;
-		else
-			bank = node_mem->first_bank;
-		cur_nodes_num++;
+			continue;	/* node has not memory */
+
+		bank = (node == start_node) ? node_banks[start_bank].next
+					    : node_mem->first_bank;
 		for (; bank >= 0; bank = phys_bank->next) {
+			e2k_addr_t	bank_base;
+			e2k_addr_t	bank_end;
+			e2k_addr_t	phys_addr;
+
 			phys_bank = &node_banks[bank];
 			if (phys_bank->pages_num == 0) {
-				/* bank in the list has not pages */
-				BOOT_BUG("Node #%d bank #%d at the list "
-					"has not memory pages",
+				/* bank in the list has no pages */
+				BOOT_BUG("Node #%d bank #%d at the list has no memory pages",
 					node, bank);
 			}
+
+			bank_base = phys_bank->base_addr;
+			bank_end = bank_base + (phys_bank->pages_num << PAGE_SHIFT);
 			DebugMP("Node #%d bank #%d: from 0x%lx to 0x%lx\n",
-				node, bank, phys_bank->base_addr,
-				phys_bank->base_addr +
-					(phys_bank->pages_num << PAGE_SHIFT));
+					node, bank, bank_base, bank_end);
 			if (phys_bank->mapped[my_node_id]) {
 				/* bank already mapped */
-				DebugMP("Node #%d bank #%d: already mapped\n",
-					node, bank);
+				DebugMP("Node #%d bank #%d: already mapped\n", node, bank);
 				continue;
 			}
-			bank_base = phys_bank->base_addr;
-			bank_end = bank_base +
-					(phys_bank->pages_num << PAGE_SHIFT);
 			if (start_addr > bank_base && start_addr < bank_end) {
-				BOOT_BUG("Node #%d bank #%d: start addr 0x%lx "
-					"is into bank range deom 0x%lx "
-					"to 0x%lx",
-					node, bank, start_addr,
-					bank_base, bank_end);
+				BOOT_BUG("Node #%d bank #%d: start addr 0x%lx is into bank range from 0x%lx to 0x%lx",
+					node, bank, start_addr, bank_base, bank_end);
 			}
-			if (lowest)
+			if (lowest) {
 				/* contiguity should be to end */
 				phys_addr = bank_end;
-			else
+			} else {
 				/* contiguity should be to begin */
 				phys_addr = bank_base;
+			}
 			if (phys_addr == start_addr) {
-				if (lowest)
-					new_start = bank_base;
-				else
-					new_start = bank_end;
+				unsigned long new_start = (lowest) ? bank_base : bank_end;
 				phys_bank->mapped[my_node_id] = true;
-				DebugMP("Node #%d bank #%d: there is "
-					"contiguity from %s, contigous bank %s "
-					"is now 0x%lx\n",
-					node, bank,
-					(lowest) ? "end" : "start",
-					(lowest) ? "start" : "end",
-					new_start);
-				return boot_get_adjacent_phys_bank_addr(
-						node, bank, new_start, lowest);
+				DebugMP("Node #%d bank #%d: there is contiguity from %s, contigous bank %s is now 0x%lx\n",
+					node, bank, (lowest) ? "end" : "start",
+					(lowest) ? "start" : "end", new_start);
+				return boot_get_adjacent_phys_bank_addr(node,
+						bank, new_start, lowest);
 			}
 			if (start_addr < phys_addr)
 				/* all other banks higher and cannot have */
 				/* contiguity from start or end */
 				break;
 		}
-next_node:
-		node++;
-		if (node >= L_MAX_MEM_NUMNODES)
-			node = 0;
 	}
-	DebugMP("Node #%d bank #%d: there is not more contiguity from %s, so "
-		"contigous bank %s stay the same 0x%lx\n",
-		start_node, start_bank,
-		(lowest) ? "end" : "start", (lowest) ? "start" : "end",
-		start_addr);
+	DebugMP("Node #%d bank #%d: there is not more contiguity from %s, so contigous bank %s stay the same 0x%lx\n",
+		start_node, start_bank, (lowest) ? "end" : "start",
+		(lowest) ? "start" : "end", start_addr);
 	return start_addr;
 }
 static inline e2k_addr_t __init
@@ -2469,8 +2439,6 @@ boot_map_physmem(pgprot_t prot_flags, e2k_size_t max_page_size)
 {
 	boot_phys_mem_t	*all_phys_banks = NULL;
 	int		my_node_id = boot_numa_node_id();
-	int		nodes_num;
-	int		cur_nodes_num = 0;
 	e2k_addr_t	bank_base;
 	e2k_addr_t	bank_end;
 	e2k_addr_t	phys_addr;
@@ -2479,31 +2447,24 @@ boot_map_physmem(pgprot_t prot_flags, e2k_size_t max_page_size)
 	long		mapped_pages = 0;
 	long		all_pages_num = boot_pages_of_phys_memory;
 	int		node;
-	short		bank;
+	unsigned long *nodes_map = &boot_phys_mem_nodes_map;
 
 	all_phys_banks = boot_vp_to_pp((boot_phys_mem_t *)boot_phys_mem);
-	nodes_num = boot_phys_mem_nodes_num;
-	for (node = 0; node < L_MAX_MEM_NUMNODES; node++) {
+	for_each_set_bit(node, nodes_map, L_MAX_MEM_NUMNODES) {
 		boot_phys_mem_t	*node_mem = &all_phys_banks[node];
-		boot_phys_bank_t *node_banks;
+		boot_phys_bank_t *node_banks = node_mem->banks;
 		boot_phys_bank_t *phys_bank;
 
-		if (cur_nodes_num >= nodes_num)
-			break;	/* no more nodes with memory */
 		if (node_mem->pfns_num == 0)
 			continue;	/* node has not memory */
-		node_banks = node_mem->banks;
+
 		DebugMP("Node #%d: physical memory banks number %d\n",
 			node, node_mem->banks_num);
-		cur_nodes_num++;
-		for (bank = node_mem->first_bank;
-				bank >= 0;
-					bank = phys_bank->next) {
+		for (short bank = node_mem->first_bank; bank >= 0; bank = phys_bank->next) {
 			phys_bank = &node_banks[bank];
 			if (phys_bank->pages_num == 0) {
 				/* bank in the list has not pages */
-				BOOT_BUG("Node #%d bank #%d at the list "
-					"has not memory pages",
+				BOOT_BUG("Node #%d bank #%d at the list has not memory pages",
 					node, bank);
 			}
 			if (phys_bank->mapped[my_node_id])
@@ -2513,8 +2474,7 @@ boot_map_physmem(pgprot_t prot_flags, e2k_size_t max_page_size)
 			bank_end = bank_base +
 					(phys_bank->pages_num << PAGE_SHIFT);
 			phys_bank->mapped[my_node_id] = true;
-			DebugMP("Node #%d bank #%d from base 0x%lx to 0x%lx "
-				"try expand continuously from start and end\n",
+			DebugMP("Node #%d bank #%d from base 0x%lx to 0x%lx try expand continuously from start and end\n",
 				node, bank, bank_base, bank_end);
 			if (bank_base > boot_start_of_phys_memory)
 				phys_addr = boot_get_lowest_phys_bank_base(
@@ -2522,12 +2482,10 @@ boot_map_physmem(pgprot_t prot_flags, e2k_size_t max_page_size)
 			else
 				phys_addr = bank_base;
 			if (phys_addr != bank_base) {
-				DebugMP("Node #%d bank #%d base bank "
-					"addr 0x%lx was decrement to 0x%lx\n",
+				DebugMP("Node #%d bank #%d base bank addr 0x%lx was decrement to 0x%lx\n",
 					node, bank, bank_base, phys_addr);
 			} else {
-				DebugMP("Node #%d bank #%d base bank "
-					"addr 0x%lx was not changed\n",
+				DebugMP("Node #%d bank #%d base bank addr 0x%lx was not changed\n",
 					node, bank, phys_addr);
 			}
 			if (bank_end < boot_end_of_phys_memory)
@@ -2536,18 +2494,15 @@ boot_map_physmem(pgprot_t prot_flags, e2k_size_t max_page_size)
 			else
 				phys_end = bank_end;
 			if (phys_end != bank_end) {
-				DebugMP("Node #%d bank #%d end bank "
-					"addr 0x%lx was increment to 0x%lx\n",
+				DebugMP("Node #%d bank #%d end bank addr 0x%lx was increment to 0x%lx\n",
 					node, bank, bank_end, phys_end);
 			} else {
-				DebugMP("Node #%d bank #%d end bank "
-					"addr 0x%lx was not changed\n",
+				DebugMP("Node #%d bank #%d end bank addr 0x%lx was not changed\n",
 					node, bank, phys_end);
 			}
 			pages_num = boot_map_banks_physmem(phys_addr, phys_end,
 						prot_flags, max_page_size);
-			DebugMP("Node #%d bank #%d: physical memory from 0x%lx "
-				"to 0x%lx mapped to 0x%lx pages\n",
+			DebugMP("Node #%d bank #%d: physical memory from 0x%lx to 0x%lx mapped to 0x%lx pages\n",
 				node, bank, phys_addr, phys_end, pages_num);
 			mapped_pages += pages_num;
 			if (mapped_pages >= all_pages_num)

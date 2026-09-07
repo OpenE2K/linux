@@ -43,11 +43,12 @@ int fast_sys_ni_syscall(void)
 	return -ENOSYS;
 }
 
-#define FAST_SYSTEM_CALL_TBL_ENTRY(sysname)  (fast_system_call_func) sysname
+#define FAST_SYSTEM_CALL_TBL_ENTRY(sysname) \
+		((fast_system_call_func) (void *) sysname)
 #define COMPAT_FAST_SYSTEM_CALL_TBL_ENTRY(sysname) \
-		(fast_system_call_func) compat_##sysname
+		((fast_system_call_func) (void *) compat_##sysname)
 #define PROTECTED_FAST_SYSTEM_CALL_TBL_ENTRY(sysname) \
-		(fast_system_call_func) protected_##sysname
+		((fast_system_call_func) (void *) protected_##sysname)
 
 
 /*

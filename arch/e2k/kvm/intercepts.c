@@ -18,7 +18,7 @@
 #include <asm/cpu_regs.h>
 #include <asm/trap_table.h>
 #include <asm/traps.h>
-#include <asm/mmu_regs_types.h>
+#include <asm/mmu_regs_access.h>
 #include <asm/system.h>
 #include <asm/kvm/cpu_hv_regs_types.h>
 #include <asm/kvm/cpu_hv_regs_access.h>
@@ -28,7 +28,6 @@
 #include <asm/kvm/runstate.h>
 #include <asm/kvm/switch.h>
 #include <asm/kvm/guest/tlb_regs_types.h>
-#include <asm/kvm/mmu_regs_access.h>
 #include <asm/kvm/async_pf.h>
 #include <asm/kvm/trace_kvm.h>
 #include <asm/kvm/trace_kvm_hv.h>
@@ -54,7 +53,7 @@
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
-int do_hret_last_wish_intc(struct kvm_vcpu *vcpu, struct pt_regs *regs)
+int intc_hret_last_wish(struct kvm_vcpu *vcpu, struct pt_regs *regs)
 {
 	struct trap_pt_regs *trap = regs->trap;
 	unsigned long flags;
@@ -108,6 +107,7 @@ int do_hret_last_wish_intc(struct kvm_vcpu *vcpu, struct pt_regs *regs)
 						       exc_interrupt_mask);
 		}
 		vcpu->arch.virq_wish = false;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	} else if (vcpu->arch.is_pv) {
 		kvm_inject_interrupt(vcpu, regs);
 		vcpu->arch.virq_wish = false;
@@ -115,6 +115,7 @@ int do_hret_last_wish_intc(struct kvm_vcpu *vcpu, struct pt_regs *regs)
 		/* guest traps are handled by host at first */
 		/* and host only pass guest traps to guest */
 		kvm_need_create_vcpu_exception(vcpu, exc_last_wish_mask);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	}
 	return 0;
 }

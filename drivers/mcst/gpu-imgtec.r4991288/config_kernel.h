@@ -11,7 +11,11 @@
 #define LINUX 
 #define PVR_BUILD_DIR "e2c3_gpu"
 #define PVR_BUILD_TYPE "release"
+#if defined(CONFIG_MCST)
+#define PVRSRV_MODNAME "pvrsrvkm_4991288"
+#else
 #define PVRSRV_MODNAME "pvrsrvkm"
+#endif
 #define SUPPORT_RGX 1
 #define RELEASE 
 #define RGX_BVNC_CORE_KM_HEADER "cores/rgxcore_km_4.46.6.62.h"
@@ -35,7 +39,11 @@
 #define PVR_LINUX_MISR_USING_PRIVATE_WORKQUEUE 
 #define PVR_LINUX_TIMERS_USING_WORKQUEUES 
 #define PVR_LDM_PLATFORM_PRE_REGISTERED 
+#if defined(CONFIG_MCST)
+#define PVR_LDM_DRIVER_REGISTRATION_NAME "pvrsrvkm_4991288"
+#else
 #define PVR_LDM_DRIVER_REGISTRATION_NAME "pvrsrvkm"
+#endif
 #define PVRSRV_FULL_SYNC_TRACKING_HISTORY_LEN 256
 #define SUPPORT_MMU_PENDING_FAULT_PROTECTION 
 #define SUPPORT_EXTRA_METASP_DEBUG 

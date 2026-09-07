@@ -8,6 +8,7 @@
 
 #include "../../l/kernel/irq/apic/apic.h"
 #include "../../l/kernel/irq/epic/epic.h"
+#include <asm/pic.h>
 
 #ifdef	CONFIG_EPIC
 static inline unsigned int boot_epic_is_bsp(void)

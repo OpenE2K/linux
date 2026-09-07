@@ -3408,7 +3408,18 @@ static long tun_chr_ioctl(struct file *file,
 {
 	return __tun_chr_ioctl(file, cmd, arg, sizeof (struct ifreq));
 }
-
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	/*
+	 * ptr128_ifreq is longer than ifreq. All fields that are used in this
+	 * driver are compatible though, we don't need to convert the
+	 * contents.
+	 */
+static long tun_chr_ptr128_ioctl(struct file *file,
+			  unsigned int cmd, unsigned long arg)
+{
+	return __tun_chr_ioctl(file, cmd, arg, sizeof(struct ifreq));
+}
+#endif
 #ifdef CONFIG_COMPAT
 static long tun_chr_compat_ioctl(struct file *file,
 			 unsigned int cmd, unsigned long arg)
@@ -3533,6 +3544,9 @@ static const struct file_operations tun_fops = {
 	.unlocked_ioctl	= tun_chr_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = tun_chr_compat_ioctl,
+#endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl = tun_chr_ptr128_ioctl,
 #endif
 	.open	= tun_chr_open,
 	.release = tun_chr_close,

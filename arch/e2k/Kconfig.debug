@@ -33,13 +33,13 @@ config NESTED_PAGE_FAULT_INJECTION_ENABLED_DEFAULT
 	help
 	  Enable nested page faults injection by default?
 
-config HALF_SPEC_LOADS_INJECTION
-	bool "Inject half-speculative loads in kernel"
-	depends on HALF_SPECULATIVE_KERNEL
+config SEMI_SPEC_LOADS_INJECTION
+	bool "Inject semi-speculative loads in kernel"
+	depends on SEMI_SPECULATIVE_KERNEL
 	default n
 	help
-	  Inject half-speculative loads in various places in kernel to try
-	  to trigger problems with half-spec. mode support in page tables
+	  Inject semi-speculative loads in various places in kernel to try
+	  to trigger problems with semi-spec. mode support in page tables
 	  (i.e. valid bit is set or cleared as needed in kernel PTEs).
 
 config DEBUG_LCC_VOLATILE_ATOMIC
@@ -53,7 +53,7 @@ config DEBUG_IRQ
 config DEBUG_PT_REGS
 	bool "Enable checker of pt_regs structure linking"
 	default n
- 
+
 config DEBUG_STACK_USAGE
 	bool "Stack utilization instrumentation"
 	depends on DEBUG_KERNEL

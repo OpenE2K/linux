@@ -205,63 +205,63 @@ static int sysctl_rts_mask;
 
 static int
 rts_mode_sysctl(struct ctl_table *table, int write,
-                     void __user *buffer, size_t *lenp,
-                     loff_t *ppos)
+		     void __user *buffer, size_t *lenp,
+		     loff_t *ppos)
 {
-        int ret;
+	int ret;
 
-        mutex_lock(&sysctl_lock); 
+	mutex_lock(&sysctl_lock); 
 	sysctl_rts_mode = !!rts_mode; 
-        ret  = proc_dointvec(table, write, buffer, lenp, ppos);
+	ret  = proc_dointvec(table, write, buffer, lenp, ppos);
 
-        if (ret || !write )
-                goto out;
+	if (ret || !write )
+		goto out;
 	       
 	ret = (int)change_rts_mode_mask((long)sysctl_rts_mode, -1);
 
  out:
-        mutex_unlock(&sysctl_lock);
-        return ret;
+	mutex_unlock(&sysctl_lock);
+	return ret;
 }
 
 
 
 static int
 rts_mask_sysctl(struct ctl_table *table, int write,
-                     void __user *buffer, size_t *lenp,
-                     loff_t *ppos)
+		     void __user *buffer, size_t *lenp,
+		     loff_t *ppos)
 {
-        int ret;
+	int ret;
 
-        mutex_lock(&sysctl_lock); 
+	mutex_lock(&sysctl_lock); 
 	sysctl_rts_mask = (int)rts_act_mask; 
-        ret  = proc_dointvec(table, write, buffer, lenp, ppos);
+	ret  = proc_dointvec(table, write, buffer, lenp, ppos);
 
-        if (ret || !write )
-                goto out;
+	if (ret || !write )
+		goto out;
 	       
 	ret = (int)change_rts_mode_mask(-1, (long)sysctl_rts_mask);
 
  out:
-        mutex_unlock(&sysctl_lock);
-        return ret;
+	mutex_unlock(&sysctl_lock);
+	return ret;
 }
 
 struct ctl_table rt_table[] = {
        {
-                .procname       = "rts_mode",
-                .data           = &sysctl_rts_mode,
-                .maxlen         = sizeof(unsigned int),
-                .mode           = 0644,
-                .proc_handler   = rts_mode_sysctl,
+		.procname       = "rts_mode",
+		.data           = &sysctl_rts_mode,
+		.maxlen         = sizeof(unsigned int),
+		.mode           = 0644,
+		.proc_handler   = rts_mode_sysctl,
        },
        {
-                .procname       = "rts_act_mask",
-                .data           = &sysctl_rts_mask,
-                .maxlen         = sizeof(unsigned int),
-                .mode           = 0644,
-                .proc_handler   = rts_mask_sysctl,
-        },
+		.procname       = "rts_act_mask",
+		.data           = &sysctl_rts_mask,
+		.maxlen         = sizeof(unsigned int),
+		.mode           = 0644,
+		.proc_handler   = rts_mask_sysctl,
+	},
 	{}
 };
 
@@ -276,13 +276,6 @@ struct ctl_table rt_table[] = {
  * from kernel's do_page_fault()
  */
 
-
-/* To simplify 32-bit support user-space library always uses
- * 64-bit values for tv_sec and tv_nsec in struct timespec. */
-struct timespec_64 {
-	long long tv_sec;
-	long long tv_nsec;
-};
 
 static DEFINE_RAW_SPINLOCK(atomic_add_lock);
 /*#define EL_TIMERFD_USING */
@@ -430,7 +423,7 @@ long do_el_posix(int req, void __user *a1, void __user *a2,
 			smp4m_irq_set_mask(cpu_mask, 1);
 			for_each_online_cpu(cpu) {
 				all_cpu_mask |= (1 << cpu);
-	       		}
+			}
 			rval = smp4m_irq_set_mask(all_cpu_mask & ~cpu_mask, 0);
 			return smp4m_irq_get_mask();
 #endif
@@ -473,12 +466,12 @@ long do_el_posix(int req, void __user *a1, void __user *a2,
 		local_irq_enable();
 		break;
 #endif
-        case EL_SET_MLOCK_CONTROL :
-                current->extra_flags |= RT_MLOCK_CONTROL;
-                break;
-        case EL_UNSET_MLOCK_CONTROL :
+	case EL_SET_MLOCK_CONTROL :
+		current->extra_flags |= RT_MLOCK_CONTROL;
+		break;
+	case EL_UNSET_MLOCK_CONTROL :
 		current->extra_flags &= ~RT_MLOCK_CONTROL;
-                break;
+		break;
 #ifdef SHOW_WOKEN_TIME
 	case EL_GET_TIMES:
 	{
@@ -671,8 +664,6 @@ long do_el_posix(int req, void __user *a1, void __user *a2,
 #endif
 #endif
 			free_cpumask_var(new_mask);
-			/* let rcu works completition in this cpu */
-			schedule_timeout_interruptible(3);
 #if 0
 			cpu_callback(NULL, CPU_DEAD, cpu);
 #endif

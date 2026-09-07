@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
 #include <linux/interrupt.h>
 #include <linux/irq.h>
 #include <asm/nmi.h>

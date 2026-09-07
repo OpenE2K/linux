@@ -883,6 +883,10 @@ static const struct block_device_operations mmc_bdops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl		= mmc_blk_compat_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl		= mmc_blk_ioctl,
+#endif
+
 	.alternative_gpt_sector	= mmc_blk_alternative_gpt_sector,
 };
 
@@ -2721,6 +2725,9 @@ static const struct file_operations mmc_rpmb_fileops = {
 	.unlocked_ioctl = mmc_rpmb_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = mmc_rpmb_ioctl_compat,
+#endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl = mmc_rpmb_ioctl,
 #endif
 };
 

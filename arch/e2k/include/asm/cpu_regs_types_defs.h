@@ -551,7 +551,7 @@ typedef union {
 	e2k_reg_t;		/* as entire register   */
 } e2k_bgr_t;
 
-#define	E2K_INITIAL_BGR		(e2k_bgr_t){ .val = 0xff }
+#define	E2K_INITIAL_BGR		((e2k_bgr_t) { .val = 0xff })
 #define	E2K_GB_START_REG_NO_d	24
 #define	E2K_GB_REGS_NUM_d	(E2K_MAXGR_d - E2K_GB_START_REG_NO_d)
 
@@ -699,7 +699,9 @@ typedef union {
 			u64 ta_base	: E2K_VA_SIZE;
 			u64		: 64 - E2K_VA_SIZE;
 		};
-		u64;
+		struct {
+			u64		: 64;
+		};
 	};
 	struct {
 		struct {
@@ -710,7 +712,9 @@ typedef union {
 			u64 ipd		: 2;
 			u64		: 3;
 		};
-		u64; /* unused */
+		struct {
+			u64		: 64;
+		};
 	} v3;
 	struct {
 		struct {
@@ -780,6 +784,8 @@ typedef union {
 	};
 	e2k_reg_t;		/* as entire register   */
 } e2k_psr_t;
+
+#define E2K_RESET_PSR ((e2k_psr_t) { .pm = 1 })
 
 #define	PSR_PM		0x01U
 #define	PSR_IE		0x02U
@@ -1102,6 +1108,14 @@ typedef union {
 
 typedef union {
 	struct {
+		u64 lo	: 32;
+		u64 hi	: 32;
+	};
+	u64 word;
+} e2k_sclkr_t;
+
+typedef union {
+	struct {
 		u64 div		: 32;
 		u64 mdiv	: 1;
 		u64 mode	: 1;
@@ -1362,7 +1376,16 @@ typedef union {
 } e2k_madmr_t;
 
 #define E2K_MADMR_EMPTY ((e2k_madmr_t) { .word = 0 })
-
+#define E2K_MADMR_MODE_LD_NONE		0
+#define E2K_MADMR_MODE_LD_DT_NO_EXC	1
+#define E2K_MADMR_MODE_LD_EXC		2
+#define E2K_MADMR_MODE_LD_EXC_SLOW	3
+#define E2K_MADMR_MODE_ST_NONE		0
+#define E2K_MADMR_MODE_ST_EXC		2
+#define E2K_MADMR_MODE_ST_EXC_SLOW	3
+#define E2K_MADMR_MODE_WA_NONE		0
+#define E2K_MADMR_MODE_WA_FLAG		1
+#define E2K_MADMR_MODE_WA_EXC_SLOW	3
 
 /*
  * Global registers (saved state) definition
@@ -1403,6 +1426,8 @@ typedef enum cu_reg_no {
 	DTARF_cu_reg_no = 0x4e,
 	DTART_cu_reg_no = 0x4f,
 	CU_HW0_cu_reg_no = 0x78,
+	CU_HW1_cu_reg_no = 0x79,
+	CU_PMGR0_cu_reg_no = 0x7a,
 } cu_reg_no_t;
 
 #endif /* ! __ASSEMBLY__ */

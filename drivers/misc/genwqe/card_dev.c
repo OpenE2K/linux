@@ -1233,6 +1233,9 @@ static const struct file_operations genwqe_fops = {
 	.mmap		= genwqe_mmap,
 	.unlocked_ioctl	= genwqe_ioctl,
 	.compat_ioctl   = compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = genwqe_ioctl,
+#endif
 	.release	= genwqe_release,
 };
 

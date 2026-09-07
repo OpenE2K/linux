@@ -28,29 +28,33 @@
 
 
 __section(".entry.text")
+notrace __interrupt void save_global_gregs_v5(struct global_gregs *gregs)
+{
+	DO_SAVE_GREGS_ON_MASK(gregs->g, E2K_ISET_V5, LOCAL_GREGS_USER_MASK);
+}
+
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+__section(".entry.text")
 notrace __interrupt
-void save_local_gregs_v5(struct local_gregs *gregs, bool is_signal)
+void save_local_gregs_v5(struct local_gregs *gregs)
 {
 	gregs->bgr = native_read_BGR_reg();
 	init_BGR_reg();	/* enable whole GRF */
-	if (is_signal)
-		SAVE_GREGS_SIGNAL(gregs->g, E2K_ISET_V5);
-	native_write_BGR_reg(gregs->bgr);
+	SAVE_LOCAL_GREGS_ON_MASK(gregs->g, E2K_ISET_V5, 0);
 }
+#endif
 
 __section(".entry.text")
-notrace __interrupt void save_kernel_gregs_v5(struct kernel_gregs *gregs)
+notrace __interrupt void save_scratch_gregs_v5(struct scratch_gregs *gregs)
 {
-	NATIVE_SAVE_GREG(&gregs->g[GUEST_VCPU_STATE_GREGS_PAIRS_INDEX],
-			 &gregs->g[CURRENT_TASK_GREGS_PAIRS_INDEX],
-			 GUEST_VCPU_STATE_GREG, CURRENT_TASK_GREG, E2K_ISET_V5);
-	NATIVE_SAVE_GREG(&gregs->g[MY_CPU_OFFSET_GREGS_PAIRS_INDEX],
-			 &gregs->g[SMP_CPU_ID_GREGS_PAIRS_INDEX],
-			 MY_CPU_OFFSET_GREG, SMP_CPU_ID_GREG, E2K_ISET_V5);
+	BUILD_BUG_ON(KERNEL_GREGS_MAX_NUM != 10 || KERNEL_GREGS_PAIRS_START != 16);
+	SAVE_GREGS_PAIR(gregs->g, 0, 1, 26, 27, E2K_ISET_V5);
+	SAVE_GREGS_PAIR(gregs->g, 2, 3, 28, 29, E2K_ISET_V5);
+	SAVE_GREGS_PAIR(gregs->g, 4, 5, 30, 31, E2K_ISET_V5);
 }
 
 notrace __interrupt
-void save_gregs_on_mask_v5(struct e2k_global_regs *gregs, bool dirty_bgr,
+void save_gregs_on_mask_v5(struct e2k_gregs *gregs, bool dirty_bgr,
 			   unsigned long mask_not_save)
 {
 	gregs->bgr = native_read_BGR_reg();
@@ -76,34 +80,30 @@ void save_gregs_on_mask_v5(struct e2k_global_regs *gregs, bool dirty_bgr,
 }
 
 __section(".entry.text")
-notrace __interrupt void save_gregs_v5(struct e2k_global_regs *gregs)
+notrace __interrupt void restore_global_gregs_v5(const struct global_gregs *gregs)
 {
-	gregs->bgr = native_read_BGR_reg();
-	init_BGR_reg();	/* enable whole GRF */
-	SAVE_GREGS(gregs->g, true, E2K_ISET_V5);
-	native_write_BGR_reg(gregs->bgr);
-}
-
-__section(".entry.text")
-notrace __interrupt void save_gregs_dirty_bgr_v5(struct e2k_global_regs *gregs)
-{
-	gregs->bgr = native_read_BGR_reg();
-	init_BGR_reg();	/* enable whole GRF */
-	SAVE_GREGS(gregs->g, true, E2K_ISET_V5);
+	DO_RESTORE_GREGS_ON_MASK(gregs->g, E2K_ISET_V5, LOCAL_GREGS_USER_MASK);
 }
 
 __section(".entry.text")
 notrace __interrupt
-void restore_local_gregs_v5(const struct local_gregs *gregs, bool is_signal)
+void restore_local_gregs_v5(const struct local_gregs *gregs)
 {
-	init_BGR_reg();
-	if (is_signal)
-		RESTORE_GREGS_SIGNAL(gregs->g, E2K_ISET_V5);
+	RESTORE_LOCAL_GREGS_ON_MASK(gregs->g, E2K_ISET_V5, 0);
 	native_write_BGR_reg(gregs->bgr);
 }
 
+__section(".entry.text")
+notrace __interrupt void restore_scratch_gregs_v5(const struct scratch_gregs *gregs)
+{
+	BUILD_BUG_ON(KERNEL_GREGS_MAX_NUM != 10 || KERNEL_GREGS_PAIRS_START != 16);
+	RESTORE_GREGS_PAIR(gregs->g, 0, 1, 26, 27, E2K_ISET_V5);
+	RESTORE_GREGS_PAIR(gregs->g, 2, 3, 28, 29, E2K_ISET_V5);
+	RESTORE_GREGS_PAIR(gregs->g, 4, 5, 30, 31, E2K_ISET_V5);
+}
+
 notrace __interrupt
-void restore_gregs_on_mask_v5(struct e2k_global_regs *gregs, bool dirty_bgr,
+void restore_gregs_on_mask_v5(struct e2k_gregs *gregs, bool dirty_bgr,
 				unsigned long mask_not_restore)
 {
 	init_BGR_reg();	/* enable whole GRF */
@@ -125,14 +125,6 @@ void restore_gregs_on_mask_v5(struct e2k_global_regs *gregs, bool dirty_bgr,
 	}
 	if (!dirty_bgr)
 		native_write_BGR_reg(gregs->bgr);
-}
-
-__section(".entry.text")
-notrace __interrupt void restore_gregs_v5(const struct e2k_global_regs *gregs)
-{
-	init_BGR_reg();	/* enable whole GRF */
-	RESTORE_GREGS(gregs->g, true, E2K_ISET_V5);
-	native_write_BGR_reg(gregs->bgr);
 }
 
 notrace void qpswitchd_sm(int greg)
@@ -399,6 +391,7 @@ die:
 		die("AAU error", regs, 0);
 }
 
+__section(".entry.text")
 notrace void save_aaldi_v5(u64 *aaldis)
 {
 	SAVE_AALDIS_V5(aaldis);
@@ -408,6 +401,7 @@ notrace void save_aaldi_v5(u64 *aaldis)
  * It's taken that aasr was get earlier(from get_aau_context caller)
  * and comparison with aasr.iab was taken.
  */
+__section(".entry.text")
 notrace void get_aau_context_v5(e2k_aau_t *context, e2k_aasr_t aasr)
 {
 	GET_AAU_CONTEXT_V5(context, aasr);

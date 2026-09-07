@@ -48,18 +48,18 @@ struct compat_ipc64_perm {
 
 struct compat_semid64_ds {
 	struct compat_ipc64_perm sem_perm;
-	compat_ulong_t;
+	compat_ulong_t __unused1;
 	compat_ulong_t sem_otime;
 	compat_ulong_t sem_otime_high;
 	compat_ulong_t sem_ctime;
 	compat_ulong_t sem_nsems;
 	compat_ulong_t sem_ctime_high;
-	compat_ulong_t;
+	compat_ulong_t __unused2;
 };
 
 struct compat_msqid64_ds {
 	struct compat_ipc64_perm msg_perm;
-	compat_ulong_t;
+	compat_ulong_t __unused1;
 	compat_ulong_t msg_stime;
 	compat_ulong_t msg_stime_high;
 	compat_ulong_t msg_rtime;
@@ -71,12 +71,12 @@ struct compat_msqid64_ds {
 	compat_pid_t msg_lspid;
 	compat_pid_t msg_lrpid;
 	compat_ulong_t msg_ctime_high;
-	compat_ulong_t;
+	compat_ulong_t __unused2;
 };
 
 struct compat_shmid64_ds {
 	struct compat_ipc64_perm shm_perm;
-	compat_ulong_t;
+	compat_ulong_t __unused1;
 	compat_ulong_t shm_atime;
 	compat_ulong_t shm_atime_high;
 	compat_ulong_t shm_dtime;
@@ -87,7 +87,7 @@ struct compat_shmid64_ds {
 	compat_pid_t shm_lpid;
 	compat_ulong_t shm_nattch;
 	compat_ulong_t shm_ctime_high;
-	compat_ulong_t;
+	compat_ulong_t __unused2;
 };
 
 #define COMPAT_USER_HZ	100

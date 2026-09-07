@@ -1680,7 +1680,7 @@ int __init lynxfb_setup(char *options)
 }
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 10)
-static int __init lynxfb_init()
+static int __init lynxfb_init(void)
 {
 	char *option;
 	int ret;
@@ -1718,7 +1718,7 @@ int __init lynxfb_init(void)
 module_init(lynxfb_init);
 
 #ifdef MODULE
-static void __exit lynxfb_exit()
+static void __exit lynxfb_exit(void)
 {
 	ENTER();
 	inf_msg(_moduleName_ " exit\n");

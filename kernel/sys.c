@@ -2288,6 +2288,12 @@ out:
 #ifdef CONFIG_CHECKPOINT_RESTORE
 static int prctl_get_tid_address(struct task_struct *me, int __user * __user *tid_addr)
 {
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	if (in_ptr128_syscall()) {
+		e2k_ap_t ap = MAKE_AP(me->clear_child_tid, sizeof(int));
+		return put_user_tagged_16(ap.qword, ETAGAPQ, tid_addr);
+	} else
+#endif
 	return put_user(me->clear_child_tid, tid_addr);
 }
 #else

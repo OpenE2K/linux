@@ -62,7 +62,6 @@ DECLARE_PER_CPU(vector_irq_t, vector_irq);
 
 
 /* Statistics */
-extern atomic_t irq_err_count;
 extern atomic_t irq_mis_count;
 
 void lock_vector_lock(void);

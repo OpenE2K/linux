@@ -126,6 +126,7 @@
 
 #define	SIC_rt_pcicfgb	0x90
 #define	SIC_rt_pcicfged	0x98
+#define	SIC_rt_vgamemed	0x9c
 
 /* PREPIC */
 #define	SIC_prepic_version	0x8000
@@ -185,6 +186,12 @@
 #define SIC_iommu_err1		0x03b4
 #define SIC_iommu_err_info_lo	0x03b8
 #define SIC_iommu_err_info_hi	0x03bc
+#define SIC_iommu_mcr		0x03c0
+#define SIC_iommu_mid		0x03c4
+#define SIC_iommu_mar0_lo	0x03c8
+#define SIC_iommu_mar0_hi	0x03cc
+#define SIC_iommu_mar1_lo	0x03d0
+#define SIC_iommu_mar1_hi	0x03d4
 
 #define SIC_iommu_reg_base	SIC_iommu_ctrl
 #define SIC_iommu_reg_size	0x0080
@@ -257,21 +264,137 @@
 #define SIC_ipcc_str2		0x64c
 #define SIC_ipcc_str3		0x68c
 
+#define SIC_hw0			0xc80
+#define SIC_hw1			0xc84
+#define SIC_hw2			0xc88
+#define SIC_hw3			0xc8c
+
 /* Power management */
 #define SIC_pwr_mgr		0x280
 
 /* E12C/E16C/E2C3 Power Control System (PCS) registers
  * PMC base = 0x1000 is added */
-#define PMC_FREQ_CFG			0x1100
-#define PMC_FREQ_STEPS			0x1104
-#define PMC_FREQ_C2			0x1108
-#define PMC_FREQ_CORE_0_MON		0x1200
-#define PMC_FREQ_CORE_0_CTRL		0x1204
-#define PMC_FREQ_CORE_0_SLEEP		0x1208
-#define PMC_FREQ_CORE_N_MON(n)	(PMC_FREQ_CORE_0_MON +  n * 16)
-#define PMC_FREQ_CORE_N_CTRL(n)	(PMC_FREQ_CORE_0_CTRL +  n * 16)
-#define PMC_FREQ_CORE_N_SLEEP(n)	((PMC_FREQ_CORE_0_SLEEP) +  n * 16)
-#define PMC_SYS_MON_1			0x1504
+#define _PMC_TERM_CONV			0x8
+#define _PMC_TERM_CTRL			0xc
+#define _PMC_TERM_TS0			0x10
+#define _PMC_TERM_TS1			0x14
+#define _PMC_TERM_TS2			0x18
+#define _PMC_TERM_TS3			0x1c
+#define _PMC_TERM_TS4			0x20
+#define _PMC_TERM_TS5			0x24
+#define _PMC_TERM_TS6			0x28
+#define _PMC_TERM_TS7			0x2c
+#define _PMC_FREQ_CFG			0x100
+#define _PMC_FREQ_STEPS			0x104
+#define _PMC_FREQ_C2			0x108
+#define _PMC_FREQ_BND			0x10c
+#define _PMC_FREQ_CORE_FLOAT		0x110
+#define _PMC_FREQ_OCN_FLOAT		0x114
+#define _PMC_FREQ_CORE_TABLE0		0x120
+#define _PMC_FREQ_CORE_TABLE1		0x124
+#define _PMC_FREQ_CORE_TABLE2		0x128
+#define _PMC_FREQ_CORE_TABLE3		0x12c
+#define _PMC_FREQ_CORE_TABLE4		0x130
+#define _PMC_FREQ_CORE_TABLE5		0x134
+#define _PMC_FREQ_CORE_TABLE6		0x138
+#define _PMC_FREQ_CORE_TABLE7		0x13c
+#define _PMC_FREQ_OCN_TABLE0		0x140
+#define _PMC_FREQ_OCN_TABLE1		0x144
+#define _PMC_FREQ_OCN_TABLE2		0x148
+#define _PMC_FREQ_OCN_TABLE3		0x14c
+#define _PMC_FREQ_OCN_TABLE4		0x150
+#define _PMC_FREQ_OCN_TABLE5		0x154
+#define _PMC_FREQ_OCN_TABLE6		0x158
+#define _PMC_FREQ_OCN_TABLE7		0x15c
+#define _PMC_FREQ_CORE_0_MON		0x200
+#define _PMC_FREQ_CORE_0_CTRL		0x204
+#define _PMC_FREQ_CORE_0_SLEEP		0x208
+#define _PMC_FREQ_CORE_N_MON(n)		(_PMC_FREQ_CORE_0_MON +  n * 16)
+#define _PMC_FREQ_CORE_N_CTRL(n)	(_PMC_FREQ_CORE_0_CTRL +  n * 16)
+#define _PMC_FREQ_CORE_N_SLEEP(n)	(_PMC_FREQ_CORE_0_SLEEP +  n * 16)
+#define _PMC_FREQ_CORE_0_MON_V7	0x400
+#define _PMC_FREQ_CORE_0_CTRL_V7	0x404
+#define _PMC_FREQ_CORE_0_SLEEP_V7	0x408
+#define _PMC_FREQ_CORE_N_MON_V7(n)	(_PMC_FREQ_CORE_0_MON_V7 +  n * 16)
+#define _PMC_FREQ_CORE_N_CTRL_V7(n)	(_PMC_FREQ_CORE_0_CTRL_V7 +  n * 16)
+#define _PMC_FREQ_CORE_N_SLEEP_V7(n)	(_PMC_FREQ_CORE_0_SLEEP_V7 +  n * 16)
+#define _PMC_FREQ_OCN_MON		0x400
+#define _PMC_FREQ_OCN_CTRL		0x404
+#define _PMC_FREQ_GRAPHIC_0_MON	0x410
+#define _PMC_FREQ_GRAPHIC_0_CTRL	0x414
+#define _PMC_FREQ_GRAPHIC_N_MON(n)	(_PMC_FREQ_GRAPHIC_0_MON +  n * 16)
+#define _PMC_FREQ_GRAPHIC_N_CTRL(n)	(_PMC_FREQ_GRAPHIC_0_CTRL +  n * 16)
+#define _PMC_FREQ_OCN_MON_V7		0x380
+#define _PMC_FREQ_OCN_CTRL_V7		0x384
+#define _PMC_FREQ_GRAPHIC_0_MON_V7	0x3c0
+#define _PMC_FREQ_GRAPHIC_0_CTRL_V7	0x3c4
+#define _PMC_FREQ_GRAPHIC_N_MON_V7(n)	(_PMC_FREQ_GRAPHIC_0_MON_V7 +  n * 16)
+#define _PMC_FREQ_GRAPHIC_N_CTRL_V7(n)	(_PMC_FREQ_GRAPHIC_0_CTRL_V7 +  n * 16)
+#define _PMC_SYS_MON_0			0x500
+#define _PMC_SYS_MON_1			0x504
+#define _PMC_FAN_CFG			0x540
+
+#define PMC_INFO			0x1000
+
+#define PMC_TERM_CONV			(PMC_INFO + _PMC_TERM_CONV)
+#define PMC_TERM_CTRL			(PMC_INFO + _PMC_TERM_CTRL)
+#define PMC_TERM_TS0			(PMC_INFO + _PMC_TERM_TS0)
+#define PMC_TERM_TS1			(PMC_INFO + _PMC_TERM_TS1)
+#define PMC_TERM_TS2			(PMC_INFO + _PMC_TERM_TS2)
+#define PMC_TERM_TS3			(PMC_INFO + _PMC_TERM_TS3)
+#define PMC_TERM_TS4			(PMC_INFO + _PMC_TERM_TS4)
+#define PMC_TERM_TS5			(PMC_INFO + _PMC_TERM_TS5)
+#define PMC_TERM_TS6			(PMC_INFO + _PMC_TERM_TS6)
+#define PMC_TERM_TS7			(PMC_INFO + _PMC_TERM_TS7)
+#define PMC_FREQ_CFG			(PMC_INFO + _PMC_FREQ_CFG)
+#define PMC_FREQ_STEPS			(PMC_INFO + _PMC_FREQ_STEPS)
+#define PMC_FREQ_C2			(PMC_INFO + _PMC_FREQ_C2)
+#define PMC_FREQ_BND			(PMC_INFO + _PMC_FREQ_BND)
+#define PMC_FREQ_CORE_FLOAT		(PMC_INFO + _PMC_FREQ_CORE_FLOAT)
+#define PMC_FREQ_OCN_FLOAT		(PMC_INFO + _PMC_FREQ_OCN_FLOAT)
+#define PMC_FREQ_CORE_TABLE0		(PMC_INFO + _PMC_FREQ_CORE_TABLE0)
+#define PMC_FREQ_CORE_TABLE1		(PMC_INFO + _PMC_FREQ_CORE_TABLE1)
+#define PMC_FREQ_CORE_TABLE2		(PMC_INFO + _PMC_FREQ_CORE_TABLE2)
+#define PMC_FREQ_CORE_TABLE3		(PMC_INFO + _PMC_FREQ_CORE_TABLE3)
+#define PMC_FREQ_CORE_TABLE4		(PMC_INFO + _PMC_FREQ_CORE_TABLE4)
+#define PMC_FREQ_CORE_TABLE5		(PMC_INFO + _PMC_FREQ_CORE_TABLE5)
+#define PMC_FREQ_CORE_TABLE6		(PMC_INFO + _PMC_FREQ_CORE_TABLE6)
+#define PMC_FREQ_CORE_TABLE7		(PMC_INFO + _PMC_FREQ_CORE_TABLE7)
+#define PMC_FREQ_OCN_TABLE0		(PMC_INFO + _PMC_FREQ_OCN_TABLE0)
+#define PMC_FREQ_OCN_TABLE1		(PMC_INFO + _PMC_FREQ_OCN_TABLE1)
+#define PMC_FREQ_OCN_TABLE2		(PMC_INFO + _PMC_FREQ_OCN_TABLE2)
+#define PMC_FREQ_OCN_TABLE3		(PMC_INFO + _PMC_FREQ_OCN_TABLE3)
+#define PMC_FREQ_OCN_TABLE4		(PMC_INFO + _PMC_FREQ_OCN_TABLE4)
+#define PMC_FREQ_OCN_TABLE5		(PMC_INFO + _PMC_FREQ_OCN_TABLE5)
+#define PMC_FREQ_OCN_TABLE6		(PMC_INFO + _PMC_FREQ_OCN_TABLE6)
+#define PMC_FREQ_OCN_TABLE7		(PMC_INFO + _PMC_FREQ_OCN_TABLE7)
+#define PMC_FREQ_CORE_0_MON		(PMC_INFO + _PMC_FREQ_CORE_0_MON)
+#define PMC_FREQ_CORE_0_CTRL		(PMC_INFO + _PMC_FREQ_CORE_0_CTRL)
+#define PMC_FREQ_CORE_0_SLEEP		(PMC_INFO + _PMC_FREQ_CORE_0_SLEEP)
+#define PMC_FREQ_CORE_N_MON(n)		(PMC_INFO + _PMC_FREQ_CORE_N_MON(n))
+#define PMC_FREQ_CORE_N_CTRL(n)	(PMC_INFO + _PMC_FREQ_CORE_N_CTRL(n))
+#define PMC_FREQ_CORE_N_SLEEP(n)	(PMC_INFO + _PMC_FREQ_CORE_N_SLEEP(n))
+#define PMC_FREQ_CORE_0_MON_V7		(PMC_INFO + _PMC_FREQ_CORE_0_MON_V7)
+#define PMC_FREQ_CORE_0_CTRL_V7	(PMC_INFO + _PMC_FREQ_CORE_0_CTRL_V7)
+#define PMC_FREQ_CORE_0_SLEEP_V7	(PMC_INFO + _PMC_FREQ_CORE_0_SLEEP_V7)
+#define PMC_FREQ_CORE_N_MON_V7(n)	(PMC_INFO + _PMC_FREQ_CORE_N_MON_V7(n))
+#define PMC_FREQ_CORE_N_CTRL_V7(n)	(PMC_INFO + _PMC_FREQ_CORE_N_CTRL_V7(n))
+#define PMC_FREQ_CORE_N_SLEEP_V7(n)	(PMC_INFO + _PMC_FREQ_CORE_N_SLEEP_V7(n))
+#define PMC_FREQ_OCN_MON		(PMC_INFO + _PMC_FREQ_OCN_MON)
+#define PMC_FREQ_OCN_CTRL		(PMC_INFO + _PMC_FREQ_OCN_CTRL)
+#define PMC_FREQ_OCN_MON_V7		(PMC_INFO + _PMC_FREQ_OCN_MON_V7)
+#define PMC_FREQ_OCN_CTRL_V7		(PMC_INFO + _PMC_FREQ_OCN_CTRL_V7)
+#define PMC_FREQ_GRAPHIC_0_MON		(PMC_INFO + _PMC_FREQ_GRAPHIC_0_MON)
+#define PMC_FREQ_GRAPHIC_0_CTRL	(PMC_INFO + _PMC_FREQ_GRAPHIC_0_CTRL)
+#define PMC_FREQ_GRAPHIC_N_MON(n)	(PMC_INFO + _PMC_FREQ_GRAPHIC_N_MON(n))
+#define PMC_FREQ_GRAPHIC_N_CTRL(n)	(PMC_INFO + _PMC_FREQ_GRAPHIC_N_CTRL(n))
+#define PMC_FREQ_GRAPHIC_0_MON_V7	(PMC_INFO + _PMC_FREQ_GRAPHIC_0_MON_V7)
+#define PMC_FREQ_GRAPHIC_0_CTRL_V7	(PMC_INFO + _PMC_FREQ_GRAPHIC_0_CTRL_V7)
+#define PMC_FREQ_GRAPHIC_N_MON_V7(n)	(PMC_INFO + _PMC_FREQ_GRAPHIC_N_MON_V7(n))
+#define PMC_FREQ_GRAPHIC_N_CTRL_V7(n)	(PMC_INFO + _PMC_FREQ_GRAPHIC_N_CTRL_V7(n))
+#define PMC_SYS_MON_0			(PMC_INFO + _PMC_SYS_MON_0)
+#define PMC_SYS_MON_1			(PMC_INFO + _PMC_SYS_MON_1)
+#define PMC_FAN_CFG			(PMC_INFO + _PMC_FAN_CFG)
 
 #ifndef __ASSEMBLY__
 /* PMC_FREQ_CORE_0_SLEEP fields: */
@@ -567,6 +690,7 @@ typedef union {
 
 #define EFUSE_RAM_ADDR          0x0cc0
 #define EFUSE_RAM_DATA          0x0cc4
+#define EFUSE_RAM_LINES         256
 
 /*
  *   Read/Write RT_LCFGj Regs
@@ -675,6 +799,17 @@ typedef union {
 
 #define	E2K_SIC_ALIGN_RT_PCICFGB	28	/* 256 Mb */
 #define	E2K_SIC_SIZE_RT_PCICFGB		(1 << E2K_SIC_ALIGN_RT_PCICFGB)
+
+typedef union {
+	struct {
+		u32 bgn		: 16;	/* [16:0] */
+		u32		: 16;	/* [31:17] */
+	};
+	e2k_reg_t;
+} e2k_rt_pcicfg_bgn_t;
+
+#define	E2K_SIC_ALIGN_RT_PCICFG_BGN	32	/* 4 Gb */
+#define	E2K_SIC_SIZE_RT_PCICFG_BGN	(1 << E2K_SIC_ALIGN_RT_PCICFG_BGN_V7)
 
 /*
  *   Read/Write RT_MLOj Regs
@@ -944,6 +1079,44 @@ typedef union {
 } e2k_sic_mcr_t;
 
 /*
+ * SIC_HW* registers
+ */
+typedef union {
+	struct {
+		u32 independent_rdma	: 1;
+		u32 snrd32		: 1;
+		u32 dpack64		: 1;
+		u32 i2ri		: 2;
+		u32 scrqprior		: 1;
+		u32			: 26;
+	};
+	struct {
+		u32			: 6;
+		u32 dcindscr		: 3;
+		u32 b63761wa		: 1;
+		u32			: 22;
+	} e4c; /* e4c only */
+	struct {
+		u32			: 6;
+		u32 trwm_sc3		: 3;
+		u32 dma_wr_glue_en	: 1;
+		u32 us_tc_vc1_map	: 2;
+		u32 ds_tc_vc1_map	: 2;
+		u32 iol_ermo		: 1;
+		u32			: 17;
+	} v4_v5; /* iset: v4, v5 */
+	struct {
+		u32			: 15;
+		u32 hc_dma_rfo_en	: 1;
+		u32 ddrrsync_en		: 1;
+		u32 ddrrsync_delay	: 3;
+		u32 ddrrsync_rst	: 1;
+		u32			: 11;
+	} v5; /* iset: v5 */
+	e2k_reg_t;
+} e2k_sic_hw1_t;
+
+/*
  * Monitor accumulator register hi part (SIC_MAR0_hi, SIC_MAR1_hi)
  */
 typedef union {
@@ -951,7 +1124,7 @@ typedef union {
 		u32 val	: 31;	/* [30:0] */
 		u32 of	: 1;	/* [31] */
 	};
-	e2k_dreg_t;
+	e2k_reg_t;
 } e2k_sic_mar_hi_t;
 
 /*

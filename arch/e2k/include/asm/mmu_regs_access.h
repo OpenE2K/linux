@@ -20,69 +20,6 @@
 
 #include <asm/native_mmu_regs_access.h>
 
-extern unsigned long native_read_MMU_OS_PPTB_reg_value(void);
-extern void native_write_MMU_OS_PPTB_reg_value(unsigned long value);
-extern unsigned long native_read_MMU_OS_VPTB_reg_value(void);
-extern void native_write_MMU_OS_VPTB_reg_value(unsigned long value);
-extern unsigned long native_read_MMU_OS_VAB_reg_value(void);
-extern void native_write_MMU_OS_VAB_reg_value(unsigned long value);
-
-extern unsigned long boot_native_read_MMU_OS_PPTB_reg_value(void);
-extern void boot_native_write_MMU_OS_PPTB_reg_value(unsigned long value);
-extern unsigned long boot_native_read_MMU_OS_VPTB_reg_value(void);
-extern void boot_native_write_MMU_OS_VPTB_reg_value(unsigned long value);
-extern unsigned long boot_native_read_MMU_OS_VAB_reg_value(void);
-extern void boot_native_write_MMU_OS_VAB_reg_value(unsigned long value);
-
-#define	NATIVE_WRITE_MMU_OS_PPTB_REG(reg_val)				\
-		native_write_MMU_OS_PPTB_reg_value(reg_val)
-#define	NATIVE_READ_MMU_OS_PPTB_REG()					\
-		native_read_MMU_OS_PPTB_reg_value()
-#define	NATIVE_WRITE_MMU_OS_VPTB_REG(reg_val)				\
-		native_write_MMU_OS_VPTB_reg_value(reg_val)
-#define	NATIVE_READ_MMU_OS_VPTB_REG()					\
-		native_read_MMU_OS_VPTB_reg_value()
-#define	NATIVE_WRITE_MMU_OS_VAB_REG(reg_val)				\
-		native_write_MMU_OS_VAB_reg_value(reg_val)
-#define	NATIVE_READ_MMU_OS_VAB_REG()					\
-		native_read_MMU_OS_VAB_reg_value()
-#define	NATIVE_READ_MMU_PID_REG()					\
-		NATIVE_READ_MMU_REG(	\
-			_MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_PID_NO))
-#define	NATIVE_WRITE_MMU_PID_REG(reg_val)				\
-		NATIVE_SET_MMUREG(cont,	mmu_reg_val(reg_val))
-#define	NATIVE_READ_MMU_U_PPTB_REG()					\
-		NATIVE_READ_MMU_REG(	\
-			_MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_U_PPTB_NO))
-#define	NATIVE_WRITE_MMU_U_PPTB_REG(reg_val)				\
-		NATIVE_WRITE_MMU_REG( \
-			_MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_U_PPTB_NO),	\
-			mmu_reg_val(reg_val))
-#define	NATIVE_READ_MMU_U_VPTB_REG()					\
-		NATIVE_READ_MMU_REG(	\
-			_MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_U_VPTB_NO))
-#define	NATIVE_WRITE_MMU_U_VPTB_REG(reg_val)				\
-		NATIVE_WRITE_MMU_REG( \
-			_MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_U_VPTB_NO),	\
-			mmu_reg_val(reg_val))
-
-#define	BOOT_NATIVE_WRITE_MMU_OS_PPTB_REG(reg_val)			\
-		boot_native_write_MMU_OS_PPTB_reg_value(reg_val)
-#define	BOOT_NATIVE_READ_MMU_OS_PPTB_REG()				\
-		boot_native_read_MMU_OS_PPTB_reg_value()
-#define	BOOT_NATIVE_WRITE_MMU_OS_VPTB_REG(reg_val)			\
-		boot_native_write_MMU_OS_VPTB_reg_value(reg_val)
-#define	BOOT_NATIVE_READ_MMU_OS_VPTB_REG()				\
-		boot_native_read_MMU_OS_VPTB_reg_value()
-#define	BOOT_NATIVE_WRITE_MMU_OS_VAB_REG(reg_val)			\
-		boot_native_write_MMU_OS_VAB_reg_value(reg_val)
-#define	BOOT_NATIVE_READ_MMU_OS_VAB_REG()				\
-		boot_native_read_MMU_OS_VAB_reg_value()
-#define	BOOT_NATIVE_WRITE_MMU_PID_REG(reg_val)				\
-		NATIVE_WRITE_MMU_PID_REG(reg_val)
-#define	BOOT_NATIVE_READ_MMU_PID_REG()					\
-		NATIVE_READ_MMU_PID_REG()
-
 #ifdef	CONFIG_KVM_GUEST_KERNEL
 /* it is virtualized guest kernel */
 #include <asm/kvm/mmu_regs_access.h>
@@ -95,175 +32,140 @@ extern void boot_native_write_MMU_OS_VAB_reg_value(unsigned long value);
  */
 
 #ifndef __ASSEMBLY__
+
+static inline void set_MMU_TRAP_POINT(unsigned long trap_cellar)
+{
+	NATIVE_SET_MMUREG(trap_point, trap_cellar);
+}
+
 /*
  * Write/read MMU register
  */
-#define	WRITE_MMU_REG(addr_val, reg_val)				\
-		NATIVE_WRITE_MMU_REG(addr_val, reg_val)
-#define	READ_MMU_REG(addr_val)						\
-		NATIVE_READ_MMU_REG(addr_val)
+#define	WRITE_MMU_REG		NATIVE_WRITE_MMU_REG
+#define	READ_MMU_REG		NATIVE_READ_MMU_REG
 
-#define	BOOT_WRITE_MMU_REG(addr_val, reg_val)				\
-		BOOT_NATIVE_WRITE_MMU_REG(addr_val, reg_val)
-#define	BOOT_READ_MMU_REG(addr_val)					\
-		BOOT_NATIVE_READ_MMU_REG(addr_val)
+#define	WRITE_MMU_U_VPTB	NATIVE_WRITE_MMU_U_VPTB_REG
+#define	WRITE_MMU_U_PPTB	NATIVE_WRITE_MMU_U_PPTB_REG
+#define	WRITE_MMU_OS_PPTB	NATIVE_WRITE_MMU_OS_PPTB_REG
+#define	READ_MMU_OS_PPTB	NATIVE_READ_MMU_OS_PPTB_REG
+#define	WRITE_MMU_OS_VPTB	NATIVE_WRITE_MMU_OS_VPTB_REG
+#define	READ_MMU_OS_VPTB	NATIVE_READ_MMU_OS_VPTB_REG
+#define	WRITE_MMU_OS_VAB	NATIVE_WRITE_MMU_OS_VAB_REG
+#define	READ_MMU_OS_VAB		NATIVE_READ_MMU_OS_VAB_REG
+#define	WRITE_MMU_PID		NATIVE_WRITE_MMU_PID_REG
+#define	READ_MMU_PID		NATIVE_READ_MMU_PID_REG
 
-#define	WRITE_MMU_OS_PPTB(reg_val)					\
-		NATIVE_WRITE_MMU_OS_PPTB_REG(reg_val)
-#define	READ_MMU_OS_PPTB()						\
-		NATIVE_READ_MMU_OS_PPTB_REG()
-#define	WRITE_MMU_OS_VPTB(reg_val)					\
-		NATIVE_WRITE_MMU_OS_VPTB_REG(reg_val)
-#define	READ_MMU_OS_VPTB()						\
-		NATIVE_READ_MMU_OS_VPTB_REG()
-#define	WRITE_MMU_OS_VAB(reg_val)					\
-		NATIVE_WRITE_MMU_OS_VAB_REG(reg_val)
-#define	READ_MMU_OS_VAB()						\
-		NATIVE_READ_MMU_OS_VAB_REG()
-#define	WRITE_MMU_PID(reg_val)						\
-		NATIVE_WRITE_MMU_PID_REG(reg_val)
-#define	READ_MMU_PID()							\
-		NATIVE_READ_MMU_PID_REG()
+#define	WRITE_MMU_TRAP_COUNT(counter)	NATIVE_SET_MMUREG_ISET(6, trap_count, (counter))
 
-#define	BOOT_WRITE_MMU_OS_PPTB(reg_val)					\
-		BOOT_NATIVE_WRITE_MMU_OS_PPTB_REG(reg_val)
-#define	BOOT_READ_MMU_OS_PPTB()						\
-		BOOT_NATIVE_READ_MMU_OS_PPTB_REG()
-#define	BOOT_WRITE_MMU_OS_VPTB(reg_val)					\
-		BOOT_NATIVE_WRITE_MMU_OS_VPTB_REG(reg_val)
-#define	BOOT_READ_MMU_OS_VPTB()						\
-		BOOT_NATIVE_READ_MMU_OS_VPTB_REG()
-#define	BOOT_WRITE_MMU_OS_VAB(reg_val)					\
-		BOOT_NATIVE_WRITE_MMU_OS_VAB_REG(reg_val)
-#define	BOOT_READ_MMU_OS_VAB()						\
-		BOOT_NATIVE_READ_MMU_OS_VAB_REG()
-#define	BOOT_WRITE_MMU_PID(reg_val)					\
-		BOOT_NATIVE_WRITE_MMU_PID_REG(reg_val)
-#define	BOOT_READ_MMU_PID()						\
-		BOOT_NATIVE_READ_MMU_PID_REG()
+static inline void reset_MMU_TRAP_COUNT(void)
+{
+	if (machine.native_iset_ver >= E2K_ISET_V6)
+		WRITE_MMU_TRAP_COUNT(0);
+}
+
+#define	BOOT_WRITE_MMU_U_VPTB	NATIVE_WRITE_MMU_U_VPTB_REG
+#define	BOOT_WRITE_MMU_U_PPTB	NATIVE_WRITE_MMU_U_PPTB_REG
+#define	BOOT_WRITE_MMU_OS_PPTB	NATIVE_WRITE_MMU_OS_PPTB_REG
+#define	BOOT_READ_MMU_OS_PPTB	NATIVE_READ_MMU_OS_PPTB_REG
+#define	BOOT_WRITE_MMU_OS_VPTB	NATIVE_WRITE_MMU_OS_VPTB_REG
+#define	BOOT_READ_MMU_OS_VPTB	NATIVE_READ_MMU_OS_VPTB_REG
+#define	BOOT_WRITE_MMU_OS_VAB	NATIVE_WRITE_MMU_OS_VAB_REG
+#define	BOOT_READ_MMU_OS_VAB	NATIVE_READ_MMU_OS_VAB_REG
+#define	BOOT_WRITE_MMU_PID	NATIVE_WRITE_MMU_PID_REG
+#define	BOOT_READ_MMU_PID	NATIVE_READ_MMU_PID_REG
+
 
 /*
  * Write/read Data TLB register
  */
-#define	WRITE_DTLB_REG(tlb_addr, tlb_value)				\
-		NATIVE_WRITE_DTLB_REG(tlb_addr, tlb_value)
-
-#define	READ_DTLB_REG(tlb_addr)						\
-		NATIVE_READ_DTLB_REG(tlb_addr)
+#define	WRITE_DTLB_REG		NATIVE_WRITE_DTLB_REG
+#define	READ_DTLB_REG		NATIVE_READ_DTLB_REG
 
 /*
  * Flush TLB page/entry
  */
-#define	FLUSH_TLB_ENTRY(flush_op, addr)					\
-		NATIVE_FLUSH_TLB_ENTRY(flush_op, addr)
+#define	FLUSH_TLB_ENTRY		NATIVE_FLUSH_TLB_ENTRY
 
-/*
- * Flush DCACHE line
- */
-#define	FLUSH_DCACHE_LINE(virt_addr)					\
-		NATIVE_FLUSH_DCACHE_LINE(virt_addr)
-#define	FLUSH_DCACHE_LINE_OFFSET(virt_addr, offset) \
-		NATIVE_FLUSH_DCACHE_LINE_OFFSET((virt_addr), (offset))
+#define	FLUSH_DCACHE_LINE		NATIVE_FLUSH_DCACHE_LINE
+#define	FLUSH_DCACHE_LINE_OFFSET	NATIVE_FLUSH_DCACHE_LINE_OFFSET
 
 /*
  * Read DCACHE L1 fault_reg register
  */
-#define	READ_L1_FAULT_REG()	NATIVE_READ_L1_FAULT_REG()
-#define WRITE_L1_FAULT_REG(val)	NATIVE_WRITE_L1_FAULT_REG(val)
+#define	READ_L1_FAULT_REG	NATIVE_READ_L1_FAULT_REG
+#define WRITE_L1_FAULT_REG	NATIVE_WRITE_L1_FAULT_REG
 
 /*
  * Clear DCACHE L1 set
  */
-#define	CLEAR_DCACHE_L1_SET(virt_addr, set)				\
-		NATIVE_CLEAR_DCACHE_L1_SET(virt_addr, set)
+#define	CLEAR_DCACHE_L1_SET	NATIVE_CLEAR_DCACHE_L1_SET
 
 /*
- * Write DCACHE L2 registers
+ * DCACHE L2 registers
  */
-#define	WRITE_L2_REG(reg_val, reg_num, bank_num)			\
-		NATIVE_WRITE_L2_REG(reg_val, reg_num, bank_num)
+#define	WRITE_L2_REG		NATIVE_WRITE_L2_REG
+#define	READ_L2_REG		NATIVE_READ_L2_REG
 
-/*
- * Read DCACHE L2 registers
- */
-#define	READ_L2_REG(reg_num, bank_num)					\
-		NATIVE_READ_L2_REG(reg_num, bank_num)
-
-/*
- * Flush ICACHE line
- */
-#define	FLUSH_ICACHE_LINE(flush_op, addr)				\
-		NATIVE_FLUSH_ICACHE_LINE(flush_op, addr)
+#define	FLUSH_ICACHE_LINE	NATIVE_FLUSH_ICACHE_LINE
 
 /*
  * Flush and invalidate or write back L1/L2 CACHE(s)
  */
-#define	FLUSH_CACHE_L12(flush_op)					\
-		native_write_back_CACHE_L12()
+#define	FLUSH_CACHE_L12(flush_op)	native_write_back_CACHE_L12()
 
 /*
  * Flush TLB (invalidate all TLBs of the processor)
  */
-#define	FLUSH_TLB_ALL(flush_op)						\
-		native_flush_TLB_all()
+#define	FLUSH_TLB_ALL(flush_op)		native_flush_TLB_all()
 
 /*
  * Flush ICACHE (invalidate instruction caches of the processor)
  */
-#define	FLUSH_ICACHE_ALL(flush_op)					\
-		native_flush_ICACHE_all()
+#define	FLUSH_ICACHE_ALL(flush_op)	native_flush_ICACHE_all()
 
 /*
  * Get Entry probe for virtual address
  */
-#define	ENTRY_PROBE_MMU_OP(addr_val)					\
-		NATIVE_ENTRY_PROBE_MMU_OP(addr_val)
+#define	ENTRY_PROBE_MMU_OP	NATIVE_ENTRY_PROBE_MMU_OP
 
 /*
  * Get physical address for virtual address
  */
-#define	ADDRESS_PROBE_MMU_OP(addr_val)					\
-		NATIVE_ADDRESS_PROBE_MMU_OP(addr_val)
+#define	ADDRESS_PROBE_MMU_OP	NATIVE_ADDRESS_PROBE_MMU_OP
 
 /*
- * Read CLW register
+ * CLW registers access
  */
-#define	READ_CLW_REG(clw_addr)						\
-		NATIVE_READ_CLW_REG(clw_addr)
-
-/*
- * Write CLW register
- */
-#define	WRITE_CLW_REG(clw_addr, val)						\
-		NATIVE_WRITE_CLW_REG(clw_addr, val)
+#define	READ_CLW_REG		NATIVE_READ_CLW_REG
+#define	WRITE_CLW_REG		NATIVE_WRITE_CLW_REG
 
 /*
  * MMU DEBUG registers access
  */
-#define	READ_DDBAR0_REG_VALUE()		NATIVE_READ_DDBAR0_REG_VALUE()
-#define	READ_DDBAR1_REG_VALUE()		NATIVE_READ_DDBAR1_REG_VALUE()
-#define	READ_DDBAR2_REG_VALUE()		NATIVE_READ_DDBAR2_REG_VALUE()
-#define	READ_DDBAR3_REG_VALUE()		NATIVE_READ_DDBAR3_REG_VALUE()
-#define	READ_DDBCR_REG_VALUE()		NATIVE_READ_DDBCR_REG_VALUE()
-#define	READ_DDBSR_REG_VALUE()		NATIVE_READ_DDBSR_REG_VALUE()
-#define	READ_DDMAR0_REG_VALUE()		NATIVE_READ_DDMAR0_REG_VALUE()
-#define	READ_DDMAR1_REG_VALUE()		NATIVE_READ_DDMAR1_REG_VALUE()
-#define	READ_DDMAR2_REG_VALUE()		NATIVE_READ_DDMAR2_REG_VALUE()
-#define	READ_DDMAR3_REG_VALUE()		NATIVE_READ_DDMAR3_REG_VALUE()
-#define	READ_DDMCR_REG_VALUE()		NATIVE_READ_DDMCR_REG_VALUE()
-#define	READ_DDMCR1_REG_VALUE()		NATIVE_READ_DDMCR1_REG_VALUE()
-#define	WRITE_DDBAR0_REG_VALUE(value)	NATIVE_WRITE_DDBAR0_REG_VALUE(value)
-#define	WRITE_DDBAR1_REG_VALUE(value)	NATIVE_WRITE_DDBAR1_REG_VALUE(value)
-#define	WRITE_DDBAR2_REG_VALUE(value)	NATIVE_WRITE_DDBAR2_REG_VALUE(value)
-#define	WRITE_DDBAR3_REG_VALUE(value)	NATIVE_WRITE_DDBAR3_REG_VALUE(value)
-#define	WRITE_DDBCR_REG_VALUE(value)	NATIVE_WRITE_DDBCR_REG_VALUE(value)
-#define	WRITE_DDBSR_REG_VALUE(value)	NATIVE_WRITE_DDBSR_REG_VALUE(value)
-#define	WRITE_DDMAR0_REG_VALUE(value)	NATIVE_WRITE_DDMAR0_REG_VALUE(value)
-#define	WRITE_DDMAR1_REG_VALUE(value)	NATIVE_WRITE_DDMAR1_REG_VALUE(value)
-#define	WRITE_DDMAR2_REG_VALUE(value)	NATIVE_WRITE_DDMAR2_REG_VALUE(value)
-#define	WRITE_DDMAR3_REG_VALUE(value)	NATIVE_WRITE_DDMAR3_REG_VALUE(value)
-#define	WRITE_DDMCR_REG_VALUE(value)	NATIVE_WRITE_DDMCR_REG_VALUE(value)
-#define	WRITE_DDMCR1_REG_VALUE(value)	NATIVE_WRITE_DDMCR1_REG_VALUE(value)
+#define	READ_DDBAR0_REG		NATIVE_READ_DDBAR0_REG_VALUE
+#define	READ_DDBAR1_REG		NATIVE_READ_DDBAR1_REG_VALUE
+#define	READ_DDBAR2_REG		NATIVE_READ_DDBAR2_REG_VALUE
+#define	READ_DDBAR3_REG		NATIVE_READ_DDBAR3_REG_VALUE
+#define	READ_DDBCR_REG_VALUE		NATIVE_READ_DDBCR_REG_VALUE
+#define	READ_DDBSR_REG_VALUE		NATIVE_READ_DDBSR_REG_VALUE
+#define	READ_DDMAR0_REG		NATIVE_READ_DDMAR0_REG
+#define	READ_DDMAR1_REG		NATIVE_READ_DDMAR1_REG
+#define	READ_DDMAR2_REG		NATIVE_READ_DDMAR2_REG
+#define	READ_DDMAR3_REG		NATIVE_READ_DDMAR3_REG
+#define	READ_DDMCR_REG_VALUE		NATIVE_READ_DDMCR_REG_VALUE
+#define	READ_DDMCR1_REG_VALUE		NATIVE_READ_DDMCR1_REG_VALUE
+#define	WRITE_DDBAR0_REG_VALUE		NATIVE_WRITE_DDBAR0_REG_VALUE
+#define	WRITE_DDBAR1_REG_VALUE		NATIVE_WRITE_DDBAR1_REG_VALUE
+#define	WRITE_DDBAR2_REG_VALUE		NATIVE_WRITE_DDBAR2_REG_VALUE
+#define	WRITE_DDBAR3_REG_VALUE		NATIVE_WRITE_DDBAR3_REG_VALUE
+#define	WRITE_DDBCR_REG_VALUE		NATIVE_WRITE_DDBCR_REG_VALUE
+#define	WRITE_DDBSR_REG_VALUE		NATIVE_WRITE_DDBSR_REG_VALUE
+#define	WRITE_DDMAR0_REG_VALUE		NATIVE_WRITE_DDMAR0_REG_VALUE
+#define	WRITE_DDMAR1_REG_VALUE		NATIVE_WRITE_DDMAR1_REG_VALUE
+#define	WRITE_DDMAR2_REG_VALUE		NATIVE_WRITE_DDMAR2_REG_VALUE
+#define	WRITE_DDMAR3_REG_VALUE		NATIVE_WRITE_DDMAR3_REG_VALUE
+#define	WRITE_DDMCR_REG_VALUE		NATIVE_WRITE_DDMCR_REG_VALUE
+#define	WRITE_DDMCR1_REG_VALUE		NATIVE_WRITE_DDMCR1_REG_VALUE
 
 #endif /* ! __ASSEMBLY__ */
 
@@ -271,14 +173,6 @@ extern void boot_native_write_MMU_OS_VAB_reg_value(unsigned long value);
 
 #ifndef __ASSEMBLY__
 
-#define	READ_DDBAR0_REG()	\
-		READ_DDBAR0_REG_VALUE()
-#define	READ_DDBAR1_REG()	\
-		READ_DDBAR1_REG_VALUE()
-#define	READ_DDBAR2_REG()	\
-		READ_DDBAR2_REG_VALUE()
-#define	READ_DDBAR3_REG()	\
-		READ_DDBAR3_REG_VALUE()
 #define	READ_DDBCR_REG()	\
 ({ \
 	e2k_ddbcr_t ddbcr; \
@@ -293,10 +187,6 @@ extern void boot_native_write_MMU_OS_VAB_reg_value(unsigned long value);
 	ddbsr.word = READ_DDBSR_REG_VALUE(); \
 	ddbsr; \
 })
-#define	READ_DDMAR0_REG()	READ_DDMAR0_REG_VALUE()
-#define	READ_DDMAR1_REG()	READ_DDMAR1_REG_VALUE()
-#define	READ_DDMAR2_REG()	READ_DDMAR2_REG_VALUE()
-#define	READ_DDMAR3_REG()	READ_DDMAR3_REG_VALUE()
 #define	READ_DDMCR_REG()	((e2k_ddmcr_t) { .word = READ_DDMCR_REG_VALUE() })
 #define	READ_DDMCR1_REG()	((e2k_ddmcr_t) { .word = READ_DDMCR1_REG_VALUE() })
 #define	WRITE_DDBAR0_REG(value)	WRITE_DDBAR0_REG_VALUE(value)

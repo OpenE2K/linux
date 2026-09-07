@@ -1785,6 +1785,9 @@ static const struct file_operations vhost_net_fops = {
 	.poll           = vhost_net_chr_poll,
 	.unlocked_ioctl = vhost_net_ioctl,
 	.compat_ioctl   = compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = vhost_net_ioctl,
+#endif
 	.open           = vhost_net_open,
 	.llseek		= noop_llseek,
 };

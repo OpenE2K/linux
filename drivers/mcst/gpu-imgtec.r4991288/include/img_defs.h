@@ -45,7 +45,15 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #if !defined (__IMG_DEFS_H__)
 #define __IMG_DEFS_H__
 
+#if defined(CONFIG_MCST)
+#include <linux/version.h>
+#endif
+
+#if defined(CONFIG_MCST)  && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
+#include <linux/stddef.h>
+#else
 #include <stddef.h>
+#endif
 
 #include "img_types.h"
 

@@ -7,8 +7,7 @@
 
 #include <linux/thread_info.h>
 
-register unsigned long long __cpu_preempt_reg DO_ASM_GET_GREG_MEMONIC(
-							SMP_CPU_ID_GREG);
+register unsigned long long __cpu_preempt_reg ASM_GREG(SMP_CPU_ID_GREG);
 
 #define PREEMPT_COUNTER_SHIFT 33ull
 

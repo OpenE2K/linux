@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2023 MCST
+
 KASAN_SANITIZE := n
 ccflags-y := -DCONFIG_BOOT_E2K -fno-semi-spec-ld -fno-spec-ld
 

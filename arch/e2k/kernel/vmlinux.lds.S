@@ -10,12 +10,12 @@
 /* No __ro_after_init data in the .rodata section - which will always be ro */
 #define RO_AFTER_INIT_DATA
 
-#include <generated/asm-offsets.h>
-#include <asm/thread_info.h>
 #include <asm/cache.h>
 #include <asm/cpu_regs_types_defs.h>
 #include <asm/vmlinux.lds.h>
 #include <asm/head.h>
+#include <asm/stacks.h>
+
 #include <uapi/asm/kvm.h>
 
 OUTPUT_FORMAT("elf64-e2k", "elf64-e2k", "elf64-e2k")
@@ -207,7 +207,13 @@ SECTIONS
 		RO_DATA(PAGE_SIZE)
   		E2K_BOOT_SETUP(16)
 		NOTES
-
+#ifdef CONFIG_KEXEC
+	.kexec_relocate_kernel : {
+		__start_kexec_relocate_kernel = .;
+			*(.kexec_relocate_kernel);
+		__end_kexec_relocate_kernel = .;
+	}
+#endif
 		. = ALIGN(E2K_MAX_PAGE_SIZE); /* To map .rodata with large pages */
 	__end_rodata_notes = .;
 

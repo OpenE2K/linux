@@ -65,7 +65,7 @@
 #endif
 #include <linux/slab.h>
 #include <linux/platform_device.h>
-#if defined(CONFIG_X86)
+#if defined(CONFIG_X86) || defined(CONFIG_E2K)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 12, 0)
 #  include <asm/set_memory.h>
 # endif
@@ -272,6 +272,10 @@ _DmaFree(gckALLOCATOR Allocator, PLINUX_MDL Mdl)
     struct mdl_dma_priv *mdlPriv = (struct mdl_dma_priv *)Mdl->priv;
     gcsDMA_PRIV_PTR allocatorPriv = (gcsDMA_PRIV_PTR)Allocator->privateData;
     struct device *dev = (struct device *)Mdl->device;
+
+#if defined(CONFIG_X86)
+    set_memory_wb((unsigned long)(mdlPriv->kvaddr), Mdl->numPages);
+#endif
 
 #if gcdENABLE_NONCACHE_COMMANDBUF
     if (Mdl->type == gcvVIDMEM_TYPE_COMMAND)
@@ -553,13 +557,6 @@ _DmaAlloctorInit(gckOS Os, gcsDEBUGFS_DIR *Parent, gckALLOCATOR *Allocator)
     gceSTATUS status;
     gckALLOCATOR allocator = gcvNULL;
     gcsDMA_PRIV_PTR priv = gcvNULL;
-
-#if defined(CONFIG_MCST)
-    if (!dma_allocator_enable)
-    {
-        gcmkONERROR(gcvSTATUS_NOT_SUPPORTED);
-    }
-#endif
 
     gcmkONERROR(gckALLOCATOR_Construct(Os, &DmaAllocatorOperations, &allocator));
 

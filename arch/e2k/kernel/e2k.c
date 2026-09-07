@@ -3,6 +3,7 @@
  * Copyright (c) 2023 MCST
  */
 
+#include <linux/cpuhotplug.h>
 #include <linux/ptrace.h>
 #include <linux/hardirq.h>
 #include <linux/init.h>
@@ -26,6 +27,8 @@
 #include <asm/smp.h>
 #include <asm/io.h>
 #include <asm/l-iommu.h>
+#include <asm/pic.h>
+#include <asm/sclkr.h>
 #include <asm/setup.h>
 #include <asm/simul.h>
 
@@ -35,7 +38,7 @@
 extern char *get_mach_type_name(void);
 
 
-int native_show_cpuinfo(struct seq_file *m, void *v)
+static int native_show_cpuinfo(struct seq_file *m, void *v)
 {
 	struct cpuinfo_e2k *c = v;
 	unsigned long last = cpumask_last(cpu_online_mask);
@@ -58,11 +61,21 @@ int native_show_cpuinfo(struct seq_file *m, void *v)
 		"model\t\t: %d\n"
 		"model name\t: %s\n"
 		"revision\t: %u\n"
-		"cpu MHz\t\t: %llu\n"
-		"bogomips\t: %llu.%02u\n\n",
+		"cpu MHz\t\t: %llu\n",
 		cpu, c->family >= 5 ? ELBRUS_CPU_VENDOR : mcst_mb_name,
 		c->family, c->model, GET_CPU_TYPE_NAME(c->model),
-		c->revision, freq, 2 * freq, 0);
+		c->revision, freq);
+
+	seq_puts(m, "features\t:");
+	cpuinfo_clk(m);
+	cpuinfo_pic(m);
+	if (is_prototype())
+		seq_puts(m, " prototype");
+	if (IS_HV_GM())
+		seq_puts(m, " guest");
+	seq_puts(m, "\n");
+
+	seq_printf(m, "bogomips\t: %llu.%02u\n\n", 2 * freq, 0);
 
 
 	if (last == cpu)
@@ -71,7 +84,7 @@ int native_show_cpuinfo(struct seq_file *m, void *v)
 	return 0;
 }
 
-void e2k_restart(char *cmd)
+static void e2k_restart(char *cmd)
 {
 	if (machine.arch_reset)
 		machine.arch_reset(cmd);
@@ -193,3 +206,58 @@ native_setup_machine(void)
 
 	native_e2k_setup_machine();
 }
+
+void native_write_SCLKM1_reg(e2k_sclkm1_t sclkm1)
+{
+	if (cpu_has(CPU_HWBUG_SCLKM1_WRITE) && read_SCLKM1_reg().mode &&
+			!sclkm1.mode && sclkm1.mdiv) {
+		unsigned long flags;
+		e2k_sclkr_t orig_sclkr, sclkr;
+
+		all_irq_save(flags);
+
+		/* Write mode */
+		e2k_sclkm1_t sclkm1_no_mdiv = sclkm1;
+		sclkm1_no_mdiv.mdiv = 0;
+		NATIVE_WRITE_SCLKM1_REG_VALUE(AW(sclkm1_no_mdiv));
+		/* Wait for mode change */
+		orig_sclkr = read_SCLKR_reg();
+		do {
+			sclkr = read_SCLKR_reg();
+		} while (orig_sclkr.lo == sclkr.lo);
+		/* Write (m)div */
+		NATIVE_WRITE_SCLKM1_REG_VALUE(AW(sclkm1));
+
+		all_irq_restore(flags);
+	} else {
+		NATIVE_WRITE_SCLKM1_REG_VALUE(AW(sclkm1));
+	}
+}
+
+static int e2k_cpu_starting(unsigned int cpu)
+{
+	int node = cpu_to_node(cpu);
+
+	if (cpu_has(CPU_HWBUG_DMA_WR_GLUE)) {
+		e2k_sic_hw1_t sic_hw1 = {
+			.word = sic_read_node_nbsr_reg(node, SIC_hw1)
+		};
+		sic_hw1.v4_v5.dma_wr_glue_en = 0;
+		sic_write_node_nbsr_reg(node, SIC_hw1, AW(sic_hw1));
+	}
+
+	return 0;
+}
+
+static int __init fixup_cpu_quirks(void)
+{
+	int ret = cpuhp_setup_state(CPUHP_AP_E2K_CPU_STARTING, "e2k/cpu:starting",
+				e2k_cpu_starting, NULL);
+
+	if (WARN(ret < 0, "Failed to setup e2k cpu hotplug state: %d\n", ret))
+		return ret;
+
+	return 0;
+}
+early_initcall(fixup_cpu_quirks);
+

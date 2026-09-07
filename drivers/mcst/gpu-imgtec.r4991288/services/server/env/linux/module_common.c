@@ -58,6 +58,10 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvr_bridge_k.h"
 #include <linux/moduleparam.h>
 
+#ifdef CONFIG_MCST
+#include <linux/pci.h>
+#endif
+
 #include <pvr_fence.h>
 
 #if defined(SUPPORT_NATIVE_FENCE_SYNC)
@@ -99,15 +103,36 @@ MODULE_PARM_DESC(gPMRAllocFail, "When number of PMR allocs reaches"
 #if defined(SUPPORT_DISPLAY_CLASS)
 /* Display class interface */
 #include "kerneldisplay.h"
+#if defined(CONFIG_MCST)
+EXPORT_SYMBOL(DCRegisterDevice_4991288);
+EXPORT_SYMBOL(DCUnregisterDevice_4991288);
+EXPORT_SYMBOL(DCDisplayConfigurationRetired_4991288);
+EXPORT_SYMBOL(DCDisplayHasPendingCommand_4991288);
+EXPORT_SYMBOL(DCImportBufferAcquire_4991288);
+EXPORT_SYMBOL(DCImportBufferRelease_4991288);
+#else
 EXPORT_SYMBOL(DCRegisterDevice);
 EXPORT_SYMBOL(DCUnregisterDevice);
 EXPORT_SYMBOL(DCDisplayConfigurationRetired);
 EXPORT_SYMBOL(DCDisplayHasPendingCommand);
 EXPORT_SYMBOL(DCImportBufferAcquire);
 EXPORT_SYMBOL(DCImportBufferRelease);
+#endif
 
 /* Physmem interface (required by LMA DC drivers) */
 #include "physheap.h"
+#if defined(CONFIG_MCST)
+EXPORT_SYMBOL(PhysHeapAcquire_4991288);
+EXPORT_SYMBOL(PhysHeapRelease_4991288);
+EXPORT_SYMBOL(PhysHeapGetType_4991288);
+EXPORT_SYMBOL(PhysHeapRegionGetCpuPAddr_4991288);
+EXPORT_SYMBOL(PhysHeapRegionGetSize_4991288);
+EXPORT_SYMBOL(PhysHeapCpuPAddrToDevPAddr_4991288);
+
+EXPORT_SYMBOL(PVRSRVGetDriverStatus_4991288);
+EXPORT_SYMBOL(PVRSRVSystemInstallDeviceLISR_4991288);
+EXPORT_SYMBOL(PVRSRVSystemUninstallDeviceLISR_4991288);
+#else
 EXPORT_SYMBOL(PhysHeapAcquire);
 EXPORT_SYMBOL(PhysHeapRelease);
 EXPORT_SYMBOL(PhysHeapGetType);
@@ -118,19 +143,42 @@ EXPORT_SYMBOL(PhysHeapCpuPAddrToDevPAddr);
 EXPORT_SYMBOL(PVRSRVGetDriverStatus);
 EXPORT_SYMBOL(PVRSRVSystemInstallDeviceLISR);
 EXPORT_SYMBOL(PVRSRVSystemUninstallDeviceLISR);
+#endif
 
 #include "pvr_notifier.h"
+#if defined(CONFIG_MCST)
+EXPORT_SYMBOL(PVRSRVCheckStatus_4991288);
+#else
 EXPORT_SYMBOL(PVRSRVCheckStatus);
+#endif
 
 #include "pvr_debug.h"
+#if defined(CONFIG_MCST)
+EXPORT_SYMBOL(PVRSRVGetErrorStringKM_4991288);
+#else
 EXPORT_SYMBOL(PVRSRVGetErrorStringKM);
+#endif
 #endif /* defined(SUPPORT_DISPLAY_CLASS) */
 
 #include "rgxapi_km.h"
 #if defined(SUPPORT_SHARED_SLC)
+#if defined(CONFIG_MCST)
+EXPORT_SYMBOL(RGXInitSLC_4991288);
+#else
 EXPORT_SYMBOL(RGXInitSLC);
 #endif
+#endif
 
+#if defined(CONFIG_MCST)
+EXPORT_SYMBOL(RGXHWPerfConnect_4991288);
+EXPORT_SYMBOL(RGXHWPerfDisconnect_4991288);
+EXPORT_SYMBOL(RGXHWPerfControl_4991288);
+EXPORT_SYMBOL(RGXHWPerfConfigureAndEnableCounters_4991288);
+EXPORT_SYMBOL(RGXHWPerfDisableCounters_4991288);
+EXPORT_SYMBOL(RGXHWPerfAcquireEvents_4991288);
+EXPORT_SYMBOL(RGXHWPerfReleaseEvents_4991288);
+EXPORT_SYMBOL(RGXHWPerfConvertCRTimeStamp_4991288);
+#else
 EXPORT_SYMBOL(RGXHWPerfConnect);
 EXPORT_SYMBOL(RGXHWPerfDisconnect);
 EXPORT_SYMBOL(RGXHWPerfControl);
@@ -139,11 +187,19 @@ EXPORT_SYMBOL(RGXHWPerfDisableCounters);
 EXPORT_SYMBOL(RGXHWPerfAcquireEvents);
 EXPORT_SYMBOL(RGXHWPerfReleaseEvents);
 EXPORT_SYMBOL(RGXHWPerfConvertCRTimeStamp);
+#endif
 #if defined(SUPPORT_KERNEL_HWPERF_TEST)
+#if defined(CONFIG_MCST)
+EXPORT_SYMBOL(OSAddTimer_4991288);
+EXPORT_SYMBOL(OSEnableTimer_4991288);
+EXPORT_SYMBOL(OSDisableTimer_4991288);
+EXPORT_SYMBOL(OSRemoveTimer_4991288);
+#else
 EXPORT_SYMBOL(OSAddTimer);
 EXPORT_SYMBOL(OSEnableTimer);
 EXPORT_SYMBOL(OSDisableTimer);
 EXPORT_SYMBOL(OSRemoveTimer);
+#endif
 #endif
 
 CONNECTION_DATA *LinuxConnectionFromFile(struct file *pFile)
@@ -177,6 +233,15 @@ int PVRSRVCommonDriverInit(void)
 {
 	PVRSRV_ERROR pvrerr;
 	int error = 0;
+
+#ifdef CONFIG_MCST
+	struct pci_dev *pdev = pci_get_device(PCI_VENDOR_ID_MCST_TMP,
+					      PCI_DEVICE_ID_MCST_3D_IMAGINATION_GX6650, NULL);
+	if (!pdev)
+		return -ENODEV;
+
+	pci_dev_put(pdev);
+#endif
 
 #if defined(PDUMP)
 	error = dbgdrv_init();

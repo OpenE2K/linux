@@ -62,21 +62,10 @@
 
 #define DRV_NAME "l-gpio"
 
- #define L_GPIO_MAX_IRQS       2
-
-struct l_gpio_data {
-	int bar;
-	int lines;
-};
-
-
 struct l_gpio {
 	struct gpio_chip chip; /*Must be the first*/
 	void __iomem *regs;
-	struct pci_dev *pdev;
 	raw_spinlock_t lock;
-	struct l_gpio *next;
-	struct l_gpio_data data;
 };
 
 /* Registering gpio-bound devices on board. This is embedded style. */
@@ -109,17 +98,18 @@ static struct platform_device ltc2954_dev = {
 
 static int register_l_gpio_bound_devices(void)
 {
-
-	int err = 0;
+	int ret = 0;
+	if (!__ONCE_LITE_IF(true))
+		return 0;
 
 	/* Only power button is available today: */
 #if IS_ENABLED(CONFIG_INPUT_LTC2954)
-	err = platform_device_register(&ltc2954_dev);
-	if (err < 0)
+	ret = platform_device_register(&ltc2954_dev);
+	if (ret < 0)
 		pr_err("failed to register ltc2954 device\n");
 #endif /* CONFIG_INPUT_LTC2954_BUTTON */
 
-	return err;
+	return ret;
 }
 
 /* Generic GPIO interface */
@@ -214,8 +204,6 @@ static int l_gpio_direction_output(struct gpio_chip *gc, unsigned offset,
 }
 
 /* GPIOLIB interface */
-static struct l_gpio *l_gpios_set;
-
 /*
  * GPIO IRQ
  */
@@ -352,8 +340,15 @@ static irqreturn_t l_gpio_irq_handler(int irq, void *dev_id)
 	return ret;
 }
 
+static void l_gpio_irq_ack(struct irq_data *data)
+{
+	/* Do nothing: just to prevent handle_edge_irq()
+	 * from calling NULL-pointer */
+}
+
 static const struct irq_chip l_gpio_irqchip = {
 	.name = "l-gpio-irqchip",
+	.irq_ack     = l_gpio_irq_ack,
 	.irq_enable  = l_gpio_irq_enable,
 	.irq_disable = l_gpio_irq_disable,
 	.irq_unmask  = l_gpio_irq_enable,
@@ -363,28 +358,28 @@ static const struct irq_chip l_gpio_irqchip = {
 	 GPIOCHIP_IRQ_RESOURCE_HELPERS,
 };
 
-static int l_gpio_probe(struct pci_dev *pdev, struct l_gpio *c)
+static int __l_gpio_probe(struct platform_device *pdev, struct l_gpio *c)
 {
-	int err;
+	int ret;
 	int irq;
-	char nm[12];
+	struct resource *r;
 	struct gpio_chip *gc = &c->chip;
 	struct device *dev = &pdev->dev;
-	struct device_node *np = dev->of_node;
 	struct gpio_irq_chip *girq = &gc->irq;
-	int i, bar = c->data.bar;
+	int i, irq_nr = platform_irq_count(pdev);
 
-	err = pci_enable_device_mem(pdev);
-	if (err) {
-		dev_err(dev, "can't enable l-gpio device MEM\n");
-		goto done;
+	r = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	if (!r) {
+		dev_err(dev, "No MEM resource available!\n");
+		return -ENOMEM;
 	}
-
-	/* set up the driver-specific struct */
-	c->regs = devm_ioremap(dev, pci_resource_start(pdev, bar),
-			pci_resource_len(pdev, bar));
-	c->pdev = pdev;
-	raw_spin_lock_init(&(c->lock));
+	c->regs = devm_ioremap_resource(dev, r);
+	if (IS_ERR(c->regs)) {
+		dev_err(dev,
+			"Unable to ioremap base (%ld)!\n", PTR_ERR(c->regs));
+		return PTR_ERR(c->regs);
+	}
+	raw_spin_lock_init(&c->lock);
 
 #if 0 /* do not touch boot settings */
 	/* Default Input/Output mode for all pins: */
@@ -404,177 +399,81 @@ static int l_gpio_probe(struct pci_dev *pdev, struct l_gpio *c)
 	girq->default_type = IRQ_TYPE_NONE;
 	girq->handler = handle_bad_irq;
 
-	for (i = 0; !err; i++) {
-		snprintf(nm, sizeof(nm), "gpio%d", i);
-		irq = of_irq_get_byname(np, nm);
-		if (irq <= 0)
-			break;
-		err = devm_request_irq(dev, irq, l_gpio_irq_handler,
+	for (i = ret = 0; i < irq_nr && !ret; i++) {
+		irq = platform_get_irq(pdev, i);
+		ret = devm_request_irq(dev, irq, l_gpio_irq_handler,
 				IRQF_SHARED, "l-gpio", c);
 	}
-	if (err) {
-		dev_err(dev, "IRQ handler registering failed (%d)\n", err);
-		goto err;
+	if (ret) {
+		dev_err(dev, "IRQ handler registering failed (%d)\n", ret);
+		goto out;
 	}
 	/* finally, register with the generic GPIO API */
-	err = devm_gpiochip_add_data(dev, gc, c);
-	if (err)
-		goto err;
+	ret = devm_gpiochip_add_data(dev, gc, c);
+	if (ret)
+		goto out;
 
 	dev_info(dev, DRV_NAME
 		": l-gpio support successfully loaded.\n");
-	return 0;
-err:
-done:
-	return err;
-}
-
-static void __exit l_gpio_remove(struct l_gpio *c)
-{
-}
-
-static const struct l_gpio_data l_iohub_private_data = {
-	.bar = 1,
-	.lines = ARCH_NR_IOHUB_GPIOS,
-};
-static const struct l_gpio_data l_pci_private_data = {
-	.bar = 0,
-	.lines = 16,
-};
-static const struct l_gpio_data l_iohub2_private_data = {
-	.bar = 0,
-	.lines = ARCH_NR_IOHUB2_GPIOS,
-};
-static const struct l_gpio_data l_iohub3_private_data = {
-	.bar = 0,
-	.lines = 16,
-};
-
-#ifdef CONFIG_OF_GPIO
-static struct device_node *l_gpio_get_of_node(struct pci_dev *pdev,
-			struct l_gpio_data *d)
-{
-	struct device_node *np;
-	int node = dev_to_node(&pdev->dev);
-	char path[32];
-
-	/* Check for system gpio */
-	if (pdev->device != PCI_DEVICE_ID_MCST_GPIO_MPV_EIOH &&
-		pdev->device != PCI_DEVICE_ID_MCST_GPIO_MPV &&
-		pdev->device != PCI_AC97GPIO_DEVICE_ID_ELBRUS) {
-		goto out;
-	}
-
-	/* Check if iohuh2 connected to eioh or iohuh2 to eioh */
-	if (cpu_has_epic() && iohub_generation(pdev) < 2)
-		goto out;
-
-	if (!cpu_has_epic() && iohub_generation(pdev) >= 2)
-		goto out;
-
-	if (node < 0)
-		node = 0;
-	sprintf(path, "/l_gpio@%d", node);
-
-	np = of_find_node_by_path(path);
-	if (np)
-		return np;
 out:
-	return pdev->dev.of_node;
-}
-#endif
-
-/*
- * We can't use the standard PCI driver registration stuff here, since
- * that allows only one driver to bind to each PCI device (and we want
- * multiple drivers to be able to bind to the device: AC97 and GPIO).  
- * Instead, manually scan for the PCI device, request a single region, 
- * and keep track of the devices that we're using.
- */
-
-static int l_gpio_init_one(struct pci_dev *pdev, const struct l_gpio_data *drv_data)
-{
-	int err = -ENODEV;
-	struct l_gpio *next, *old = NULL;
-
-	struct l_gpio_data *d;
-	struct gpio_chip *c;
-	if (!(next = kzalloc(sizeof(*next), GFP_KERNEL)))
-		return -ENOMEM;
-	d = &next->data;
-	memcpy(d, drv_data, sizeof(*d));
-
-	c = (struct gpio_chip *)next;
-	c->owner = THIS_MODULE;
-	c->label = DRV_NAME;
-	c->get_direction = l_gpio_get_direction;
-	c->direction_input = l_gpio_direction_input;
-	c->direction_output = l_gpio_direction_output;
-	c->get = l_gpio_get_value;
-	c->set = l_gpio_set_value;
-	c->ngpio = d->lines;
-	c->can_sleep = 0;
-	c->of_node = l_gpio_get_of_node(pdev, d);
-
-	err = l_gpio_probe(pdev, next);
-
-	if (err)
-		pci_dev_put(pdev);
-	if (old)
-		old->next = next;
-	else
-		l_gpios_set = next;
-	old = next;
-
-
-	if (!l_gpios_set)
-		err = register_l_gpio_bound_devices();
-
-	return err;
+	return ret;
 }
 
-static void l_quirk_gpio_iohub3(struct pci_dev *pdev)
-{
-	l_gpio_init_one(pdev, &l_iohub3_private_data);
-}
-DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MCST_TMP,
-		PCI_DEVICE_ID_MCST_GPIO_MPV_EIOH, l_quirk_gpio_iohub3);
-static void l_quirk_gpio_iohub2(struct pci_dev *pdev)
-{
-	l_gpio_init_one(pdev, &l_iohub2_private_data);
-}
-DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_GPIO_MPV, l_quirk_gpio_iohub2);
-static void l_quirk_gpio_iohub(struct pci_dev *pdev)
-{
-	l_gpio_init_one(pdev, &l_iohub_private_data);
-}
-DECLARE_PCI_FIXUP_FINAL(PCI_AC97GPIO_VENDOR_ID_ELBRUS,
-		PCI_AC97GPIO_DEVICE_ID_ELBRUS, l_quirk_gpio_iohub);
-static void l_quirk_gpio_pci(struct pci_dev *pdev)
-{
-	l_gpio_init_one(pdev, &l_pci_private_data);
-}
-DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MCST_TMP,
-		PCI_DEVICE_ID_MCST_GPIO, l_quirk_gpio_pci);
-
-static int __init l_gpio_init(void)
+static int __exit l_gpio_remove(struct platform_device *pdev)
 {
 	return 0;
 }
 
-static void __exit l_gpio_exit(void)
+static int l_gpio_probe(struct platform_device *pdev)
 {
-	struct l_gpio *p;
-	for (p = l_gpios_set; p; p = p->next) {
-		l_gpio_remove(p);
-		pci_dev_put(p->pdev);
+	int ret = -ENODEV;
+	u32 ngpio;
+	struct l_gpio *c;
+	struct gpio_chip *gc;
+	struct device *dev = &pdev->dev;
+	ret = of_property_read_u32(dev->of_node, "ngpios", &ngpio);
+	if (ret) {
+		dev_err(dev, "no 'ngpios' property: %d\n", ret);
+		return ret;
 	}
+	if (!(c = kzalloc(sizeof(*c), GFP_KERNEL)))
+		return -ENOMEM;
 
+	gc = (struct gpio_chip *)c;
+	gc->owner = THIS_MODULE;
+	gc->label = DRV_NAME;
+	gc->get_direction = l_gpio_get_direction;
+	gc->direction_input = l_gpio_direction_input;
+	gc->direction_output = l_gpio_direction_output;
+	gc->get = l_gpio_get_value;
+	gc->set = l_gpio_set_value;
+	gc->ngpio = ngpio;
+	gc->can_sleep = 0;
+	gc->of_node = dev->of_node;
+
+	ret = __l_gpio_probe(pdev, c);
+
+	ret = register_l_gpio_bound_devices();
+
+	return ret;
 }
 
-module_init(l_gpio_init);
-module_exit(l_gpio_exit);
+static const struct of_device_id l_gpio_of_match[] = {
+	{ .compatible = "mcst,l-gpio", },
+	{ /* sentinel */ }
+};
+MODULE_DEVICE_TABLE(of, l_gpio_of_match);
 
+static struct platform_driver l_gpio_platform_driver = {
+	.probe = l_gpio_probe,
+	.remove = l_gpio_remove,
+	.driver = {
+		.name = "l-gpio",
+		.of_match_table = l_gpio_of_match,
+	}
+};
+
+module_platform_driver(l_gpio_platform_driver);
 MODULE_AUTHOR("MCST");
 MODULE_DESCRIPTION("Elbrus MCST GPIO driver");
 MODULE_LICENSE("GPL v2");

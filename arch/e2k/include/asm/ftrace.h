@@ -53,5 +53,7 @@ stack_trace_sysctl(struct ctl_table *table, int write,
 		   void __user *buffer, size_t *lenp, loff_t *ppos);
 #endif
 
+extern __noreturn void panic_ftrace_graph_cr(void);
+
 #endif /* _ASM_E2K_FTRACE_H */
 

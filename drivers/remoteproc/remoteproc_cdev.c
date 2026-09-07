@@ -92,6 +92,9 @@ static const struct file_operations rproc_fops = {
 	.write = rproc_cdev_write,
 	.unlocked_ioctl = rproc_device_ioctl,
 	.compat_ioctl = compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = rproc_device_ioctl,
+#endif
 	.release = rproc_cdev_release,
 };
 

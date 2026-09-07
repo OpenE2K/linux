@@ -8,7 +8,7 @@
 
 #include <linux/types.h>
 #include <linux/kvm_host.h>
-#include "pv_mmu.h"
+#include "paravirt_sw/pv_mmu.h"
 
 #undef	DEBUG_MMU_CR_MODE
 #undef	DebugMMUCR
@@ -69,11 +69,10 @@ static inline e2k_mmu_cr_t read_guest_MMU_CR_reg(struct kvm_vcpu *vcpu)
 			DebugMMUCR("vcpu #%d guest turned %s virtual space support\n",
 				vcpu->vcpu_id, (mmu_cr.tlb_en) ? "ON" : "OFF");
 		}
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	} else if (vcpu->arch.is_pv) {
 		mmu_cr = read_pv_MMU_CR_reg(vcpu);
-	} else {
-		E2K_KVM_BUG_ON(true);
-		mmu_cr = MMU_CR_KERNEL;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	}
 
 	return sh_mmu_cr;
@@ -88,10 +87,10 @@ write_guest_MMU_CR_reg(struct kvm_vcpu *vcpu, e2k_mmu_cr_t mmu_cr)
 
 	if (likely(vcpu->arch.is_hv)) {
 		write_SH_MMU_CR_reg(mmu_cr);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	} else if (vcpu->arch.is_pv) {
 		write_pv_MMU_CR_reg(vcpu, mmu_cr);
-	} else {
-		E2K_KVM_BUG_ON(true);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	}
 }
 
@@ -99,10 +98,10 @@ static inline mmu_reg_t read_guest_PID_reg(struct kvm_vcpu *vcpu)
 {
 	if (likely(vcpu->arch.is_hv)) {
 		return read_SH_PID_reg();
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	} else if (vcpu->arch.is_pv) {
 		return read_pv_PID_reg(vcpu);
-	} else {
-		E2K_KVM_BUG_ON(true);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	}
 	return (mmu_reg_t) -1;
 }
@@ -112,8 +111,10 @@ write_guest_PID_reg(struct kvm_vcpu *vcpu, mmu_reg_t value)
 {
 	if (likely(vcpu->arch.is_hv)) {
 		write_SH_PID_reg(value);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	} else if (vcpu->arch.is_pv) {
 		write_pv_PID_reg(vcpu, value);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	} else {
 		E2K_KVM_BUG_ON(true);
 	}

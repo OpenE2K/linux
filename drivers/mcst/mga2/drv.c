@@ -25,7 +25,7 @@ int mga2_get_version(const struct device *dev)
 	const char *name;
 	struct property *prop;
 	char *ids[] = {
-		[MGA2_PCI_PROTO]  = "mcst,mga20-pci-proto",
+		[MGA20_PCI_PROTO]  = "mcst,mga20-pci-proto",
 		[MGA20_PROTO]     = "mcst,mga20-proto",
 		[MGA20]           = "mcst,mga20",
 		[MGA25_PCI_PROTO] = "mcst,mga25-pci-proto",
@@ -112,8 +112,9 @@ struct drm_ioctl_desc mga2_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(MGA2_GEM_CREATE, mga2_gem_create_ioctl, DRM_AUTH | DRM_UNLOCKED),
 	DRM_IOCTL_DEF_DRV(MGA2_GEM_MMAP, mga2_gem_mmap_ioctl, DRM_AUTH | DRM_UNLOCKED),
 	DRM_IOCTL_DEF_DRV(MGA2_SYNC, mga2_gem_sync_ioctl, DRM_AUTH | DRM_UNLOCKED),
-     	DRM_IOCTL_DEF_DRV(MGA2_INFO, mga2_info_ioctl, DRM_AUTH | DRM_UNLOCKED),
+	DRM_IOCTL_DEF_DRV(MGA2_INFO, mga2_info_ioctl, DRM_AUTH | DRM_UNLOCKED),
 	DRM_IOCTL_DEF_DRV(MGA2_AUC2, mga2_auc2_ioctl,  DRM_AUTH | DRM_UNLOCKED),
+	DRM_IOCTL_DEF_DRV(MGA2_VIRT_TO_HNDL, mga2_virt_to_handle,  DRM_AUTH | DRM_UNLOCKED),
 };
 
 static const struct file_operations mga2_fops = {
@@ -123,6 +124,9 @@ static const struct file_operations mga2_fops = {
 	.unlocked_ioctl = drm_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = drm_compat_ioctl,
+#endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl = drm_ptr128_ioctl,
 #endif
 	.mmap = mga2_mmap,
 	.poll = drm_poll,
@@ -147,6 +151,7 @@ static struct drm_driver mga2_drm_driver = {
 
 	/* copy of DRM_GEM_DMA_DRIVER_OPS */
 	.dumb_create		= mga2_dumb_create,
+	.dumb_map_offset =	mga2_gem_dumb_map_offset,
 	.prime_handle_to_fd	= drm_gem_prime_handle_to_fd,
 	.prime_fd_to_handle	= drm_gem_prime_fd_to_handle,
 	.gem_prime_import_sg_table = mga2_prime_import_sg_table,
@@ -494,35 +499,13 @@ static int mga2_compare_of(struct device *dev, void *data)
 	return dev->of_node == data;
 }
 
-
-#define PCI_MCST_CFG	0x40
-#define PCI_MCST_RESET		(1 << 6)
-#define PCI_MCST_IOMMU_DSBL	(1 << 5)
-#define PCI_MCST_IOMMU_BL_DSBL	(1 << 4)
-#define PCI_MCST_IOMMU_FB_DSBL	(1 << 3)
-
-void mga2_reset(struct drm_device *drm)
+static void mga20_reset(struct pci_dev *pdev)
 {
 	u16 cmd, vcfg, tmp;
-	struct mga2 *mga2 = drm->dev_private;
-	struct device *dev = drm->dev;
-	struct pci_dev *pdev = to_pci_dev(dev);
-	/* Lock vga-console to prevent e2c3 deadlock (bug 136108). */
-	console_lock();
-
-	if (!mga20(mga2->dev_id)) {
-		u8 tmp;
-		if (!mga2_pci_proto(mga2->dev_id)) /*deadlock at pci-proto*/
-			pci_reset_function_locked(pdev);
-		if (mga2->dev_id != MGA25 && mga2->dev_id != MGA25_PROTO)
-			goto out;
-		/* enable iommu translation */
-		pci_read_config_byte(pdev, PCI_MCST_CFG, &tmp);
-		tmp &= ~(PCI_MCST_IOMMU_DSBL | PCI_MCST_IOMMU_BL_DSBL |
-				PCI_MCST_IOMMU_FB_DSBL);
-		pci_write_config_byte(pdev, PCI_MCST_CFG, tmp);
-		goto out;
-	}
+	int timeout_us = 1;
+#if HZ < 100 /* supposing it is processor prototype */
+	timeout_us *= 200;
+#endif
 #define PCI_VCFG	0x40
 #define PCI_MGA2_RESET	(1 << 2)
 	pci_read_config_word(pdev, PCI_COMMAND, &cmd);
@@ -534,10 +517,60 @@ void mga2_reset(struct drm_device *drm)
 	pci_write_config_word(pdev, PCI_VCFG,
 				vcfg | PCI_MGA2_RESET);
 	pci_read_config_word(pdev, PCI_VCFG, &tmp);
-	udelay(1);
+	udelay(timeout_us);
 	pci_write_config_word(pdev, PCI_VCFG, vcfg);
 	pci_write_config_word(pdev, PCI_COMMAND, cmd);
-out:
+}
+
+#define PCI_MCST_CFG	0x40
+#define PCI_MCST_RESET		(1 << 6)
+#define PCI_MCST_IOMMU_DSBL	(1 << 5)
+#define PCI_MCST_IOMMU_BL_DSBL	(1 << 4)
+#define PCI_MCST_IOMMU_FB_DSBL	(1 << 3)
+static void mga25_enable_iommu(struct pci_dev *pdev)
+{
+	u8 tmp8;
+	/* enable iommu translation */
+	pci_read_config_byte(pdev, PCI_MCST_CFG, &tmp8);
+	tmp8 &= ~(PCI_MCST_IOMMU_DSBL | PCI_MCST_IOMMU_BL_DSBL |
+			PCI_MCST_IOMMU_FB_DSBL);
+	pci_write_config_byte(pdev, PCI_MCST_CFG, tmp8);
+}
+
+void mga2_reset(struct drm_device *drm)
+{
+	struct mga2 *mga2 = drm->dev_private;
+	struct device *dev = drm->dev;
+	struct pci_dev *pdev = to_pci_dev(dev);
+
+	/* Lock vga-console to prevent e2c3 deadlock (bug 136108). */
+	console_lock();
+
+	switch (mga2->dev_id) {
+	case MGA20_PCI_PROTO:
+	case MGA25_PCI_PROTO:
+	case MGA26_PCI_PROTO:
+	case MGA27_PCI_PROTO:/*deadlock at pci-proto*/
+		goto out;
+	case MGA20_PROTO:
+	case MGA20:
+		mga20_reset(pdev);
+		goto out;
+	case MGA26:
+	case MGA26_PROTO: /* use pci-e flr capability*/
+		WARN_ON(pci_reset_function_locked(pdev));
+		goto out;
+	case MGA25:
+	case MGA25_PROTO:
+	case MGA27:
+	case MGA27_PROTO: /* use reset_mcst_generic_dev() */
+		WARN_ON(pci_reset_function_locked(pdev));
+		mga25_enable_iommu(pdev);
+		goto out;
+	default:
+		WARN_ON(1);
+	}
+out:;
 	console_unlock();
 }
 
@@ -554,17 +587,25 @@ static void mga2_init_hw(struct mga2 *mga2)
 		/* disable vga to prevent dma-access initiated
 		 in restore_vga_text() */
 		regmap_write(regmap, 0x800, 0x80000003);
-	} else if (mga25(mga2->dev_id)) { /*TODO*/
+	} else if (mga2->dev_id == MGA25 || mga2->dev_id == MGA25_PROTO) { /*TODO*/
 		for (r = 0x400; r <= 0xc00; r += 0x400) /*Bug 138934*/
 			regmap_write(regmap, r + 0xc0, 0x8080);
 		regmap_write(regmap, 0x2ca0, 0x00008080);
 		/* disable vga to prevent dma-access initiated
 		 in restore_vga_text() */
 		regmap_write(regmap, 0x400, 0x80000003);
-	}
-	if (mga26(mga2->dev_id)) {
+	} else if (mga2->dev_id == MGA26 || mga2->dev_id == MGA26_PROTO) {
 		for (r = 0x400; r <= 0xc00; r += 0x400) /*Bug 138934*/
 			regmap_write(regmap, r + 0xc4, 0x00010100);
+		/* disable vga to prevent dma-access initiated
+		 in restore_vga_text() */
+		regmap_write(regmap, 0x400, 0x80000003);
+	} else if (mga2->dev_id == MGA27 || mga2->dev_id == MGA27_PROTO) {
+		for (r = 0x400; r <= 0xc00; r += 0x400) /*Bug 138934*/
+			regmap_write(regmap, r + 0xc4, 0x00010100);
+		/* disable vga to prevent dma-access initiated
+		 in restore_vga_text() */
+		regmap_write(regmap, 0x400, 0x80000003);
 	}
 }
 
@@ -604,6 +645,9 @@ static int mga2_init(struct drm_device *drm, int reg_bar, int vram_bar)
 			goto out;
 
 	}
+
+	WARN_ON(dma_set_max_seg_size(dev, UINT_MAX));
+
 	mga2->regs = devm_ioremap(dev,
 			pci_resource_start(pdev, reg_bar),
 			pci_resource_len(pdev, reg_bar));
@@ -759,7 +803,6 @@ static void mga2_pci_remove(struct pci_dev *pdev)
 	}
 }
 
-#ifdef CONFIG_PM_SLEEP
 static int mga2_suspend(struct device *dev)
 {
 	struct pci_dev *pdev = to_pci_dev(dev);
@@ -776,6 +819,7 @@ static int mga2_suspend(struct device *dev)
 	return 0;
 }
 
+#ifdef CONFIG_PM_SLEEP
 static int mga2_resume(struct device *dev)
 {
 	int ret;

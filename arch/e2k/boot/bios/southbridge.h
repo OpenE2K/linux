@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
 /* PIIX4 southbridge configuration registers */
 
 #ifndef _SOUTHBRIDGE_H_

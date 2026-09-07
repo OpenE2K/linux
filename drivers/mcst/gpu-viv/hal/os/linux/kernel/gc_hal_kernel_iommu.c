@@ -119,10 +119,16 @@ gckIOMMU_Construct(
 
         dmaHandle = dma_map_page(dev, page, 0, PAGE_SIZE, DMA_TO_DEVICE);
 
+#ifdef CONFIG_MCST
+	if (!dma_mapping_error(dev, dmaHandle))
+            dma_unmap_page(dev, dmaHandle, PAGE_SIZE, DMA_TO_DEVICE);
+#else
         if (dmaHandle)
         {
             dma_unmap_page(dev, dmaHandle, PAGE_SIZE, DMA_FROM_DEVICE);
+
         }
+#endif
 
         __free_page(page);
 

@@ -1,4 +1,8 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later */
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
 /*
  *  Optimized RAID-5 checksumming functions for E2K
  */

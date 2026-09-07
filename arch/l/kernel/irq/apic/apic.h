@@ -1,4 +1,8 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
 #ifndef _ASM_L_APIC_H
 #define _ASM_L_APIC_H
 
@@ -35,13 +39,7 @@ extern int apic_verbosity;
 
 
 /*
- * Copyright 2004 James Cleverdon, IBM.
- *
  * Generic APIC sub-arch data struct.
- *
- * Hacked for x86-64 by James Cleverdon from i386 architecture code by
- * Martin Bligh, Andi Kleen, James Bottomley, John Stultz, and
- * James Cleverdon.
  */
 
 /*
@@ -149,5 +147,4 @@ static inline unsigned int boot_apic_read_id(void)
 {
 	return GET_APIC_ID(boot_arch_apic_read(APIC_ID));
 }
-
 #endif /* _ASM_L_APIC_H */

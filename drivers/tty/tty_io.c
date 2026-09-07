@@ -153,6 +153,9 @@ static long tty_compat_ioctl(struct file *file, unsigned int cmd,
 #else
 #define tty_compat_ioctl NULL
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+static long tty_ptr128_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
+#endif
 static int __tty_fasync(int fd, struct file *filp, int on);
 static int tty_fasync(int fd, struct file *filp, int on);
 static void release_tty(struct tty_struct *tty, int idx);
@@ -471,6 +474,9 @@ static const struct file_operations tty_fops = {
 	.poll		= tty_poll,
 	.unlocked_ioctl	= tty_ioctl,
 	.compat_ioctl	= tty_compat_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	= tty_ptr128_ioctl,
+#endif
 	.open		= tty_open,
 	.release	= tty_release,
 	.fasync		= tty_fasync,
@@ -486,6 +492,9 @@ static const struct file_operations console_fops = {
 	.poll		= tty_poll,
 	.unlocked_ioctl	= tty_ioctl,
 	.compat_ioctl	= tty_compat_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	= tty_ptr128_ioctl,
+#endif
 	.open		= tty_open,
 	.release	= tty_release,
 	.fasync		= tty_fasync,
@@ -498,6 +507,9 @@ static const struct file_operations hung_up_tty_fops = {
 	.poll		= hung_up_tty_poll,
 	.unlocked_ioctl	= hung_up_tty_ioctl,
 	.compat_ioctl	= hung_up_tty_compat_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	= hung_up_tty_ioctl,
+#endif
 	.release	= tty_release,
 	.fasync		= hung_up_tty_fasync,
 };
@@ -2979,6 +2991,182 @@ static long tty_compat_ioctl(struct file *file, unsigned int cmd,
 }
 #endif
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#include <asm/e2k_ptypes.h>
+
+struct serial_struct128 {
+	int	type;
+	int	line;
+	unsigned int	port;
+	int	irq;
+	int	flags;
+	int	xmit_fifo_size;
+	int	custom_divisor;
+	int	baud_base;
+	unsigned short	close_delay;
+	char	io_type;
+	char	reserved_char[1];
+	int	hub6;
+	unsigned short	closing_wait; /* time to wait before closing */
+	unsigned short	closing_wait2; /* no longer used... */
+	e2k_ap_t	iomem_base;	/* (unsigned char   *) */
+	unsigned short	iomem_reg_shift;
+	unsigned int	port_high;
+	unsigned long	iomap_base;	/* cookie passed into ioremap */
+};
+static int ptr128_tty_tiocsserial(struct tty_struct *tty,
+		struct serial_struct128 __user *ss)
+{
+	struct serial_struct128 v128;
+	struct serial_struct v;
+
+	if (copy_from_user(&v128, ss, sizeof(*ss)))
+		return -EFAULT;
+
+	memcpy(&v, &v128, offsetof(struct serial_struct128, iomem_base));
+	v.iomem_base = (char *)AP_PTR(v128.iomem_base);
+	v.iomem_reg_shift = v128.iomem_reg_shift;
+	v.port_high = v128.port_high;
+	v.iomap_base = 0;
+
+	return tty_set_serial(tty, &v);
+}
+
+static int ptr128_tty_tiocgserial(struct tty_struct *tty,
+			struct serial_struct128 __user *ss)
+{
+	struct serial_struct128 v128;
+	struct serial_struct v;
+	int err;
+
+	memset(&v, 0, sizeof(v));
+	memset(&v128, 0, sizeof(v128));
+
+	if (!tty->ops->get_serial)
+		return -ENOTTY;
+	err = tty->ops->get_serial(tty, &v);
+	if (!err) {
+		memcpy(&v128, &v, offsetof(struct serial_struct128, iomem_base));
+		v128.iomem_base = MAKE_AP(v.iomem_base, 0);
+		v128.iomem_reg_shift = v.iomem_reg_shift;
+		v128.port_high = v.port_high;
+		if (copy_to_user(ss, &v128, sizeof(v128)))
+			err = -EFAULT;
+	}
+	return err;
+}
+static long tty_ptr128_ioctl(struct file *file, unsigned int cmd,
+				unsigned long arg)
+{
+	struct tty_struct *tty = file_tty(file);
+	struct tty_ldisc *ld;
+	int retval = -ENOIOCTLCMD;
+
+	switch (cmd) {
+	case TIOCOUTQ:
+	case TIOCSTI:
+	case TIOCGWINSZ:
+	case TIOCSWINSZ:
+	case TIOCGEXCL:
+	case TIOCGETD:
+	case TIOCSETD:
+	case TIOCGDEV:
+	case TIOCMGET:
+	case TIOCMSET:
+	case TIOCMBIC:
+	case TIOCMBIS:
+	case TIOCGICOUNT:
+	case TIOCGPGRP:
+	case TIOCSPGRP:
+	case TIOCGSID:
+	case TIOCSERGETLSR:
+	case TIOCGRS485:
+	case TIOCSRS485:
+#ifdef TIOCGETP
+	case TIOCGETP:
+	case TIOCSETP:
+	case TIOCSETN:
+#endif
+#ifdef TIOCGETC
+	case TIOCGETC:
+	case TIOCSETC:
+#endif
+#ifdef TIOCGLTC
+	case TIOCGLTC:
+	case TIOCSLTC:
+#endif
+	case TCSETSF:
+	case TCSETSW:
+	case TCSETS:
+	case TCGETS:
+#ifdef TCGETS2
+	case TCGETS2:
+	case TCSETSF2:
+	case TCSETSW2:
+	case TCSETS2:
+#endif
+	case TCGETA:
+	case TCSETAF:
+	case TCSETAW:
+	case TCSETA:
+	case TIOCGLCKTRMIOS:
+	case TIOCSLCKTRMIOS:
+#ifdef TCGETX
+	case TCGETX:
+	case TCSETX:
+	case TCSETXW:
+	case TCSETXF:
+#endif
+	case TIOCGSOFTCAR:
+	case TIOCSSOFTCAR:
+
+	case PPPIOCGCHAN:
+	case PPPIOCGUNIT:
+	case TIOCCONS:
+	case TIOCEXCL:
+	case TIOCNXCL:
+	case TIOCVHANGUP:
+	case TIOCSBRK:
+	case TIOCCBRK:
+	case TCSBRK:
+	case TCSBRKP:
+	case TCFLSH:
+	case TIOCGPTPEER:
+	case TIOCNOTTY:
+	case TIOCSCTTY:
+	case TCXONC:
+	case TIOCMIWAIT:
+	case TIOCSERCONFIG:
+		return tty_ioctl(file, cmd, arg);
+	}
+
+	if (tty_paranoia_check(tty, file_inode(file), "tty_ioctl"))
+		return -EINVAL;
+
+	switch (cmd) {
+	case TIOCSSERIAL:
+		return ptr128_tty_tiocsserial(tty, (void *)arg);
+	case TIOCGSERIAL:
+		return ptr128_tty_tiocgserial(tty, (void *)arg);
+	}
+	if (tty->ops->ptr128_ioctl) {
+		retval = tty->ops->ptr128_ioctl(tty, cmd, arg);
+		if (retval != -ENOIOCTLCMD)
+			return retval;
+	}
+
+	ld = tty_ldisc_ref_wait(tty);
+	if (!ld)
+		return hung_up_tty_ioctl(file, cmd, arg);
+	if (ld->ops->ptr128_ioctl)
+		retval = ld->ops->ptr128_ioctl(tty, cmd, arg);
+	if (retval == -ENOIOCTLCMD && ld->ops->ioctl)
+		retval = ld->ops->ioctl(tty, cmd, arg);
+	tty_ldisc_deref(ld);
+
+	return retval;
+}
+#endif
 static int this_tty(const void *t, struct file *file, unsigned fd)
 {
 	if (likely(file->f_op->read_iter != tty_read))

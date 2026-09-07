@@ -236,7 +236,7 @@ int memtype_reserve(phys_addr_t start, phys_addr_t end,
 	*cache_flush_needed = false;
 
 	if (start >= end) {
-		WARN("%s failed: mem [0x%llx-0x%llx], requested %s",
+		WARN(1, "%s failed: mem [0x%llx-0x%llx], requested %s",
 				__func__, start, end - 1, memtype_name(memtype));
 		return -EINVAL;
 	}
@@ -305,8 +305,7 @@ void memtype_free(phys_addr_t start, phys_addr_t end)
 		struct page *page = pfn_to_page(pfn);
 		prev_type = get_page_memtype(page);
 
-		if (prev_type == PCM_WB ||
-		    prev_type == PCM_UNKNOWN) {
+		if (prev_type != PCM_WC && prev_type != PCM_UC) {
 			WARN_ONCE(1, "memtype_free for [mem 0x%llx-0x%llx], pfn 0x%lx is mapped as %s already\n",
 				start, end - 1, pfn,
 				memtype_name(PCM_WB));
@@ -460,19 +459,6 @@ void untrack_pfn_moved(struct vm_area_struct *vma)
 	vma->vm_flags &= ~VM_MEMTYPE_TRACKED;
 }
 
-
-int io_remap_pfn_range(struct vm_area_struct *vma, unsigned long addr,
-		       unsigned long pfn, unsigned long size, pgprot_t prot)
-{
-	int is_ram = region_intersects(PFN_PHYS(pfn), size,
-			IORESOURCE_SYSTEM_RAM, IORES_DESC_NONE);
-	WARN_ONCE(is_ram != REGION_DISJOINT, "I/O remap attempted on ram region at 0x%lx - 0x%lx\n",
-			addr, addr + size);
-	return remap_pfn_range(vma, addr, pfn, size, pgprot_decrypted(prot));
-}
-EXPORT_SYMBOL(io_remap_pfn_range);
-
-
 /*
  * /dev/mem mapping:
  *  if opened with O_SYNC, then use WC for RAM and UC for device memory;
@@ -620,27 +606,37 @@ int pud_clear_huge(pud_t *pud)
 
 int pud_free_pmd_page(pud_t *pud, unsigned long addr)
 {
-	pmd_t *pmd_page = (pmd_t *) pud_page_vaddr(*pud);
-	pmd_t *pmdp = pmd_page;
-	unsigned long next = addr, end = addr + PUD_SIZE;
+	pmd_t *pmd_save, *pmd_page = (pmd_t *)pud_page_vaddr(*pud);
+	int i;
 
-	while (next < end) {
+	pmd_save = (pmd_t *)__get_free_page(GFP_KERNEL);
+	if (!pmd_save)
+		return 0;
+
+	for (i = 0; i < PTRS_PER_PMD; i++) {
 		/*
 		 * Do not use pmd_free_pte_page() here because it flushes caches.
-		 * We will flush them later anyway.
+		 * Rather save pmd entries into 'pmd_save' array and free PTE pages
+		 * they point to after the whole PUD range is flushed from TLB.
 		 */
-		if (!pmd_none(*pmdp)) {
-			pte_t *pte = (pte_t *) pmd_page_vaddr(*pmdp);
-			pte_free_kernel(&init_mm, pte);
-		}
-
-		pmdp++;
-		next += PMD_SIZE;
+		pmd_save[i] = pmd_page[i];
+		if (!pmd_none(pmd_page[i]))
+			pmd_clear(&pmd_page[i]);
 	}
 
 	pud_clear(pud);
 
 	flush_tlb_kernel_range(addr, addr + PUD_SIZE);
+
+	for (i = 0; i < PTRS_PER_PMD; i++) {
+		if (!pmd_none(pmd_save[i])) {
+			pte_t *pte = (pte_t *)pmd_page_vaddr(pmd_save[i]);
+
+			pte_free_kernel(&init_mm, pte);
+		}
+	}
+
+	free_page((unsigned long)pmd_save);
 
 	pmd_free(&init_mm, pmd_page);
 

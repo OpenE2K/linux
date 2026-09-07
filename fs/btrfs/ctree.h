@@ -3493,7 +3493,7 @@ void btrfs_assert_inode_range_clean(struct btrfs_inode *inode, u64 start, u64 en
 /* ioctl.c */
 long btrfs_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
 #if defined CONFIG_E2K && defined CONFIG_PROTECTED_MODE
-long btrfs_protected_ioctl(struct file *file, unsigned long cmd, unsigned long arg);
+long btrfs_protected_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
 #endif
 long btrfs_compat_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
 int btrfs_fileattr_get(struct dentry *dentry, struct fileattr *fa);

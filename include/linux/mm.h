@@ -2330,8 +2330,18 @@ static inline int __p4d_alloc(struct mm_struct *mm, pgd_t *pgd,
 {
 	return 0;
 }
+# ifdef CONFIG_E2K_MODULES_DUPLICATION
+static inline int __p4d_alloc_node(int node, struct mm_struct *mm, pgd_t *pgd,
+						unsigned long address)
+{
+	return 0;
+}
+# endif /* CONFIG_E2K_MODULES_DUPLICATION */
 #else
 int __p4d_alloc(struct mm_struct *mm, pgd_t *pgd, unsigned long address);
+# ifdef CONFIG_E2K_MODULES_DUPLICATION
+int __p4d_alloc_node(int node, struct mm_struct *mm, pgd_t *pgd, unsigned long address);
+# endif /* CONFIG_E2K_MODULES_DUPLICATION */
 #endif
 
 #if defined(__PAGETABLE_PUD_FOLDED) || !defined(CONFIG_MMU)
@@ -2340,11 +2350,20 @@ static inline int __pud_alloc(struct mm_struct *mm, p4d_t *p4d,
 {
 	return 0;
 }
+# ifdef CONFIG_E2K_MODULES_DUPLICATION
+static inline int __pud_alloc_node(int node, struct mm_struct *mm, p4d_t *p4d)
+{
+	return 0;
+}
+# endif /* CONFIG_E2K_MODULES_DUPLICATION */
 static inline void mm_inc_nr_puds(struct mm_struct *mm) {}
 static inline void mm_dec_nr_puds(struct mm_struct *mm) {}
 
 #else
 int __pud_alloc(struct mm_struct *mm, p4d_t *p4d, unsigned long address);
+# ifdef CONFIG_E2K_MODULES_DUPLICATION
+int __pud_alloc_node(int node, struct mm_struct *mm, p4d_t *p4d);
+# endif /* CONFIG_E2K_MODULES_DUPLICATION */
 
 static inline void mm_inc_nr_puds(struct mm_struct *mm)
 {
@@ -2367,12 +2386,21 @@ static inline int __pmd_alloc(struct mm_struct *mm, pud_t *pud,
 {
 	return 0;
 }
+# ifdef CONFIG_E2K_MODULES_DUPLICATION
+static inline int __pmd_alloc_node(int node, struct mm_struct *mm, pud_t *pud)
+{
+	return 0;
+}
+# endif /* CONFIG_E2K_MODULES_DUPLICATION */
 
 static inline void mm_inc_nr_pmds(struct mm_struct *mm) {}
 static inline void mm_dec_nr_pmds(struct mm_struct *mm) {}
 
 #else
 int __pmd_alloc(struct mm_struct *mm, pud_t *pud, unsigned long address);
+# ifdef CONFIG_E2K_MODULES_DUPLICATION
+int __pmd_alloc_node(int node, struct mm_struct *mm, pud_t *pud);
+# endif /* CONFIG_E2K_MODULES_DUPLICATION */
 
 static inline void mm_inc_nr_pmds(struct mm_struct *mm)
 {
@@ -2423,6 +2451,9 @@ static inline void mm_dec_nr_ptes(struct mm_struct *mm) {}
 
 int __pte_alloc(struct mm_struct *mm, pmd_t *pmd);
 int __pte_alloc_kernel(pmd_t *pmd);
+#ifdef CONFIG_E2K_MODULES_DUPLICATION
+int __pte_alloc_kernel_node(int node, pmd_t *pmd);
+#endif /* CONFIG_E2K_MODULES_DUPLICATION */
 
 #if defined(CONFIG_MMU)
 

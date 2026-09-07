@@ -38,9 +38,9 @@ void kernel_fpu_end(void)
 	new_nesting = __this_cpu_dec_return(nesting);
 
 	if (likely(new_nesting == 0)) {
-		write_FPCR_reg(current->thread.sw_regs.fpu.fpcr);
-		write_FPSR_reg(current->thread.sw_regs.fpu.fpsr);
-		write_PFPFR_reg(current->thread.sw_regs.fpu.pfpfr);
+		write_FPU_regs(current->thread.sw_regs.fpu.fpcr,
+			       current->thread.sw_regs.fpu.fpsr,
+			       current->thread.sw_regs.fpu.pfpfr);
 	}
 	raw_all_irq_restore(flags);
 

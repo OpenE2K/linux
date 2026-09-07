@@ -65,6 +65,9 @@ static const struct file_operations lsi_fops = {
 	.open	= mraid_mm_open,
 	.unlocked_ioctl = mraid_mm_unlocked_ioctl,
 	.compat_ioctl = compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = mraid_mm_unlocked_ioctl,
+#endif
 	.owner	= THIS_MODULE,
 	.llseek = noop_llseek,
 };

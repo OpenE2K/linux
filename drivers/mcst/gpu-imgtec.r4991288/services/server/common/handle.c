@@ -51,7 +51,15 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * pointers to the structures themselves.
  */
 
+#if defined(CONFIG_MCST)
+#include <linux/version.h>
+#endif
+
+#if defined(CONFIG_MCST) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
+#include <linux/stdarg.h>
+#else
 #include <stddef.h>
+#endif
 
 #include "handle.h"
 #include "handle_impl.h"

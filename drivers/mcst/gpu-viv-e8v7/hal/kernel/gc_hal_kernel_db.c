@@ -1380,12 +1380,18 @@ gckKERNEL_DestroyProcessDB(gckKERNEL Kernel, gctUINT32 ProcessID)
                 break;
 
             case gcvDB_CONTEXT:
+#ifdef CONFIG_MCST
+                if (record->kernel->command != gcvNULL) {
+#endif
                 status = gckCOMMAND_Detach(record->kernel->command,
                                            gcmNAME_TO_PTR(record->data));
                 gcmRELEASE_NAME(record->data);
 
                 gcmkTRACE_ZONE(gcvLEVEL_WARNING, gcvZONE_DATABASE,
                                "DB: CONTEXT %p (status=%d)", record->data, status);
+#ifdef CONFIG_MCST
+                }
+#endif
                 break;
 
             case gcvDB_MAP_MEMORY:

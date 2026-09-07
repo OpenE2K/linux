@@ -17,7 +17,7 @@
 #include <asm/kvm/priv-hypercall.h>
 
 #include "cpu.h"
-#include "string.h"
+#include "paravirt_sw/string.h"
 
 /*
  * This is the privileged actions hypercalls execution.
@@ -37,11 +37,14 @@ __visible unsigned long kvm_priv_hcalls(unsigned long hcall_num,
 			      unsigned long arg5, unsigned long arg6,
 			      unsigned long arg7)
 {
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	struct thread_info *thread_info = read_CURRENT_reg_value();
 	struct kvm_vcpu *vcpu = thread_info->vcpu;
+#endif
 	unsigned long ret = 0;
 
 	switch (hcall_num) {
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	case KVM_PRIV_HCALL_FAST_TAGGED_MEMORY_COPY:
 		ret = kvm_priv_tagged_memory_copy((void *)arg1,
 						  (void *)arg2, arg3, arg4,
@@ -88,6 +91,7 @@ __visible unsigned long kvm_priv_hcalls(unsigned long hcall_num,
 							     (u64 *) arg5,
 							     (u64 *) arg6);
 		break;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	default:
 		ret = -ENOSYS;
 	}

@@ -46,6 +46,7 @@
 #include <drm/drm_blend.h>
 #include <drm/drm_edid.h>
 #include <drm/drm_aperture.h>
+#include <drm/drm_managed.h>
 #include <drm/drm_gem_framebuffer_helper.h>
 #include <drm/ttm/ttm_bo_driver.h>
 
@@ -127,6 +128,9 @@ struct mga2_gem_object {
 	void *vaddr;
 	dma_addr_t dma_addr;
 
+	struct sg_table *sgt;
+	struct page **pages;
+	enum dma_data_direction dma_dir;
 	/**
 	 * @read_domains: Read memory domains.
 	 *
@@ -143,7 +147,6 @@ struct mga2_gem_object {
 	u16 write_domain;
 
 	struct dma_resv resv;
-
 	/**
 	 * @hw_unref_time: The time, when the object can be safely freed.
 	 */
@@ -175,6 +178,8 @@ struct drm_gem_object *mga2_gem_create_with_handle(struct drm_file *file,
 int mga2_dumb_create(struct drm_file *file_priv,
 			    struct drm_device *drm,
 			    struct drm_mode_create_dumb *args);
+int mga2_gem_dumb_map_offset(struct drm_file *file, struct drm_device *dev,
+			    u32 handle, u64 *offset);
 struct drm_gem_object *mga2_prime_import_sg_table(struct drm_device *dev,
 				     struct dma_buf_attachment *attach,
 				     struct sg_table *sgt);
@@ -193,8 +198,10 @@ int mga2_gem_mmap_ioctl(struct drm_device *dev, void *data,
 			struct drm_file *filp);
 int mga2_gem_sync_ioctl(struct drm_device *dev, void *data,
 			struct drm_file *filp);
+int mga2_virt_to_handle(struct drm_device *drm, void *data,
+			struct drm_file *file);
 
-#define MGA2_PCI_PROTO	0
+#define MGA20_PCI_PROTO	0
 #define MGA20_PROTO	1
 #define MGA20		2
 #define MGA25_PCI_PROTO	3

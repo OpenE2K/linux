@@ -707,6 +707,9 @@ const struct file_operations nilfs_dir_operations = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= nilfs_compat_ioctl,
 #endif	/* CONFIG_COMPAT */
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	= nilfs_ioctl,
+#endif
 	.fsync		= nilfs_sync_file,
 
 };

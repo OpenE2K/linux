@@ -11,7 +11,8 @@ SECTIONS {
 	_start = .;
 	.bootblock : {
 		_bootblock = .;
-			arch/e2k/boot/bootblock.o(.rodata)
+		. = _bootblock + 0x100;
+		arch/e2k/boot/bootblock.o(.rodata)
 		_ebootblock = .;
 	}
 

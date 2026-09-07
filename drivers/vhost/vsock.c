@@ -906,6 +906,9 @@ static const struct file_operations vhost_vsock_fops = {
 	.llseek		= noop_llseek,
 	.unlocked_ioctl = vhost_vsock_dev_ioctl,
 	.compat_ioctl   = compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = vhost_vsock_dev_ioctl,
+#endif
 	.read_iter      = vhost_vsock_chr_read_iter,
 	.write_iter     = vhost_vsock_chr_write_iter,
 	.poll           = vhost_vsock_chr_poll,

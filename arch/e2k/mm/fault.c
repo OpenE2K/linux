@@ -191,9 +191,11 @@ e2k_addr_t user_address_to_pva(struct task_struct *tsk, e2k_addr_t address)
 	if (ret != 0)
 		return ret;
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (unlikely(IS_GUEST_USER_ADDRESS_TO_PVA(tsk, address))) {
 		return guest_user_address_to_pva(tsk, address);
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	if (!mmap_read_trylock(tsk->mm))
 		already_locked = true;
@@ -704,7 +706,7 @@ int apply_usd_delta_to_signal_stack(unsigned long top, unsigned long delta_sp, b
 	int regs_num = 0, ret = 0;
 
 	DebugUS("stack top 0x%lx, delta_sp 0x%lx, incr %d\n", top, delta_sp, incr);
-	DebugUS("signal_stack used 0x%lx, size 0x%lx, base 0x%lx\n",
+	DebugUS("signal_stack used 0x%lx, size 0x%lx, base 0x%px\n",
 		current_thread_info()->signal_stack.used, current_thread_info()->signal_stack.size,
 		current_thread_info()->signal_stack.base);
 
@@ -1226,7 +1228,7 @@ void __priv *remap_e2k_stack(void __priv *addr_ptr,
 	LIST_HEAD(uf_unmap_early);
 	LIST_HEAD(uf_unmap);
 	bool locked = false;
-	VMA_ITERATOR(vmi, mm, addr);
+	struct vma_iterator vmi;
 
 	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
 
@@ -1236,11 +1238,14 @@ void __priv *remap_e2k_stack(void __priv *addr_ptr,
 	 * Try to expand without remapping
 	 */
 	vma = vma_to_resize(addr, old_size, new_size, MREMAP_FIXED);
-	if (WARN_ON_ONCE(IS_ERR(vma))) {
-		ret = PTR_ERR(vma);
+	if (IS_ERR_VALUE(vma)) {
+		ret = (unsigned long)PTR_ERR(vma);
+		WARN_ONCE((long)ret != -ENOMEM, "ret = %ld\n", (long)ret);
 		goto out_unlock;
 	}
 
+	vma_iter_init(&vmi, mm, vma->vm_start);
+	BUG_ON(vma_find(&vmi, ULONG_MAX) != vma);
 	next_vma = vma_next(&vmi);
 
 	if (vma->vm_end == end && (!next_vma || next_vma->vm_start >= new_end)) {
@@ -1273,7 +1278,7 @@ void __priv *remap_e2k_stack(void __priv *addr_ptr,
 			new_size, 0, MAP_PRIVATE | MAP_ANONYMOUS);
 	if (IS_ERR_VALUE(new_addr)) {
 		ret = new_addr;
-		pr_err("%s(): could not get unmapped area after 0x%lx "
+		DebugHS("%s(): could not get unmapped area after 0x%lx "
 			"size 0x%lx, error %ld\n",
 			__func__, (after) ? addr : USER_HW_STACKS_BASE,
 			new_size, new_addr);
@@ -1281,23 +1286,28 @@ void __priv *remap_e2k_stack(void __priv *addr_ptr,
 	}
 
 	vma_iter_init(&vmi, mm, addr);
+	vma = vma_find(&vmi, ULONG_MAX);
 
-	for_each_vma_range(vmi, vma, end) {
-		unsigned long remap_from, remap_to,
-				remap_from_size, remap_to_size;
+	while (vma && vma->vm_start < end) {
+		unsigned long remap_from, remap_to, remap_from_size, remap_to_size, vm_end;
 
 		remap_from = vma->vm_start;
 		if (vma->vm_start < addr)
 			remap_from = addr;
 
-		remap_from_size = vma->vm_end - remap_from;
-		if (vma->vm_end >= end)
+		/*
+		 * vma->vm_end should be stored before calling mremap_to(), that could remove vma
+		 */
+		vm_end = vma->vm_end;
+
+		remap_from_size = vm_end - remap_from;
+		if (vm_end >= end)
 			remap_from_size = end - remap_from;
 
 		remap_to = remap_from + new_addr - addr;
 
 		remap_to_size = remap_from_size;
-		if (vma->vm_end >= end) {
+		if (vm_end >= end) {
 			remap_to_size = end - remap_from +
 			    (new_size - old_size);
 		}
@@ -1313,6 +1323,9 @@ void __priv *remap_e2k_stack(void __priv *addr_ptr,
 			       __func__, remap_from, remap_to, remap_to_size, ret);
 			goto out_unlock;
 		}
+
+		vma_iter_init(&vmi, mm, vm_end);
+		vma = vma_find(&vmi, ULONG_MAX);
 	}
 
 	ret = new_addr;
@@ -1775,7 +1788,7 @@ static void print_pagefault_info(const char *reason, struct pt_regs *regs,
 	print_all_TIRs(trap->TIRs, trap->nr_TIRs);
 	print_all_TC(trap->tcellar, trap->tc_count);
 	print_mmap(current);
-	DebugPF("MMU_ADDR_CONT = 0x%llx\n", read_MMU_reg(MMU_ADDR_CONT));
+	DebugPF("MMU_ADDR_CONT = 0x%llx\n", NATIVE_GET_MMUREG(pid));
 
 	if (trap->nr_page_fault_exc == exc_instr_page_miss_num ||
 	    trap->nr_page_fault_exc == exc_instr_page_prot_num) {
@@ -2053,7 +2066,7 @@ static int execute_CLW_operation(const struct pt_regs *regs)
 
 	DebugCLW("started for us_cl_up 0x%lx us_cl_b 0x%lx\n", us_cl_up, us_cl_b);
 	for (bmask = 0; bmask < CLW_MASK_WORD_NUM; bmask++)
-		DebugCLW("    mask[%d] = 0x%016lx\n", bmask, us_cl_m[bmask]);
+		DebugCLW("    mask[%d] = 0x%016llx\n", bmask, us_cl_m[bmask]);
 
 	if (us_cl_up <= us_cl_b) {
 		DebugCLW("nothing to clean\n");
@@ -2228,6 +2241,8 @@ static int handle_spill_fill(struct pt_regs *regs, trap_cellar_t *tcellar,
 		ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
 		ret = do_page_fault(regs, address, condition, mask, NULL, &tcellar[cnt]);
 		clear_ts_flag(ts_flag);
+		if (ret == PFR_SIGPENDING)
+			return ret;
 		if (ret != PFR_SUCCESS)
 			goto fail_sigsegv;
 
@@ -2494,20 +2509,9 @@ repeat:
 			clear_ts_flag(ts_flag);
 		} else if (ftype.exc_mem_lock) {
 			DbgTC("do_trap_cellar: exc_mem_lock\n");
-			if (!trap->from_sigreturn) {
-				S_SIG(regs, SIGBUS, BUS_OBJERR);
-				debug_signal_print("SIGBUS. Memory lock signaled",
-						regs, false);
-				break;
-			}
-			/*
-			 * We can be here only after binary compiler's
-			 * SIGBUS handler when handler wants kernel to
-			 * complete memory operations from cellar.
-			 * Never ignore this request and carry out
-			 * execute_mmu_operations.
-			 */
-			rval = PFR_SUCCESS;
+			S_SIG(regs, SIGBUS, BUS_OBJERR);
+			debug_signal_print("SIGBUS. Memory lock signaled", regs, false);
+			break;
 		} else if (TASK_IS_BINCO(current) && srp_flag && cond.store) {
 			DebugSRP("found memory store request with SRP flag in trap cellar cnt %d\n",
 				cnt);
@@ -2646,8 +2650,6 @@ handled:
 			calculate_new_rpr(regs, srp_ip, rpr_srp_flag);
 #endif
 
-		trap->from_sigreturn = 0;
-
 continue_passed:
 		tcellar[cnt].done = 1;
 	}
@@ -2701,6 +2703,7 @@ static inline union pf_mode set_kvm_fault_mode(tc_cond_t condition,
 	return mode;
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline union pf_mode set_kvm_dont_inject_mode(pt_regs_t *regs,
 						     pf_mode_t mode)
 {
@@ -2710,6 +2713,13 @@ static inline union pf_mode set_kvm_dont_inject_mode(pt_regs_t *regs,
 	mode.host_dont_inject = true;
 	return mode;
 }
+#else
+static inline union pf_mode set_kvm_dont_inject_mode(pt_regs_t *regs,
+						     pf_mode_t mode)
+{
+	return mode;
+}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 /*
  * KVM injected page fault for the guest only to eliminate the reason
@@ -2798,14 +2808,41 @@ bool handle_kernel_macp_trap(struct pt_regs *regs)
 
 
 /**
+ * controlled_user_access - is this from special kernel-to-user access
+ *			    (get_user, copy_to_user, ...)
+ * @regs: pt_regs for this trap
+ */
+static bool controlled_user_access(const struct pt_regs *regs)
+{
+	unsigned long trap_ip = get_trap_ip(regs), return_ip = get_return_ip(regs);
+
+	/* get_user/put_user case: */
+	if (search_exception_tables(return_ip))
+		return true;
+
+	/* UACCESS_FN_CALL case: */
+	if (trap_ip >= (unsigned long)__uaccess_start &&
+	    trap_ip < (unsigned long)__uaccess_end) {
+		return true;
+	}
+
+	/* SET_USR_PFAULT case: */
+	if (current->thread.usr_pfault_jump)
+		return true;
+
+	return false;
+}
+
+
+/**
  * handle_uaccess_trap - handle trap caused by accessing a user address
  *		legitimately (i.e. its an intended access of user memory)
  * @regs - pt_regs for this trap
  * @no_check_get_user - whether this a real exc_data_page exception or exc_diag_*.
- *             On e2k when half-spec. loads are used by compiler in its
+ *             On e2k when semi-spec. loads are used by compiler in its
  *             optimizations, it's possible that exc_diag_* will be generated
  *             instead of exc_data_page (because the load that should have
- *             generated page fault has been put into half-spec. mode).
+ *             generated page fault has been put into semi-spec. mode).
  *             if exc_macp always check.
  */
 bool handle_uaccess_trap(struct pt_regs *regs, bool no_check_get_user)
@@ -2813,7 +2850,7 @@ bool handle_uaccess_trap(struct pt_regs *regs, bool no_check_get_user)
 	unsigned long trap_ip = get_trap_ip(regs), return_ip = get_return_ip(regs);
 
 	/*
-	 * Compiler won't use half-spec. mode for get_user()/put_user()
+	 * Compiler won't use semi-spec. mode for get_user()/put_user()
 	 * so do not check for get_user()/put_user() from exc_diag_*.
 	 */
 	if (!no_check_get_user) {
@@ -2829,8 +2866,9 @@ bool handle_uaccess_trap(struct pt_regs *regs, bool no_check_get_user)
 
 	/* UACCESS_FN_CALL case. This should be checked before
 	 * SET_USR_PFAULT case because we can call SET_USR_PFAULT()
-	 * from UACCESS_FN_DEFINE function. */
-	/* This trap can occure if MADM when access from kernel to user as well */
+	 * from UACCESS_FN_DEFINE function.
+	 *
+	 * Can also happen for MADM violation on kernel to user access. */
 	if (trap_ip >= (unsigned long)__uaccess_start &&
 	    trap_ip < (unsigned long)__uaccess_end) {
 		unsigned long flags;
@@ -2911,15 +2949,14 @@ static int no_context(const char *reason, unsigned long address,
 			return PFR_IGNORE;
 
 		/*
-		 * Kernel's valid half speculative loads and user's loads are
+		 * Kernel's valid semi-speculative loads and user's loads are
 		 * checked above, so this is an *invalid* page fault from half
 		 * speculative load.  This means there is some bug in kernel,
 		 * so print warning and recover by flushing bad entry from TLB.
 		 */
 		trace_unhandled_page_fault(address, PT_DTLB_TRANSLATION_KERNEL);
 		trace_unhandled_page_fault(address, PT_DTLB_TRANSLATION_USER);
-		WARN(1,
-		     "Unexpected page fault from kernel's half speculative load\n");
+		WARN(1, "Unexpected page fault from kernel's semi-speculative load\n");
 		flush_TLB_all();
 		return PFR_IGNORE;
 	}
@@ -3002,11 +3039,13 @@ int pf_force_sig_info(const char *reason, int si_signo, int si_code,
 	return PFR_SIGPENDING;
 }
 
-static int clear_valid_on_spec_load_one(struct vm_area_struct *vma,
-					unsigned long addr,
-					struct pt_regs *regs, bool *unlocked)
+static int clear_valid_on_spec_load_one(struct mm_struct *mm,
+		struct vm_area_struct *vma, unsigned long addr,
+		const struct pt_regs *regs, bool *unlocked, bool write_lock)
 {
-	struct mm_struct *mm = current->mm;
+	struct vm_area_struct *vma_prev, *vma_next;
+	unsigned long pmd_down = round_down(addr, PMD_SIZE);
+	unsigned long pmd_up = round_up(addr + 1, PMD_SIZE);
 	unsigned long area_start, area_end;
 	pgd_t *pgd;
 	p4d_t *p4d;
@@ -3020,21 +3059,10 @@ static int clear_valid_on_spec_load_one(struct vm_area_struct *vma,
 	 */
 	if (!vma) {
 		/* This is a speculative load from unmapped area */
-		struct vm_area_struct *vma_prev;
-		vma = find_vma_prev(mm, addr, &vma_prev);
+		vma_next = find_vma_prev(mm, addr, &vma_prev);
+
 		area_start = (vma_prev) ? vma_prev->vm_end : 0;
-		area_end = TASK_SIZE;
-	} else if (addr < vma->vm_start) {
-		struct vm_area_struct *prev;
-		MA_STATE(mas, &mm->mm_mt, vma->vm_start, vma->vm_start);
-
-		BUG_ON(mas_walk(&mas) != vma);
-		prev = mas_prev(&mas, 0);
-
-		/* This is a speculative load from unmapped area */
-		area_start = prev ? prev->vm_end : 0;
-		area_end = vma->vm_start;
-		vma = NULL;
+		area_end = (vma_next) ? vma_next->vm_start : TASK_SIZE;
 	} else {
 		/* Check that this is a speculative load from PROT_NONE mapping */
 		if (vma->vm_flags & (VM_READ | VM_EXEC | VM_WRITE))
@@ -3054,7 +3082,7 @@ static int clear_valid_on_spec_load_one(struct vm_area_struct *vma,
 	pgd = pgd_offset(mm, addr);
 	/* Check if we can mark whole pgd invalid */
 	if (pgd_none(*pgd) && round_down(addr, PGDIR_SIZE) >= area_start &&
-	    round_up(addr, PGDIR_SIZE) <= area_end) {
+			round_up(addr + 1, PGDIR_SIZE) <= area_end) {
 		spin_lock(&mm->page_table_lock);
 		if (pgd_none(*pgd) && pgd_valid(*p4d)) {
 			pgd_t entry = pgd_mknotvalid(*pgd);
@@ -3088,7 +3116,7 @@ static int clear_valid_on_spec_load_one(struct vm_area_struct *vma,
 		return 0;
 	/* Check if we can mark whole pud invalid */
 	if (pud_none(*pud) && round_down(addr, PUD_SIZE) >= area_start &&
-	    round_up(addr, PUD_SIZE) <= area_end) {
+			round_up(addr + 1, PUD_SIZE) <= area_end) {
 		spin_lock(&mm->page_table_lock);
 		if (pud_none(*pud) && pud_valid(*pud)) {
 			pud_t entry = pud_mknotvalid(*pud);
@@ -3101,13 +3129,14 @@ static int clear_valid_on_spec_load_one(struct vm_area_struct *vma,
 	pmd = pmd_alloc(mm, pud, addr);
 	if (!pmd)
 		goto oom;
+
 	/* Avoid unnecessary splitting if we raced againt huge PMD fault
 	 * (just for better performance) */
 	if (pmd_trans_huge(*pmd))
 		return 0;
+
 	/* Check if we can mark whole pmd invalid */
-	if (pmd_none(*pmd) && round_down(addr, PMD_SIZE) >= area_start &&
-	    round_up(addr, PMD_SIZE) <= area_end) {
+	if (pmd_none(*pmd) && pmd_down >= area_start && pmd_up <= area_end) {
 		spinlock_t *ptl;
 		if (vma && is_vm_hugetlb_page(vma)) {
 			pte_t *huge_pte = (pte_t *) pmd;
@@ -3125,7 +3154,19 @@ static int clear_valid_on_spec_load_one(struct vm_area_struct *vma,
 		goto out_success;
 	}
 
-	split_huge_pmd(vma, pmd, addr);
+	if (vma) {
+		split_huge_pmd(vma, pmd, addr);
+	} else {
+		/* Use another vma within same pmd if possible. */
+		if (vma_prev && vma_prev->vm_end > pmd_down) {
+			split_huge_pmd(vma_prev, pmd, vma_prev->vm_end - 1);
+		} else if (vma_next && vma_next->vm_start < pmd_up) {
+			split_huge_pmd(vma_prev, pmd, vma_next->vm_start);
+		} else {
+			WARN_ONCE(1, "Could not split pmd for semi-spec. load from invalid area, address: 0x%lx, pmd boundaries: 0x%lx - 0x%lx\n",
+					addr, pmd_down, pmd_up);
+		}
+	}
 
 	/*
 	 * Use pte_alloc() instead of pte_alloc_map().  We can't run
@@ -3174,8 +3215,12 @@ out_success:
 	return PFR_IGNORE;
 
 oom:
-	mmap_read_unlock(current->mm);
 	*unlocked = true;
+	if (write_lock) {
+		mmap_write_unlock(mm);
+	} else {
+		mmap_read_unlock(mm);
+	}
 
 	/* OOM killer could have killed us */
 	pagefault_out_of_memory();
@@ -3191,7 +3236,9 @@ oom:
  * the address in question is unmapped or mapped with PROT_NONE).
  *
  * In the case of a race we will try clearing the valid bit again the
- * next time we get a page fault on half-spec. load.
+ * next time we get a page fault on semi-spec. load.
+ *
+ * Releases mmap_sem.
  *
  * Returns:
  *   PFR_SIGPENDING: if this process was killed by Out-of-Memory handler;
@@ -3199,61 +3246,65 @@ oom:
  *               from clearing it);
  *   0: otherwise.
  */
-static int clear_valid_on_spec_load(unsigned long address,
-				    struct vm_area_struct *vma,
-				    struct pt_regs *regs, union pf_mode mode,
-				    int addr_num, bool *unlocked)
-{
-	int ret;
-
-	if (!is_spec_load_fault(mode))
-		return 0;
-
-	ret = clear_valid_on_spec_load_one(vma, address, regs, unlocked);
-	if (ret || *unlocked)
-		return ret;
-
-	if (addr_num > 1) {
-		unsigned long addr_hi = PAGE_ALIGN(address);
-		if (vma && vma->vm_end <= addr_hi) {
-			MA_STATE(mas, &vma->vm_mm->mm_mt, vma->vm_start, vma->vm_start);
-			BUG_ON(mas_walk(&mas) != vma);
-			vma = mas_next(&mas, ULONG_MAX);
-		}
-		ret = clear_valid_on_spec_load_one(vma, addr_hi, regs, unlocked);
-		if (ret)
-			return ret;
-	}
-
-	return 0;
-}
-
-__cold
-static int bad_area(const char *reason, unsigned long address,
-			struct pt_regs *regs, union pf_mode mode,
-			int addr_num, int si_code, tc_fault_type_t ftype)
+static int clear_valid_on_spec_load_and_unlock(unsigned long address,
+		struct vm_area_struct *vma, struct pt_regs *regs,
+		union pf_mode mode, int addr_num, bool write_lock)
 {
 	struct mm_struct *mm = current->mm;
-	struct vm_area_struct *vma;
 	bool unlocked = false;
 	int ret;
 
-	/*
-	 * __do_munmap() could change mmap_sem writelock to mmap_sem readlock, so one
-	 * need to take mmap_sem writelock to process with page table in
-	 * clear_valid_on_spec_load_one().
-	 */
-	mmap_read_unlock(mm);
-	mmap_write_lock(mm);
+	if (!is_spec_load_fault(mode)) {
+		ret = 0;
+		goto out_unlock;
+	}
 
-	address = untagged_addr(address);
-	vma = find_vma(mm, address);
+	ret = clear_valid_on_spec_load_one(mm, vma, address, regs, &unlocked, write_lock);
+	if (ret || unlocked)
+		goto out_unlock;
 
-	ret = clear_valid_on_spec_load(address, vma, regs, mode, addr_num, &unlocked);
+	if (addr_num > 1) {
+		unsigned long addr_hi = PAGE_ALIGN(address);
 
-	if (!unlocked)
-		mmap_write_unlock(mm);
+		vma = find_vma(mm, addr_hi);
+		if (addr_hi < vma->vm_start)
+			vma = NULL;
 
+		ret = clear_valid_on_spec_load_one(mm, vma, addr_hi, regs, &unlocked, write_lock);
+	} else {
+		ret = 0;
+	}
+
+out_unlock:
+	if (!unlocked) {
+		unlocked = true;
+		if (write_lock) {
+			mmap_write_unlock(mm);
+		} else {
+			mmap_read_unlock(mm);
+		}
+	}
+
+	return ret;
+}
+
+/*
+ * Releases mmap_sem
+ */
+__cold
+static int bad_area(const char *reason, unsigned long address,
+		    struct vm_area_struct *vma, struct pt_regs *regs,
+		    union pf_mode mode, int addr_num, int si_code, tc_fault_type_t ftype,
+		    bool write_lock)
+{
+	int ret;
+
+	if (write_lock)
+		mmap_assert_write_locked(current->mm);
+	else
+		mmap_assert_locked(current->mm);
+
+	ret = clear_valid_on_spec_load_and_unlock(address, vma, regs, mode, addr_num, write_lock);
 	if (ret)
 		return ret;
 
@@ -3313,7 +3364,7 @@ static const char *access_error(struct vm_area_struct *vma,
  * a page fault which we do not want in this case (because `mova' is
  * speculative).
  *
- * For half-speculative loads we can just return to user and there will
+ * For semi-speculative loads we can just return to user and there will
  * be DT in register (hardware puts it there), the user application will
  * continue execution from the next wide instruction. But for AAU we have
  * to remove the valid bit from page table, otherwise it will just repeat
@@ -3476,7 +3527,7 @@ static int mm_fault_error(struct vm_area_struct *vma, unsigned long address,
 		/* We cannot guarantee that another thread did not
 		 * truncate the file we were reading from, thus we
 		 * cannot rely on valid bit being cleared and must
-		 * manually check for half-speculative mode. */
+		 * manually check for semi-speculative mode. */
 		if (handle_spec_load_fault(address, regs, mode))
 			return PFR_IGNORE;
 
@@ -3669,8 +3720,8 @@ static int handle_single_page(struct vm_area_struct *vma,
 	const char *str;
 
 	if ((str = access_error(vma, address, regs, mode)))
-		return bad_area(str, address, regs, mode, addr_num,
-				SEGV_ACCERR, ftype);
+		return bad_area(str, address, vma, regs, mode, addr_num,
+				SEGV_ACCERR, ftype, false);
 
 	fault = handle_mm_fault(vma, address, flags, regs);
 	DebugPF("handle_mm_fault() returned %x\n", fault);
@@ -3720,6 +3771,8 @@ int do_page_fault(struct pt_regs *const regs, e2k_addr_t address,
 	int flags = FAULT_FLAG_ALLOW_RETRY | FAULT_FLAG_KILLABLE;
 
 	DebugPF("started for addr 0x%lx\n", address);
+
+	address = untagged_addr(address);
 
 	if (user_mode(regs))
 		flags = FAULT_FLAG_DEFAULT;
@@ -3850,11 +3903,46 @@ retry:
 		 */
 		might_sleep();
 	}
-	vma = vma_lookup(mm, untagged_addr(address));
+	vma = vma_lookup(mm, address);
 	DebugPF("find_vma() returned 0x%px\n", vma);
-	if (!vma)
-		return bad_area("vma not found",
-				address, regs, mode, addr_num, SEGV_MAPERR, ftype);
+	if (!vma) {
+		if (!is_spec_load_fault(mode)) {
+			return bad_area("vma not found", address, NULL, regs, mode,
+					addr_num, SEGV_MAPERR, ftype, false);
+		}
+
+		/*
+		 * There is a race:
+		 * 1) thread1 calls sys_munmap, detaches vma and downgrades
+		 * mmap_sem to read.
+		 * 2) thread2 enters page fault from semispec. load on address
+		 * being unmapped by thread1 and locks mmap_sem for reading.
+		 * It does not find vma.
+		 * 3) thread1 calls destructor for pte/pmd page and frees
+		 * corresponding spinlock.
+		 * 4) thread2 tries to lock the same page from bad_area() ->
+		 * clear_valid_on_spec_load() - use-after-free.
+		 *
+		 * Avoid race by re-acquiring semaphore with write permissions.
+		 */
+		mmap_read_unlock(mm);
+		mmap_write_lock(mm);
+
+		/* Check again since there is a window for another thread's mmap */
+		vma = vma_lookup(mm, address);
+		if (!vma) {
+			return bad_area("vma not found", address, NULL, regs,
+					mode, addr_num, SEGV_MAPERR, ftype, true);
+		}
+
+		mmap_write_downgrade(mm);
+	}
+
+	if (!mode.user && !controlled_user_access(regs)) {
+		return bad_area("raw access from kernel to user",
+				address, vma, regs, mode, addr_num,
+				SEGV_MAPERR, ftype, false);
+	}
 
 #ifdef CONFIG_MAKE_ALL_PAGES_VALID
 	/*
@@ -3867,7 +3955,8 @@ retry:
 		if (mode.exec && ftype.illegal_page) {
 			tracing_off();
 			return bad_area("instruction page protection for valid address",
-					address, regs, mode, addr_num, SEGV_MAPERR, ftype);
+					address, vma, regs, mode, addr_num,
+					SEGV_MAPERR, ftype, false);
 		}
 
 		/* bug #102076: now this situation is possible */
@@ -3878,7 +3967,8 @@ retry:
 		    ftype.global_sp || ftype.nwrite_page ||
 		    ftype.illegal_page || ftype_test_sw_fault(ftype))) {
 			return bad_area("trap with bad fault type for valid address",
-					address, regs, mode, addr_num, SEGV_ACCERR, ftype);
+					address, vma, regs, mode, addr_num,
+					SEGV_ACCERR, ftype, false);
 		}
 	}
 #endif /* CONFIG_MAKE_ALL_PAGES_VALID */
@@ -3974,11 +4064,11 @@ retry:
 				address);
 
 			mmap_read_lock(mm);
-			vma = vma_lookup(mm, untagged_addr(address));
+			vma = vma_lookup(mm, address);
 			DebugPF("find_vma() returned 0x%px\n", vma);
 			if (!vma) {
-				return bad_area("vma not found", address, regs,
-						mode, addr_num, SEGV_MAPERR, ftype);
+				return bad_area("vma not found", address, vma, regs,
+						mode, addr_num, SEGV_MAPERR, ftype, false);
 			}
 		}
 	} while (unlikely(addr_num > 0));
@@ -4265,26 +4355,27 @@ static enum exec_mmu_ret do_recovery_store(struct pt_regs *regs,
 	ld_rec_opc.index = 0;
 	ld_rec_opc.pm = priv_user;
 
-	recovery_faulted_load((e2k_addr_t) & tcellar->data,
-			      &data, &data_tag, AW(ld_rec_opc), 0, (tc_cond_t) {.word = 0});
+	recovery_faulted_load((unsigned long) &tcellar->data, &data, &data_tag,
+			      AW(ld_rec_opc), 0, (tc_cond_t) {.word = 0});
+	if (atomic_q_store || qp_store) {
+		unsigned long addr_ext = (unsigned long)
+				((qp_store) ? &tcellar->data_ext : &next_tcellar->data);
+		recovery_faulted_load(addr_ext, &data_ext, &data_ext_tag,
+				      AW(ld_rec_opc), 0, (tc_cond_t) {.word = 0});
+	}
 
-	if (atomic_q_store) {
-		recovery_faulted_load((e2k_addr_t) & next_tcellar->data,
-				      &data_ext, &data_ext_tag, AW(ld_rec_opc), 0,
-				      (tc_cond_t) {.word = 0});
-
-		/* This is aligned so offset == 0 */
-		calculate_wr_data(fmt, offset, &data, &data_tag);
-		calculate_wr_data(fmt, offset, &data_ext, &data_ext_tag);
-	} else if (qp_store) {
-		recovery_faulted_load((e2k_addr_t) & tcellar->data_ext,
-				      &data_ext, &data_ext_tag, AW(ld_rec_opc),
-				      0, (tc_cond_t) {.word = 0});
-
-		calculate_qp_wr_data(offset, &data, &data_tag,
-				     &data_ext, &data_ext_tag);
-	} else {
-		calculate_wr_data(fmt, offset, &data, &data_tag);
+	/* Updated algorithm since v6 does not require manual data rotation */
+	if (!cpu_has(CPU_FEAT_ISET_V6)) {
+		if (atomic_q_store) {
+			/* This is aligned so offset == 0 */
+			calculate_wr_data(fmt, offset, &data, &data_tag);
+			calculate_wr_data(fmt, offset, &data_ext, &data_ext_tag);
+		} else if (qp_store) {
+			calculate_qp_wr_data(offset, &data, &data_tag,
+					&data_ext, &data_ext_tag);
+		} else {
+			calculate_wr_data(fmt, offset, &data, &data_tag);
+		}
 	}
 
 	DbgEXMMU("do_recovery_store: store(fmt 0x%x) chan = %d address = 0x%lx, data = 0x%llx tag = 0x%x tc_data = 0x%016llx\n",
@@ -4301,7 +4392,7 @@ static enum exec_mmu_ret do_recovery_store(struct pt_regs *regs,
 	st_rec_opc.mas = (big_endian) ? (mas & ~MAS_ENDIAN_MASK) : mas;
 	st_rec_opc.prot = !tcellar->condition.npsp;
 	st_rec_opc.root = tcellar->condition.root;
-	if (cpu_has(CPU_FEAT_ISET_V7) && !st_rec_opc.prot && !st_rec_opc.root) {
+	if (cpu_has(CPU_FEAT_ISET_V7) && !st_rec_opc.prot) {
 		/* MMU_CR.svsc check should not trigger here so use unprivileged
 		 * access (mode=4) instead of the privileged one (mode=0) */
 		st_rec_opc.mode_h = 1;
@@ -4344,14 +4435,65 @@ static enum exec_mmu_ret do_recovery_store(struct pt_regs *regs,
 						tcellar->mask.mask_lo : 0xff,
 					  tc_fmt_has_valid_mask(fmt) ?
 						tcellar->mask.mask_hi : 0xff);
-	} else
-	    if (is_spurious_qp_store(true, address, fmt, tcellar->mask, NULL)) {
-		/* Since v6: qp store with spurious fault, repeating the whole
-		 * operation will generate another spurious fault so repeat
-		 * each byte store separately. */
-		recovery_store_with_bytes(address, 0, 0, data, data_ext,
-					  st_rec_opc, chan, 16, st_rec_opc.mask,
-					  st_opc_ext.mask);
+	} else if (cpu_has(CPU_FEAT_ISET_V6) && !atomic_store && !offset &&
+			(fmt == LDST_DWORD_FMT || fmt == LDST_QWORD_FMT ||
+			 fmt == TC_FMT_DWORD_Q || fmt == TC_FMT_QPWORD_Q)) {
+		/*
+		 * This `if` and the next one implement an algorithm that
+		 * takes into account new iset v7 features:
+		 * - STMQP causes spurious exc_data_page when masked bytes
+		 *   land into unmapped memory;
+		 * - STMQP above can be speculative in which case tags must
+		 *   be copied into the good page.
+		 *
+		 * For atomic operations we'll fallback to the last `else`.
+		 *
+		 * It's suitable for v6 so use it there too.
+		 */
+		st_rec_opc.fmt = LDST_QWORD_FMT;
+		st_rec_opc.fmt_h = 0;
+		st_rec_opc.mask = 0;
+		st_opc_ext = st_rec_opc;
+		st_opc_ext.index = 8;
+		recovery_faulted_tagged_store(address, data, data_tag,
+				AW(st_rec_opc), data_ext, data_ext_tag,
+				AW(st_opc_ext), chan, qp_store, atomic_store);
+	} else if (cpu_has(CPU_FEAT_ISET_V6) && !atomic_store) {
+		address -= offset;
+		st_rec_opc.fmt = LDST_QP_FMT;
+		st_rec_opc.fmt_h = 0;
+
+		int length = (fmt == LDST_QWORD_FMT || fmt == TC_FMT_QWORD_QP ||
+			      fmt == TC_FMT_DWORD_Q || fmt == TC_FMT_DWORD_QP) ? 8 :
+			     (fmt == LDST_QP_FMT || fmt == TC_FMT_QPWORD_Q) ? 16 :
+			     (1 << ((fmt & 0x7) - 1));
+
+		unsigned long mask;
+		if (fmt == LDST_QP_FMT || fmt == TC_FMT_QWORD_QP || fmt == TC_FMT_DWORD_QP) {
+			mask = 0;
+			bitmap_set_value8(&mask, tcellar->mask.mask_lo, 0);
+			bitmap_set_value8(&mask, tcellar->mask.mask_hi, 8);
+		} else {
+			mask = (1 << length) - 1;
+		}
+
+		for (mask <<= offset; mask; mask >>= 8) {
+			u64 value;
+			u8 value_tag;
+
+			if (fmt == LDST_QP_FMT && !IS_ALIGNED(st_rec_opc.index, 16)) {
+				value = data_ext;
+				value_tag = data_ext_tag;
+			} else {
+				value = data;
+				value_tag = data_tag;
+			}
+
+			st_rec_opc.mask = bitmap_get_value8(&mask, 0);
+			recovery_faulted_tagged_store(address, value, value_tag,
+					AW(st_rec_opc), 0, 0, 0, chan, 0, 0);
+			st_rec_opc.index += 8;
+		}
 	} else {
 		recovery_faulted_tagged_store(address, data, data_tag,
 					      AW(st_rec_opc), data_ext,
@@ -4838,7 +4980,7 @@ static enum exec_mmu_ret do_recovery_load(struct pt_regs *regs,
 	}
 	ld_rec_opc.prot = !tcellar->condition.npsp;
 	ld_rec_opc.root = tcellar->condition.root;
-	if (cpu_has(CPU_FEAT_ISET_V7) && !ld_rec_opc.prot && !ld_rec_opc.root) {
+	if (cpu_has(CPU_FEAT_ISET_V7) && !ld_rec_opc.prot) {
 		/* MMU_CR.svsc check should not trigger here so use unprivileged
 		 * access (mode=4) instead of the privileged one (mode=0) */
 		ld_rec_opc.mode_h = 1;
@@ -4900,10 +5042,15 @@ static enum exec_mmu_ret do_recovery_load(struct pt_regs *regs,
 		/* Load to %g register */
 		u64 *saved_greg_lo = NULL, *saved_greg_hi = NULL;
 
-		if (KERNEL_GREGS_MASK != 0 &&
-		    (KERNEL_GREGS_MASK & (1UL << greg_num_d))) {
-			saved_greg_lo = current_thread_info()->k_gregs.g[greg_num_d -
-							     KERNEL_GREGS_PAIRS_START].xreg;
+		if (greg_num_d >= SCRATCH_GREGS_START && !user_mode(regs)) {
+			/* Load to scratch gregs in kernel */
+			saved_greg_lo = regs->trap->k_gregs.g[greg_num_d -
+						SCRATCH_GREGS_START].xreg;
+		} else if (greg_num_d >= LOCAL_GREGS_START) {
+			/* Load to local gregs in user */
+			WARN_ON_ONCE(!user_mode(regs));
+			saved_greg_lo = current->thread.u_gregs.g[greg_num_d -
+						KERNEL_GREGS_PAIRS_START].xreg;
 		} else if (is_guest_kernel_gregs(current_thread_info(),
 				greg_num_d, &saved_greg_lo)) {
 			BUG_ON(saved_greg_lo == NULL);
@@ -5007,6 +5154,7 @@ check_spill_fill_recovery(tc_cond_t cond, e2k_addr_t address, bool s_f,
 	return false;
 }
 
+#if defined CONFIG_KVM_PARAVIRTUALIZATION || defined CONFIG_KVM_GUEST_KERNEL
 static enum exec_mmu_ret convert_pv_gva_to_hva(unsigned long *address_hva_p,
 					       bool is_write,
 					       unsigned long address,
@@ -5029,6 +5177,7 @@ static enum exec_mmu_ret convert_pv_gva_to_hva(unsigned long *address_hva_p,
 
 	return EXEC_MMU_SUCCESS;
 }
+#endif
 
 enum exec_mmu_ret execute_mmu_operations(trap_cellar_t *tcellar,
 		trap_cellar_t *next_tcellar, struct pt_regs *regs, e2k_addr_t *adr,
@@ -5042,7 +5191,7 @@ enum exec_mmu_ret execute_mmu_operations(trap_cellar_t *tcellar,
 {
 	unsigned long	flags, hva_page_offset = 0;
 	tc_cond_t	cond = tcellar->condition;
-	e2k_addr_t	address = tcellar->address, address_hi;
+	e2k_addr_t	address = tcellar->address, address_hi = 0;
 	int		chan, store, fmt, ret;
 	bool		is_s_f;
 
@@ -5115,6 +5264,7 @@ enum exec_mmu_ret execute_mmu_operations(trap_cellar_t *tcellar,
 	 * code from 1) above is simpler (does not require duplicating
 	 * functionality).
 	 */
+#if defined CONFIG_KVM_PARAVIRTUALIZATION || defined CONFIG_KVM_GUEST_KERNEL
 	if (host_test_intc_emul_mode(regs) && !tcellar->is_hva ||
 			IS_ENABLED(CONFIG_KVM_GUEST_KERNEL)) {
 		unsigned long address_lo_hva;
@@ -5148,6 +5298,7 @@ enum exec_mmu_ret execute_mmu_operations(trap_cellar_t *tcellar,
 
 		address = address_lo_hva;
 	}
+#endif
 
 	if (is_s_f)
 		store = 1;

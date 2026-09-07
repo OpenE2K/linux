@@ -2,20 +2,22 @@
  * SPDX-License-Identifier: GPL-2.0
  * Copyright (c) 2023 MCST
  */
+
 #ifndef __ASM_L_PIC_COMMON_H
 #define __ASM_L_PIC_COMMON_H
 
 #include <linux/irq.h>
 
-#ifdef CONFIG_SMP
-int __init pic_init_smp(struct irq_domain *parent, struct device_node *np);
-#else
-# define pic_init_smp(parent, np) 0
-#endif
-
 noinline notrace void epic_do_nmi(struct pt_regs *regs);
 noinline notrace void apic_do_nmi(struct pt_regs *regs);
 
+unsigned int get_irr_epic(unsigned int);
+unsigned int get_irr_apic(unsigned int);
+
+void epic_smp_error_interrupt(void);
+void epic_smp_spurious_interrupt(void);
+void apic_smp_error_interrupt(void);
+void apic_smp_spurious_interrupt(void);
 
 extern int irq_move_cleanup_vector;
 bool apic_check_vector_to_be_cleaned(unsigned vector);
@@ -23,13 +25,27 @@ bool epic_check_vector_to_be_cleaned(unsigned vector);
 
 extern struct irq_chip lapic_controller;
 extern struct irq_chip epic_controller;
-int __init epic_init(struct device_node *np);
+
+struct pic_params {
+	struct irq_chip *ic;
+	unsigned end_vector;
+	void (*pic_smp_error_interrupt)(void);
+	void (*pic_smp_spurious_interrupt)(void);
+	int spurious_interrupts_vector; /*out*/
+	int error_interrupts_vector; /*out*/
+};
+
+int __init epic_init(struct device_node *np, struct pic_params *p);
+int __init apic_init(struct device_node *np, struct pic_params *p);
 
 #ifdef CONFIG_SMP
+int __init pic_init_smp(struct irq_domain *parent,
+			struct device_node *np, struct pic_params *p);
 int pic_set_affinity(struct irq_data *irqd,
 			     const struct cpumask *dest, bool force);
 void smp_irq_move_cleanup_interrupt(void);
 #else
+# define pic_init_smp(parent, np, p) 0
 # define pic_set_affinity	NULL
 #endif
 

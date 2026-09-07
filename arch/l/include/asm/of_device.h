@@ -22,20 +22,20 @@ struct of_device;
 struct of_device
 {
 	char				name[32];	
-        struct of_device		*parent;
-        struct device                   dev;
+	struct of_device		*parent;
+	struct device                   dev;
 	struct device_node		*node;
-        struct resource                 resource[PROMREG_MAX];
-        unsigned int                    irqs[PROMINTR_MAX];
-        int                             num_irqs;
-        struct  proc_dir_entry *pde;    /* this node's proc directory */
+	struct resource                 resource[PROMREG_MAX];
+	unsigned int                    irqs[PROMINTR_MAX];
+	int                             num_irqs;
+	struct  proc_dir_entry *pde;    /* this node's proc directory */
 	int				registered;
 //        void                            *sysdata;
 
 	int				p2s_id;
 //        int                             slot;
 //        int                             portid;
-        int                             clock_freq;
+	int                             clock_freq;
 };
 
 extern void __iomem *of_ioremap(struct resource *res, unsigned long offset, unsigned long size, char *name);

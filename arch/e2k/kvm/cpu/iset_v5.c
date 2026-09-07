@@ -29,20 +29,12 @@ void kvm_guest_save_local_gregs_v5(struct local_gregs *gregs,
 	native_write_BGR_reg(gregs->bgr);
 }
 
-notrace __interrupt void kvm_guest_save_gregs_v5(struct e2k_global_regs *gregs)
+notrace __interrupt void kvm_guest_save_gregs_v5(struct e2k_gregs *gregs)
 {
 	gregs->bgr = native_read_BGR_reg();
 	init_BGR_reg();		/* enable whole GRF */
 	DO_SAVE_GUEST_GREGS_EXCEPT_KERNEL_V5(gregs->g);
 	native_write_BGR_reg(gregs->bgr);
-}
-
-notrace __interrupt
-void kvm_guest_save_gregs_dirty_bgr_v5(struct e2k_global_regs *gregs)
-{
-	gregs->bgr = native_read_BGR_reg();
-	init_BGR_reg();		/* enable whole GRF */
-	DO_SAVE_GUEST_GREGS_EXCEPT_KERNEL_V5(gregs->g);
 }
 
 notrace __interrupt void kvm_guest_restore_gregs_v5(const e2k_global_regs_t *gregs)

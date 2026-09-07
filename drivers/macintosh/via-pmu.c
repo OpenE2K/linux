@@ -2474,6 +2474,9 @@ static const struct file_operations pmu_device_fops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= compat_pmu_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	= pmu_unlocked_ioctl,
+#endif
 	.open		= pmu_open,
 	.release	= pmu_release,
 	.llseek		= noop_llseek,

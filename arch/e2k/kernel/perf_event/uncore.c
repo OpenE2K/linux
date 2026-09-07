@@ -138,7 +138,6 @@ static int uncore_validate_event(struct perf_event *event)
 
 int e2k_uncore_event_init(struct perf_event *event)
 {
-	struct e2k_uncore *uncore = event_to_e2k_uncore(event);
 	struct hw_perf_event *hwc = &event->hw;
 
 	if (event->attr.type != event->pmu->type)

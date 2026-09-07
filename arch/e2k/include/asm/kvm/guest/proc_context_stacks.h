@@ -74,6 +74,9 @@ kvm_mkctxt_prepare_hw_user_stacks(void __user *user_func, void __user *args,
 		.ps_frames = (void *) ps_frames_k,
 		.cs_frames = (e2k_mem_crs_t *) cs_frames_k,
 		.uc_link = uc_link,
+		.trampoline = (format == CTX_128_BIT) ? makecontext_trampoline_128(current->mm) :
+			      (format == CTX_64_BIT) ? makecontext_trampoline_64(current->mm) :
+			      makecontext_trampoline_32(current->mm),
 	};
 
 	ret = HYPERVISOR_prepare_mkctxt_hw_user_stacks(&hw_stacks);

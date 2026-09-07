@@ -325,10 +325,20 @@ int e2c3_gpu_enable(struct device *dev)
 	/* Enable BUS master */
 	pci_set_master(pdev);
 
-	if ((err = pci_set_dma_mask(pdev, DMA_BIT_MASK(40))))
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
+	if ((err = dma_set_mask(&pdev->dev, DMA_BIT_MASK(40)))) {
+#else
+	if ((err = pci_set_dma_mask(pdev, DMA_BIT_MASK(40)))) {
+#endif
 		goto err_disable_device;
-	if ((err = pci_set_consistent_dma_mask(pdev, DMA_BIT_MASK(40))))
+	}
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
+	if ((err = dma_set_coherent_mask(&pdev->dev, DMA_BIT_MASK(40)))) {
+#else
+	if ((err = pci_set_consistent_dma_mask(pdev, DMA_BIT_MASK(40)))) {
+#endif
 		goto err_disable_device;
+	}
 err_out:
 	return err;
 

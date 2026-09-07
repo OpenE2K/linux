@@ -1382,20 +1382,6 @@ static ssize_t current_clocksource_store(struct device *dev,
 }
 static DEVICE_ATTR_RW(current_clocksource);
 
-#ifdef CONFIG_MCST
-void override_clocksource(const char *buf, size_t count)
-{
-	mutex_lock(&clocksource_mutex);
-
-	memcpy(override_name, buf, count);
-	override_name[count] = 0;
-	clocksource_select();
-
-	mutex_unlock(&clocksource_mutex);
-}
-EXPORT_SYMBOL_GPL(override_clocksource);
-#endif
-
 /**
  * unbind_clocksource_store - interface for manually unbinding clocksource
  * @dev:	unused

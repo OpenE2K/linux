@@ -353,6 +353,8 @@ static void mga25_disable_iommu_translation(struct pci_dev *dev)
 }
 DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_MGA25,
 			  mga25_disable_iommu_translation);
+DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_MGA27,
+			  mga25_disable_iommu_translation);
 
 static int pci_disable_extended_tags(struct pci_dev *dev, void *ign)
 {

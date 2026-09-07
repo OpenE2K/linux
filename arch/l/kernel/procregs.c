@@ -29,7 +29,6 @@
 #define MASWRITE_STR_MAX_SIZE	64
 #define SICREAD_STR_MAX_SIZE	16
 #define SICWRITE_STR_MAX_SIZE	32
-#define LDRD_STR_MAX_SIZE	32
 
 
 enum {
@@ -60,11 +59,9 @@ __setup("hwdebug", hwdebug_setup);
 static atomic64_t masread_addr;
 static atomic64_t masread_mas = ATOMIC64_INIT(MAS_DCACHE_L2_REG);
 
-
-static ssize_t common_proc_write(const char *__user buffer, size_t count, size_t maxcount,
-				 char *msg, void (*func)(char *))
+static ssize_t common_proc_write(const char *__user buffer, size_t count,
+		char *proc_buffer, size_t maxcount, const char *msg, void (*func)(char *))
 {
-	char proc_buffer[maxcount];
 	long ret;
 
 	memset(proc_buffer, 0, sizeof(char) * maxcount);
@@ -139,8 +136,9 @@ static void masread_write_reg(char *str)
 static ssize_t masread_write(struct file *file, const char __user *buffer,
 			size_t count, loff_t *ppos)
 {
-	return common_proc_write(buffer, count, MASREAD_STR_MAX_SIZE,
-			"save address and MAS to read", masread_write_reg);
+	char proc_buffer[MASREAD_STR_MAX_SIZE];
+	return common_proc_write(buffer, count, proc_buffer, MASREAD_STR_MAX_SIZE,
+				 "save address and MAS to read", masread_write_reg);
 }
 
 static const struct proc_ops masread_proc_ops = {
@@ -187,8 +185,9 @@ static void maswrite_write_reg(char *str)
 static ssize_t maswrite_write(struct file *file, const char __user *buffer,
 			size_t count, loff_t *ppos)
 {
-	return common_proc_write(buffer, count, MASWRITE_STR_MAX_SIZE, "write with MAS",
-			maswrite_write_reg);
+	char proc_buffer[MASWRITE_STR_MAX_SIZE];
+	return common_proc_write(buffer, count, proc_buffer, MASWRITE_STR_MAX_SIZE,
+				  "write with MAS", maswrite_write_reg);
 }
 
 static int maswrite_proc_show(struct seq_file *s, void *v)

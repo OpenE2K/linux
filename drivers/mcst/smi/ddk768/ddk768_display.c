@@ -31,7 +31,7 @@
  *      0   - Success
  *      1   - Fail 
  */
-long initDisplay()
+long initDisplay(void)
 {
 
     /* set 80024[30:28] and 88024[30:28] to 0x3 in order for the DAC to output stronger signal. */
@@ -570,7 +570,7 @@ long setCloneViewOn(disp_control_t dataPath)
 /*
  * Convenient function to trun on dual view 
  */
-long setDualViewOn()
+long setDualViewOn(void)
 {
 	setSingleViewOn(CHANNEL0_CTRL);
 	setSingleViewOn(CHANNEL1_CTRL);
@@ -581,7 +581,7 @@ long setDualViewOn()
 /*
  * Convenient function to trun off all views
  */
-long setAllViewOff()
+long setAllViewOff(void)
 {
 	setSingleViewOff(CHANNEL0_CTRL);	/* Turn Off monitor 0 */
 	setSingleViewOff(CHANNEL1_CTRL);	/* Turn Off monitor 1 */

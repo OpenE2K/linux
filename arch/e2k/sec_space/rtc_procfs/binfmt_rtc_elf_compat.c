@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
 #include <linux/elfcore-compat.h>
 #include <linux/time.h>
 #include "internal.h"
@@ -69,51 +74,10 @@
 #define	ARCH_DLINFO		COMPAT_ARCH_DLINFO
 #endif
 
-#ifdef	COMPAT_ELF_ET_DYN_BASE
-#undef	ELF_ET_DYN_BASE
-#define	ELF_ET_DYN_BASE		COMPAT_ELF_ET_DYN_BASE
-#endif
-
 #ifdef COMPAT_ELF_EXEC_PAGESIZE
 #undef	ELF_EXEC_PAGESIZE
 #define	ELF_EXEC_PAGESIZE	COMPAT_ELF_EXEC_PAGESIZE
 #endif
-
-#ifdef	COMPAT_ELF_PLAT_INIT
-#undef	ELF_PLAT_INIT
-#define	ELF_PLAT_INIT		COMPAT_ELF_PLAT_INIT
-#endif
-
-#ifdef	COMPAT_SET_PERSONALITY
-#undef	SET_PERSONALITY
-#define	SET_PERSONALITY		COMPAT_SET_PERSONALITY
-#endif
-
-#ifdef	compat_start_thread
-#undef	start_thread
-#define	start_thread		compat_start_thread
-#endif
-
-#ifdef	compat_arch_setup_additional_pages
-#undef	ARCH_HAS_SETUP_ADDITIONAL_PAGES
-#define ARCH_HAS_SETUP_ADDITIONAL_PAGES 1
-#undef	arch_setup_additional_pages
-#define	arch_setup_additional_pages compat_arch_setup_additional_pages
-#endif
-
-#ifdef	compat_elf_read_implies_exec
-#undef	elf_read_implies_exec
-#define	elf_read_implies_exec compat_elf_read_implies_exec
-#endif
-
-/*
- * Rename a few of the symbols that binfmt_elf.c will define.
- * These are all local so the names don't really matter, but it
- * might make some debugging less confusing not to duplicate them.
- */
-#define elf_format		compat_elf_format
-#define init_elf_binfmt		init_compat_elf_binfmt
-#define exit_elf_binfmt		exit_compat_elf_binfmt
 
 #define X86_VDSO_CALL_OFFSET	0x400
 /**

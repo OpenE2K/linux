@@ -41,6 +41,11 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */ /**************************************************************************/
 #include <asm/io.h>
+
+#if defined(CONFIG_MCST)
+#include <linux/version.h>
+#endif
+
 #include <linux/uaccess.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
@@ -49,7 +54,11 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <linux/spinlock.h>
 #include <linux/string.h>
 #include <linux/slab.h>
+#if defined(CONFIG_MCST) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
+#include <linux/stdarg.h>
+#else
 #include <stdarg.h>
+#endif
 
 #include "allocmem.h"
 #include "pvrversion.h"

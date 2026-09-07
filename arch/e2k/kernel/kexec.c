@@ -28,6 +28,7 @@
 #include <asm/pic.h>
 #include <asm/p2v/boot_init.h>
 #include <asm/p2v/boot_v2p.h>
+#include <asm/kexec.h>
 
 #include <asm-l/hw_irq.h>
 #include <asm-l/serial.h>
@@ -47,21 +48,6 @@
 #define IMAGE_BOOTBLOCK_OFFSET		0x100
 #define IMAGE_LINTEL_ENTRY_OFFSET	0x800
 #define KEXEC_CHUNKS_COUNT_MAX		16
-
-#define	SCC_WR9_RESET_BASE	(1 << 7)
-#define	SCC_WR4_PARITY_NONE	(0 << 0)
-#define SCC_WR4_STOP_BITS_1	(1 << 2)
-#define	SCC_WR4_CLOCK_MODE_X16	(1 << 6)
-#define	SCC_WR7_XN_MODE_ENABLE	(1 << 7)
-#define	SCC_WR10_ENCODING_NRZ	(0 << 0)
-#define	SCC_WR11_TXCLK_BRG	(2 << 3)
-#define	SCC_WR11_RXCLK_BRG	(2 << 5)
-#define	SCC_WR14_BRG_ENABLE	(1 << 0)
-#define	SCC_WR14_BRG_SOURCE	(1 << 1)
-#define	SCC_WR3_RX_DATA		(3 << 6)
-#define	SCC_WR3_RX_ENABLE	(1 << 0)
-#define	SCC_WR5_TX_DATA		(3 << 5)
-#define	SCC_WR5_TX_ENABLE	(1 << 3)
 
 #define __switch_to_phys__	__attribute__((__section__(".switch_to_phys")))
 
@@ -106,7 +92,7 @@ static void free_kexec_mem(struct kexec_mem_ptr *mem)
 	BUG_ON(!mem->size);
 
 	for (i = 0, chunk = mem->chunks; i < mem->chunks_count; i++, chunk++) {
-		DebugKE("free memory from 0x%llx of 0x%x bytes\n",
+		DebugKE("free memory from 0x%px of 0x%x bytes\n",
 			chunk->start, chunk->size);
 		free_pages_exact(chunk->start, chunk->size);
 
@@ -142,7 +128,7 @@ static int alloc_kexec_mem(struct kexec_mem_ptr *mem, u64 size)
 			chunk_size, size);
 
 		if ((chunk->start = alloc_pages_exact(chunk_size, GFP_ATOMIC | __GFP_NOWARN))) {
-			DebugKE("memory of chunk %d allocated from 0x%llx\n",
+			DebugKE("memory of chunk %d allocated from 0x%px\n",
 				mem->chunks_count, chunk->start);
 
 			chunk->size = chunk_size;
@@ -201,7 +187,7 @@ static int copy_kexec_mem_from_user(struct kexec_mem_ptr *to,
 				to->chunks[i].size + to->valid_size - to->size :
 				to->chunks[i].size;
 
-		DebugKE("copy 0x%llx bytes from 0x%llx to 0x%llx\n",
+		DebugKE("copy 0x%llx bytes from 0x%px to 0x%px\n",
 			copy_size, from + offset, to->chunks[i].start);
 		if (copy_from_user(to->chunks[i].start, from + offset,
 				   copy_size)) {
@@ -251,7 +237,7 @@ static int find_continuous_kexec_mem(struct kexec_mem_ptr *mem, bool huge_align,
 			(u64)mem->chunks[0].start + mem->chunks[0].size < end) {
 		mem->phys_addr = virt_to_phys(mem->chunks[0].start);
 		mem->ready = true;
-		DebugKE("continuous address for kexec memory 0x%llx is 0x%llx\n",
+		DebugKE("continuous address for kexec memory 0x%px is 0x%llx\n",
 			mem, mem->phys_addr);
 		return 0;
 	}
@@ -259,11 +245,11 @@ static int find_continuous_kexec_mem(struct kexec_mem_ptr *mem, bool huge_align,
 	mem->phys_addr = memblock_phys_alloc_range(mem->size, align, base, end);
 
 	if (!mem->phys_addr) {
-		DebugKE("failed to find continuous address for kexec memory 0x%llx\n",
+		DebugKE("failed to find continuous address for kexec memory 0x%px\n",
 			mem);
 		return -ENOMEM;
 	} else {
-		DebugKE("continuous address for kexec memory 0x%llx is 0x%llx\n",
+		DebugKE("continuous address for kexec memory 0x%px is 0x%llx\n",
 			mem, mem->phys_addr);
 
 		DebugKE("reserve memblock memory from 0x%llx size 0x%llx\n",
@@ -322,7 +308,7 @@ static void boot_merge_kexec_mem(struct kexec_mem_ptr *mem)
 
 static void free_cmdline_mem(char *cmdline)
 {
-	DebugKE("free cmdline memory from 0x%llx\n", cmdline);
+	DebugKE("free cmdline memory from 0x%px\n", cmdline);
 	kfree(cmdline);
 
 	DebugKE("remove bootblock memory from memblock\n");
@@ -338,7 +324,7 @@ static int alloc_cmdline_mem(char **cmdline)
 		DebugKE("allocating cmdline memory failed\n");
 		return -ENOMEM;
 	}
-	DebugKE("cmdline memory allocated from 0x%llx\n", *cmdline);
+	DebugKE("cmdline memory allocated from 0x%px\n", *cmdline);
 
 	ret = memblock_reserve(virt_to_phys(*cmdline), COMMAND_LINE_SIZE);
 	if (ret) {
@@ -353,7 +339,7 @@ static int alloc_cmdline_mem(char **cmdline)
 
 static int copy_cmdline_mem(char *to, char __user *from, u32 size)
 {
-	DebugKE("copy %d bytes of cmdline from 0x%llx to 0x%llx\n", size, from, to);
+	DebugKE("copy %d bytes of cmdline from 0x%px to 0x%px\n", size, from, to);
 
 	if (copy_from_user(to, (void __user *)from, size)) {
 		DebugKE("failed to copy cmdline from user\n");
@@ -373,7 +359,7 @@ static int copy_cmdline_mem(char *to, char __user *from, u32 size)
 
 static void free_bootblock_mem(bootblock_struct_t *bootblock)
 {
-	DebugKE("free bootblock memory from 0x%llx\n", bootblock);
+	DebugKE("free bootblock memory from 0x%px\n", bootblock);
 	kfree(bootblock);
 
 	DebugKE("remove bootblock memory from memblock\n");
@@ -390,7 +376,7 @@ static int alloc_bootblock_mem(struct bootblock_struct **bootblock)
 		DebugKE("allocating bootblock memory failed\n");
 		return -ENOMEM;
 	}
-	DebugKE("bootblock memory allocated from 0x%llx\n", *bootblock);
+	DebugKE("bootblock memory allocated from 0x%px\n", *bootblock);
 
 	if ((ret = memblock_reserve(virt_to_phys(*bootblock), PAGE_SIZE))) {
 		DebugKE("adding bootblock memory to memblock failed\n");
@@ -405,7 +391,7 @@ static int alloc_bootblock_mem(struct bootblock_struct **bootblock)
 static int copy_bootblock_mem(struct bootblock_struct *to,
 			      struct bootblock_struct *from)
 {
-	DebugKE("copy %d bytes of bootblock from 0x%llx to 0x%llx\n",
+	DebugKE("copy %d bytes of bootblock from 0x%px to 0x%px\n",
 		BOOTBLOCK_SIZE, from, to);
 	memcpy(to, from, BOOTBLOCK_SIZE);
 	return 0;
@@ -418,38 +404,38 @@ static int copy_bootblock_mem(struct bootblock_struct *to,
 
 static void free_initrd_mem(struct kexec_mem_ptr *initrd)
 {
-	DebugKE("free initrd memory 0x%llx\n", initrd);
+	DebugKE("free initrd memory 0x%px\n", initrd);
 	free_kexec_mem(initrd);
 }
 
 static int alloc_initrd_mem(u64 initrd_size, struct kexec_mem_ptr *initrd)
 {
-	DebugKE("allocating initrd memory 0x%llx of size 0x%llx\n",
+	DebugKE("allocating initrd memory 0x%px of size 0x%llx\n",
 		initrd, initrd_size);
 	return alloc_kexec_mem(initrd, initrd_size);
 }
 
 static int copy_initrd_mem(struct kexec_mem_ptr *to, const void __user *from)
 {
-	DebugKE("copy initrd memory 0x%llx from user 0x%llx\n", to, from);
+	DebugKE("copy initrd memory 0x%px from user 0x%px\n", to, from);
 	return copy_kexec_mem_from_user(to, from);
 }
 
 static void unreserve_continuous_initrd_mem(struct kexec_mem_ptr *initrd)
 {
-	DebugKE("unreserve continuous memory for initrd 0x%llx\n", initrd);
+	DebugKE("unreserve continuous memory for initrd 0x%px\n", initrd);
 	unreserve_continuous_kexec_mem(initrd);
 }
 
 static int find_continuous_initrd_mem(struct kexec_mem_ptr *initrd)
 {
-	DebugKE("try to find continuous memory for initrd 0x%llx\n", initrd);
+	DebugKE("try to find continuous memory for initrd 0x%px\n", initrd);
 	return find_continuous_kexec_mem(initrd, 0, 0);
 }
 
 static void boot_merge_initrd_mem(struct kexec_mem_ptr *initrd)
 {
-	DebugBootKE("merge chunks of initrd memory 0x%llx\n", initrd);
+	DebugBootKE("merge chunks of initrd memory 0x%px\n", initrd);
 	return boot_merge_kexec_mem(initrd);
 }
 
@@ -460,13 +446,13 @@ static void boot_merge_initrd_mem(struct kexec_mem_ptr *initrd)
 
 static void free_kernel_code_mem(struct kexec_mem_ptr *image)
 {
-	DebugKE("free kernel code memory 0x%llx\n", image);
+	DebugKE("free kernel code memory 0x%px\n", image);
 	free_kexec_mem(image);
 }
 
 static int alloc_kernel_code_mem(u64 image_size, struct kexec_mem_ptr *image)
 {
-	DebugKE("allocating kernel code memory 0x%llx of size 0x%llx\n",
+	DebugKE("allocating kernel code memory 0x%px of size 0x%llx\n",
 		image, image_size);
 	return alloc_kexec_mem(image, image_size);
 }
@@ -474,26 +460,26 @@ static int alloc_kernel_code_mem(u64 image_size, struct kexec_mem_ptr *image)
 static int
 copy_kernel_code_mem(struct kexec_mem_ptr *to, const void __user *from)
 {
-	DebugKE("copy kernel code memory 0x%llx from user 0x%llx\n", to, from);
+	DebugKE("copy kernel code memory 0x%px from user 0x%px\n", to, from);
 	return copy_kexec_mem_from_user(to, from);
 }
 
 static void unreserve_continuous_kernel_code_mem(struct kexec_mem_ptr *image)
 {
-	DebugKE("unreserve continuous memory for kernel code 0x%llx\n", image);
+	DebugKE("unreserve continuous memory for kernel code 0x%px\n", image);
 	unreserve_continuous_kexec_mem(image);
 }
 
 static int find_continuous_kernel_code_mem(struct kexec_mem_ptr *image)
 {
-	DebugKE("try to find continuous memory for kernel code 0x%llx\n",
+	DebugKE("try to find continuous memory for kernel code 0x%px\n",
 		image);
 	return find_continuous_kexec_mem(image, 1, 0);
 }
 
 static void boot_merge_kernel_code_mem(struct kexec_mem_ptr *image)
 {
-	DebugBootKE("merge chunks of kernel code memory 0x%llx\n", image);
+	DebugBootKE("merge chunks of kernel code memory 0x%px\n", image);
 	return boot_merge_kexec_mem(image);
 }
 
@@ -504,13 +490,13 @@ static void boot_merge_kernel_code_mem(struct kexec_mem_ptr *image)
 
 static void free_lintel_code_mem(struct kexec_mem_ptr *image)
 {
-	DebugKE("free lintel code memory 0x%llx\n", image);
+	DebugKE("free lintel code memory 0x%px\n", image);
 	free_kexec_mem(image);
 }
 
 static int alloc_lintel_code_mem(u64 image_size, struct kexec_mem_ptr *image)
 {
-	DebugKE("allocating lintel code memory 0x%llx of size 0x%llx\n",
+	DebugKE("allocating lintel code memory 0x%px of size 0x%llx\n",
 		image, image_size);
 	return alloc_kexec_mem(image, image_size);
 }
@@ -518,26 +504,26 @@ static int alloc_lintel_code_mem(u64 image_size, struct kexec_mem_ptr *image)
 static int
 copy_lintel_code_mem(struct kexec_mem_ptr *to, const void __user *from)
 {
-	DebugKE("copy lintel code memory 0x%llx from user 0x%llx\n", to, from);
+	DebugKE("copy lintel code memory 0x%px from user 0x%px\n", to, from);
 	return copy_kexec_mem_from_user(to, from);
 }
 
 static void unreserve_continuous_lintel_code_mem(struct kexec_mem_ptr *image)
 {
-	DebugKE("unreserve continuous memory for lintel code 0x%llx\n", image);
+	DebugKE("unreserve continuous memory for lintel code 0x%px\n", image);
 	unreserve_continuous_kexec_mem(image);
 }
 
 static int find_continuous_lintel_code_mem(struct kexec_mem_ptr *image)
 {
-	DebugKE("try to find continuous memory for lintel code 0x%llx\n",
+	DebugKE("try to find continuous memory for lintel code 0x%px\n",
 		image);
 	return find_continuous_kexec_mem(image, 0, 1);
 }
 
 static void boot_merge_lintel_code_mem(struct kexec_mem_ptr *image)
 {
-	DebugBootKE("merge chunks of lintel code memory 0x%llx\n", image);
+	DebugBootKE("merge chunks of lintel code memory 0x%px\n", image);
 	return boot_merge_kexec_mem(image);
 }
 
@@ -548,31 +534,31 @@ static void boot_merge_lintel_code_mem(struct kexec_mem_ptr *image)
 
 static void smp_kexec_reboot_param_to_phys(struct smp_kexec_reboot_param *p)
 {
-	DebugInitKE("converting smp param 0x%llx to phys\n", p);
+	DebugInitKE("converting smp param 0x%px to phys\n", p);
 
-	DebugInitKE("converting bootblock virt address 0x%llx\n", p->bootblock);
+	DebugInitKE("converting bootblock virt address 0x%px\n", p->bootblock);
 	p->bootblock = (void *)virt_to_phys(p->bootblock);
-	DebugInitKE("bootblock phys address 0x%llx\n", p->bootblock);
+	DebugInitKE("bootblock phys address 0x%px\n", p->bootblock);
 
 	/*
 	 * p->image and p->initrd are placed on stack, so it can be vmalloced, so convert it with
 	 * e2k_virt_to_phys()
 	 */
 
-	DebugInitKE("converting image virt address 0x%llx\n", p->image);
+	DebugInitKE("converting image virt address 0x%px\n", p->image);
 	kexec_mem_to_phys(p->image);
 	p->image = (void *)e2k_virt_to_phys(p->image);
-	DebugInitKE("image phys address 0x%llx\n", p->image);
+	DebugInitKE("image phys address 0x%px\n", p->image);
 
-	DebugInitKE("converting reboot virt address 0x%llx\n", p->reboot);
+	DebugInitKE("converting reboot virt address 0x%px\n", p->reboot);
 	p->reboot = (kexec_reboot_func_ptr) __pa_symbol(p->reboot);
-	DebugInitKE("reboot phys address 0x%llx\n", p->reboot);
+	DebugInitKE("reboot phys address 0x%px\n", p->reboot);
 
-	DebugInitKE("converting initrd virt address 0x%llx\n", p->initrd);
+	DebugInitKE("converting initrd virt address 0x%px\n", p->initrd);
 	if (p->initrd->valid_size) {
 		kexec_mem_to_phys(p->initrd);
 		p->initrd = (void *)e2k_virt_to_phys(p->initrd);
-		DebugInitKE("initrd phys address 0x%llx\n", p->initrd);
+		DebugInitKE("initrd phys address 0x%px\n", p->initrd);
 	}
 }
 
@@ -651,7 +637,10 @@ static void do_kexec_reboot(void *info)
 
 	all_irq_disable();
 
-	DebugInitKE("switch to phys memory started for smp param 0x%llx, phys smp param 0x%llx\n",
+	pic_disable();
+	fixup_irqs_pic();
+
+	DebugInitKE("switch to phys memory started for smp param 0x%px, phys smp param 0x%llx\n",
 		param, e2k_virt_to_phys(param));
 	kexec_switch_to_phys((struct smp_kexec_reboot_param *)e2k_virt_to_phys(param));
 }
@@ -688,45 +677,6 @@ static int reserve_stack_mem(u64 stack)
 /*
  * HW shutdown block
  */
-
-static void kexec_writeb(u8 b, void __iomem *addr)
-{
-	NATIVE_WRITE_MAS_B((unsigned long) addr, b, MAS_IOADDR);
-}
-
-static void kexec_scc_outb_command(u64 iomem_addr, u8 reg_num, u8 val)
-{
-	kexec_writeb(reg_num, (void __iomem *)iomem_addr);
-	kexec_writeb(val, (void __iomem *)iomem_addr);
-}
-
-static void kexec_scc_init_port(u8 channel, u64 port)
-{
-	kexec_scc_outb_command(port, AM85C30_WR9, SCC_WR9_RESET_BASE >> channel);
-	kexec_scc_outb_command(port, AM85C30_WR1, 0x0);
-	kexec_scc_outb_command(port, AM85C30_WR4,
-			       SCC_WR4_PARITY_NONE | SCC_WR4_STOP_BITS_1 |
-			       SCC_WR4_CLOCK_MODE_X16);
-	kexec_scc_outb_command(port, AM85C30_WR6, 0x15);
-	kexec_scc_outb_command(port, AM85C30_WR7, SCC_WR7_XN_MODE_ENABLE);
-	kexec_scc_outb_command(port, AM85C30_WR10, SCC_WR10_ENCODING_NRZ);
-	kexec_scc_outb_command(port, AM85C30_WR11,
-			       SCC_WR11_TXCLK_BRG | SCC_WR11_RXCLK_BRG);
-	kexec_scc_outb_command(port, AM85C30_WR12, 0x0);
-	kexec_scc_outb_command(port, AM85C30_WR13, 0x0);
-	kexec_scc_outb_command(port, AM85C30_WR14,
-			       SCC_WR14_BRG_ENABLE | SCC_WR14_BRG_SOURCE);
-	kexec_scc_outb_command(port, AM85C30_WR3,
-			       SCC_WR3_RX_DATA | SCC_WR3_RX_ENABLE);
-	kexec_scc_outb_command(port, AM85C30_WR5,
-			       SCC_WR5_TX_DATA | SCC_WR5_TX_ENABLE);
-}
-
-static void kexec_scc_init(u64 base)
-{
-	kexec_scc_init_port(0, base);
-	kexec_scc_init_port(1, base + 2);
-}
 
 static void kexec_hw_shutdown(bootblock_struct_t *bootblock)
 {
@@ -806,20 +756,18 @@ static int kexec_setup_bootblock(bootblock_struct_t *bootblock,
 	u32	kernel_csum;
 	int	cmdline_len;
 
-	DebugKE("image_bootblock is 0x%llx\n", image_bootblock);
+	DebugKE("image_bootblock is 0x%px\n", image_bootblock);
 
-	DebugKE("get %ld bytes of image_bootblock from 0x%llx to 0x%llx\n",
-		sizeof(kernel_size), &image_bootblock->info.kernel_size,
-		&kernel_size);
+	DebugKE("get %ld bytes of image_bootblock from 0x%px to 0x%px\n",
+		sizeof(kernel_size), &image_bootblock->info.kernel_size, &kernel_size);
 	if (get_user(kernel_size, &image_bootblock->info.kernel_size)) {
 		DebugKE("failed to get kernel_size from image_bootblock\n");
 		return -EFAULT;
 	}
 	DebugKE("kernel_size is 0x%llx\n", kernel_size);
 
-	DebugKE("get %ld bytes of image_bootblock from 0x%llx to 0x%llx\n",
-		sizeof(kernel_csum), &image_bootblock->info.kernel_csum,
-		&kernel_csum);
+	DebugKE("get %ld bytes of image_bootblock from 0x%px to 0x%px\n",
+		sizeof(kernel_csum), &image_bootblock->info.kernel_csum, &kernel_csum);
 	if (get_user(kernel_csum, &image_bootblock->info.kernel_csum)) {
 		DebugKE("failed to get kernel_csum from image_bootblock\n");
 		return -EFAULT;
@@ -853,6 +801,121 @@ static int kexec_setup_bootblock(bootblock_struct_t *bootblock,
 	return ret;
 }
 
+static int check_image_mdl(bootblock_struct_t *image_bootblock)
+{
+	e2k_idr_t idr = read_IDR_reg();
+	u8 mdl = idr.mdl;
+	u8 target_mdl = image_bootblock->info.target_mdl;
+	u8 target_iset_min = image_bootblock->info.target_iset_min;
+	u8 target_iset_max = image_bootblock->info.target_iset_max;
+
+	DebugKE("mdl %d, target_mdl %d, target_iset_min %d, target_iset_max %d\n",
+		mdl, target_mdl, target_iset_min, target_iset_max);
+
+	if (target_mdl == mdl)
+		return 0;
+	else if (!target_mdl && (mdl >= target_iset_min && mdl <= target_iset_max))
+		return 0;
+
+	return -EPERM;
+}
+
+static u32 *crc32_filltable(void)
+{
+	u32 *crc_table, c;
+	int i, j;
+
+	crc_table = kmalloc(256 * sizeof(uint32_t), GFP_KERNEL);
+	if (!crc_table)
+		return NULL;
+
+	for (i = 0; i < 256; i++) {
+		c = i << 24;
+		for (j = 8; j; j--)
+			c = (c & 0x80000000) ? ((c << 1) ^ 0x04c11db7) : (c << 1);
+		*crc_table++ = c;
+	}
+
+	return crc_table - 256;
+}
+
+static int check_image_csum(void *image, bootblock_struct_t *image_bootblock, u64 size)
+{
+	u32 image_csum, csum, *crc32_table;
+	int len = size;
+	char *cp = image;
+
+	image_csum = image_bootblock->info.kernel_csum;
+	DebugKE("kernel_csum is 0x%x\n", image_csum);
+
+	image_bootblock->info.kernel_csum = 0;
+
+	crc32_table = crc32_filltable();
+	if (!crc32_table) {
+		DebugKE("failed to allocate crc32_table\n");
+		return -ENOMEM;
+	}
+
+	if (len) {
+		while (len--)
+			csum = (csum << 8) ^ crc32_table[((csum >> 24) ^ (*cp++)) & 0xffL];
+		for (len = size; len; len >>= 8)
+			csum = (csum << 8) ^ crc32_table[((csum >> 24) ^ len) & 0xffL];
+		csum ^= 0xffffffffL;
+	} else {
+		csum = 0;
+	}
+	DebugKE("calculated image csum is 0x%x\n", csum);
+
+	kfree(crc32_table);
+
+	if (csum != image_csum)
+		return -EPERM;
+
+	return 0;
+}
+
+static int check_bootblock_integrity(bootblock_struct_t *bootblock, u64 size)
+{
+	if (bootblock->info.signature != 0x8086)
+		return -EPERM;
+	else if (bootblock->bootblock_marker != 0xaa55)
+		return -EPERM;
+
+	return 0;
+}
+
+static int check_image(void __user *user_image, u64 size)
+{
+	bootblock_struct_t *image_bootblock;
+	void *image;
+	int ret = 0;
+
+	DebugKE("vmalloc of %lld bytes\n", size);
+	image = vmalloc(size);
+	if (!image)
+		DebugKE("vmalloc failed\n");
+
+	DebugKE("copy 0x%llx bytes from 0x%px to 0x%px\n", size, user_image, image);
+	if (copy_from_user(image, user_image, size)) {
+		DebugKE("failed to copy memory from user\n");
+		return -EFAULT;
+	}
+
+	image_bootblock = (bootblock_struct_t *) (image + IMAGE_BOOTBLOCK_OFFSET);
+
+	if ((ret = check_image_csum(image, image_bootblock, size)))
+		pr_err("image csum check failed\n");
+	else if ((ret = check_image_mdl(image_bootblock)))
+		pr_err("image mdl check failed\n");
+	else if ((ret = check_bootblock_integrity(image_bootblock, size)))
+		pr_err("image integrity check failed\n");
+
+	vfree(image);
+
+	return ret;
+}
+
 static long kexec_reboot(struct kexec_reboot_param __user *param)
 {
 	struct kexec_reboot_param	p;
@@ -864,13 +927,13 @@ static long kexec_reboot(struct kexec_reboot_param __user *param)
 	struct smp_kexec_reboot_param	smp_param;
 	int				ret = 0;
 
-	DebugKE("copy %ld bytes of kexec_reboot_param struct from 0x%llx to 0x%llx\n",
+	DebugKE("copy %ld bytes of kexec_reboot_param struct from 0x%px to 0x%px\n",
 		sizeof(struct kexec_reboot_param), param, &p);
 	if (copy_from_user(&p, param, sizeof(struct kexec_reboot_param))) {
 		DebugKE("failed to copy kexec_reboot_param struct from user\n");
 		return -EFAULT;
 	}
-	DebugKE("cmdline=0x%llx cmdline_size=%d image=0x%llx image_size=0x%llx initrd=0x%llx initrd_size=0x%llx\n",
+	DebugKE("cmdline=0x%px cmdline_size=%d image=0x%px image_size=0x%llx initrd=0x%px initrd_size=0x%llx\n",
 		p.cmdline, p.cmdline_size, p.image, p.image_size, p.initrd,
 		p.initrd_size);
 
@@ -878,6 +941,9 @@ static long kexec_reboot(struct kexec_reboot_param __user *param)
 		DebugKE("cmdline_size %d > %d\n", p.cmdline_size, COMMAND_LINE_SIZE);
 		return -EINVAL;
 	}
+
+	if ((ret = check_image(p.image, p.image_size)))
+		return ret;
 
 	if (!p.initrd_size) {
 		initrd.valid_size = 0;
@@ -929,11 +995,9 @@ static long kexec_reboot(struct kexec_reboot_param __user *param)
 	if (DEBUG_KEXEC_MODE)
 		memblock_dump_all();
 
-	image_bootblock =
-		(bootblock_struct_t __user *)(p.image + IMAGE_BOOTBLOCK_OFFSET);
+	image_bootblock = (bootblock_struct_t __user *)(p.image + IMAGE_BOOTBLOCK_OFFSET);
 
-	if ((ret = kexec_setup_bootblock(bootblock, image_bootblock, &image,
-					 &initrd, cmdline)))
+	if ((ret = kexec_setup_bootblock(bootblock, image_bootblock, &image, &initrd, cmdline)))
 		goto out_initrd_cont;
 
 	if ((ret = freeze_processes())) {
@@ -967,7 +1031,6 @@ out_bootblock:
 	free_bootblock_mem(bootblock);
 out_cmdline:
 	free_cmdline_mem(cmdline);
-
 out_stack:
 	unreserve_stack_mem(USD_PTR(usd));
 
@@ -1014,14 +1077,14 @@ static long lintel_reboot(struct lintel_reboot_param __user *param)
 	struct smp_kexec_reboot_param	smp_param;
 	int				ret = 0;
 
-	DebugKE("copy %ld bytes of lintel_reboot_param struct from 0x%llx to 0x%llx\n",
+	DebugKE("copy %ld bytes of lintel_reboot_param struct from 0x%px to 0x%px\n",
 		sizeof(struct lintel_reboot_param), param, &p);
 	if (copy_from_user(&p, param, sizeof(struct lintel_reboot_param))) {
 		DebugKE("failed to copy lintel_reboot_param struct from user\n");
 		return -EFAULT;
 	}
 
-	DebugKE("image=0x%llx image_size=0x%llx\n", p.image, p.image_size);
+	DebugKE("image=0x%px image_size=0x%llx\n", p.image, p.image_size);
 
 	if (!PAGE_ALIGNED(p.image_size))
 		return -EINVAL;

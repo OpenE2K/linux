@@ -125,8 +125,10 @@ static inline bool is_paging(struct kvm_vcpu *vcpu)
 {
 	if (is_tdp_paging(vcpu))
 		return is_hv_paging(vcpu);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (unlikely(vcpu->arch.is_pv))
 		return is_pv_paging(vcpu);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	if (unlikely(is_shadow_paging(vcpu)))
 		return is_spt_paging(vcpu);
 
@@ -159,6 +161,7 @@ static inline void reset_spt_gpa_fault(struct kvm_vcpu *vcpu)
 	vcpu->arch.mmu.spt_gpa_fault = false;
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline unsigned long get_mmu_u_pptb_reg(void)
 {
 	return NATIVE_READ_MMU_U_PPTB_REG();
@@ -168,6 +171,7 @@ static inline unsigned long get_mmu_pid_reg(void)
 {
 	return NATIVE_READ_MMU_PID_REG();
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline hpa_t
 kvm_get_gp_phys_root(struct kvm_vcpu *vcpu)
@@ -354,6 +358,7 @@ static inline void do_gmm_get(gmm_struct_t *gmm)
 	atomic_inc(&gmm->mm_count);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline void kvm_gmm_get(struct kvm_vcpu *vcpu, gthread_info_t *gti,
 				gmm_struct_t *gmm)
 {
@@ -382,6 +387,7 @@ static inline void kvm_init_gmm_get(struct kvm_vcpu *vcpu, gthread_info_t *gti)
 	do_gmm_get(init_gmm);
 	gti->gmm = NULL;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #define	INVALID_GPA		((gpa_t)E2K_INVALID_PAGE)
 #define	IS_INVALID_GPA(gpa)	((gpa) == INVALID_GPA)
@@ -515,17 +521,8 @@ extern void __user *kvm_guest_ptr_to_host_ptr(const void *guest_ptr, bool is_wri
 					int size, bool need_inject);
 
 #ifdef	CONFIG_KVM_HOST_MODE
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 /* it is native host kernel with virtualization support */
-static inline int
-guest_addr_to_host(void **addr, const pt_regs_t *regs)
-{
-	if (likely(!host_test_intc_emul_mode(regs))) {
-		/* faulted addres is not paravirtualized guest one */
-		return native_guest_addr_to_host(addr);
-	}
-
-	return kvm_guest_addr_to_host(addr);
-}
 static inline void __user *
 guest_ptr_to_host(void *ptr, bool is_write, int size, const pt_regs_t *regs)
 {
@@ -536,6 +533,13 @@ guest_ptr_to_host(void *ptr, bool is_write, int size, const pt_regs_t *regs)
 
 	return kvm_guest_ptr_to_host_ptr(ptr, is_write, size, false);
 }
+#else
+static inline void __user *guest_ptr_to_host(void *ptr, bool is_write,
+				int size, const pt_regs_t *regs)
+{
+	return native_guest_ptr_to_host(ptr, size);
+}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 #endif	/* CONFIG_KVM_HOST_MODE */
 
 #else	/* !CONFIG_VIRTUALIZATION */

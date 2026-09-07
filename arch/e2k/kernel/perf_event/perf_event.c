@@ -8,6 +8,18 @@
 #include <asm/e2k_debug.h>
 
 
+#define EVENT_VAR(_id)  event_attr_##_id
+#define EVENT_PTR(_id) (&event_attr_##_id.attr.attr)
+
+#define EVENT_ATTR(_name, _id)						\
+static struct perf_pmu_events_attr EVENT_VAR(_id) =			\
+{									\
+	.attr		= __ATTR(_name, 0444, events_sysfs_show, NULL),	\
+	.id		= PERF_COUNT_HW_##_id,				\
+	.event_str	= NULL,						\
+};
+
+
 static inline bool is_glue(u64 ip)
 {
 	return ip >= (u64) __entry_handlers_start && ip < (u64) __entry_handlers_end ||
@@ -303,7 +315,7 @@ static s64 handle_event_overflow(const char *name,
 	period = hwc->sample_period;
 	local64_set(&hwc->prev_count, period);
 
-	pr_debug("%s event %lx %shandled, new period %lld\n",
+	pr_debug("%s event %px %shandled, new period %lld\n",
 		 name, event, (ret) ? "could not be " : "", period);
 
 	return period;
@@ -323,7 +335,7 @@ void perf_data_overflow_handle(struct pt_regs *regs)
 
 	ddbsr = READ_DDBSR_REG();
 
-	pr_debug("data overflow, ddbsr %llx, monitors_used 0x%hhx, events 0x%lx/0x%lx\n",
+	pr_debug("data overflow, ddbsr %llx, monitors_used 0x%hx, events 0x%px/0x%px\n",
 		 AW(ddbsr), monitors_used, event0, event1);
 
 	if (ddbsr.m0 && event0 && (monitors_used & _BITUL(DDM0))) {
@@ -370,7 +382,7 @@ void perf_instr_overflow_handle(struct pt_regs *regs)
 
 	dibsr = read_DIBSR_reg();
 
-	pr_debug("instr overflow, dibsr %x, monitors_used 0x%hhx, events 0x%lx/0x%lx\n",
+	pr_debug("instr overflow, dibsr %x, monitors_used 0x%hx, events 0x%px/0x%px\n",
 		 AW(dibsr), monitors_used, event0, event1);
 
 	if (dibsr.m0 && event0 && (monitors_used & _BITUL(DIM0))) {
@@ -378,35 +390,35 @@ void perf_instr_overflow_handle(struct pt_regs *regs)
 		if (event0->pmu->type != e2k_pmu.type) {
 			dimtp_overflow(event0);
 		} else {
-			regs->trap->dim_ip = read_DIMAR0_reg_value();
+			regs->trap->dim_ip = read_DIMAR0_reg();
 			regs->trap->dim_ip_valid = 1;
 			s64 period = handle_event_overflow("DIM0", event0, regs);
-			write_DIMAR0_reg_value(-period);
+			write_DIMAR0_reg(-period);
 		}
 		dibsr.m0 = 0;
 	}
 
 	if (dibsr.m1 && event1 && (monitors_used & _BITUL(DIM1))) {
-		regs->trap->dim_ip = read_DIMAR1_reg_value();
+		regs->trap->dim_ip = read_DIMAR1_reg();
 		regs->trap->dim_ip_valid = 1;
 		s64 period = handle_event_overflow("DIM1", event1, regs);
-		write_DIMAR1_reg_value(-period);
+		write_DIMAR1_reg(-period);
 		dibsr.m1 = 0;
 	}
 
 	if (dibsr.m2 && event2 && (monitors_used & _BITUL(DIM2))) {
-		regs->trap->dim_ip = read_DIMAR2_reg_value();
+		regs->trap->dim_ip = read_DIMAR2_reg();
 		regs->trap->dim_ip_valid = 1;
 		s64 period = handle_event_overflow("DIM2", event2, regs);
-		write_DIMAR2_reg_value(-period);
+		write_DIMAR2_reg(-period);
 		dibsr.m2 = 0;
 	}
 
 	if (dibsr.m3 && event3 && (monitors_used & _BITUL(DIM3))) {
-		regs->trap->dim_ip = read_DIMAR3_reg_value();
+		regs->trap->dim_ip = read_DIMAR3_reg();
 		regs->trap->dim_ip_valid = 1;
 		s64 period = handle_event_overflow("DIM3", event3, regs);
-		write_DIMAR3_reg_value(-period);
+		write_DIMAR3_reg(-period);
 		dibsr.m3 = 0;
 	}
 
@@ -446,9 +458,9 @@ static void monitor_resume(struct hw_perf_event *hwc, int reload, s64 period)
 			period = -period;
 
 			if (num == 1)
-				write_DIMAR1_reg_value(period);
+				write_DIMAR1_reg(period);
 			else
-				write_DIMAR0_reg_value(period);
+				write_DIMAR0_reg(period);
 		}
 		write_DIMCR_reg(dimcr);
 	} else if (config.instruction && num >= 2) {
@@ -462,9 +474,9 @@ static void monitor_resume(struct hw_perf_event *hwc, int reload, s64 period)
 			period = -period;
 
 			if (num == 3)
-				write_DIMAR3_reg_value(period);
+				write_DIMAR3_reg(period);
 			else
-				write_DIMAR2_reg_value(period);
+				write_DIMAR2_reg(period);
 		}
 		write_DIMCR1_reg(dimcr1);
 	} else if (!config.instruction && num <= 1) {
@@ -549,8 +561,8 @@ static s64 monitor_pause(struct perf_event *event,
 				else
 					dibsr.m0 = 0;
 			} else {
-				left = (num == 1) ? read_DIMAR1_reg_value() :
-						    read_DIMAR0_reg_value();
+				left = (num == 1) ? read_DIMAR1_reg() :
+						    read_DIMAR0_reg();
 				left = -left;
 
 				pr_debug("event DIM%d: left %lld, dimcr 0x%llx/0x%llx, dibsr 0x%x/0x%x\n",
@@ -583,8 +595,8 @@ static s64 monitor_pause(struct perf_event *event,
 				else
 					dibsr.m2 = 0;
 			} else {
-				left = (num == 3) ? read_DIMAR3_reg_value() :
-						    read_DIMAR2_reg_value();
+				left = (num == 3) ? read_DIMAR3_reg() :
+						    read_DIMAR2_reg();
 				left = -left;
 
 				pr_debug("event DIM%d: left %lld, dimcr1 0x%llx/0x%llx, dibsr 0x%x/0x%x\n",
@@ -616,8 +628,7 @@ static s64 monitor_pause(struct perf_event *event,
 				else
 					ddbsr.m0 = 0;
 			} else {
-				left = (num == 1) ? READ_DDMAR1_REG_VALUE() :
-						    READ_DDMAR0_REG_VALUE();
+				left = (num == 1) ? READ_DDMAR1_REG() : READ_DDMAR0_REG();
 				left = -left;
 
 				/*
@@ -660,8 +671,7 @@ static s64 monitor_pause(struct perf_event *event,
 				else
 					ddbsr.m2 = 0;
 			} else {
-				left = (num == 3) ? READ_DDMAR3_REG_VALUE() :
-						    READ_DDMAR2_REG_VALUE();
+				left = (num == 3) ? READ_DDMAR3_REG() : READ_DDMAR2_REG();
 				left = -left;
 
 				/*
@@ -806,13 +816,13 @@ static int monitor_enable(s64 period, struct perf_event *event, int run)
 		dibsr = read_DIBSR_reg();
 
 		if (monitor == DIM1) {
-			write_DIMAR1_reg_value(period);
+			write_DIMAR1_reg(period);
 			dibsr.m1 = 0;
 
 			__this_cpu_write(cpu_events[1], event);
 			__this_cpu_or(perf_monitors_used, _BITUL(DIM1));
 		} else {
-			write_DIMAR0_reg_value(period);
+			write_DIMAR0_reg(period);
 			dibsr.m0 = 0;
 
 			__this_cpu_write(cpu_events[0], event);
@@ -848,13 +858,13 @@ static int monitor_enable(s64 period, struct perf_event *event, int run)
 		dibsr = read_DIBSR_reg();
 
 		if (num == 1) {
-			write_DIMAR3_reg_value(period);
+			write_DIMAR3_reg(period);
 			dibsr.m3 = 0;
 
 			__this_cpu_write(cpu_events[7], event);
 			__this_cpu_or(perf_monitors_used, _BITUL(DIM3));
 		} else {
-			write_DIMAR2_reg_value(period);
+			write_DIMAR2_reg(period);
 			dibsr.m2 = 0;
 
 			__this_cpu_write(cpu_events[6], event);
@@ -997,7 +1007,7 @@ static s64 monitor_disable(const struct hw_perf_event *hwc)
 
 		raw_all_irq_save(flags);
 
-		left = (num == 1) ? read_DIMAR1_reg_value() : read_DIMAR0_reg_value();
+		left = (num == 1) ? read_DIMAR1_reg() : read_DIMAR0_reg();
 		left = -left;
 
 		dibsr = read_DIBSR_reg();
@@ -1060,7 +1070,7 @@ static s64 monitor_disable(const struct hw_perf_event *hwc)
 
 		raw_all_irq_save(flags);
 
-		left = (num == 3) ? read_DIMAR3_reg_value() : read_DIMAR2_reg_value();
+		left = (num == 3) ? read_DIMAR3_reg() : read_DIMAR2_reg();
 		left = -left;
 
 		dibsr = read_DIBSR_reg();
@@ -1136,7 +1146,7 @@ static s64 monitor_disable(const struct hw_perf_event *hwc)
 				pr_debug("event DDM1: left 0 (1)\n");
 				ddbsr.m1 = 0;
 			} else {
-				left = READ_DDMAR1_REG_VALUE();
+				left = READ_DDMAR1_REG();
 				left = -left;
 				pr_debug("event DDM1: left %lld\n", left);
 			}
@@ -1151,7 +1161,7 @@ static s64 monitor_disable(const struct hw_perf_event *hwc)
 				pr_debug("event DDM0: left 0 (1)\n");
 				ddbsr.m0 = 0;
 			} else {
-				left = READ_DDMAR0_REG_VALUE();
+				left = READ_DDMAR0_REG();
 				left = -left;
 				pr_debug("event DDM0: left %lld\n", left);
 			}
@@ -1187,7 +1197,7 @@ static s64 monitor_disable(const struct hw_perf_event *hwc)
 				pr_debug("event DDM3: left 0 (1)\n");
 				ddbsr.m3 = 0;
 			} else {
-				left = READ_DDMAR3_REG_VALUE();
+				left = READ_DDMAR3_REG();
 				left = -left;
 				pr_debug("event DDM3: left %lld\n", left);
 			}
@@ -1202,7 +1212,7 @@ static s64 monitor_disable(const struct hw_perf_event *hwc)
 				pr_debug("event DDM2: left 0 (1)\n");
 				ddbsr.m2 = 0;
 			} else {
-				left = READ_DDMAR2_REG_VALUE();
+				left = READ_DDMAR2_REG();
 				left = -left;
 				pr_debug("event DDM2: left %lld\n", left);
 			}
@@ -1236,22 +1246,22 @@ static s64 monitor_read(const struct hw_perf_event *hwc)
 		switch (hwc->idx) {
 		case 0:
 			dibsr = read_DIBSR_reg();
-			left = (dibsr.m0) ? 0 : -(s64) read_DIMAR0_reg_value();
+			left = (dibsr.m0) ? 0 : -(s64) read_DIMAR0_reg();
 			pr_debug("reading DIM0: left %lld (dibsr %d)\n", left, dibsr.m0);
 			break;
 		case 1:
 			dibsr = read_DIBSR_reg();
-			left = (dibsr.m1) ? 0 : -(s64) read_DIMAR1_reg_value();
+			left = (dibsr.m1) ? 0 : -(s64) read_DIMAR1_reg();
 			pr_debug("reading DIM1: left %lld (dibsr %d)\n", left, dibsr.m1);
 			break;
 		case 2:
 			dibsr = read_DIBSR_reg();
-			left = (dibsr.m2) ? 0 : -(s64) read_DIMAR2_reg_value();
+			left = (dibsr.m2) ? 0 : -(s64) read_DIMAR2_reg();
 			pr_debug("reading DIM2: left %lld (dibsr %d)\n", left, dibsr.m2);
 			break;
 		case 3:
 			dibsr = read_DIBSR_reg();
-			left = (dibsr.m3) ? 0 : -(s64) read_DIMAR3_reg_value();
+			left = (dibsr.m3) ? 0 : -(s64) read_DIMAR3_reg();
 			pr_debug("reading DIM3: left %lld (dibsr %d)\n", left, dibsr.m3);
 			break;
 		default:
@@ -1264,22 +1274,22 @@ static s64 monitor_read(const struct hw_perf_event *hwc)
 		switch (hwc->idx) {
 		case 0:
 			ddbsr = READ_DDBSR_REG();
-			left = (ddbsr.m0) ? 0 : -(s64) READ_DDMAR0_REG_VALUE();
+			left = (ddbsr.m0) ? 0 : -(s64) READ_DDMAR0_REG();
 			pr_debug("reading DDM0: left %lld (ddbsr %d)\n", left, ddbsr.m0);
 			break;
 		case 1:
 			ddbsr = READ_DDBSR_REG();
-			left = (ddbsr.m1) ? 0 : -(s64) READ_DDMAR1_REG_VALUE();
+			left = (ddbsr.m1) ? 0 : -(s64) READ_DDMAR1_REG();
 			pr_debug("reading DDM1: left %lld (ddbsr %d)\n", left, ddbsr.m1);
 			break;
 		case 2:
 			ddbsr = READ_DDBSR_REG();
-			left = (ddbsr.m2) ? 0 : -(s64) READ_DDMAR2_REG_VALUE();
+			left = (ddbsr.m2) ? 0 : -(s64) READ_DDMAR2_REG();
 			pr_debug("reading DDM2: left %lld (ddbsr %d)\n", left, ddbsr.m2);
 			break;
 		case 3:
 			ddbsr = READ_DDBSR_REG();
-			left = (ddbsr.m3) ? 0 : -(s64) READ_DDMAR3_REG_VALUE();
+			left = (ddbsr.m3) ? 0 : -(s64) READ_DDMAR3_REG();
 			pr_debug("reading DDM3: left %lld (ddbsr %d)\n", left, ddbsr.m3);
 			break;
 		default:
@@ -1313,7 +1323,7 @@ static int e2k_pmu_add(struct perf_event *event, int flags)
 	union core_event_config config = (union core_event_config) { .word = hwc->config };
 	s64 period;
 
-	pr_debug("event %lx: enabling %hhx:%hhx:%02hhx\n"
+	pr_debug("event %px: enabling %hhx:%hhx:%02hhx\n"
 		 "sample_period %lld, left %ld\n",
 		 event, config.mask, config.monitor, config.event_id,
 		 hwc->sample_period, local64_read(&hwc->period_left));
@@ -1346,7 +1356,7 @@ static void e2k_pmu_update(struct perf_event *event, s64 left)
 
 	local64_add(prev - left, &event->count);
 
-	pr_debug("event %lx: updating %hhx:%hhx:%02hhx\n"
+	pr_debug("event %px: updating %hhx:%hhx:%02hhx\n"
 		 "sample_period %lld, count %ld (+%lld)\n"
 		 "left previously %lld, left now %lld\n",
 		 event, config.mask, config.monitor, config.event_id,
@@ -1363,7 +1373,7 @@ static void e2k_pmu_del(struct perf_event *event, int flags)
 	local64_set(&hwc->period_left, left);
 
 	union core_event_config config = (union core_event_config) { .word = hwc->config };
-	pr_debug("event %lx: disabling %hhx:%hhx:%02hhx\n"
+	pr_debug("event %px: disabling %hhx:%hhx:%02hhx\n"
 		 "sample_period %lld, left %lld\n",
 		 event, config.mask, config.monitor, config.event_id,
 		 hwc->sample_period, left);
@@ -1388,7 +1398,7 @@ static void e2k_pmu_stop(struct perf_event *event, int flags)
 		local64_set(&hwc->period_left, left);
 
 		union core_event_config config = (union core_event_config) { .word = hwc->config };
-		pr_debug("event %lx: pausing %hhx:%hhx:%02hhx\n"
+		pr_debug("event %px: pausing %hhx:%hhx:%02hhx\n"
 			 "sample_period %lld, left %lld\n",
 			 event, config.mask, config.monitor, config.event_id,
 			 hwc->sample_period, left);
@@ -1404,7 +1414,7 @@ static void e2k_pmu_start(struct perf_event *event, int flags)
 	union core_event_config config = (union core_event_config) { .word = hwc->config };
 	s64 left = 0;
 
-	pr_debug("event %lx: resuming %hhx:%hhx:%02hhx\n"
+	pr_debug("event %px: resuming %hhx:%hhx:%02hhx\n"
 		 "sample_period %lld\n",
 		 event, config.mask, config.monitor, config.event_id,
 		 hwc->sample_period);
@@ -1414,7 +1424,7 @@ static void e2k_pmu_start(struct perf_event *event, int flags)
 
 		local64_set(&hwc->prev_count, (u64) left);
 
-		pr_debug("event %lx: period_left %lld\n", event, left);
+		pr_debug("event %px: period_left %lld\n", event, left);
 	}
 
 	monitor_resume(hwc, flags & PERF_EF_RELOAD, left);
@@ -1899,9 +1909,20 @@ static int e2k_pmu_event_init(struct perf_event *event)
 	if (err)
 		goto error;
 
-	if (config.monitor == DIM2 || config.monitor == DIM3) {
-		err = -EINVAL;
-		goto error;
+	if (cpu_has(CPU_HWBUG_DIMCR1)) {
+		if (config.mask) {
+			config.dim2 = 0;
+			config.dim3 = 0;
+			if (!config.mask) {
+				err = -EINVAL;
+				goto error;
+			}
+		}
+
+		if (config.monitor == DIM2 || config.monitor == DIM3) {
+			err = -EINVAL;
+			goto error;
+		}
 	}
 
 	/*
@@ -1985,7 +2006,7 @@ static void e2k_pmu_enable(struct pmu *pmu)
 	}
 }
 
-ssize_t events_sysfs_show(struct device *dev,
+static ssize_t events_sysfs_show(struct device *dev,
 				struct device_attribute *attr, char *page)
 {
 	struct perf_pmu_events_attr *pmu_attr =

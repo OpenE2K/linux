@@ -176,7 +176,6 @@ void __init_or_module apply_alternatives(struct alt_instr *start,
 				continue;
 			}
 
-			/* Modules are not duplicated */
 			if (!is_duplicated_code((unsigned long) instr))
 				break;
 		}

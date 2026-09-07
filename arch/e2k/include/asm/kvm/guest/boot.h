@@ -18,9 +18,9 @@
 #include <asm/page.h>
 
 extern void boot_kvm_setup_machine_id(bootblock_struct_t *bootblock);
-extern int __init boot_kvm_probe_memory(node_phys_mem_t *nodes_phys_mem,
+extern void __init boot_kvm_probe_memory(node_phys_mem_t *nodes_phys_mem,
 						boot_info_t *bootblock);
-extern e2k_size_t __init boot_kvm_get_bootblock_size(boot_info_t *bblock);
+extern e2k_size_t __init boot_kvm_get_bootblock_size(const boot_info_t *bblock);
 
 extern void boot_kvm_panic(const char *fmt_v, ...);
 extern void __init_recv boot_kvm_cpu_relax(void);
@@ -57,15 +57,15 @@ boot_setup_machine_id(bootblock_struct_t *bootblock)
 {
 	boot_kvm_setup_machine_id(bootblock);
 }
-static inline int __init
+static inline void __init
 boot_loader_probe_memory(node_phys_mem_t *nodes_phys_mem,
 					boot_info_t *bootblock)
 {
-	return boot_kvm_probe_memory(nodes_phys_mem, bootblock);
+	boot_kvm_probe_memory(nodes_phys_mem, bootblock);
 }
 
 static inline e2k_size_t __init
-boot_get_bootblock_size(boot_info_t *bootblock)
+boot_get_bootblock_size(const boot_info_t *bootblock)
 {
 	return boot_kvm_get_bootblock_size(bootblock);
 }

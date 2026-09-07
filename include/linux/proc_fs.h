@@ -44,6 +44,9 @@ struct proc_ops {
 #ifdef CONFIG_COMPAT
 	long	(*proc_compat_ioctl)(struct file *, unsigned int, unsigned long);
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	long	(*proc_ptr128_ioctl)(struct file *, unsigned int, unsigned long);
+#endif
 	int	(*proc_mmap)(struct file *, struct vm_area_struct *);
 	unsigned long (*proc_get_unmapped_area)(struct file *, unsigned long, unsigned long, unsigned long, unsigned long);
 } __randomize_layout;

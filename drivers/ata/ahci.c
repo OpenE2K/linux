@@ -1764,6 +1764,69 @@ static ssize_t remapped_nvme_show(struct device *dev,
 
 static DEVICE_ATTR_RO(remapped_nvme);
 
+#ifdef CONFIG_MCST
+struct reg_wr_data {
+	u32 data;
+	u32 phy_num;
+	u32 reg_address;
+};
+
+static struct reg_wr_data preset2800_0[4] = {
+	{0xb800, 0x08, 0x1002},
+	{0xb800, 0x08, 0x1102},
+	{0xb800, 0x09, 0x1002},
+	{0xb800, 0x09, 0x1102},
+};
+
+static struct reg_wr_data preset2800_1[4] = {
+	{0x2040, 0x08, 0x1003},
+	{0x2040, 0x08, 0x1103},
+	{0x2040, 0x09, 0x1003},
+	{0x2040, 0x09, 0x1103},
+};
+
+static struct reg_wr_data set_max_amp[4] = {
+	{0x1fc0, 0x08, 0x3001},
+	{0x1fc0, 0x08, 0x3101},
+	{0x1fc0, 0x09, 0x3001},
+	{0x1fc0, 0x09, 0x3101},
+};
+
+static int conf_write(struct pci_dev *dev, struct reg_wr_data *d)
+{
+	u32 v;
+	int t = 50;
+	u32 cmd = (3 << 29) | (d->phy_num << 16) | d->reg_address;
+	/* See: eioh_e2c3.pdf */
+	pci_write_config_dword(dev, 0x70, d->data);
+	pci_write_config_dword(dev, 0x6c, cmd);
+	do {
+		pci_read_config_dword(dev, 0x6c, &v);
+		if ((v & (1 << 31)) == 0)
+			return 0;
+		udelay(20);
+	} while (--t);
+	return -ETIME;
+}
+
+static int set_phy_preset(struct pci_dev *dev, struct reg_wr_data *preset)
+{
+	if (conf_write(dev, &preset[0]) ||
+		conf_write(dev, &preset[1]) ||
+		conf_write(dev, &preset[2]) ||
+		conf_write(dev, &preset[3]))
+		return -EIO;
+	return 0;
+}
+
+static int set_phy_max_amp_preset(struct pci_dev *dev)
+{
+	if (set_phy_preset(dev, set_max_amp))
+		return -EIO;
+	return 0;
+}
+#endif
+
 static int ahci_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
 	unsigned int board_id = ent->driver_data;
@@ -2042,6 +2105,20 @@ static int ahci_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	ahci_pci_print_info(host);
 
 	pci_set_master(pdev);
+
+/* rm 24950: setting new values of physical level registers,
+ * which helps to reduce the amount of disk speed reduction
+ * when connecting and to remove non-connections.
+ */
+#ifdef CONFIG_MCST
+	if (pdev->vendor == PCI_VENDOR_ID_MCST_TMP &&
+			pdev->device == PCI_DEVICE_ID_MCST_SATA &&
+			iohub_generation(pdev) == 2) {
+		WARN_ON(rc = set_phy_preset(pdev, preset2800_0));
+		WARN_ON(rc = set_phy_preset(pdev, preset2800_1));
+		WARN_ON(rc = set_phy_max_amp_preset(pdev));
+	}
+#endif
 
 	rc = ahci_host_activate(host, &ahci_sht);
 	if (rc)

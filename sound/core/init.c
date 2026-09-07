@@ -474,6 +474,9 @@ static const struct file_operations snd_shutdown_f_ops =
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = snd_disconnect_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl = snd_disconnect_ioctl,
+#endif
 	.mmap =		snd_disconnect_mmap,
 	.fasync =	snd_disconnect_fasync
 };

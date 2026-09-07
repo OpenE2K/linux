@@ -11,8 +11,6 @@ void boot_e8c_setup_arch(void)
 {
 	boot_e2k_sic_setup_arch();
 
-	boot_mmu_features.mmu_pt_v6 = false;
-	boot_mmu_features.mmu_separate_pt = false;
 	boot_machine.native_iset_ver = ELBRUS_8C_ISET;
 	boot_machine.L3_enable = true;
 	boot_machine.max_nr_node_cpus = E8C_MAX_NR_NODE_CPUS;

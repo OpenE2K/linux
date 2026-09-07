@@ -289,7 +289,7 @@ static int modify_instruction(unsigned long ip, phys_addr_t phys_ip,
 }
 
 static int e2k_modify_call(unsigned long addr, unsigned long ip,
-			   unsigned long phys_ip, bool enable)
+			   unsigned long phys_ip, bool enable, bool ignore_modified)
 {
 	union {
 		struct {
@@ -326,14 +326,14 @@ static int e2k_modify_call(unsigned long addr, unsigned long ip,
 	}
 
 	if (enable) {
-		if (instruction.SS.ct == 1) {
+		if (instruction.SS.ct == 1 && !ignore_modified) {
 			pr_err("_mcount at %lx (phys %lx) is enabled already\n", ip, phys_ip);
 			WARN_ON(1);
 			return -EINVAL;
 		}
 		instruction.SS.ct = 1;
 	} else {
-		if (instruction.SS.ct == 0) {
+		if (instruction.SS.ct == 0 && !ignore_modified) {
 			pr_err("_mcount at %lx (phys %lx) is disabled already\n", ip, phys_ip);
 			WARN_ON(1);
 			return -EINVAL;
@@ -349,6 +349,7 @@ static int ftrace_modify_call_wrapper(struct dyn_ftrace *rec, unsigned long addr
 {
 	unsigned long ip = rec->ip, phys_ip;
 	int node, ret = 0;
+	bool ignore_modified = false;
 
 	for_each_node_has_dup_kernel(node) {
 		phys_ip = node_kernel_address_to_phys(node, ip);
@@ -358,13 +359,21 @@ static int ftrace_modify_call_wrapper(struct dyn_ftrace *rec, unsigned long addr
 			break;
 		}
 
-		ret = e2k_modify_call(addr, ip, phys_ip, enable);
+		/*
+		 * Module code can be not duplicated at this moment. That's why
+		 * all modifications will hit the same instruction. Use flag
+		 * 'ignore_modified' to prevent e2k_modify_call() from printing
+		 * a warning and returning error in the case when we try to modify
+		 * yet unduplicated code from all NUMA nodes.
+		 */
+		ret = e2k_modify_call(addr, ip, phys_ip, enable, ignore_modified);
 		if (ret)
 			return ret;
 
-		/* Modules are not duplicated */
 		if (!is_duplicated_code(ip))
 			break;
+
+		ignore_modified = true;
 	}
 
 	return ret;

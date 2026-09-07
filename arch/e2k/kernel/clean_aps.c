@@ -68,6 +68,8 @@ int mem_set_empty_tagged_dw(void __user *ptr, s64 size, u64 dw)
 {
 	void __user *ptr_aligned;
 	s64 size_aligned, size_head, size_tail;
+	e2k_madmr_t mem_madmr;
+	int ret;
 
 	if (size < 8)
 		if (clear_user((void __user *) ptr, size))
@@ -78,12 +80,26 @@ int mem_set_empty_tagged_dw(void __user *ptr, s64 size, u64 dw)
 	size_aligned = round_down(size - size_head, 8);
 	size_tail = size - size_head - size_aligned;
 
-	if (fill_user(ptr, size_head, 0xff) ||
-	    fill_user_with_tags(ptr, size_aligned, ETAGEWD, dw) ||
-	    fill_user(ptr_aligned + size_aligned, size_tail, 0xff))
-		return -EFAULT;
+	if (cpu_has(CPU_FEAT_MADM)) {
+		/* NB> It might happen memory had been re-colored since allocation.
+		 *     As an example, usage of the allocated memory for alternative stack.
+		       To avoid MACP exception, we temporarily set mode_st to zero.
+		 */
+		mem_madmr = read_MADMR_reg();
+		e2k_madmr_t madmr = mem_madmr;
 
-	return 0;
+		madmr.mode_st = E2K_MADMR_MODE_ST_NONE;
+		write_MADMR_reg(madmr);
+	}
+
+	ret = (fill_user(ptr, size_head, 0xff) ||
+	    fill_user_with_tags(ptr, size_aligned, ETAGEWD, dw) ||
+	    fill_user(ptr_aligned + size_aligned, size_tail, 0xff));
+
+	if (cpu_has(CPU_FEAT_MADM)) /* Restoring mode_st saved above. */
+		write_MADMR_reg(mem_madmr);
+
+	return ret ? -EFAULT : 0;
 }
 
 __always_inline /* To optimize based on 'kernel_stack' value */
@@ -116,8 +132,7 @@ static int find_data_in_list(struct rb_root_cached *areas, e2k_ap_t data,
 		 * catch a reasonable PFAULT on store operation.
 		 */
 		if (kernel_stack) {
-			__NATIVE_STORE_TAGGED_QWORD(ptr, data.lo,
-						    data.hi, ETAGNVD, ETAGNVD, offset);
+			store_tagged_qword((void *) ptr, data.qword, ETAGNVQ, offset);
 		} else if (!priv) {
 			if (put_user(data.qword.lo, (u64 __user *) ptr) ||
 			    put_user(data.qword.hi, (u64 __user *) (ptr + offset))) {
@@ -427,7 +442,7 @@ int clean_descriptors(void __user *list_descriptors, unsigned long list_size)
 		if (unlikely(IS_AP(descriptor, tag))) {
 			pr_info_ratelimited("%s: bad descriptor extag 0x%x hiw=0x%llx low=0x%llx ind=%d\n",
 					    __func__, tag, descriptor.hi, descriptor.lo, i);
-			pr_info_ratelimited("%s: list_descriptors: 0x%lx / list_size=%ld\n",
+			pr_info_ratelimited("%s: list_descriptors: 0x%px / list_size=%ld\n",
 					    __func__, list_descriptors, list_size);
 			res = -EFAULT;
 			goto free_list;

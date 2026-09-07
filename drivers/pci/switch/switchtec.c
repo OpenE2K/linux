@@ -1252,6 +1252,9 @@ static const struct file_operations switchtec_fops = {
 	.poll = switchtec_dev_poll,
 	.unlocked_ioctl = switchtec_dev_ioctl,
 	.compat_ioctl = compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = switchtec_dev_ioctl,
+#endif
 };
 
 static void link_event_work(struct work_struct *work)

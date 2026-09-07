@@ -17,10 +17,13 @@
 enum restore_caller;
 
 #ifdef	CONFIG_VIRTUALIZATION
+
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static __always_inline void kvm_set_intc_emul_flag(pt_regs_t *regs)
 {
 	regs->flags.trap_as_intc_emul = 1;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static __always_inline bool kvm_test_intc_emul_flag(pt_regs_t *regs)
 {
@@ -41,6 +44,8 @@ static __always_inline bool kvm_test_and_clear_intc_emul_flag(pt_regs_t *regs)
 
 #ifdef	CONFIG_KVM_HOST_MODE
 /* it is host kernel with virtualization support */
+
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline bool host_test_intc_emul_mode(const struct pt_regs *regs)
 {
 	if (likely(native_current_thread_info()->vcpu == NULL)) {
@@ -54,6 +59,12 @@ static inline bool host_test_intc_emul_mode(const struct pt_regs *regs)
 
 	return true;
 }
+#else
+static inline bool host_test_intc_emul_mode(const struct pt_regs *regs)
+{
+	return false;
+}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline bool test_ti_is_vcpu_thread(struct thread_info *ti)
 {
@@ -75,6 +86,7 @@ static inline bool is_task_at_vcpu_intc_emul_mode(struct task_struct *task)
 	return test_ti_is_vcpu_thread(ti) && regs && kvm_test_intc_emul_flag(regs);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 extern void pv_vcpu_switch_to_host_from_intc(thread_info_t *ti);
 extern void pv_vcpu_return_to_intc_mode(thread_info_t *ti, struct kvm_vcpu *vcpu);
 
@@ -82,6 +94,7 @@ static inline void return_to_pv_vcpu_intc(struct kvm_vcpu *vcpu)
 {
 	pv_vcpu_return_to_intc_mode(current_thread_info(), vcpu);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #else /* !CONFIG_KVM_HOST_MODE */
 /* it is not host kernel */
@@ -125,6 +138,7 @@ static inline bool kvm_check_is_vcpu_intc_TIRs_empty(struct kvm_vcpu *vcpu)
 	return false;
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline bool
 kvm_check_is_vcpu_guest_stacks_empty(struct kvm_vcpu *vcpu, pt_regs_t *regs)
 {
@@ -233,16 +247,20 @@ static inline int pv_vcpu_get_gpid_id(struct kvm_vcpu *vcpu)
 		return -EINVAL;
 	}
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
+//TODO always NULL w/o CONFIG_KVM_PARAVIRTUALIZATION
 static inline gmm_struct_t *pv_mmu_get_init_gmm(struct kvm *kvm)
 {
 	return kvm->arch.init_gmm;
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline void pv_mmu_clear_init_gmm(struct kvm *kvm)
 {
 	kvm->arch.init_gmm = NULL;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline bool pv_mmu_is_init_gmm(struct kvm *kvm, gmm_struct_t *gmm)
 {
@@ -264,6 +282,7 @@ static inline bool pv_vcpu_is_init_gmm(struct kvm_vcpu *vcpu, gmm_struct_t *gmm)
 	return pv_mmu_is_init_gmm(vcpu->kvm, gmm);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline void pv_vcpu_clear_gmm(struct kvm_vcpu *vcpu)
 {
 	if (likely(!vcpu->arch.is_hv && vcpu->arch.is_pv)) {
@@ -272,6 +291,7 @@ static inline void pv_vcpu_clear_gmm(struct kvm_vcpu *vcpu)
 		E2K_KVM_BUG_ON(true);
 	}
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline gmm_struct_t *pv_vcpu_get_gmm(struct kvm_vcpu *vcpu)
 {
@@ -287,6 +307,7 @@ static inline gmm_struct_t *pv_vcpu_get_gmm(struct kvm_vcpu *vcpu)
 	return NULL;
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline void pv_vcpu_set_gmm(struct kvm_vcpu *vcpu, gmm_struct_t *gmm)
 {
 	if (likely(!vcpu->arch.is_hv && vcpu->arch.is_pv)) {
@@ -299,6 +320,7 @@ static inline void pv_vcpu_set_gmm(struct kvm_vcpu *vcpu, gmm_struct_t *gmm)
 		E2K_KVM_BUG_ON(true);
 	}
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline gmm_struct_t *pv_vcpu_get_active_gmm(struct kvm_vcpu *vcpu)
 {

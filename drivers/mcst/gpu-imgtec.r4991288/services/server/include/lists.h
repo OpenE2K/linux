@@ -46,7 +46,15 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 /* instruct QAC to ignore warnings about the following custom formatted macros */
 /* PRQA S 0881,3410 ++ */
+
+#if defined(CONFIG_MCST)
+#include <linux/version.h>
+#endif
+#if defined(CONFIG_MCST) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
+#include <linux/stdarg.h>
+#else
 #include <stdarg.h>
+#endif
 #include "img_types.h"
 #include "device.h"
 #include "power.h"

@@ -700,6 +700,9 @@ static const struct file_operations lirc_fops = {
 	.write		= lirc_transmit,
 	.unlocked_ioctl	= lirc_ioctl,
 	.compat_ioctl	= compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = lirc_ioctl,
+#endif
 	.read		= lirc_read,
 	.poll		= lirc_poll,
 	.open		= lirc_open,

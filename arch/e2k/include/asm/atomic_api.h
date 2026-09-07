@@ -30,11 +30,11 @@
 # define NATIVE_HAS_HWBUG_AFTER_LD_ACQ_ADDRESS		\
 		virt_cpu_has(CPU_HWBUG_WRITE_MEMORY_BARRIER)
 # ifdef E2K_FAST_SYSCALL
-#  define NATIVE_HWBUG_AFTER_LD_ACQ_CPU NATIVE_GET_DSREG_OPEN(clkr)
+#  define NATIVE_HWBUG_AFTER_LD_ACQ_CPU NATIVE_GET_DREG_OPEN(clkr)
 # else
 #  ifndef __ASSEMBLY__
 #   include <asm/glob_regs.h>
-register unsigned long long __cpu_preempt_reg DO_ASM_GET_GREG_MEMONIC(SMP_CPU_ID_GREG);
+register unsigned long long __cpu_preempt_reg ASM_GREG(SMP_CPU_ID_GREG);
 #  endif
 #  define NATIVE_HWBUG_AFTER_LD_ACQ_CPU ((unsigned int) __cpu_preempt_reg)
 # endif
@@ -42,7 +42,7 @@ register unsigned long long __cpu_preempt_reg DO_ASM_GET_GREG_MEMONIC(SMP_CPU_ID
 #elif defined(E2K_P2V)
 
 # define NATIVE_HWBUG_AFTER_LD_ACQ_ADDRESS	\
-		(NATIVE_GET_DSREG_OPEN(ip) & ~0x3fUL)
+		(NATIVE_GET_DREG_OPEN(ip) & ~0x3fUL)
 # define NATIVE_HWBUG_AFTER_LD_ACQ_CPU 0
 # if !defined(CONFIG_E2K_MACHINE) || defined(CONFIG_E2K_E8C)
 #  define NATIVE_HAS_HWBUG_AFTER_LD_ACQ_ADDRESS 1
@@ -53,7 +53,7 @@ register unsigned long long __cpu_preempt_reg DO_ASM_GET_GREG_MEMONIC(SMP_CPU_ID
 #else /* CONFIG_BOOT_E2K */
 
 # define NATIVE_HWBUG_AFTER_LD_ACQ_ADDRESS	\
-		(NATIVE_GET_DSREG_OPEN(ip) & ~0x3fUL)
+		(NATIVE_GET_DREG_OPEN(ip) & ~0x3fUL)
 # define NATIVE_HAS_HWBUG_AFTER_LD_ACQ_ADDRESS 0
 # define NATIVE_HWBUG_AFTER_LD_ACQ_CPU 0
 
@@ -73,7 +73,7 @@ do { \
 				NATIVE_HWBUG_AFTER_LD_ACQ_ADDRESS + \
 				(__hwbug_cpu & 0x3) * 4096; \
 		unsigned long __hwbug_atomic_flags; \
-		__hwbug_atomic_flags = NATIVE_GET_DSREG_OPEN(upsr); \
+		__hwbug_atomic_flags = NATIVE_GET_DREG_OPEN(upsr); \
 		NATIVE_SET_UPSR_IRQ_BARRIER( \
 			__hwbug_atomic_flags & ~(_UPSR_IE | _UPSR_NMIE)); \
 		NATIVE_CLEAN_LD_ACQ_ADDRESS(__reg1, __reg2, __hwbug_address); \
@@ -136,7 +136,7 @@ do { \
 
 #define __api_atomic_ticket_trylock(spinlock, tail_shift) \
 ({ \
- 	register int	__rval;	\
+	register int	__rval;	\
 	register int	__val; \
 	register int	__head; \
 	register int	__tail; \
@@ -163,29 +163,30 @@ do { \
 	rval; \
 })
 
-#define __api_user_atomic32_op(insn, oparg, uaddr, mem_model, oldval) \
+#define __api_user_atomic32_op(insn, oparg, uaddr, use_descriptor, mem_model, oldval) \
 ({ \
 	int __ret; \
 	typeof(oparg) __stored_val; \
-	USER_ATOMIC_FETCH_OP(oparg, uaddr, oldval, __stored_val, \
-			       w, insn, mem_model, __ret); \
+	USER_ATOMIC_FETCH_OP(oparg, uaddr, oldval, __stored_val, 4, \
+			     w, LDST_WORD_FMT, insn, use_descriptor, mem_model, __ret); \
 	VIRT_HWBUG_AFTER_LD_ACQ_##mem_model(); \
 	__builtin_expect(__ret, 0); \
 })
 
-#define __api_user_cmpxchg_word(old, new, addr, mem_model, oldval) \
+#define __api_user_cmpxchg_word(old, new, addr, use_descriptor, mem_model, oldval) \
 ({ \
 	int __ret, __stored_val; \
 	USER_ATOMIC_CMPXCHG_WORD_RETURN(old, new, addr, __stored_val, \
-			oldval, mem_model, __ret); \
+			oldval, use_descriptor, mem_model, __ret); \
 	VIRT_HWBUG_AFTER_LD_ACQ_##mem_model(); \
 	__builtin_expect(__ret, 0); \
 })
 
-#define __api_user_xchg(val, addr, size_letter, mem_model, oldval) \
+#define __api_user_xchg(val, addr, size, size_letter, fmt, use_descriptor, mem_model, oldval) \
 ({ \
 	int __ret; \
-	USER_ATOMIC_XCHG_RETURN(val, addr, oldval, size_letter, mem_model, __ret); \
+	USER_ATOMIC_XCHG_RETURN(val, addr, oldval, size, size_letter, fmt, \
+			use_descriptor, mem_model, __ret); \
 	VIRT_HWBUG_AFTER_LD_ACQ_##mem_model(); \
 	__ret; \
 })
@@ -278,7 +279,7 @@ do { \
 
 #define __api_xchg_return(val, addr, size_letter, mem_model) \
 ({ \
- 	register long	rval;	\
+	register long	rval;	\
 	NATIVE_ATOMIC_XCHG_RETURN(val, addr, rval, size_letter, mem_model); \
 	VIRT_HWBUG_AFTER_LD_ACQ_##mem_model(); \
 	rval; \
@@ -286,7 +287,7 @@ do { \
 
 #define __api_cmpxchg_return(old, new, addr, size_letter, sxt_size, mem_model) \
 ({ \
- 	register long	rval;	\
+	register long	rval;	\
 	register long	stored_val; \
 	NATIVE_ATOMIC_CMPXCHG_RETURN(old, new, addr, stored_val, rval, \
 					size_letter, sxt_size, mem_model); \

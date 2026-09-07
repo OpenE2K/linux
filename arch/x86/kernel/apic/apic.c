@@ -1110,6 +1110,7 @@ static void local_apic_timer_interrupt(void)
 #ifdef CONFIG_MCST
 DEFINE_PER_CPU(long long, next_rt_intr) = 0;
 EXPORT_SYMBOL(next_rt_intr);
+DEFINE_PER_CPU(long long, must_do_timer) = 0;
 
 #define DELTA_NS	(NSEC_PER_SEC / HZ / 2)
 
@@ -1129,12 +1130,9 @@ void do_postpone_tick(int to_next_rt_ns)
 		per_cpu(next_rt_intr, cpu) = cur_time + to_next_rt_ns;
 	} else{
 		per_cpu(next_rt_intr, cpu) = 0;
+		per_cpu(must_do_timer, cpu) = 0;
 	}
-#if 0
-	trace_printk("DOPOSTP old_nx-cur=%lld cur=%lld nx=%lld\n",
-		next_tm - cur_time, cur_time, cur_time + to_next_rt_ns);
-#endif
-	if (next_tm == 1) {
+	if (per_cpu(must_do_timer, cpu)) {
 		/* FIXME next line has long run time and may be deleted */
 		memset(&regs_new, 0, sizeof(struct pt_regs));
 		/* need to get answer to user_mod() only */

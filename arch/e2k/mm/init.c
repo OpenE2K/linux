@@ -25,12 +25,15 @@
 #include <asm/process.h>
 #include <asm/pci.h>
 #include <asm/pic.h>
+#include <asm/kexec.h>
 #ifdef CONFIG_STRICT_KERNEL_RWX
 #include <asm/ptdump.h>
 #endif
 
 #include "../../../mm/internal.h"	/* for vmap_pages_range_noflush() */
 
+#include "linux/kexec.h"
+#include "linux/kmemleak.h"
 
 #undef	DEBUG_INIT_MODE
 #undef	DebugB
@@ -77,6 +80,18 @@ static void protection_map_init(void)
 	protection_map[VM_SHARED | VM_EXEC | VM_WRITE | VM_READ] = PAGE_SHARED_EX;
 }
 
+static struct resource mem_res[] = {
+	{
+		.name = "Kernel code",
+		.start = 0,
+		.end = 0,
+		.flags = IORESOURCE_SYSTEM_RAM
+	},
+};
+
+#define kernel_code mem_res[0]
+
+
 pgprot_t vm_get_page_prot(unsigned long vm_flags)
 {
 	unsigned long prot = pgprot_val(protection_map[vm_flags &
@@ -98,21 +113,107 @@ pgprot_t vm_get_page_prot(unsigned long vm_flags)
 }
 EXPORT_SYMBOL(vm_get_page_prot);
 
+
+static int __init reserve_crashkernel_low(unsigned long long low_size)
+{
+	unsigned long long low_base;
+
+	low_base = memblock_phys_alloc_range(low_size, HPAGE_SIZE, 0, MAX_DMA_ADDRESS);
+	if (!low_base) {
+		pr_err("cannot allocate crashkernel low memory (size:0x%llx).\n", low_size);
+		return -ENOMEM;
+	}
+
+	pr_info("crashkernel low memory reserved: 0x%08llx - 0x%08llx (%lld MB)\n",
+		low_base, low_base + low_size, low_size >> 20);
+
+	crashk_low_res.start = low_base;
+	crashk_low_res.end   = low_base + low_size - 1;
+	insert_resource(&iomem_resource, &crashk_low_res);
+
+	return 0;
+}
+
+static void __init reserve_crashkernel(void)
+{
+	unsigned long long crash_base, crash_size;
+	unsigned long long crash_low_size = 0;
+	unsigned long long crash_max = MAX_DMA_ADDRESS;
+	char *cmdline = boot_command_line;
+	int ret;
+
+	if (!IS_ENABLED(CONFIG_KEXEC_CORE))
+		return;
+
+	/* crashkernel=X[@offset] */
+	ret = parse_crashkernel(cmdline, memblock_phys_mem_size(),
+				&crash_size, &crash_base);
+	if (ret == -ENOENT) {
+		ret = parse_crashkernel_high(cmdline, 0, &crash_size, &crash_base);
+		if (ret || !crash_size)
+			return;
+
+		/*
+		 * crashkernel=Y,low can be specified or not, but invalid value
+		 * is not allowed.
+		 */
+		ret = parse_crashkernel_low(cmdline, 0, &crash_low_size, &crash_base);
+		if (ret && (ret != -ENOENT))
+			return;
+
+		crash_max = MAX_PM_SIZE;
+	} else if (ret || !crash_size) {
+		/* The specified value is invalid */
+		return;
+	}
+
+	crash_size = PAGE_ALIGN(crash_size);
+
+	/* User specifies base address explicitly. */
+	if (crash_base)
+		crash_max = crash_base + crash_size;
+
+	crash_base = memblock_phys_alloc_range(crash_size, HPAGE_SIZE,
+					       crash_base, crash_max);
+	if (!crash_base) {
+		pr_warn("cannot allocate crashkernel (size:0x%llx)\n",
+			crash_size);
+		return;
+	}
+
+	if ((crash_base >= MAX_DMA_ADDRESS) &&
+	     crash_low_size && reserve_crashkernel_low(crash_low_size)) {
+		memblock_phys_free(crash_base, crash_size);
+		return;
+	}
+
+	pr_info("crashkernel reserved: 0x%016llx - 0x%016llx (%lld MB)\n",
+		crash_base, crash_base + crash_size, crash_size >> 20);
+
+	/*
+	 * The crashkernel memory will be removed from the kernel linear
+	 * map. Inform kmemleak so that it won't try to access it.
+	 */
+	kmemleak_ignore_phys(crash_base);
+	if (crashk_low_res.end)
+		kmemleak_ignore_phys(crashk_low_res.start);
+
+	crashk_res.start = crash_base;
+	crashk_res.end = crash_base + crash_size - 1;
+	insert_resource(&iomem_resource, &crashk_res);
+}
+
 static void notrace __init
 bootmem_init(void)
 {
-	int		cur_nodes_num = 0;
 	int		node;
 
-	for (node = 0; node < L_MAX_MEM_NUMNODES; node++) {
+	for_each_set_bit(node, &phys_mem_nodes_map, L_MAX_MEM_NUMNODES) {
 		node_phys_mem_t		*node_mem = &boot_phys_mem[node];
 		boot_phys_bank_t	*phys_bank;
 		boot_phys_bank_t	*node_banks;
 		e2k_addr_t		end_pfn;
 		int			bank;
-
-		if (cur_nodes_num >= phys_mem_nodes_num)
-			break;		/* no more nodes with memory */
 
 		if (!node_mem->pfns_num)
 			continue;	/* node has not memory */
@@ -124,7 +225,6 @@ bootmem_init(void)
 		}
 
 		node_banks = node_mem->banks;
-		cur_nodes_num++;
 
 		for (bank = node_mem->first_bank; bank >= 0;
 				bank = phys_bank->next) {
@@ -256,24 +356,18 @@ static void __init register_free_bootmem(void)
 	e2k_addr_t		start_addr = -1;
 	e2k_size_t		start_page;
 	long			pages_num;
-	int			nodes_num;
-	int			cur_nodes_num = 0;
 	int			node = 0;
 	int			bank;
 	int			area;
 
-	nodes_num = phys_mem_nodes_num;
-	for (node = 0; node < L_MAX_MEM_NUMNODES; node++) {
+	for_each_set_bit(node, &phys_mem_nodes_map, L_MAX_MEM_NUMNODES) {
 		node_phys_mem_t *node_mem = &boot_phys_mem[node];
 		boot_phys_bank_t *node_banks;
 		boot_phys_bank_t *phys_bank;
 
-		if (cur_nodes_num >= nodes_num)
-			break;	/* no more nodes with memory */
 		if (node_mem->pfns_num == 0)
 			continue;	/* node has not memory */
 		node_banks = node_mem->banks;
-		cur_nodes_num++;
 		for (bank = node_mem->first_bank;
 				bank >= 0;
 					bank = phys_bank->next) {
@@ -307,9 +401,7 @@ static void __init register_free_bootmem(void)
 			start_page = 0;
 			start_addr = phys_bank->base_addr;
 			init_check_order_bank_areas(node, phys_bank);
-			for (area = phys_bank->first_area;
-					area >= 0;
-						area = busy_area->next) {
+			for (area = phys_bank->first_area; area >= 0; area = busy_area->next) {
 				busy_area = __va(&phys_bank->busy_areas[area]);
 				if (busy_area->pages_num == 0) {
 					INIT_BUG("Node #%d bank #%d empty "
@@ -318,10 +410,8 @@ static void __init register_free_bootmem(void)
 						node, bank, area);
 					continue;
 				}
-				if (busy_area->flags &
-					BOOT_RESERVED_TO_FREE_PHYS_MEM)
-					/* the area was reserved to free */
-					/* it now */
+				if (busy_area->flags & BOOT_RESERVED_TO_FREE_PHYS_MEM)
+					/* the area was reserved to free it now */
 					continue;
 
 				pages_num = busy_area->start_page - start_page;
@@ -351,7 +441,7 @@ static void __init register_free_bootmem(void)
 
 			memblock_phys_free((phys_addr_t)phys_bank->busy_areas,
 				BOOT_RESERVED_AREAS_SIZE);
-			DebugB("Node #%d bank #%d register free memory from 0x%lx to 0x%lx\n",
+			DebugB("Node #%d bank #%d register free memory from 0x%px to 0x%px\n",
 				node, bank, phys_bank->busy_areas,
 				phys_bank->busy_areas +
 				BOOT_RESERVED_AREAS_SIZE);
@@ -630,7 +720,7 @@ void __init notrace mem_init(void)
 
 	high_memory = __va(last_valid_pfn << PAGE_SHIFT);
 
-	this_cpu_write(u_root_ptb, __pa(mm_node_pgd(&init_mm, numa_node_id())));
+	u_root_ptb = __pa(mm_node_pgd(&init_mm, numa_node_id()));
 
 #ifdef CONFIG_DEBUG_PAGEALLOC
 	init_sma_page_pool();
@@ -689,7 +779,10 @@ void mark_rodata_ro(void)
 
 	set_memory_ro((unsigned long)__start_ro_after_init,
 				size >> PAGE_SHIFT);
-	kernel_image_duplicate_page_range(__start_ro_after_init, size, false);
+
+	/* Check this is not panic kernel, where only one node available */
+	if (!is_kdump_kernel())
+		kernel_image_duplicate_page_range(__start_ro_after_init, size, false);
 
 	pr_info("Write protected %sread-only-after-init data: %luk\n",
 			(IS_ENABLED(CONFIG_NUMA) &&
@@ -769,25 +862,6 @@ void free_initmem(void)
 			stack_start, stack_start + stack_size);
 	}
 #endif	/* ! (CONFIG_RECOVERY) */
-
-#ifdef	CONFIG_DBG_CHAIN_STACK_PROC
-	if (kernel_symtab != NULL) {
-		printk("The kernel symbols table addr 0x%px size 0x%lx "
-			"(0x%lx ... 0x%lx)\n",
-			kernel_symtab, kernel_symtab_size,
-			((long *)kernel_symtab)[0],
-			((long *)kernel_symtab)[kernel_symtab_size /
-							sizeof (long) - 1]);
-	}
-	if (kernel_strtab != NULL) {
-		printk("The kernel strings table addr 0x%px size 0x%lx "
-			"(0x%lx ... 0x%lx)\n",
-			kernel_strtab, kernel_strtab_size,
-			((long *)kernel_strtab)[0],
-			((long *)kernel_strtab)[kernel_strtab_size /
-							sizeof (long) - 1]);
-	}
-#endif	/* CONFIG_DBG_CHAIN_STACK_PROC */
 }
 
 #ifdef CONFIG_BLK_DEV_INITRD
@@ -813,6 +887,13 @@ void free_initrd_mem(unsigned long start, unsigned long end)
 }
 #endif
 
+static void __init request_kernel_resources(void)
+{
+	kernel_code.start   = __pa_symbol(_text);
+	kernel_code.end     = __pa_symbol(_end - 1);
+	insert_resource(&iomem_resource, &kernel_code);
+}
+
 /*
  * System memory should not be in /proc/iomem but various tools expect it
  * (eg kdump).
@@ -837,6 +918,10 @@ static int __init add_system_ram_resources(void)
 			WARN_ON(request_resource(&iomem_resource, res) < 0);
 		}
 	}
+
+	request_kernel_resources();
+
+	reserve_crashkernel();
 
 	return 0;
 }
@@ -892,27 +977,3 @@ bool __virt_addr_valid(unsigned long kaddr)
 	return false;
 }
 EXPORT_SYMBOL(__virt_addr_valid);
-
-__init
-static int init_trampolines_area(void)
-{
-	int i;
-	struct page *pages[E2K_TRAMPOLINES_SIZE / PAGE_SIZE];
-
-	/* Paravirt. guest will use hypervisor's trampolines */
-	if (IS_ENABLED(CONFIG_KVM_GUEST_KERNEL))
-		return 0;
-
-	void *addr = alloc_pages_exact(E2K_TRAMPOLINES_SIZE, GFP_KERNEL | __GFP_NOFAIL);
-	memcpy(addr, __trampolines_start, __trampolines_end - __trampolines_start);
-
-	for (i = 0; i < ARRAY_SIZE(pages); i++) {
-		pages[i] = virt_to_page(addr + i * PAGE_SIZE);
-	}
-	BUG_ON(vmap_pages_range_noflush(E2K_TRAMPOLINES_START, E2K_TRAMPOLINES_END,
-			PAGE_USER_EXEC, pages, PAGE_SHIFT));
-	flush_cache_vmap(E2K_TRAMPOLINES_START, E2K_TRAMPOLINES_END);
-
-	return 0;
-}
-arch_initcall(init_trampolines_area);

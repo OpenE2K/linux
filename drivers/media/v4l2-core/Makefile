@@ -16,6 +16,7 @@ videodev-objs	:=	v4l2-dev.o v4l2-ioctl.o v4l2-device.o v4l2-fh.o \
 # Please keep it alphabetically sorted by Kconfig name
 # (e. g. LC_ALL=C sort Makefile)
 videodev-$(CONFIG_COMPAT) += v4l2-compat-ioctl32.o
+videodev-$(CONFIG_PROTECTED_MODE) += v4l2-ioctl128.o
 videodev-$(CONFIG_MEDIA_CONTROLLER) += v4l2-mc.o
 videodev-$(CONFIG_SPI) += v4l2-spi.o
 videodev-$(CONFIG_TRACEPOINTS) += v4l2-trace.o

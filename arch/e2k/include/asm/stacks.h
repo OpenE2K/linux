@@ -8,8 +8,6 @@
 
 #include <linux/types.h>
 
-#include <asm/irq.h>
-
 /*
  * User's high address space is reserved for tag memory mapping.
  * Tags of all user virtual pages are mapped to user virtual space
@@ -188,6 +186,9 @@ typedef struct old_pcs_area {
 /* For preallocating pt_regs in kernel threads
  * (which will be later used by kernel_execve()) */
 #define KERNEL_PT_REGS_SIZE round_up(sizeof(struct pt_regs), E2K_ALIGN_USTACK_BOUNDS)
+
+#define	THREAD_SIZE		KERNEL_STACKS_SIZE
+#define THREAD_SIZE_ORDER	order_base_2(KERNEL_STACKS_SIZE / PAGE_SIZE)
 
 #endif /* _E2K_STACKS_H */
 

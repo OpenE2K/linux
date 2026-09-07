@@ -10,6 +10,22 @@
 #include <asm/pgalloc.h>
 
 
+/* guest area allocation flags */
+#define	KVM_ALLOC_AREA_PRESENT		0x00000001ULL
+#define	KVM_ALLOC_AREA_LOCKED		0x00000002ULL
+#define	KVM_ALLOC_AREA_ZEROED		0x00000004ULL
+/* protections as part of flags */
+#define	KVM_ALLOC_AREA_PROT_READ	0x00010000ULL
+#define	KVM_ALLOC_AREA_PROT_WRITE	0x00020000ULL
+#define	KVM_ALLOC_AREA_PROT_EXEC	0x00040000ULL
+/* some additional features */
+#define	KVM_ALLOC_AREA_HUGE		0x00100000ULL	/* prefered mapping */
+							/* to huge pages */
+#define	KVM_ALLOC_AREA_MAP_FLAGS	\
+		(KVM_ALLOC_AREA_PROT_READ | KVM_ALLOC_AREA_PROT_WRITE | \
+			KVM_ALLOC_AREA_PROT_EXEC | \
+				KVM_ALLOC_AREA_HUGE)
+
 /* user area and chunks flags */
 /* WARNING should not intersect with protection flags */
 /*	KVM_ALLOC_AREA_PROT_READ/WRITE/EXEC */
@@ -91,19 +107,20 @@ user_area_get(user_area_t *user_area, e2k_addr_t start, e2k_size_t size,
 }
 
 static inline void __user *
-user_area_alloc_pages(user_area_t *user_area, e2k_addr_t start,
-		e2k_addr_t size, e2k_addr_t align, unsigned long flags)
-{
-	return user_area_alloc_chunk(user_area, start, size, align,
-			flags & KVM_ALLOC_AREA_MAP_FLAGS | UA_VMAP_TO_KERNEL);
-}
-
-static inline void __user *
 user_area_alloc_present(user_area_t *user_area, e2k_addr_t start,
 		e2k_addr_t size, e2k_addr_t align, unsigned long flags)
 {
 	return user_area_alloc_chunk(user_area, start, size, align,
-			flags & KVM_ALLOC_AREA_MAP_FLAGS | UA_ALLOC_PRESENT);
+			(flags & KVM_ALLOC_AREA_MAP_FLAGS) | UA_ALLOC_PRESENT);
+}
+
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+static inline void __user *
+user_area_alloc_pages(user_area_t *user_area, e2k_addr_t start,
+		e2k_addr_t size, e2k_addr_t align, unsigned long flags)
+{
+	return user_area_alloc_chunk(user_area, start, size, align,
+			(flags & KVM_ALLOC_AREA_MAP_FLAGS) | UA_VMAP_TO_KERNEL);
 }
 
 static inline void __user *
@@ -114,11 +131,21 @@ user_area_alloc_zeroed(user_area_t *user_area, e2k_addr_t start,
 }
 
 static inline void __user *
+user_area_alloc_locked_present(user_area_t *user_area, e2k_addr_t start,
+		e2k_addr_t size, e2k_addr_t align, unsigned long flags)
+{
+	return user_area_alloc_chunk(user_area, start, size, align,
+			(flags & KVM_ALLOC_AREA_MAP_FLAGS) |
+					UA_ALLOC_PRESENT | UA_ALLOC_LOCKED);
+}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
+
+static inline void __user *
 user_area_alloc_locked(user_area_t *user_area, e2k_addr_t start,
 		e2k_addr_t size, e2k_addr_t align, unsigned long flags)
 {
 	return user_area_alloc_chunk(user_area, start, size, align,
-			flags & KVM_ALLOC_AREA_MAP_FLAGS | UA_ALLOC_LOCKED);
+			(flags & KVM_ALLOC_AREA_MAP_FLAGS) | UA_ALLOC_LOCKED);
 }
 
 static inline void __user *
@@ -126,17 +153,8 @@ user_area_alloc_locked_pages(user_area_t *user_area, e2k_addr_t start,
 		e2k_addr_t size, e2k_addr_t align, unsigned long flags)
 {
 	return user_area_alloc_chunk(user_area, start, size, align,
-			flags & KVM_ALLOC_AREA_MAP_FLAGS |
+			(flags & KVM_ALLOC_AREA_MAP_FLAGS) |
 					UA_VMAP_TO_KERNEL | UA_ALLOC_LOCKED);
-}
-
-static inline void __user *
-user_area_alloc_locked_present(user_area_t *user_area, e2k_addr_t start,
-		e2k_addr_t size, e2k_addr_t align, unsigned long flags)
-{
-	return user_area_alloc_chunk(user_area, start, size, align,
-			flags & KVM_ALLOC_AREA_MAP_FLAGS |
-					UA_ALLOC_PRESENT | UA_ALLOC_LOCKED);
 }
 
 extern void *map_user_area_to_vmalloc_range(user_area_t *user_area,

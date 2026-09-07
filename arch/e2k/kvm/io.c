@@ -19,7 +19,7 @@
 
 #include "cpu.h"
 #include "mmu.h"
-#include "gaccess.h"
+#include "paravirt_sw/gaccess.h"
 #include "io.h"
 #include "pic.h"
 #include "intercepts.h"
@@ -232,7 +232,7 @@ static void vcpu_mmio_prepare_request(struct kvm_vcpu *vcpu,
 	vcpu->arch.exit_reason = EXIT_REASON_MMIO_REQ;
 }
 
-static int kvm_hv_mmio_page_fault(struct kvm_vcpu *vcpu, gpa_t gpa,
+static pf_res_t kvm_hv_mmio_page_fault(struct kvm_vcpu *vcpu, gpa_t gpa,
 		int size, bool is_write, intc_info_mu_t *intc_info_mu)
 {
 	int ret;
@@ -252,7 +252,7 @@ static int kvm_hv_mmio_page_fault(struct kvm_vcpu *vcpu, gpa_t gpa,
 		DebugMMIOPF("access to GPA 0x%llx %s size %d byte(s) was "
 			"handled locally\n",
 			gpa, (is_write) ? "write" : "read", size);
-		return 0;
+		return PFRES_NO_ERR;
 	}
 
 	/* MMIO request should be passed to user space emulation */
@@ -287,7 +287,7 @@ static void vcpu_io_port_prepare_request(struct kvm_vcpu *vcpu,
 	vcpu->arch.exit_reason = EXIT_REASON_IOPORT_REQ;
 }
 
-static int kvm_hv_io_port_page_fault(struct kvm_vcpu *vcpu, gpa_t gpa,
+static pf_res_t kvm_hv_io_port_page_fault(struct kvm_vcpu *vcpu, gpa_t gpa,
 			int size, bool is_write, intc_info_mu_t *intc_info_mu)
 {
 	u16 port = gpa - IO_AREA_PHYS_BASE;
@@ -312,8 +312,7 @@ static int kvm_hv_io_port_page_fault(struct kvm_vcpu *vcpu, gpa_t gpa,
 	return PFRES_TRY_MMIO;
 }
 
-int kvm_hv_io_page_fault(struct kvm_vcpu *vcpu, gpa_t gpa,
-				intc_info_mu_t *intc_info_mu)
+pf_res_t kvm_hv_io_page_fault(struct kvm_vcpu *vcpu, gpa_t gpa, intc_info_mu_t *intc_info_mu)
 {
 	tc_cond_t cond;
 	tc_opcode_t opcode;
@@ -325,18 +324,13 @@ int kvm_hv_io_page_fault(struct kvm_vcpu *vcpu, gpa_t gpa,
 	is_write = !!cond.store;
 	spec = !!cond.spec;
 
-	if (spec) {
-		if (is_write) {
-			complete_intc_info_io_write(vcpu, intc_info_mu);
-			DebugKVMIO("speculative write to IO area - ignoring\n");
-		} else {
-			NATIVE_STORE_VALUE_WITH_TAG(&intc_info_mu->data,
-				ITAGDWD_IO_DEBUG, ETAGDWD);
-			NATIVE_STORE_VALUE_WITH_TAG(&intc_info_mu->data_ext,
-				ITAGDWD_IO_DEBUG, ETAGDWD);
-			complete_intc_info_io_read(vcpu, intc_info_mu);
-			DebugKVMIO("speculative read from IO area - return diag value\n");
-		}
+	if (spec && !is_write) {
+		NATIVE_STORE_VALUE_WITH_TAG(&intc_info_mu->data,
+			ITAGDWD_IO_DEBUG, ETAGDWD);
+		NATIVE_STORE_VALUE_WITH_TAG(&intc_info_mu->data_ext,
+			ITAGDWD_IO_DEBUG, ETAGDWD);
+		complete_intc_info_io_read(vcpu, intc_info_mu);
+		DebugKVMIO("speculative read from IO area - return diag value\n");
 		return 0;
 	}
 
@@ -374,6 +368,7 @@ static int kvm_complete_hv_io_page_fault(struct kvm_vcpu *vcpu, gpa_t gpa,
 	return 0;
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static unsigned long
 kvm_complete_guest_mmio_read(struct kvm_vcpu *vcpu,
 	u64 phys_addr, u64 *mmio_data, u64 *user_data, u8 size)
@@ -390,6 +385,7 @@ kvm_complete_guest_mmio_read(struct kvm_vcpu *vcpu,
 	}
 	return 0;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 unsigned long kvm_complete_guest_mmio_request(struct kvm_vcpu *vcpu)
 {
@@ -424,11 +420,13 @@ unsigned long kvm_complete_guest_mmio_request(struct kvm_vcpu *vcpu)
 	if (vcpu->arch.io_intc_info != NULL) {
 		ret = kvm_complete_hv_io_page_fault(vcpu, phys_addr,
 					mmio_data, size, is_write);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	} else {
 		if (!is_write) {
 			ret = kvm_complete_guest_mmio_read(vcpu, phys_addr,
 					mmio_data, vcpu->arch.mmio_user_data, size);
 		}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	}
 
 	frag->data = NULL;
@@ -437,6 +435,7 @@ unsigned long kvm_complete_guest_mmio_request(struct kvm_vcpu *vcpu)
 	return ret;
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 unsigned long kvm_guest_mmio_request(struct kvm_vcpu *vcpu,
 		u64 phys_addr, u64 *user_data, u8 size, u8 is_write)
 {
@@ -517,6 +516,7 @@ kvm_complete_guest_ioport_read(struct kvm_vcpu *vcpu,
 	}
 	return 0;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 unsigned long kvm_complete_guest_ioport_request(struct kvm_vcpu *vcpu)
 {
@@ -544,22 +544,25 @@ unsigned long kvm_complete_guest_ioport_request(struct kvm_vcpu *vcpu)
 		DebugKVMIO("IO port request is not completed: data 0x%llx, "
 			"size %d, port 0x%x\n",
 			vcpu->arch.ioport.data, size, port);
-		data[0] = ~0UL;
+		data[0] = U32_MAX;
 	}
 
 	if (vcpu->arch.io_intc_info != NULL) {
 		ret = kvm_complete_hv_io_page_fault(vcpu,
 					port, data, size, is_out);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	} else {
 		if (!is_out) {
 			ret = kvm_complete_guest_ioport_read(vcpu,
 						port, data, user_data, size);
 		}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	}
 
 	return ret;
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 unsigned long kvm_guest_ioport_request(struct kvm_vcpu *vcpu,
 			u16 port, u32 *user_data, u8 size, u8 is_out)
 {
@@ -808,6 +811,7 @@ int kvm_guest_printk_on_host(struct kvm_vcpu *vcpu, char *msg, int size)
 out:
 	return size;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 /*
  * Prefetching is disabled: prefixed MMIO pages are populated on demand, in

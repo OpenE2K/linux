@@ -2498,9 +2498,11 @@ gckOS_MapPhysical(
 #else
             pgprot = pgprot_noncached(PAGE_KERNEL);
 #endif
-
+#ifdef CONFIG_MCST
+            logical = vmap(pages, numPages, VM_MAP, pgprot);
+#else
             logical = vmap(pages, numPages, 0, pgprot);
-
+#endif
             kfree(pages);
 
             if (logical == gcvNULL)

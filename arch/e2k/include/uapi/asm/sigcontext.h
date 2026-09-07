@@ -79,6 +79,32 @@ struct extra_ucontext {
 	/* Offsets from base suitable for passing to sys_access_hw_stacks */
 	unsigned long long chain_stack_offset;
 	unsigned long long proc_stack_offset;
+
+	/* According to ABI registers %g16-%g31 are saved before signal entry */
+	unsigned int bgr;
+	unsigned long long g[16];
+	unsigned char gtag[16];
+	unsigned long long gext[16];
+	unsigned char gext_tag[16];
+
+	/* Loop context */
+	unsigned long long lsr;
+	unsigned long long ilcr;
+	unsigned long long lsr1;
+	unsigned long long ilcr1;
+	struct {
+		unsigned long long lo;
+		unsigned long long hi;
+	} aad[32];
+	unsigned long long aaind[16];
+	unsigned long long aaincr[8];
+	unsigned long long aaldi[64];
+	unsigned long long aaldv;
+	unsigned long long aalda[64];
+	unsigned long long aaldm;
+	unsigned long long aasr;
+	unsigned long long aafstr;
+	unsigned long long aasti[16];
 };
 
 

@@ -1,14 +1,16 @@
-// SPDX-License-Identifier: GPL-2.0
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
 /*
  *  HW NMI watchdog support
- *
- *  started by Don Zickus, Copyright (C) 2010 Red Hat, Inc.
  *
  *  Arch specific calls to support NMI watchdog
  *
  *  Bits copied from original nmi.c file
- *
  */
+
 #include <linux/thread_info.h>
 #include <asm/apic.h>
 #include <asm/nmi.h>

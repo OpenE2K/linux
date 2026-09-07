@@ -40,9 +40,10 @@
 #include "cpu.h"
 #include "mmu.h"
 #include "mman.h"
-#include "gaccess.h"
+#include "paravirt_sw/gaccess.h"
 #include "intercepts.h"
 #include "io.h"
+#include "user_area.h"
 
 #undef	CHECK_MMU_PAGES_AVAILABLE
 
@@ -66,6 +67,15 @@ module_param(dbg, bool, 0644);
 #define	DebugKVM(fmt, args...)						\
 ({									\
 	if (DEBUG_KVM_MODE || kvm_debug)				\
+		pr_info("%s(): " fmt, __func__, ##args);		\
+})
+
+#undef	DEBUG_KVM_VM_MODE
+#undef	DebugKVMVM
+#define	DEBUG_KVM_VM_MODE	0	/* page fault on KVM */
+#define	DebugKVMVM(fmt, args...)					\
+({									\
+	if (DEBUG_KVM_VM_MODE)						\
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
@@ -1171,6 +1181,7 @@ struct kvm_mmu_page *kvm_mmu_get_page(struct kvm_vcpu *vcpu,
 	return sp;
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static void copy_guest_kernel_root_range(struct kvm_vcpu *vcpu,
 					 pgprot_t *dst_root)
 {
@@ -1193,6 +1204,7 @@ static void copy_guest_user_root_range(struct kvm_vcpu *vcpu,
 					    GUEST_USER_PGD_PTRS_START,
 					    GUEST_USER_PGD_PTRS_END);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 void copy_host_kernel_root_range(struct kvm_vcpu *vcpu, pgprot_t *dst_root)
 {
@@ -1202,6 +1214,7 @@ void copy_host_kernel_root_range(struct kvm_vcpu *vcpu, pgprot_t *dst_root)
 	copy_kernel_pgd_range(dst_pgd, mm_node_pgd(&init_mm, numa_node_id()));
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static void release_guest_kernel_root_range(struct kvm *kvm, pgprot_t *root)
 {
 	mmu_pt_zap_linked_children(kvm, root,
@@ -1215,6 +1228,7 @@ static void release_guest_user_root_range(struct kvm *kvm, pgprot_t *root)
 				   GUEST_USER_PGD_PTRS_START,
 				   GUEST_USER_PGD_PTRS_END);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 void kvm_mmu_commit_zap_page(struct kvm *kvm, struct list_head *invalid_list)
 {
@@ -1256,6 +1270,7 @@ static bool prepare_zap_oldest_mmu_page(struct kvm *kvm,
 	return (zapped > 0) ? true : false;
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 void kvm_get_spt_translation(struct kvm_vcpu *vcpu, e2k_addr_t address,
 			     pgdval_t *pgd, pudval_t *pud, pmdval_t *pmd,
 			     pteval_t *pte, int *pt_level)
@@ -1337,6 +1352,7 @@ int kvm_get_va_spt_translation(struct kvm_vcpu *vcpu, e2k_addr_t address,
 	}
 	return 0;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 unsigned long kvm_get_gva_to_hva(struct kvm_vcpu *vcpu, gva_t gva)
 {
@@ -4209,7 +4225,6 @@ int kvm_mmu_unprotect_page_virt(struct kvm_vcpu *vcpu, gva_t gva)
 
 	return r;
 }
-
 EXPORT_SYMBOL_GPL(kvm_mmu_unprotect_page_virt);
 
 int make_mmu_pages_available(struct kvm_vcpu *vcpu)
@@ -4322,7 +4337,7 @@ static void kvm_mmu_init_pt_interface(struct kvm *kvm)
 	PTNAME_DYNAMIC(mmu_init_pt_interface) (kvm);
 #else /* !CONFIG_DYNAMIC_PT_STRUCT */
 	int iset = machine.native_iset_ver;
-	bool mmu_pt_v6 = mmu_features.mmu_pt_v6;
+	bool mmu_pt_v6 = cpu_has(CPU_FEAT_PAGE_TABLE_V6);
 
 	if (iset < E2K_ISET_V5) {
 		PTNAME_V3(mmu_init_pt_interface) (kvm);
@@ -4377,7 +4392,7 @@ void kvm_mmu_uninit_vm(struct kvm *kvm)
 	kvm_page_track_unregister_notifier(kvm, node);
 }
 
-void kvm_mmu_slot_remove_write_access(struct kvm *kvm,
+static void kvm_mmu_slot_remove_write_access(struct kvm *kvm,
 				      struct kvm_memory_slot *memslot)
 {
 	bool flush;
@@ -4695,6 +4710,7 @@ static void kvm_setup_nonp_shadow_pt(struct kvm_vcpu *vcpu, hpa_t root)
 		if (vcpu->arch.is_hv) {
 			/* shadow PTs cannot be used for host translations */
 			;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 		} else if (vcpu->arch.is_pv) {
 			/* shadow PTs will be used in both modes */
 			/* as well as host and guest translations */
@@ -4703,8 +4719,7 @@ static void kvm_setup_nonp_shadow_pt(struct kvm_vcpu *vcpu, hpa_t root)
 						(is_sep_virt_spaces(vcpu)) ?
 							MMU_SEPARATE_KERNEL_VPTB :
 							MMU_UNITED_KERNEL_VPTB);
-		} else {
-			E2K_KVM_BUG_ON(true);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 		}
 	}
 }
@@ -4963,6 +4978,7 @@ static int kvm_sync_shadow_u_root(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 	return 0;
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static int sync_pv_vcpu_shadow_u_root(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 				      hpa_t root_hpa, gpa_t u_pptb)
 {
@@ -5288,6 +5304,7 @@ void kvm_switch_mmu_guest_u_pt(struct kvm_vcpu *vcpu)
 
 	kvm_dump_shadow_u_pptb(vcpu, "Set MMU guest shadow U_PT context:\n");
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static void kvm_setup_shadow_u_pptb(struct kvm_vcpu *vcpu)
 {
@@ -5297,12 +5314,14 @@ static void kvm_setup_shadow_u_pptb(struct kvm_vcpu *vcpu)
 	kvm_dump_shadow_u_pptb(vcpu, "Set MMU guest shadow U_PT context:\n");
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 void mmu_pv_setup_shadow_u_pptb(struct kvm_vcpu *vcpu, gmm_struct_t *gmm)
 {
 	kvm_setup_shadow_u_pptb(vcpu);
 	pv_vcpu_set_gmm(vcpu, gmm);
 	pv_vcpu_set_active_gmm(vcpu, gmm);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static int switch_shadow_pptb(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 			      gpa_t pptb, unsigned flags)
@@ -5336,11 +5355,13 @@ static int switch_shadow_pptb(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 		 "user root PT at 0x%llx, virtual at 0x%lx\n",
 		 vcpu->vcpu_id, root, pptb, mmu->get_vcpu_sh_u_vptb(vcpu));
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (!vcpu->arch.is_hv) {
 		E2K_KVM_BUG_ON(true);
 		kvm_prepare_shadow_root(vcpu, NULL, root, E2K_INVALID_PAGE,
 					mmu->get_vcpu_sh_u_vptb(vcpu));
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	ret = kvm_sync_shadow_u_root(vcpu, gmm, false);
 	if (ret) {
@@ -5355,6 +5376,7 @@ failed:
 	return ret;
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 hpa_t mmu_pv_switch_spt_u_pptb(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 			       gpa_t u_phys_ptb)
 {
@@ -5383,6 +5405,7 @@ hpa_t mmu_pv_switch_spt_u_pptb(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 failed:
 	return TO_ERROR_PAGE(ret);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 int kvm_switch_shadow_u_pptb(struct kvm_vcpu *vcpu, gpa_t u_pptb,
 			     hpa_t *u_root)
@@ -5544,37 +5567,6 @@ void setup_tdp_paging(struct kvm_vcpu *vcpu)
 
 	init_kvm_mmu(vcpu);
 }
-
-int kvm_switch_to_tdp_paging(struct kvm_vcpu *vcpu,
-			     gpa_t u_phys_ptb, gva_t u_virt_ptb,
-			     gpa_t os_phys_ptb, gva_t os_virt_ptb,
-			     gva_t os_virt_base)
-{
-	DebugTDP("started on VCPU #%d to switch TDP to paging mode GP root at 0x%llx\n",
-			vcpu->vcpu_id, kvm_get_gp_phys_root(vcpu));
-
-	setup_tdp_paging(vcpu);
-
-	DebugTDP("VCPU #%d guest OS root PT base: physical 0x%llx,\n"
-		 "virtual 0x%lx, space offset 0x%lx\n",
-		 vcpu->vcpu_id, os_phys_ptb, os_virt_ptb, os_virt_base);
-	DebugTDP("VCPU #%d guest user root PT base: physical 0x%llx,virtual 0x%lx\n",
-		vcpu->vcpu_id, u_phys_ptb, u_virt_ptb);
-
-	/* always separate speces should be used for paravirtualized guest */
-	set_sep_virt_spaces(vcpu);
-
-	vcpu->arch.mmu.set_vcpu_u_pptb(vcpu, u_phys_ptb);
-	vcpu->arch.mmu.set_vcpu_u_vptb(vcpu, u_virt_ptb);
-	vcpu->arch.mmu.set_vcpu_os_pptb(vcpu, os_phys_ptb);
-	vcpu->arch.mmu.set_vcpu_os_vptb(vcpu, os_virt_ptb);
-	vcpu->arch.mmu.set_vcpu_os_vab(vcpu, os_virt_base);
-
-	/* setup page table structures type to properly manage PTs */
-	mmu_pt_setup_tdp_pt_structs(vcpu);
-
-	return 0;
-}
 #endif
 
 static int setup_shadow_paging(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
@@ -5606,7 +5598,9 @@ static int setup_shadow_paging(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 	} else {
 		E2K_KVM_BUG_ON(true);
 	}
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	kvm_mmu_set_init_gmm_root(vcpu, mmu->sh_root_hpa);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	if (!vcpu->arch.is_hv) {
 		kvm_set_root_gmm_spt_list(vcpu->kvm, gmm);
 	}
@@ -5783,11 +5777,13 @@ int vcpu_write_mmu_cr_reg(struct kvm_vcpu *vcpu, e2k_mmu_cr_t mmu_cr)
 		if (vcpu->arch.is_hv) {
 			r = kvm_setup_shadow_paging(vcpu, NULL);
 		} else {
-			r = kvm_setup_shadow_paging(vcpu,
-						    pv_vcpu_get_gmm(vcpu));
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+			r = kvm_setup_shadow_paging(vcpu, pv_vcpu_get_gmm(vcpu));
+#else
+			r = -EINVAL;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 		}
 	} else {
-		E2K_KVM_BUG_ON(true);
 		r = -EINVAL;
 	}
 	if (r != 0) {
@@ -6132,7 +6128,7 @@ nomem:
 /*
  * Caculate mmu pages needed for kvm.
  */
-unsigned int kvm_mmu_calculate_mmu_pages(struct kvm *kvm)
+static unsigned int kvm_mmu_calculate_mmu_pages(struct kvm *kvm)
 {
 	unsigned int nr_mmu_pages;
 	unsigned int nr_pages = 0;
@@ -6154,6 +6150,124 @@ unsigned int kvm_mmu_calculate_mmu_pages(struct kvm *kvm)
 			   (unsigned int) KVM_MIN_ALLOC_MMU_PAGES);
 
 	return nr_mmu_pages;
+}
+
+static void kvm_mmu_slot_apply_flags(struct kvm *kvm,
+				     struct kvm_memory_slot *new)
+{
+	if (new->flags & (KVM_MEM_READONLY | KVM_MEM_LOG_DIRTY_PAGES)) {
+		kvm_mmu_slot_remove_write_access(kvm, new);
+	}
+}
+
+void kvm_arch_commit_memory_region(struct kvm *kvm,
+			struct kvm_memory_slot *old,
+			const struct kvm_memory_slot *new,
+			enum kvm_mr_change change)
+{
+	u32 old_flags = old ? old->flags : 0;
+	u32 new_flags = new ? new->flags : 0;
+	int nr_mmu_pages = 0;
+
+	if (!kvm->arch.n_requested_mmu_pages)
+		nr_mmu_pages = kvm_mmu_calculate_mmu_pages(kvm);
+
+	if (nr_mmu_pages)
+		kvm_mmu_change_mmu_pages(kvm, nr_mmu_pages);
+
+	/*
+	 * Dirty logging tracks sptes in 4k granularity, meaning that large
+	 * sptes have to be split.  If live migration is successful, the guest
+	 * in the source machine will be destroyed and large sptes will be
+	 * created in the destination. However, if the guest continues to run
+	 * in the source machine (for example if live migration fails), small
+	 * sptes will remain around and cause bad performance.
+	 *
+	 * Scan sptes if dirty logging has been stopped, dropping those
+	 * which can be collapsed into a single large-page spte.  Later
+	 * page faults will create the large-page sptes.
+	 */
+	if ((change != KVM_MR_DELETE) &&
+		(old_flags & KVM_MEM_LOG_DIRTY_PAGES) &&
+		!(new_flags & KVM_MEM_LOG_DIRTY_PAGES))
+		kvm_mmu_zap_collapsible_sptes(kvm, new);
+
+	/*
+	 * Set up write protection and/or dirty logging for the new slot.
+	 *
+	 * For KVM_MR_DELETE and KVM_MR_MOVE, the shadow pages of old slot have
+	 * been zapped so no dirty logging staff is needed for old slot. For
+	 * KVM_MR_FLAGS_ONLY, the old slot is essentially the same one as the
+	 * new and it's also covered when dealing with the new slot.
+	 *
+	 * FIXME: const-ify all uses of struct kvm_memory_slot.
+	 */
+	if (change != KVM_MR_DELETE)
+		kvm_mmu_slot_apply_flags(kvm, (struct kvm_memory_slot *)new);
+}
+
+void kvm_arch_free_memslot(struct kvm *kvm, struct kvm_memory_slot *free)
+{
+	const pt_struct_t *pt_struct = mmu_pt_get_host_pt_struct(kvm);
+	user_area_t *guest_area;
+	int i;
+	unsigned long base_gfn;
+
+	DebugKVMSH("started for memory slot %px\n", free);
+	base_gfn = free->base_gfn;
+	DebugKVMVM("memory slot: base gfn 0x%lx, pages 0x%lx\n",
+		   base_gfn, free->npages);
+
+	guest_area = free->arch.guest_areas.area;
+	if (guest_area != NULL)
+		kvm_arch_free_memory_region(kvm, free);
+	E2K_KVM_BUG_ON(free->arch.guest_areas.area != NULL);
+	for (i = 0; i < KVM_NR_PAGE_SIZES; ++i) {
+		const pt_level_t *pt_level;
+		int level = i + 1;
+
+		pt_level = get_pt_struct_level_on_id(pt_struct, level);
+
+		kvfree(free->arch.rmap[i]);
+		DebugKVMVM("free slot ID %d RMAP %px\n",
+			   free->id, free->arch.rmap);
+		free->arch.rmap[i] = NULL;
+
+		if (!is_huge_pt_level(pt_level))
+			/* the page table level has not huge pages */
+			continue;
+
+		kvfree(free->arch.lpage_info[i - 1]);
+		DebugKVMVM("free slot ID %d huge page INFO %px\n",
+			   free->id, free->arch.lpage_info[i - 1]);
+		free->arch.lpage_info[i - 1] = NULL;
+	}
+
+	kvm_page_track_free_memslot(free);
+}
+
+void kvm_arch_flush_shadow_memslot(struct kvm *kvm,
+				   struct kvm_memory_slot *slot)
+{
+	kvm_page_track_flush_slot(kvm, slot);
+}
+
+int write_to_guest_pt_phys(struct kvm_vcpu *vcpu, gpa_t gpa,
+			   const pgprot_t *gpte, int bytes)
+{
+	int ret;
+
+	DebugPTE("started for GPA 0x%llx gpte %px == 0x%lx\n",
+		 gpa, gpte, pgprot_val(*gpte));
+	ret = kvm_vcpu_write_guest(vcpu, gpa, gpte, bytes);
+	if (ret < 0) {
+		pr_err("%s(): could not write guest pte %px == 0x%lx on host address of GPA 0x%llx\n",
+		       __func__, gpte, pgprot_val(*gpte), gpa);
+		return ret;
+	}
+	kvm_page_track_write(vcpu, NULL, gpa, (const void *)gpte, bytes, 0);
+
+	return 1;		/* fault handled and recovered */
 }
 
 void kvm_vcpu_release_trap_cellar(struct kvm_vcpu *vcpu)

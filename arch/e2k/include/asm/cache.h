@@ -57,8 +57,11 @@
  */
 #define ARCH_DMA_MINALIGN (1 << INTERNODE_CACHE_SHIFT)
 
-#define cache_line_size()	_max3_(L1_CACHE_BYTES, L2_CACHE_BYTES, \
-				       L3_CACHE_BYTES)
+/* For saving tagged qwords.  Cannot use `max()` so calculate manually */
+#define ARCH_SLAB_MINALIGN	16
+#define ARCH_KMALLOC_MINALIGN	64 /* max(ARCH_SLAB_MINALIGN, ARCH_DMA_MINALIGN) */
+
+#define cache_line_size()	_max3_(L1_CACHE_BYTES, L2_CACHE_BYTES, L3_CACHE_BYTES)
 
 #define __read_mostly __attribute__((__section__(".data..read_mostly")))
 

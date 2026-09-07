@@ -227,17 +227,22 @@ unsigned int check_debug_value(const char *env_var_name, const size_t max_len)
 	return value;
 }
 
-
-
-/*
- * Checks for PM debug mode env var setup and outputs corresponding debug mask.
- * 'max_len' - maximum expected env var length.
- * Returns: mask to apply to 'pm_sc_debug_mode' if env var is "set";
- *           0 - otherwise.
+/** protected_mode_check_env_debug_mask() - Return PM debug mode mask
+ *                                          based on env var setting.
+ * @env_var_name: Name of the environment variable to read.
+ * @max_len:      Maximum expected length of the env var value.
+ *
+ * Reads the environment variable of the current process specified by
+ * @env_var_name. If the variable is set positive, returns a debug mask for |.
+ * If the variable is set negative, returns an inverted mask for &.
+ * If the variable is not set or an error occurs during parsing, returns 0.
+ *
+ * Return: Mask to apply to 'pm_sc_debug_mode' or 'pm_soft_options_mask'
+ *         if env var is "set"; 0 - otherwise.
  */
-static
-unsigned long check_debug_mask(const char *env_var_name, const size_t max_len,
-			       const unsigned long mask)
+unsigned long protected_mode_check_env_debug_mask(const char *env_var_name,
+						  const size_t max_len,
+						  const unsigned long mask)
 {
 	char *env_val;
 
@@ -259,10 +264,11 @@ wrong_val_out:
 	pr_alert("Legal values: 0/1/y/n/Y/N\n");
 	return 0;
 }
+EXPORT_SYMBOL_GPL(protected_mode_check_env_debug_mask);
 
 #define CHECK_DEBUG_MASK(mask_name) \
 do { \
-	mask = check_debug_mask(#mask_name, 48, mask_name); \
+	mask = protected_mode_check_env_debug_mask(#mask_name, 48, mask_name); \
 	if (mask) { \
 		if (mask & mask_name) /* positive mask */ \
 			context->pm_sc_debug_mode |= mask; \
@@ -285,6 +291,24 @@ void reset_PM_MM_default_setup(mm_context_t *context, int save_flag)
 		context->pm_sc_debug_mode &= ~PM_MM_EMPTYING_FREED_POINTERS;
 }
 
+#if IS_ENABLED(CONFIG_SOFT_PM)
+
+static void (*arch_init_soft_pm_mode)(void *context_ptr) = NULL;
+
+void init_arch_init_soft_pm_mode(void (*initer)(void *context_ptr))
+{
+	WRITE_ONCE(arch_init_soft_pm_mode, initer);
+}
+EXPORT_SYMBOL_GPL(init_arch_init_soft_pm_mode);
+
+void remove_arch_init_soft_pm_mode(void)
+{
+	WRITE_ONCE(arch_init_soft_pm_mode, NULL);
+}
+EXPORT_SYMBOL_GPL(remove_arch_init_soft_pm_mode);
+
+#endif /* CONFIG_SOFT_PM */
+
 /*
  * Initialization of the E2K Secure Computing execution mode.
  */
@@ -294,6 +318,9 @@ void arch_init_secure_computing_mode(void *context_ptr)
 	unsigned long mask;
 	int reset_PM_MM_default; /* once env var encountered, we need to reset default setup */
 	int ival;
+#if IS_ENABLED(CONFIG_SOFT_PM)
+	void (*soft_pm_initer)(void *) = READ_ONCE(arch_init_soft_pm_mode);
+#endif /* CONFIG_SOFT_PM */
 
 	if (!context)
 		context = &current->mm->context;
@@ -330,18 +357,18 @@ void arch_init_secure_computing_mode(void *context_ptr)
 
 	/* Checking for dynamic controls thru env vars: */
 
-	mask = check_debug_mask("PM_SC_DBG_MODE_DISABLED", 48, 1);
+	mask = protected_mode_check_env_debug_mask("PM_SC_DBG_MODE_DISABLED", 48, 1);
 	if (mask == 1) {
 		context->pm_sc_debug_mode = 0;
-		return;
+		goto ret;
 	}
 
-	mask = check_debug_mask("PM_SC_DBG_MODE_ALL", 48,
+	mask = protected_mode_check_env_debug_mask("PM_SC_DBG_MODE_ALL", 48,
 				PM_SC_DBG_MODE_ALL);
 	if (mask & PM_SC_DBG_MODE_ALL) { /* positive mask */
 		context->pm_sc_debug_mode |= PM_SC_DBG_MODE_ALL;
 		pr_info("ENVP: PM_SC_DBG_MODE_ALL=1\n");
-		return;
+		goto ret;
 	}
 
 	CHECK_DEBUG_MASK(PM_SC_DBG_MODE_DEBUG);
@@ -364,8 +391,9 @@ void arch_init_secure_computing_mode(void *context_ptr)
 	CHECK_DEBUG_MASK(PROTECTED_MODE_SOFT);
 	if (!mask) {
 		/* Alias for backward compatibility: */
-		mask = check_debug_mask("PM_SC_DBG_MODE_WARN_ONLY",
-					48, PM_SC_DBG_MODE_WARN_ONLY);
+		mask = protected_mode_check_env_debug_mask(
+				"PM_SC_DBG_MODE_WARN_ONLY",
+				48, PM_SC_DBG_MODE_WARN_ONLY);
 		if (mask) {
 			if (mask & PROTECTED_MODE_SOFT) /* positive mask */
 				context->pm_sc_debug_mode |= mask;
@@ -378,7 +406,8 @@ void arch_init_secure_computing_mode(void *context_ptr)
 	CHECK_DEBUG_MASK(PM_SC_PTRACE_ENABLED);
 	CHECK_DEBUG_MASK(PM_SC_UNSAFE_UINT64_TO_PTR_ENABLED);
 	if (context->pm_sc_debug_mode & PM_SC_UNSAFE_UINT64_TO_PTR_ENABLED) {
-		mask = check_debug_mask("PM_SC_UNSAFE_UINT64_TO_PTR_WHOLE_STACK_MODE", 48, 1);
+		mask = protected_mode_check_env_debug_mask(
+				"PM_SC_UNSAFE_UINT64_TO_PTR_WHOLE_STACK_MODE", 48, 1);
 		if (mask) {
 			context->pm_sc_unsafe_uint64_to_ptr_mode |=
 						PM_SC_UNSAFE_UINT64_TO_PTR_WHOLE_STACK_MODE;
@@ -402,8 +431,6 @@ void arch_init_secure_computing_mode(void *context_ptr)
 		reset_PM_MM_default_setup(context, PM_MM_EMPTYING_FREED_POINTERS);
 		reset_PM_MM_default = 0;
 	}
-	if (context->pm_sc_debug_mode & PM_MM_FREE_PTR_MODE_MASK == 0)
-		context->pm_sc_debug_mode |= PM_MM_DEFAULT_FREE_PTR_MODE; /* RM-18187 */
 
 	/* Language setup: */
 	mask = check_PM_lang_setup("LC_ALL", 48);
@@ -432,6 +459,17 @@ select_lang:
 			ARRAY_SIZE(protected_error_list_RU_KOI8) != PMSCERRMSG_NUMBER);
 
 out:
+	if ((context->pm_sc_debug_mode & PM_MM_FREE_PTR_MODE_MASK) == 0) {
+		if (context->pm_sc_debug_mode & PM_SC_UNSAFE_UINT64_TO_PTR_ENABLED) {
+			protected_mode_message(PM_SC_DBG_MODE_MSG_TYPE_INFO,
+					       PMSCERRMSG_FILLING_FREED_MEM_BLOCKED, NULL);
+		} else {
+			context->pm_sc_debug_mode |= PM_MM_DEFAULT_FREE_PTR_MODE; /* RM-18187 */
+			protected_mode_message(PM_SC_DBG_MODE_MSG_TYPE_ERROR,
+					       PMSCERRMSG_FILLING_FREED_MEM_IN_NON_HM, NULL);
+		}
+	}
+
 	if (context->pm_sc_debug_mode & PM_SC_DBG_MODE_DEBUG) {
 		char *env_val;
 
@@ -447,6 +485,11 @@ out:
 			pr_info("\tpm_sc_check4tags_max_size = %d\n",
 					context->pm_sc_check4tags_max_size);
 	}
+ret:
+#if IS_ENABLED(CONFIG_SOFT_PM)
+	if (soft_pm_initer)
+		soft_pm_initer(context_ptr);
+#endif /* CONFIG_SOFT_PM */
 	return;
 }
 

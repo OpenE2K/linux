@@ -63,16 +63,32 @@ struct e2k_greg {
 } __aligned(16); /* must be aligned for stgdq/stqp/ldqp to work */
 
 
-typedef struct e2k_global_regs {
+typedef struct e2k_gregs {
 	struct e2k_greg g[E2K_GLOBAL_REGS_NUM];
 	e2k_bgr_t bgr;
 } e2k_global_regs_t;
 
-/* Sometimes we only want to save %g16-%g31 (so called "local" gregs) */
+/* According to user ABI registers %g0-%g15 should not be saved upon signal
+ * delivery (so called "global" gregs) */
+struct global_gregs {
+	struct e2k_greg g[GLOBAL_GREGS_NUM];
+};
+
+/* According to user ABI registers %g16-%g31 should be saved upon signal
+ * delivery (so called "local" gregs).
+ *
+ * And %bgr holds additinal settings for %g24-%g31. */
 typedef struct local_gregs {
 	struct e2k_greg g[LOCAL_GREGS_NUM];
 	e2k_bgr_t bgr;
 } local_gregs_t;
+
+/* Only a part of `local_gregs` is used by kernel for scratch
+ * registers (i.e. for -fglobal-regs optimization).  The other
+ * part is used to hold often accessed data. */
+struct scratch_gregs {
+	struct e2k_greg g[LOCAL_GREGS_NUM - KERNEL_GREGS_MAX_NUM];
+};
 
 /* gN and gN+1 global registers hold pointers to current in kernel, */
 /* gN+2 and gN+3 are used for per-cpu data pointer and current cpu id. */
@@ -91,9 +107,14 @@ typedef struct trap_pt_regs {
 	s8		curr_cnt;
 	u8		nr_trap;		/* number of trap */
 	u8		nr_page_fault_exc;	/* number of page fault trap */
+#if IS_ENABLED(CONFIG_SOFT_PM)
+	/* parse_TIR_registers calls handlers for raised exceptions one by one. */
+	/* When both illegal_operand and array_bounds raised, we can skip */
+	/* processed ill_op als-s when doing array_bound by saving this mask */
+	u8 corrected_als_mask;
+#endif /* CONFIG_SOFT_PM */
 	union {
 		struct {
-			u16 from_sigreturn	: 1;
 			u16 ignore_user_tc	: 1;
 			u16 tc_called		: 1;
 			u16 pcsp_fill_adjusted	: 1;
@@ -113,6 +134,11 @@ typedef struct trap_pt_regs {
 	e2k_tir_t	TIRs[TIR_NUM];
 	trap_cellar_t	tcellar[HW_TC_SIZE];
 	u64 sbbp[SBBP_ENTRIES_NUM];
+
+	/* User's %bgr, %g16-%g31 are saved to thread_struct in user traps and syscalls.
+	 * Kernel's %g26-g31 are saved here in kernel traps. */
+	struct scratch_gregs k_gregs;
+
 #ifdef CONFIG_SECONDARY_SPACE_SUPPORT
 	e2k_mlt_t mlt_state;		/* MLT state for binco */
 #endif
@@ -285,7 +311,10 @@ typedef struct sw_regs {   /* to save/restore regs when stack switches */
 	struct task_struct *prev_task;	/* task switch to current from */
 #endif /* CONFIG_VIRTUALIZATION */
 
-	struct e2k_global_regs gregs;
+	/* User's %g0-%g15 are saved here */
+	struct global_gregs u_gregs;
+
+	u64 uaccess_max;
 
 	/*
 	 * These two are shared by monitors and breakpoints. Monitors
@@ -311,18 +340,12 @@ typedef struct sw_regs {   /* to save/restore regs when stack switches */
 	 * in the case we switch from/to a BINCO task, we
 	 * need to backup/restore these registers in task switching
 	 */
-	u64		cs_lo;
-	u64		cs_hi;
-	u64		ds_lo;
-	u64		ds_hi;
-	u64		es_lo;
-	u64		es_hi;
-	u64		fs_lo;
-	u64		fs_hi;
-	u64		gs_lo;
-	u64		gs_hi;
-	u64		ss_lo;
-	u64		ss_hi;
+	e2k_qreg_t cs;
+	e2k_qreg_t ds;
+	e2k_qreg_t es;
+	e2k_qreg_t fs;
+	e2k_qreg_t gs;
+	e2k_qreg_t ss;
 
 	/* Additional registers for BINCO */
 	e2k_rpr_t	rpr;
@@ -558,10 +581,6 @@ do { \
 	if (!paravirt_enabled()) { \
 		/* FIXME: it need implement for guest kernel */ \
 		NATIVE_SAVE_BINCO_REGS_FOR_PTRACE(__pt_regs); \
-	} \
-	if (from_syscall(__pt_regs) && __pt_regs->sys_num != __NR_sigreturn) { \
-		memset(&current_thread_info()->k_gregs, 0, \
-				sizeof(current_thread_info()->k_gregs)); \
 	} \
 } while (0)
 

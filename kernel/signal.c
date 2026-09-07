@@ -1369,8 +1369,10 @@ force_sig_info_to_task(struct kernel_siginfo *info, struct task_struct *t,
 	struct k_sigaction *action;
 	int sig = info->si_signo;
 
-#if defined(CONFIG_E2K) && defined(E2K_DELAYED_SIGNALS)
-	if (in_atomic()) {
+#if defined(CONFIG_E2K) && defined(CONFIG_E2K_DELAYED_SIGNALS)
+	/* On e2k NMIs are used more often, and can also send signals.
+	 * Delay those signals until we exit NMI context. */
+	if (in_nmi()) {
 		struct task_struct *t = current;
 
 		if (WARN_ON_ONCE(t->forced_info.si_signo))
@@ -3648,14 +3650,6 @@ int copy_siginfo_from_user32(struct kernel_siginfo *to,
 
 #if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
 
-static inline e2k_ptr_t make_fake_ap(void *p)
-{
-	e2k_ptr_t ap;
-	ap.hi = 0;
-	ap.lo = (u64)p;
-	return ap;
-}
-
 
 void _copy_siginfo_to_prot_user(struct prot_siginfo *to,
 		struct kernel_siginfo *from)
@@ -3684,38 +3678,26 @@ void _copy_siginfo_to_prot_user(struct prot_siginfo *to,
 		to->si_fd   = from->si_fd;
 		break;
 	case SIL_FAULT:
-		to->si_addr = from->si_addr;
+		to->si_addr = MAKE_AP(from->si_addr, 0);
 		break;
 	case SIL_FAULT_TRAPNO:
-		to->si_addr = from->si_addr;
-#ifdef __ARCH_SI_TRAPNO
-		to->si_trapno = from->si_trapno;
-#endif
+		to->si_addr = MAKE_AP(from->si_addr, 0);
 		break;
 	case SIL_FAULT_MCEERR:
-		to->si_addr = from->si_addr;
-#ifdef __ARCH_SI_TRAPNO
-		to->si_trapno = from->si_trapno;
-#endif
+		to->si_addr = MAKE_AP(from->si_addr, 0);
 		to->si_addr_lsb = from->si_addr_lsb;
 		break;
 	case SIL_FAULT_BNDERR:
-		to->si_addr = from->si_addr;
-#ifdef __ARCH_SI_TRAPNO
-		to->si_trapno = from->si_trapno;
-#endif
-		to->si_lower = from->si_lower;
-		to->si_upper = from->si_upper;
+		to->si_addr = MAKE_AP(from->si_addr, 0);
+		to->si_lower = MAKE_AP(from->si_lower, 0);
+		to->si_upper = MAKE_AP(from->si_upper, 0);
 		break;
 	case SIL_FAULT_PKUERR:
-		to->si_addr = from->si_addr;
-#ifdef __ARCH_SI_TRAPNO
-		to->si_trapno = from->si_trapno;
-#endif
+		to->si_addr = MAKE_AP(from->si_addr, 0);
 		to->si_pkey = from->si_pkey;
 		break;
 	case SIL_FAULT_PERF_EVENT:
-		to->si_addr = from->si_addr;
+		to->si_addr = MAKE_AP(from->si_addr, 0);
 		to->si_perf_data = from->si_perf_data;
 		to->si_perf_type = from->si_perf_type;
 		to->si_perf_flags = from->si_perf_flags;
@@ -3730,12 +3712,12 @@ void _copy_siginfo_to_prot_user(struct prot_siginfo *to,
 	case SIL_RT:
 		to->si_pid = from->si_pid;
 		to->si_uid = from->si_uid;
-		DebugSCP("to->si_ptr = 0x%llx\n", from->si_ptr);
+		DebugSCP("to->si_ptr = 0x%px\n", from->si_ptr);
 		/* NB> We use the biggest union field over here: */
-		to->si_ptr = make_fake_ap(from->si_ptr);
+		to->si_ptr = MAKE_AP(from->si_ptr, 0);
 		break;
 	case SIL_SYS:
-		to->si_call_addr = from->si_call_addr;
+		to->si_call_addr = MAKE_AP(from->si_call_addr, 0);
 		to->si_syscall   = from->si_syscall;
 		to->si_arch      = from->si_arch;
 		break;
@@ -3766,7 +3748,7 @@ static inline int  set_sigval_from_prot_siginfo(kernel_siginfo_t *to,
 	if (!get_user_tagged_16(kap.qword, tag, &usi->si_ptr) || IS_AP(kap, tag)) {
 		to->si_ptr = (void *)AP_PTR(kap);
 		to->si_errno = 1;
-		DebugSCP("to->si_ptr = 0x%llx\n", to->si_ptr);
+		DebugSCP("to->si_ptr = 0x%px\n", to->si_ptr);
 		return 1;
 	}
 	return 0;
@@ -3795,38 +3777,26 @@ static int post_copy_siginfo_from_prot_user(kernel_siginfo_t *to,
 		to->si_fd   = from->si_fd;
 		break;
 	case SIL_FAULT:
-		to->si_addr = pusi->si_addr;
+		to->si_addr = (void __user *)AP_PTR(pusi->si_addr);
 		break;
 	case SIL_FAULT_TRAPNO:
-		to->si_addr = pusi->si_addr;
-#ifdef __ARCH_SI_TRAPNO
-		to->si_trapno = from->si_trapno;
-#endif
+		to->si_addr = (void __user *)AP_PTR(pusi->si_addr);
 		break;
 	case SIL_FAULT_MCEERR:
-		to->si_addr = pusi->si_addr;
-#ifdef __ARCH_SI_TRAPNO
-		to->si_trapno = from->si_trapno;
-#endif
+		to->si_addr = (void __user *)AP_PTR(pusi->si_addr);
 		to->si_addr_lsb = from->si_addr_lsb;
 		break;
 	case SIL_FAULT_BNDERR:
-		to->si_addr = pusi->si_addr;
-#ifdef __ARCH_SI_TRAPNO
-		to->si_trapno = from->si_trapno;
-#endif
-		to->si_lower = pusi->si_lower;
-		to->si_upper = pusi->si_upper;
+		to->si_addr = (void __user *)AP_PTR(pusi->si_addr);
+		to->si_lower = (void __user *)AP_PTR(pusi->si_lower);
+		to->si_upper = (void __user *)AP_PTR(pusi->si_upper);
 		break;
 	case SIL_FAULT_PKUERR:
-		to->si_addr = pusi->si_addr;
-#ifdef __ARCH_SI_TRAPNO
-		to->si_trapno = from->si_trapno;
-#endif
+		to->si_addr = (void __user *)AP_PTR(pusi->si_addr);
 		to->si_pkey = from->si_pkey;
 		break;
 	case SIL_FAULT_PERF_EVENT:
-		to->si_addr = pusi->si_addr;
+		to->si_addr = (void __user *)AP_PTR(pusi->si_addr);
 		to->si_perf_data = pusi->si_perf_data;
 		to->si_perf_type = pusi->si_perf_type;
 		to->si_perf_flags = pusi->si_perf_flags;
@@ -3846,7 +3816,7 @@ static int post_copy_siginfo_from_prot_user(kernel_siginfo_t *to,
 		}
 		break;
 	case SIL_SYS:
-		to->si_call_addr = pusi->si_call_addr;
+		to->si_call_addr = (void __user *)AP_PTR(pusi->si_call_addr);
 		to->si_syscall   = from->si_syscall;
 		to->si_arch      = from->si_arch;
 		break;
@@ -4182,7 +4152,7 @@ static int copy_siginfo_from_user_any(kernel_siginfo_t *kinfo,
 	 * conversions here. Note, this is a stop-gap measure and should not be
 	 * considered a generic solution.
 	 */
-	if (TASK_IS_PROTECTED(current))
+	if (in_ptr128_syscall())
 		return _copy_siginfo_from_prot_user(
 			kinfo, (struct prot_siginfo __user *)info);
 #endif
@@ -5028,9 +4998,9 @@ long protected_sys_rt_sigaction(int sig,
 		if (IS_PL(pl, tag)) {
 			new_ka.sa.sa_handler = (__sighandler_t)pl.target;
 		} else if (tag == ETAGNUM) {
-			if ((LO(pl) == (u64)SIG_DFL)) {
+			if (LO(pl) == (u64)SIG_DFL) {
 				new_ka.sa.sa_handler = SIG_DFL;
-			} else if ((LO(pl) == (u64)SIG_IGN)) {
+			} else if (LO(pl) == (u64)SIG_IGN) {
 				new_ka.sa.sa_handler = SIG_IGN;
 			} else {
 				DebugSCP("Wrong act->sa_handler tag=0x%x LO/HI=0x%llx:0x%llx sig = %d\n",

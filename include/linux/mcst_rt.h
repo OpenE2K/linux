@@ -11,6 +11,7 @@
 
 extern long rts_mode;
 extern long rts_act_mask; /* mcst realtime mode mask */
+extern bool postpone4rt(void);
 
 #endif	/* _LINUX_MCST_RT_H */
 

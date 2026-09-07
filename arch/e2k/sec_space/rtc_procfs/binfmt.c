@@ -146,6 +146,7 @@ out:
 enum bincomp_exec_type {
 	EXEC_TYPE_FD = 0u,
 	EXEC_TYPE_MMAP,
+	EXEC_TYPE_MMAP_TOPDOWN,
 	EXEC_TYPE_UNKNOWN
 };
 
@@ -166,7 +167,9 @@ static int exec_rtc(bin_comp_info_t *bi, struct linux_binprm *bprm)
 	struct file *x86_file;
 	struct bincomp_map_info map_info;
 	union bincomp_info_header *hdr;
-	u64 exec_type = EXEC_TYPE_FD;
+	bool is_exec_type_mmap = 0;
+	bool is_topdown = 0;
+	bool is_support_em64t = 0;
 	loff_t pos = 0;
 	void *bi_info;
 	size_t bi_info_size;
@@ -201,10 +204,17 @@ static int exec_rtc(bin_comp_info_t *bi, struct linux_binprm *bprm)
 	read_unlock(&bi->lock);
 
 	hdr = (union bincomp_info_header *)bi_info;
-	if (hdr->v0.version >= 1)
-		exec_type = hdr->v1.exec_type;
+	if (hdr->v0.version >= 1) {
+		if (hdr->v1.exec_type >= EXEC_TYPE_MMAP)
+			is_exec_type_mmap = true;
 
-	if (exec_type >= EXEC_TYPE_UNKNOWN) {
+		if (hdr->v1.exec_type == EXEC_TYPE_MMAP_TOPDOWN)
+			is_topdown = true;
+
+		is_support_em64t = hdr->v1.is_support_em64_t;
+	}
+
+	if (hdr->v1.exec_type >= EXEC_TYPE_UNKNOWN) {
 		ret = -EINVAL;
 		kfree(bi_info);
 		goto out;
@@ -225,7 +235,7 @@ static int exec_rtc(bin_comp_info_t *bi, struct linux_binprm *bprm)
 	get_file(bincomp_file);
 	would_dump(bprm, x86_file);
 
-	if (exec_type == EXEC_TYPE_FD) {
+	if (!is_exec_type_mmap) {
 		/* mark the bprm that fd should be passed to interp */
 		bprm->interpreter = bincomp_file;
 		bprm->have_execfd = 1;
@@ -323,9 +333,11 @@ static int exec_rtc(bin_comp_info_t *bi, struct linux_binprm *bprm)
 
 		/* map x86 binary */
 		if (x86_compat)
-			ret = rtc_load_elf32(bprm, &map_info);
+			ret = rtc_load_x86_elf32(bprm, &map_info,
+					is_support_em64t, is_topdown);
 		else
-			ret = rtc_load_elf64(bprm, &map_info);
+			ret = rtc_load_x86_elf64(bprm, &map_info,
+					is_support_em64t, is_topdown);
 
 		if (ret) {
 			/* Force free_bprm() to fix bincomp_file */
@@ -338,9 +350,9 @@ static int exec_rtc(bin_comp_info_t *bi, struct linux_binprm *bprm)
 
 		/* map real executable and start a new process */
 		if (e2k_compat)
-			ret = rtc_load_elf32(bprm, &map_info);
+			ret = rtc_load_bincomp_elf32(bprm, &map_info);
 		else
-			ret = rtc_load_elf64(bprm, &map_info);
+			ret = rtc_load_bincomp_elf64(bprm, &map_info);
 	}
 
 out:

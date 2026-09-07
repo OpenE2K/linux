@@ -261,7 +261,7 @@ static long lwdt_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			break;
 		lwdt_opts->lwdt_stop();
 		lwdt_opts->lwdt_start();
-		/* Fall */
+		fallthrough;
 
 	case WDIOC_GETTIMEOUT:
 		ret = put_user(heartbeat, p);

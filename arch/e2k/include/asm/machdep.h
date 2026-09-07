@@ -16,30 +16,32 @@
 #include <asm/mmu_types.h>
 #include <asm/p2v/boot_v2p.h>
 
+
 #ifdef __KERNEL__
 
 struct cpuinfo_e2k;
 struct pt_regs;
 struct seq_file;
-struct e2k_global_regs;
-struct kernel_gregs;
+struct e2k_gregs;
+struct global_gregs;
 struct local_gregs;
+struct scratch_gregs;
 struct e2k_mlt;
 struct kvm_vcpu_arch;
 struct thread_info;
 
 #include <asm/kvm/machdep.h>	/* virtualization support */
 
-typedef void (*restore_gregs_fn_t)(const struct e2k_global_regs *);
-typedef void (*save_gregs_fn_t)(struct e2k_global_regs *);
+typedef void (*restore_gregs_fn_t)(const struct e2k_gregs *);
+typedef void (*save_gregs_fn_t)(struct e2k_gregs *);
+typedef void (*restore_global_gregs_fn_t)(const struct global_gregs *);
+typedef void (*save_global_gregs_fn_t)(struct global_gregs *);
 typedef struct machdep {
 	int		native_id;		/* machine Id */
 	int		native_rev;		/* cpu revision */
 	e2k_iset_ver_t	native_iset_ver;	/* Instruction set version */
 	bool		cmdline_iset_ver;	/* iset specified in cmdline */
 	bool		L3_enable;		/* cache L3 is enable */
-	bool		gmi;			/* is hardware virtualized */
-						/* guest VM */
 	e2k_addr_t	io_area_base;
 	e2k_addr_t	io_area_size;
 	u8		max_nr_node_cpus;
@@ -71,17 +73,23 @@ typedef struct machdep {
 	void (*C1_enter)(void);
 	void (*C3_enter)(void);
 
-	/* Often used pointers are placed close to each other */
+	/* Save/restore %g0-%g15 */
+	save_global_gregs_fn_t save_global_gregs;
+	restore_global_gregs_fn_t restore_global_gregs;
 
-	void (*save_kernel_gregs)(struct kernel_gregs *);
-	void (*save_gregs)(struct e2k_global_regs *);
-	void (*save_local_gregs)(struct local_gregs *, bool is_signal);
-	save_gregs_fn_t save_gregs_dirty_bgr;
-	restore_gregs_fn_t restore_gregs;
-	void (*save_gregs_on_mask)(struct e2k_global_regs *, bool dirty_bgr,
+	/* Save/restore %bgr and %g16-%g31 */
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+	void (*save_local_gregs)(struct local_gregs *);
+#endif
+	void (*restore_local_gregs)(const struct local_gregs *);
+
+	/* Save/restore so called "scratch registers" for kernel - %g26-%g31 */
+	void (*save_scratch_gregs)(struct scratch_gregs *);
+	void (*restore_scratch_gregs)(const struct scratch_gregs *);
+
+	void (*save_gregs_on_mask)(struct e2k_gregs *, bool dirty_bgr,
 				   unsigned long not_save_gregs_mask);
-	void (*restore_local_gregs)(const struct local_gregs *, bool is_signal);
-	void (*restore_gregs_on_mask)(struct e2k_global_regs *, bool dirty_bgr,
+	void (*restore_gregs_on_mask)(struct e2k_gregs *, bool dirty_bgr,
 				      unsigned long not_restore_gregs_mask);
 	void (*save_kvm_context)(struct kvm_vcpu_arch *);
 	void (*restore_kvm_context)(const struct kvm_vcpu_arch *);
@@ -92,8 +100,6 @@ typedef struct machdep {
 	void (*do_aau_fault)(int aa_field, struct pt_regs *regs);
 	void (*save_aaldi)(u64 *aaldis);
 	void (*get_aau_context)(e2k_aau_t *, e2k_aasr_t);
-	unsigned long	(*boot_rrd)(int reg);
-	void		(*boot_rwd)(int reg, unsigned long value);
 #ifdef CONFIG_MLT_STORAGE
 	void		(*get_and_invalidate_MLT_context)(struct e2k_mlt *mlt_state);
 #endif
@@ -137,33 +143,31 @@ extern pt_struct_t	pgtable_struct;
 #endif
 
 /* Returns true in guest running with hardware virtualization support */
-#ifndef E2K_P2V
-# define IS_HV_GM()	(cpu_has(CPU_FEAT_ISET_V6) && read_CORE_MODE_reg().gmi)
-#else
-# define IS_HV_GM()	(machine.gmi)
-#endif
+#define IS_HV_GM()	cpu_has(CPU_FEAT_GUEST)
 
 #define	IS_IRQ_MASK_GLOBAL()	cpu_has(CPU_FEAT_GLOBAL_IRQ_MASK)
 
-extern void save_kernel_gregs_v3(struct kernel_gregs *);
-extern void save_kernel_gregs_v5(struct kernel_gregs *);
-extern void save_gregs_v3(struct e2k_global_regs *);
-extern void save_gregs_v5(struct e2k_global_regs *);
-extern void save_local_gregs_v3(struct local_gregs *, bool is_signal);
-extern void save_local_gregs_v5(struct local_gregs *, bool is_signal);
-extern void save_gregs_dirty_bgr_v3(struct e2k_global_regs *);
-extern void save_gregs_dirty_bgr_v5(struct e2k_global_regs *);
-extern void save_gregs_on_mask_v3(struct e2k_global_regs *, bool dirty_bgr,
+extern void save_global_gregs_v3(struct global_gregs *);
+extern void save_global_gregs_v5(struct global_gregs *);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+extern void save_local_gregs_v3(struct local_gregs *);
+extern void save_local_gregs_v5(struct local_gregs *);
+#endif
+extern void save_scratch_gregs_v3(struct scratch_gregs *);
+extern void save_scratch_gregs_v5(struct scratch_gregs *);
+extern void save_gregs_on_mask_v3(struct e2k_gregs *, bool dirty_bgr,
 				  unsigned long mask_not_save);
-extern void save_gregs_on_mask_v5(struct e2k_global_regs *, bool dirty_bgr,
+extern void save_gregs_on_mask_v5(struct e2k_gregs *, bool dirty_bgr,
 				  unsigned long mask_not_save);
-extern void restore_gregs_v3(const struct e2k_global_regs *);
-extern void restore_gregs_v5(const struct e2k_global_regs *);
-extern void restore_local_gregs_v3(const struct local_gregs *, bool is_signal);
-extern void restore_local_gregs_v5(const struct local_gregs *, bool is_signal);
-extern void restore_gregs_on_mask_v3(struct e2k_global_regs *, bool dirty_bgr,
+extern void restore_global_gregs_v3(const struct global_gregs *);
+extern void restore_global_gregs_v5(const struct global_gregs *);
+extern void restore_local_gregs_v3(const struct local_gregs *);
+extern void restore_local_gregs_v5(const struct local_gregs *);
+extern void restore_scratch_gregs_v3(const struct scratch_gregs *);
+extern void restore_scratch_gregs_v5(const struct scratch_gregs *);
+extern void restore_gregs_on_mask_v3(struct e2k_gregs *, bool dirty_bgr,
 				     unsigned long mask_not_restore);
-extern void restore_gregs_on_mask_v5(struct e2k_global_regs *, bool dirty_bgr,
+extern void restore_gregs_on_mask_v5(struct e2k_gregs *, bool dirty_bgr,
 				     unsigned long mask_not_restore);
 extern void save_kvm_context_v6(struct kvm_vcpu_arch *);
 extern void save_kvm_context_v7(struct kvm_vcpu_arch *);
@@ -186,31 +190,6 @@ extern void get_aau_context_v3(e2k_aau_t*, e2k_aasr_t);
 extern void get_aau_context_v5(e2k_aau_t*, e2k_aasr_t);
 
 extern unsigned long boot_native_read_IDR_reg_value(void);
-
-unsigned long rrd_v3(int);
-unsigned long rrd_v5(int);
-unsigned long rrd_v6(int);
-void rwd_v3(int reg, unsigned long value);
-void rwd_v5(int reg, unsigned long value);
-void rwd_v6(int reg, unsigned long value);
-unsigned long boot_rrd_v3(int);
-unsigned long boot_rrd_v6(int);
-void boot_rwd_v3(int reg, unsigned long value);
-void boot_rwd_v6(int reg, unsigned long value);
-
-/* Supported registers for machine->rrd()/rwd() */
-enum {
-	E2K_REG_CU_HW1,
-	E2K_REG_HCEM,
-	E2K_REG_HCEB,
-	E2K_REG_OSCUTD,
-	E2K_REG_OSCUIR,
-};
-
-u64 native_get_cu_hw1_v3(void);
-u64 native_get_cu_hw1_v5(void);
-void native_set_cu_hw1_v3(u64);
-void native_set_cu_hw1_v5(u64);
 
 void get_and_invalidate_MLT_context_v3(struct e2k_mlt *mlt_state);
 void get_and_invalidate_MLT_context_v6(struct e2k_mlt *mlt_state);

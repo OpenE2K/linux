@@ -71,7 +71,6 @@ typedef struct _gcsSURF_RESOLVE_ARGS {
             gctBOOL   directCopy;
             gctBOOL   resample;
             gctBOOL   bUploadTex;     /* used for upload tex.*/
-            gctBOOL   bSwapBuffers;   /* used for eglSwapBuffers and glXSwapBuffers */
             gctBOOL   bSwap;          /* used for swap.*/
             gctBOOL   visualizeDepth; /* convert depth to visible color */
             gcsPOINT  srcOrigin;

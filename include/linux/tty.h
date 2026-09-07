@@ -505,7 +505,10 @@ int vt_ioctl(struct tty_struct *tty, unsigned int cmd, unsigned long arg);
 
 long vt_compat_ioctl(struct tty_struct *tty, unsigned int cmd,
 		unsigned long arg);
-
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+int vt_ptr128_ioctl(struct tty_struct *tty, unsigned int cmd,
+		unsigned long arg);
+#endif
 /* tty_mutex.c */
 /* functions for preparation of BKL removal */
 void tty_lock(struct tty_struct *tty);

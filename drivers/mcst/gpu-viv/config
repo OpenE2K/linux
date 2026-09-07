@@ -53,12 +53,12 @@
 ##############################################################################
 
 
-ARCH_TYPE                         ?= arm
+ARCH_TYPE                         ?= e2k
 VIVANTE_ENABLE_3D                 ?= 1
 VIVANTE_ENABLE_2D                 ?= 1
 VIVANTE_ENABLE_VG                 ?= 1
-VIVANTE_ENABLE_DRM                ?= 0
-NO_DMA_COHERENT                   ?= 1
+VIVANTE_ENABLE_DRM                ?= 1
+NO_DMA_COHERENT                   ?= 0
 USE_PLATFORM_DRIVER               ?= 1
 ENABLE_GPU_CLOCK_BY_DRIVER        ?= 1
 FORCE_ALL_VIDEO_MEMORY_CACHED     ?= 0

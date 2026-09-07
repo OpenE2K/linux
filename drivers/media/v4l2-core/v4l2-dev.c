@@ -367,7 +367,6 @@ static long v4l2_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 
 	return ret;
 }
-
 #ifdef CONFIG_MMU
 #define v4l2_get_unmapped_area NULL
 #else
@@ -480,6 +479,9 @@ static const struct file_operations v4l2_fops = {
 	.unlocked_ioctl = v4l2_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = v4l2_compat_ioctl32,
+#endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl = v4l2_ptr128_ioctl,
 #endif
 	.release = v4l2_release,
 	.poll = v4l2_poll,

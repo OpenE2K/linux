@@ -115,15 +115,17 @@ do { \
 extern int __smp_load_acquire_bad(void) __attribute__((noreturn));
 # define __smp_load_acquire(p) \
 ({ \
-	typeof(*(p)) __ret_la; \
+	__unqual_scalar_typeof(*(p)) __ret_la; \
+	typeof(p) __p = (p); \
+	compiletime_assert_atomic_type(*p); \
 	switch (sizeof(*p)) { \
-	case 1: LOAD_NV_MAS((p), __ret_la, MAS_LOAD_ACQUIRE_V6(MAS_MT_1), b, "memory"); \
+	case 1: LOAD_NV_MAS(__p, __ret_la, MAS_LOAD_ACQUIRE_V6(MAS_MT_1), b, "memory"); \
 		break; \
-	case 2: LOAD_NV_MAS((p), __ret_la, MAS_LOAD_ACQUIRE_V6(MAS_MT_1), h, "memory"); \
+	case 2: LOAD_NV_MAS(__p, __ret_la, MAS_LOAD_ACQUIRE_V6(MAS_MT_1), h, "memory"); \
 		break; \
-	case 4: LOAD_NV_MAS((p), __ret_la, MAS_LOAD_ACQUIRE_V6(MAS_MT_1), w, "memory"); \
+	case 4: LOAD_NV_MAS(__p, __ret_la, MAS_LOAD_ACQUIRE_V6(MAS_MT_1), w, "memory"); \
 		break; \
-	case 8: LOAD_NV_MAS((p), __ret_la, MAS_LOAD_ACQUIRE_V6(MAS_MT_1), d, "memory"); \
+	case 8: LOAD_NV_MAS(__p, __ret_la, MAS_LOAD_ACQUIRE_V6(MAS_MT_1), d, "memory"); \
 		break; \
 	default: __smp_load_acquire_bad(); break; \
 	} \
@@ -163,15 +165,7 @@ static inline unsigned long array_index_mask_nospec(unsigned long index,
 	return -1UL;
 }
 
-/*
- * Follow the example of RISC-V and forbid IO crossing of scheduling
- * boundary by using mb() instead of smp_mb().  This should not have
- * any measurable performance impact on e2k.  The bad case is when
- * task is preempted after writeX() and migrated to another CPU fast
- * enough so that the CPU it was preempted on has not called any
- * spin_unlock()'s yet.
- */
-#define smp_mb__after_spinlock() mb()
+#define smp_mb__after_spinlock() smp_mb()
 
 #include <asm-generic/barrier.h>
 

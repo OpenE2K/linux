@@ -28,6 +28,9 @@ void *module_alloc(unsigned long size)
 			GFP_KERNEL, PAGE_KERNEL_EXEC, 0, NUMA_NO_NODE,
 			__builtin_return_address(0));
 }
+#ifdef CONFIG_TEST_KERNEL_PT_SYNC_MODULE
+EXPORT_SYMBOL(module_alloc);
+#endif
 
 int apply_relocate_add(Elf64_Shdr *sechdrs,
 		       const char *strtab,
@@ -85,9 +88,9 @@ int apply_relocate_add(Elf64_Shdr *sechdrs,
 			break;
 
 		case R_E2K_DISP:
-                        v -= (Elf64_Addr) location;
-                        *loc32 = (*loc32 & 0xf0000000) | ((v >> 3) & 0x0fffffff);
-                        break;
+			v -= (Elf64_Addr) location;
+			*loc32 = (*loc32 & 0xf0000000) | ((v >> 3) & 0x0fffffff);
+			break;
 
 		case R_E2K_32_PC:
 			v -= (Elf64_Addr) location;

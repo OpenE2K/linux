@@ -24,7 +24,6 @@
 /* mm_alloc()/mmdrop() defined at include/linux/sched.h */
 
 #define uaccess_enable	native_uaccess_enable
-#define uaccess_enable_irqs_off	native_uaccess_enable_irqs_off
 #define uaccess_disable	native_uaccess_disable
 #define uaccess_restore native_uaccess_restore
 

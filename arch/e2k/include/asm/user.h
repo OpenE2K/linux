@@ -53,18 +53,12 @@ struct user_regs_struct {
 	e2k_cud_t cud;
 	e2k_gd_t gd;
 
-	unsigned long long cs_lo;
-	unsigned long long cs_hi;
-	unsigned long long ds_lo;
-	unsigned long long ds_hi;
-	unsigned long long es_lo;
-	unsigned long long es_hi;
-	unsigned long long fs_lo;
-	unsigned long long fs_hi;
-	unsigned long long gs_lo;
-	unsigned long long gs_hi;
-	unsigned long long ss_lo;
-	unsigned long long ss_hi;
+	e2k_qreg_t cs;
+	e2k_qreg_t ds;
+	e2k_qreg_t es;
+	e2k_qreg_t fs;
+	e2k_qreg_t gs;
+	e2k_qreg_t ss;
 
 	e2k_aadj_t aad[32];
 	unsigned long long aaind[16];

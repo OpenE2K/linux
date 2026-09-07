@@ -56,10 +56,10 @@ static inline pgd_t *kvm_mmu_get_init_gmm_root(struct kvm *kvm)
 	return (pgd_t *)__va(root_hpa);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline void kvm_mmu_set_init_gmm_root(struct kvm_vcpu *vcpu, hpa_t root)
 {
 	gmm_struct_t *gmm = pv_mmu_get_init_gmm(vcpu->kvm);
-	gpa_t root_gpa;
 
 	if (gmm == NULL)
 		return;
@@ -74,11 +74,6 @@ static inline void kvm_mmu_set_init_gmm_root(struct kvm_vcpu *vcpu, hpa_t root)
 	if (VALID_PAGE(root)) {
 		gmm->root_hpa = root;
 	}
-	if (is_sep_virt_spaces(vcpu)) {
-		root_gpa = kvm_get_space_type_guest_os_root(vcpu);
-	} else {
-		root_gpa = kvm_get_space_type_guest_u_root(vcpu);
-	}
 	gmm->u_pptb = vcpu->arch.mmu.get_vcpu_u_pptb(vcpu);
 	gmm->os_pptb = vcpu->arch.mmu.get_vcpu_os_pptb(vcpu);
 	gmm->u_vptb = vcpu->arch.mmu.get_vcpu_u_vptb(vcpu);
@@ -87,6 +82,7 @@ out_unlock:
 	spin_unlock(&vcpu->kvm->mmu_lock);
 	return;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline pgd_t *kvm_mmu_get_gmm_root(struct gmm_struct *gmm)
 {
@@ -153,6 +149,7 @@ static inline pgd_t *kvm_mmu_load_the_gmm_root(struct kvm_vcpu *vcpu,
 	}
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline pgd_t *kvm_mmu_load_gmm_root(thread_info_t *next_ti,
 					   gthread_info_t *next_gti)
 {
@@ -164,6 +161,7 @@ static inline pgd_t *kvm_mmu_load_gmm_root(thread_info_t *next_ti,
 	root = kvm_mmu_load_the_gmm_root(vcpu, next_gmm);
 	return root;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline pgd_t *kvm_mmu_load_init_root(struct kvm_vcpu *vcpu)
 {
@@ -210,9 +208,6 @@ kvm_mmu_load_the_init_gmm_root(struct kvm_vcpu *vcpu, gmm_struct_t *gmm)
 
 #endif /* CONFIG_KVM_HV_MMU */
 
-extern hpa_t kvm_convert_to_init_gmm(struct kvm_vcpu *vcpu,
-				     gthread_info_t *gti);
-
 static inline void switch_guest_pgd(pgd_t *next_pgd)
 {
 	thread_info_t *thread_info = native_current_thread_info();
@@ -239,8 +234,13 @@ static inline void switch_guest_pgd(pgd_t *next_pgd)
 	 */
 }
 
-#define	DO_NOT_USE_ACTIVE_GMM	/* turn OFF optimization */
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+
+extern hpa_t kvm_convert_to_init_gmm(struct kvm_vcpu *vcpu,
+				     gthread_info_t *gti);
+
+#define	DO_NOT_USE_ACTIVE_GMM	/* turn OFF optimization */
 static inline gmm_struct_t *switch_guest_mm(gthread_info_t *next_gti,
 					    struct gmm_struct *next_gmm)
 {
@@ -344,6 +344,7 @@ static inline bool kvm_switch_to_init_guest_mm(struct kvm_vcpu *vcpu)
 	pv_vcpu_clear_gmm(vcpu);
 	return true;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline void
 kvm_guest_kernel_p4d_populate(struct mm_struct *mm, p4d_t *p4d)

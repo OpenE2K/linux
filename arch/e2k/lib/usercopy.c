@@ -697,10 +697,8 @@ unsigned long raw_copy_to_user_with_tags(void __user *to, const void *from,
  * All arguments must be aligned
  */
 unsigned long __fill_user_with_tags(void __user *to, unsigned long n,
-		unsigned long tag, unsigned long dw)
+		unsigned long tag, unsigned long dw, ldst_rec_op_t strd_opcode)
 {
-	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT,
-			.mas = MAS_BYPASS_L1_CACHE, .prot = 1 };
 	size_t cleared;
 
 	if (unlikely(!IS_ALIGNED((unsigned long) to, 8) || !IS_ALIGNED(n, 8)))

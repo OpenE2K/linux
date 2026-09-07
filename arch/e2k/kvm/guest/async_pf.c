@@ -228,7 +228,7 @@ static void pv_apf_enable_curr_cpu(void *info)
  */
 static int __init pv_apf_enable(void)
 {
-	int ret = pic_get_vector_by_name(NULL, "/kvm", "ASYNC PF WAKE interrupt",
+	int ret = pic_get_vector_by_name(NULL, "/kvm", "ASYNC PF WAKE interrupts",
 					&async_pf_wake_vector);
 	if (ret)
 		return ret;

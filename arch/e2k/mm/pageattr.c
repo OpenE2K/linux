@@ -9,6 +9,7 @@
 #include <linux/pgtable.h>
 #include <linux/interval_tree.h>
 #include <linux/cleanup.h>
+#include <linux/kfence.h>
 
 #include <asm/l-iommu.h>
 #include <asm/page.h>
@@ -18,6 +19,10 @@
 #include <asm/tlbflush.h>
 #include <asm/topology.h>
 #include <asm/pool.h>
+#include <asm/kfence.h>
+#include <linux/crash_dump.h>
+
+bool arch_kfence_initialized;
 
 static inline size_t pt_pages_nr(unsigned long start, unsigned long end, unsigned long shift)
 {
@@ -164,6 +169,8 @@ static void modify_pte_page(pte_t *ptep, enum sma_mode mode)
 	case SMA_UC_MT:
 		new = pte_mk_uc(*ptep);
 		break;
+	case SMA_SPLIT:
+		break;
 	default:
 		BUG();
 	};
@@ -196,6 +203,8 @@ static int pte_modified(pte_t pte, enum sma_mode mode)
 		return pte_wc(pte);
 	case SMA_UC_MT:
 		return pte_uc(pte);
+	case SMA_SPLIT:
+		return true;
 	default:
 		BUG();
 	};
@@ -258,8 +267,27 @@ static __ref void *sma_alloc_page__pool(struct pool *pool, int node,
 		set_page_allocator_pool(virt_to_page(page));
 #endif
 
-	if (level == PT_LEVEL_PGD)
+	if (level == PT_LEVEL_PGD) {
 		pgd_ctor(&init_mm, node, (pgd_t *) page);
+	} else if (level == PT_LEVEL_PMD) {
+		/*
+		 * Both USE_SPLIT_PMD_PTLOCKS and ALLOC_SPLIT_PTLOCKS can not be defined
+		 * due to Kconfig restrictions, but check them anyway. An allocation of
+		 * a page table lock in pgtable_pmd_page_ctor() may cause a deadlock
+		 * on kernel_pt_lock.
+		 */
+		BUILD_BUG_ON(USE_SPLIT_PMD_PTLOCKS && ALLOC_SPLIT_PTLOCKS);
+
+		if (!pgtable_pmd_page_ctor(virt_to_page(page))) {
+			pool_put(pool, page);
+			return NULL;
+		}
+	} else if (level == PT_LEVEL_PTE) {
+		/*
+		 * Note: we do not call pgtable_pte_page_ctor()
+		 * because it is used for user PT only.
+		 */
+	}
 
 	return page;
 }
@@ -293,9 +321,11 @@ static __ref void sma_free_page__no_pool(enum e2k_pt_levels level, void *addr)
  * This spinlock is used by the following operations:
  *
  * 1) set_memory_*();
- * 2) memory duplication across NUMA-nodes;
+ * 2) kernel memory duplication across NUMA nodes;
  * 3) page collapse;
- * 4) page split (which is internally used by set_memory_*() and NUMA duplication).
+ * 4) page split (which is internally used by set_memory_*() and kernel memory duplication);
+ * 5) duplication and deduplication of module pages;
+ * 6) duplication of preallocated PUD pages.
  *
  * Whenever we traverse kernel PT during one of these operations, kernel_pt_lock
  * must be acquired. Using the single spinlock for all these operations simplifies
@@ -399,6 +429,8 @@ static void modify_pmd_page(pmd_t *pmdp, enum sma_mode mode)
 	case SMA_UC_MT:
 		new = pmd_mk_uc(*pmdp);
 		break;
+	case SMA_SPLIT:
+		break;
 	default:
 		BUG();
 	};
@@ -431,11 +463,18 @@ static int pmd_modified(pmd_t pmd, enum sma_mode mode)
 		return pmd_wc(pmd);
 	case SMA_UC_MT:
 		return pmd_uc(pmd);
+	case SMA_SPLIT:
+		return false;
 	default:
 		BUG();
 	};
 
 	return -EINVAL;
+}
+
+static inline bool split_mode(enum sma_mode mode)
+{
+	return mode == SMA_SPLIT;
 }
 
 static int walk_pmd_level(int node, pud_t *pud, unsigned long addr,
@@ -458,7 +497,7 @@ static int walk_pmd_level(int node, pud_t *pud, unsigned long addr,
 					     need_flush);
 		} else if (!pmd_modified(*pmdp, mode)) {
 			page_size = get_pmd_level_page_size();
-			if (addr & (page_size - 1) || addr + page_size > next) {
+			if (addr & (page_size - 1) || addr + page_size > next || split_mode(mode)) {
 				ret = split_pmd_page(node, pmdp, pool);
 				if (ret)
 					return ret;
@@ -554,6 +593,8 @@ static void modify_pud_page(pud_t *pudp, enum sma_mode mode)
 	case SMA_UC_MT:
 		new = pud_mk_uc(*pudp);
 		break;
+	case SMA_SPLIT:
+		break;
 	default:
 		BUG();
 	}
@@ -586,6 +627,8 @@ static int pud_modified(pud_t pud, enum sma_mode mode)
 		return pud_wc(pud);
 	case SMA_UC_MT:
 		return pud_uc(pud);
+	case SMA_SPLIT:
+		return false;
 	default:
 		BUG();
 	};
@@ -614,7 +657,7 @@ static int walk_pud_level(int node, p4d_t *p4dp, unsigned long addr, unsigned lo
 		} else if (!pud_modified(*pudp, mode)) {
 
 			page_size = get_pud_level_page_size();
-			if (addr & (page_size - 1) || addr + page_size > next) {
+			if (addr & (page_size - 1) || addr + page_size > next || split_mode(mode)) {
 				int ret = split_pud_page(node, pudp, pool);
 				if (ret)
 					return ret;
@@ -678,59 +721,61 @@ struct collapse_tlb_range {
 	unsigned long end;
 };
 
-struct stored_info {
-	void *next_page;
+struct free_page_info {
+	struct list_head list;
+	void *page;
 	enum e2k_pt_levels level;
 	int node;
 };
 
-/* Add 'page' to the list of free pages 'free_pages' */
-static void add_free_page_to_list(void **free_pages, void *page, enum e2k_pt_levels level, int node)
+struct collapse_data {
+	struct pool *pool;
+	struct list_head free_pages_list;
+	struct collapse_tlb_range tlb_range;
+};
+
+static void add_free_page_to_list(void *page, enum e2k_pt_levels level, int node,
+				  struct collapse_data *collapse_data)
 {
-	struct stored_info info = { .next_page = *free_pages, .level = level, .node = node };
+	struct free_page_info *info;
 
-	BUILD_BUG_ON(sizeof(struct stored_info) > PAGE_SIZE);
+	info = (struct free_page_info *)pool_get(collapse_data->pool);
 
-	/*
-	 * Save pointer to prevoius list entry, page's PT level
-	 * and page's node in the beginning of page.
-	 */
-	memcpy(page, &info, sizeof(struct stored_info));
+	if (!info) {
+		/* Pool should have enough space. Page 'page' will leak */
+		WARN_ON_ONCE(1);
+		return;
+	}
 
-	/* Update list head to point to newly added page */
-	*free_pages = page;
+	info->page = page;
+	info->level = level;
+	info->node = node;
+
+	list_add(&info->list, &collapse_data->free_pages_list);
 }
 
-static void free_pages_list(void *list)
+static void free_pages_after_collapse(struct list_head *free_pages)
 {
-	void *cur_page = list;
-	struct stored_info info;
+	struct free_page_info *info, *tmp;
 
-	while (cur_page) {
-		/*
-		 * Get pointer to next page, its PT level and its node number
-		 * that were stored in the beginning of the page.
-		 */
-		memcpy(&info, cur_page, sizeof(struct stored_info));
-
+	list_for_each_entry_safe(info, tmp, free_pages, list) {
 #ifdef CONFIG_DEBUG_PAGEALLOC
-		if (test_and_clear_page_allocator_pool(virt_to_page(cur_page))) {
-			pool_put(sma_page_pool[info.node], cur_page);
-			cur_page = info.next_page;
+		if (test_and_clear_page_allocator_pool(virt_to_page(info->page))) {
+			if (info->level == PT_LEVEL_PMD)
+				pgtable_pmd_page_dtor(virt_to_page(info->page));
+
+			pool_put(sma_page_pool[info->node], info->page);
+
+			list_del(&info->list);
+			kfree(info);
 			continue;
 		}
 #endif
-		sma_free_page__no_pool(info.level, cur_page);
-		cur_page = info.next_page;
+		sma_free_page__no_pool(info->level, info->page);
+
+		list_del(&info->list);
+		kfree(info);
 	}
-}
-
-static void free_pages_after_collapse(void *lists[MAX_NUMNODES])
-{
-	int node;
-
-	for_each_node_state(node, N_MEMORY)
-		free_pages_list(lists[node]);
 }
 
 static pte_t *set_collapsed_pmd(pmd_t *pmdp, unsigned long start)
@@ -787,7 +832,7 @@ static bool pmd_check_loop(pmd_t *pmdp, unsigned long pmd_down)
 }
 
 static void collapse_pmd(pmd_t *pmdp, unsigned long pmd_down,
-			 void **free_pages, struct collapse_tlb_range *range)
+			 struct collapse_data *collapse_data)
 {
 	int node = page_to_nid(pmd_page(*pmdp));
 	pte_t *ptep = set_collapsed_pmd(pmdp, pmd_down);
@@ -795,30 +840,40 @@ static void collapse_pmd(pmd_t *pmdp, unsigned long pmd_down,
 	BUG_ON(!ptep);
 
 	/* Update range for TLB flush */
-	range->begin = min(range->begin, pmd_down);
-	range->end = max(range->end, pmd_down + PMD_SIZE);
+	collapse_data->tlb_range.begin = min(collapse_data->tlb_range.begin, pmd_down);
+	collapse_data->tlb_range.end = max(collapse_data->tlb_range.end, pmd_down + PMD_SIZE);
 
 	/*
 	 * We can't free the page here because kernel_pt_lock is acquired.
-	 * Instead, put the page into list 'free_pages' to free it after
-	 * kernel_pt_lock is released.
+	 * Instead, put the page into list to free it after kernel_pt_lock
+	 * is released and TLBs are flushed.
 	 */
-	add_free_page_to_list(free_pages, ptep, PT_LEVEL_PTE, node);
+	add_free_page_to_list(ptep, PT_LEVEL_PTE, node, collapse_data);
+}
+
+/* Check is the interval we want collapse don't intersects areas
+ * that forced to map by 4k pages */
+static bool collapse_allowed(unsigned long addr, unsigned long size)
+{
+	return !intersects_kfence(addr, size);
 }
 
 static bool collapse_pmd_try(pmd_t *pmdp, struct interval_tree_node *itp,
 			     unsigned long start, unsigned long end,
-			     void **free_pages, struct collapse_tlb_range *range)
+			     struct collapse_data *collapse_data)
 {
 	unsigned long pmd_down = round_down(start, HPAGE_SIZE);
 	bool collapse_flag = true;
 	bool is_last = itp->last != end || is_last_pmd_interval(itp, end);
 
 	if (is_last) {
+		if (!collapse_allowed(pmd_down, HPAGE_SIZE))
+			return false;
+
 		collapse_flag = pmd_check_loop(pmdp, pmd_down);
 
 		if (collapse_flag)
-			collapse_pmd(pmdp, pmd_down, free_pages, range);
+			collapse_pmd(pmdp, pmd_down, collapse_data);
 	}
 
 	return collapse_flag;
@@ -830,7 +885,7 @@ static bool collapse_pmd_try(pmd_t *pmdp, struct interval_tree_node *itp,
  */
 static bool collapse_pmd_area(pud_t *pudp, struct interval_tree_node *itp,
 			      unsigned long start, unsigned long end,
-			      void **free_pages, struct collapse_tlb_range *range)
+			      struct collapse_data *collapse_data)
 {
 	unsigned long pmd_start, pmd_end;
 	pmd_t *pmdp;
@@ -846,7 +901,7 @@ static bool collapse_pmd_area(pud_t *pudp, struct interval_tree_node *itp,
 			return false;
 		if (!kernel_pmd_huge(*pmdp)) {
 			collapse_flag = collapse_pmd_try(pmdp, itp, pmd_start,
-							 pmd_end, free_pages, range) &&
+							 pmd_end, collapse_data) &&
 					collapse_flag;
 		}
 
@@ -884,7 +939,7 @@ static bool pud_check_loop(pud_t *pudp, unsigned long pud_down)
 }
 
 static void collapse_pud(pud_t *pudp, unsigned long pud_down,
-			 void **free_pages, struct collapse_tlb_range *range)
+			 struct collapse_data *collapse_data)
 {
 	int node = page_to_nid(pud_page(*pudp));
 	pmd_t *pmdp = set_collapsed_pud(pudp, pud_down);
@@ -892,15 +947,15 @@ static void collapse_pud(pud_t *pudp, unsigned long pud_down,
 	BUG_ON(!pmdp);
 
 	/* Update range for TLB flush */
-	range->begin = min(range->begin, pud_down);
-	range->end = max(range->end, pud_down + PUD_SIZE);
+	collapse_data->tlb_range.begin = min(collapse_data->tlb_range.begin, pud_down);
+	collapse_data->tlb_range.end = max(collapse_data->tlb_range.end, pud_down + PUD_SIZE);
 
 	/*
 	 * We can't free the page here because kernel_pt_lock is acquired.
-	 * Instead, put the page into list 'free_pages' to free it after
-	 * kernel_pt_lock is released.
+	 * Instead, put the page into list to free it after kernel_pt_lock
+	 * is released and TLBs are flushed.
 	 */
-	add_free_page_to_list(free_pages, pmdp, PT_LEVEL_PMD, node);
+	add_free_page_to_list(pmdp, PT_LEVEL_PMD, node, collapse_data);
 }
 
 /*
@@ -911,26 +966,25 @@ static void collapse_pud(pud_t *pudp, unsigned long pud_down,
  */
 static void collapse_pud_try(pud_t *pudp, struct interval_tree_node *itp,
 			     unsigned long start, unsigned long end,
-			     bool *makes_sense, void **free_pages,
-			     struct collapse_tlb_range *range)
+			     bool *makes_sense, struct collapse_data *collapse_data)
 {
 	unsigned long pud_down = round_down(start, GIANT_PAGE_SIZE);
 	bool is_last = itp->last != end || is_last_pud_interval(itp, end);
 
-	*makes_sense = collapse_pmd_area(pudp, itp, start, end, free_pages, range) && *makes_sense;
+	*makes_sense = collapse_pmd_area(pudp, itp, start, end, collapse_data) && *makes_sense;
 
 	if (cpu_has(CPU_FEAT_ISET_V5) && is_last && *makes_sense) {
 		if (pud_check_loop(pudp, pud_down))
-			collapse_pud(pudp, pud_down, free_pages, range);
+			collapse_pud(pudp, pud_down, collapse_data);
 	}
 
-	/* if all areas for this pud checked, set *makes_sence true for next pud */
+	/* if all areas for this pud checked, set *makes_sense true for next pud */
 	*makes_sense = is_last || *makes_sense;
 }
 
 static void collapse_pud_area(p4d_t *p4dp, struct interval_tree_node *itp,
 			      unsigned long start, unsigned long end,
-			      void **free_pages, struct collapse_tlb_range *range)
+			      struct collapse_data *collapse_data)
 {
 	unsigned long pud_start, pud_end;
 	pud_t *pudp;
@@ -946,7 +1000,7 @@ static void collapse_pud_area(p4d_t *p4dp, struct interval_tree_node *itp,
 			return;
 		if (!kernel_pud_huge(*pudp)) {
 			collapse_pud_try(pudp, itp, pud_start, pud_end,
-					 &makes_sense, free_pages, range);
+					 &makes_sense, collapse_data);
 		}
 
 		pudp++;
@@ -957,7 +1011,7 @@ static void collapse_pud_area(p4d_t *p4dp, struct interval_tree_node *itp,
 
 static void collapse_p4d_area(pgd_t *pgdp, struct interval_tree_node *itp,
 			      unsigned long start, unsigned long end,
-			      void **free_pages, struct collapse_tlb_range *range)
+			      struct collapse_data *collapse_data)
 {
 	unsigned long p4d_start, p4d_end;
 	p4d_t *p4dp;
@@ -970,7 +1024,7 @@ static void collapse_p4d_area(pgd_t *pgdp, struct interval_tree_node *itp,
 	while (p4d_start < end) {
 		if (WARN_ON_ONCE(p4d_none(*p4dp)))
 			return;
-		collapse_pud_area(p4dp, itp, p4d_start, p4d_end, free_pages, range);
+		collapse_pud_area(p4dp, itp, p4d_start, p4d_end, collapse_data);
 
 		p4dp++;
 		p4d_start = p4d_end;
@@ -979,7 +1033,7 @@ static void collapse_p4d_area(pgd_t *pgdp, struct interval_tree_node *itp,
 }
 
 static void collapse_pgd_area(const int node, struct interval_tree_node *itp,
-			      void **free_pages, struct collapse_tlb_range *range)
+			      struct collapse_data *collapse_data)
 {
 	unsigned long pgd_start, pgd_end;
 	pgd_t *pgdp;
@@ -992,7 +1046,7 @@ static void collapse_pgd_area(const int node, struct interval_tree_node *itp,
 	while (pgd_start < itp->last) {
 		if (WARN_ON_ONCE(pgd_none(*pgdp)))
 			return;
-		collapse_p4d_area(pgdp, itp, pgd_start, pgd_end, free_pages, range);
+		collapse_p4d_area(pgdp, itp, pgd_start, pgd_end, collapse_data);
 
 		pgdp++;
 		pgd_start = pgd_end;
@@ -1000,8 +1054,60 @@ static void collapse_pgd_area(const int node, struct interval_tree_node *itp,
 	}
 }
 
-static void collapse_pages_on_node(const int node, struct rb_root_cached *itree_root,
-				   void **free_pages, struct collapse_tlb_range *range)
+static unsigned long collapse_pool_capacity(unsigned long start, unsigned long end)
+{
+	/*
+	 * Page collapse for range [start, end) can free no more pages than
+	 * split for this range requires.
+	 */
+	return split_pool_pages(start, end) * MAX_NUMNODES;
+}
+
+static int schedule_collapse(unsigned long start, unsigned long end);
+
+static void collapse_pages_interval(struct interval_tree_node *itp)
+{
+	int node;
+	unsigned long flags;
+	struct collapse_data collapse_data;
+	unsigned long pool_capacity = collapse_pool_capacity(itp->start, itp->last);
+
+	collapse_data.pool = pool_create(pool_capacity, sizeof(struct free_page_info),
+					 POOL_SLAB, GFP_KERNEL, NUMA_NO_NODE);
+	if (!collapse_data.pool) {
+		/* Print a warning and reschedule collapse for this interval */
+		WARN_ON_ONCE(1);
+		schedule_collapse(itp->start, itp->last);
+		return;
+	}
+
+	INIT_LIST_HEAD(&collapse_data.free_pages_list);
+	collapse_data.tlb_range.begin = ULONG_MAX;
+	collapse_data.tlb_range.end = 0;
+
+	raw_spin_lock_irqsave(&kernel_pt_lock, flags);
+
+	for_each_node_state(node, N_MEMORY)
+		collapse_pgd_area(node, itp, &collapse_data);
+
+	raw_spin_unlock_irqrestore(&kernel_pt_lock, flags);
+
+	/* Flush TLB after kernel_pt_lock is released */
+	if (collapse_data.tlb_range.end > collapse_data.tlb_range.begin)
+		flush_tlb_kernel_range(collapse_data.tlb_range.begin, collapse_data.tlb_range.end);
+
+	/*
+	 * Free pages after kernel_pt_lock is released because freeing can call
+	 * set_memory_*() and cause a deadlock on kernel_pt_lock. Also, free these
+	 * pages after TLB flush because these pages can be accessed via old
+	 * TLB entries before the flush.
+	 */
+	free_pages_after_collapse(&collapse_data.free_pages_list);
+
+	pool_destroy(collapse_data.pool);
+}
+
+static void collapse_pages(struct rb_root_cached *itree_root)
 {
 	struct rb_node *rb_nodep = rb_first_cached(itree_root);
 	struct interval_tree_node *itp;
@@ -1009,35 +1115,10 @@ static void collapse_pages_on_node(const int node, struct rb_root_cached *itree_
 	while (rb_nodep) {
 		itp = container_of(rb_nodep, struct interval_tree_node, rb);
 
-		collapse_pgd_area(node, itp, free_pages, range);
+		collapse_pages_interval(itp);
 
 		rb_nodep = rb_next(rb_nodep);
 	}
-}
-
-static void collapse_pages(struct rb_root_cached *itree_root)
-{
-	int node;
-	unsigned long flags;
-	void *free_pages_list[MAX_NUMNODES] = { NULL };
-	struct collapse_tlb_range range = { .begin = ULONG_MAX, .end = 0 };
-
-	raw_spin_lock_irqsave(&kernel_pt_lock, flags);
-
-	for_each_node_state(node, N_MEMORY)
-		collapse_pages_on_node(node, itree_root, &free_pages_list[node], &range);
-
-	raw_spin_unlock_irqrestore(&kernel_pt_lock, flags);
-
-	/* Flush TLB after kernel_pt_lock is released */
-	if (range.end > range.begin)
-		flush_tlb_kernel_range(range.begin, range.end);
-
-	/*
-	 * Free pages after kernel_pt_lock is released because freeing can call
-	 * set_memory_*() and cause a deadlock on kernel_pt_lock.
-	 */
-	free_pages_after_collapse(free_pages_list);
 }
 
 #ifdef CONFIG_DEBUG_PAGEALLOC
@@ -1214,14 +1295,14 @@ static int alloc_split_pools(struct pool *pools[MAX_NUMNODES],
 	for (node = 0; node < MAX_NUMNODES; node++)
 		pools[node] = NULL;
 
-	for_each_node_state(node, N_MEMORY) {
+	for_each_node_mm_pgdmask(node, &init_mm) {
 		if (pool_capacity) {
 			/*
 			 * Note that flag GFP_ATOMIC is used because set_memory_*()
 			 * can be called from atomic context.
 			 */
 			pools[node] = pool_create(pool_capacity, 0, POOL_BUDDY,
-						  GFP_ATOMIC, node);
+				GFP_ATOMIC, is_kdump_kernel() ? NUMA_NO_NODE : node);
 			if (!pools[node])
 				goto alloc_err;
 		}
@@ -1260,14 +1341,20 @@ static int sma_main(unsigned long start, unsigned long end,
 	 * If CONFIG_DEBUG_PAGEALLOC is disabled, we allocate the pool right here.
 	 * If CONFIG_DEBUG_PAGEALLOC is enabled, we use preallocated pool, see comment
 	 * before sma_page_pool definition.
+	 *
+	 * For kfence we can't allocate memory, see comment
+	 * before arch_kfence_init_pool.
 	 */
+
 #ifndef CONFIG_DEBUG_PAGEALLOC
 	struct pool *pools[MAX_NUMNODES];
 
-	ret = alloc_split_pools(pools, start, end);
-	if (ret) {
-		pr_info("Failed to allocate pools for split\n");
-		return ret;
+	if (!is_kfence_address((void *)start) || !arch_kfence_initialized) {
+		ret = alloc_split_pools(pools, start, end);
+		if (ret) {
+			pr_info("Failed to allocate pools for split\n");
+			return ret;
+		}
 	}
 #else
 	struct pool **pools = sma_page_pool;
@@ -1335,10 +1422,18 @@ static int set_memory_attr(unsigned long start, unsigned long end, enum sma_mode
 	if (unlikely((ret = sma_main(start, end, mode, dontflush))))
 		return ret;
 
-	WARN_ON_ONCE(schedule_collapse(start, end));
+	if (!is_kdump_kernel() && !is_kfence_address((void *)start))
+		WARN_ON_ONCE(schedule_collapse(start, end));
 
 	return 0;
 }
+
+int set_memory_4k(unsigned long addr, int numpages)
+{
+	addr &= PAGE_MASK;
+	return set_memory_attr(addr, addr + numpages * PAGE_SIZE, SMA_SPLIT, 0);
+}
+EXPORT_SYMBOL(set_memory_4k);
 
 int set_memory_ro(unsigned long addr, int numpages)
 {
@@ -1359,14 +1454,18 @@ int set_memory_nx(unsigned long addr, int numpages)
 	addr &= PAGE_MASK;
 	return set_memory_attr(addr, addr + numpages * PAGE_SIZE, SMA_NX, 0);
 }
+#ifdef CONFIG_TEST_KERNEL_PT_SYNC_MODULE
 EXPORT_SYMBOL(set_memory_nx);
+#endif
 
 int set_memory_x(unsigned long addr, int numpages)
 {
 	addr &= PAGE_MASK;
 	return set_memory_attr(addr, addr + numpages * PAGE_SIZE, SMA_X, 0);
 }
+#ifdef CONFIG_TEST_KERNEL_PT_SYNC_MODULE
 EXPORT_SYMBOL(set_memory_x);
+#endif
 
 int set_memory_p(unsigned long addr, int numpages)
 {
@@ -1375,7 +1474,9 @@ int set_memory_p(unsigned long addr, int numpages)
 	/* See comment in set_memory_np() */
 	return set_memory_attr(addr, addr + numpages * PAGE_SIZE, SMA_PV, 0);
 }
+#ifdef CONFIG_TEST_KERNEL_PT_SYNC_MODULE
 EXPORT_SYMBOL(set_memory_p);
+#endif
 
 int set_memory_p_noflush(unsigned long addr, int numpages)
 {
@@ -1384,14 +1485,16 @@ int set_memory_p_noflush(unsigned long addr, int numpages)
 	/* See comment in set_memory_np() */
 	return set_memory_attr(addr, addr + numpages * PAGE_SIZE, SMA_PV, 1);
 }
+#ifdef CONFIG_TEST_KERNEL_PT_SYNC_MODULE
 EXPORT_SYMBOL(set_memory_p_noflush);
+#endif
 
 int set_memory_np(unsigned long addr, int numpages)
 {
 	addr &= PAGE_MASK;
 
 	/* Clearing only present bit without valid is dangerous - any
-	 * half-speculative load can cause an unexpected page fault and
+	 * semi-speculative load can cause an unexpected page fault and
 	 * kernel panic.  So we clear both present and valid bit, doing
 	 * so is closer to how other arch-es implement set_memory_[n]p() */
 	return set_memory_attr(addr, addr + numpages * PAGE_SIZE, SMA_NPV, 0);
@@ -1402,7 +1505,7 @@ int set_memory_np_noflush(unsigned long addr, int numpages)
 	addr &= PAGE_MASK;
 
 	/* Clearing only present bit without valid is dangerous - any
-	 * half-speculative load can cause an unexpected page fault and
+	 * semi-speculative load can cause an unexpected page fault and
 	 * kernel panic.  So we clear both present and valid bit, doing
 	 * so is closer to how other arch-es implement set_memory_[n]p() */
 	return set_memory_attr(addr, addr + numpages * PAGE_SIZE, SMA_NPV, 1);
@@ -1415,20 +1518,6 @@ void __kernel_map_pages(struct page *page, int numpages, int enable)
 
 	set_memory_attr(addr, addr + numpages * PAGE_SIZE, (enable) ? SMA_P : SMA_NP, 0);
 }
-
-# ifdef CONFIG_HIBERNATION
-/*
- * When built with CONFIG_DEBUG_PAGEALLOC and CONFIG_HIBERNATION, this function
- * is used to determine if a linear map page has been marked as not-valid by
- * CONFIG_DEBUG_PAGEALLOC.
- */
-bool kernel_page_present(struct page *page)
-{
-	unsigned long addr = (unsigned long) page_address(page);
-	probe_entry_t entry = get_MMU_DTLB_ENTRY(addr);
-	return DTLB_ENTRY_TEST_SUCCESSFUL(entry) && DTLB_ENTRY_TEST_VVA(entry);
-}
-# endif
 #endif
 
 typedef int (*set_memory_attr_fn)(unsigned long addr, int numpages);
@@ -2009,11 +2098,15 @@ static int kernel_duplicate_pgd_range(int node, enum e2k_pt_levels level,
 static int call_duplication_for_each_memory_node(enum e2k_pt_levels level,
 						 unsigned long addr, unsigned long end,
 						 struct pool *pools[MAX_NUMNODES],
-						 struct pool *hpools[MAX_NUMNODES])
+						 struct pool *hpools[MAX_NUMNODES],
+						 unsigned long *node_mask)
 {
 	int ret, node;
 
 	for_each_node_state(node, N_MEMORY) {
+		if (!test_bit(node, node_mask))
+			continue;
+
 		ret = kernel_duplicate_pgd_range(node, level, addr, end, pools[node], hpools[node]);
 		if (ret)
 			return ret;
@@ -2024,7 +2117,8 @@ static int call_duplication_for_each_memory_node(enum e2k_pt_levels level,
 
 static int alloc_duplication_pools(struct pool *pools[MAX_NUMNODES],
 				   struct pool *hpools[MAX_NUMNODES],
-				   unsigned long start, unsigned long end, bool page_tables_only)
+				   unsigned long start, unsigned long end,
+				   bool page_tables_only, unsigned long *node_mask)
 {
 	int node;
 	unsigned long pool_capacity = duplication_pool_pages(start, end, page_tables_only);
@@ -2037,6 +2131,9 @@ static int alloc_duplication_pools(struct pool *pools[MAX_NUMNODES],
 	}
 
 	for_each_node_state(node, N_MEMORY) {
+		if (!test_bit(node, node_mask))
+			continue;
+
 		if (pool_capacity) {
 			pools[node] = pool_create(pool_capacity, 0, POOL_BUDDY, GFP_KERNEL, node);
 			if (!pools[node])
@@ -2061,12 +2158,103 @@ alloc_err:
 	return -ENOMEM;
 }
 
-
 static void reload_pgd_and_flush(void *unused)
 {
 	/* Update PT root to point to the duplicated image */
 	set_root_pt(mm_node_pgd(&init_mm, numa_node_id()));
 	local_flush_tlb_all();
+}
+
+/*
+ * Do some checks before running kernel memory duplication, preallocated PUD pages
+ * duplication or duplication/deduplication of module pages.
+ *
+ * Returns true if we can continue [de]duplication, false if
+ * we need to skip it.
+ */
+static bool check_duplication(unsigned long addr, size_t size)
+{
+	unsigned long end = addr + size;
+
+	/*
+	 * It seems that duplication does not make sense
+	 * on guest where memory nodes are virtual.
+	 */
+	if (IS_ENABLED(CONFIG_KVM_GUEST_KERNEL) || size == 0)
+		return false;
+
+	might_sleep();
+	BUG_ON(addr > end || !PAGE_ALIGNED(addr) || !PAGE_ALIGNED(size));
+
+	/*
+	 * page_to_nid() for memblock allocated pages will not work for
+	 * deferred pages (see CONFIG_DEFERRED_STRUCT_PAGE_INIT), so
+	 * avoid calling this function too early in the boot process.
+	 */
+	BUG_ON(!slab_is_available());
+
+	return true;
+}
+
+static bool exceeds_threshold(unsigned long need_pages, unsigned long total_pages,
+			      unsigned long free_pages)
+{
+	/* Set threshold to 1/8 of node memory size */
+	unsigned long threshold = total_pages / 8;
+
+	/*
+	 * If there are not enough free pages for the new pages allocation
+	 * to be under the threshold, reject the allocation.
+	 */
+	if (free_pages < (total_pages - threshold) + need_pages)
+		return true;
+
+	return false;
+}
+
+/*
+ * Note: deferred initialization of page structures should be already completed,
+ * otherwise there may be not enough free memory and threshold check will fail.
+ */
+static void calculate_duplication_thresholds(unsigned long addr, unsigned long end,
+					     bool duplicate_pt, bool duplicate_pages,
+					     unsigned long *node_mask)
+{
+	int node, z;
+	unsigned long nr_free_pages, alloc_pages;
+	struct zone *zone;
+	pg_data_t *cur_node;
+
+	BUG_ON(!duplicate_pt && !duplicate_pages);
+
+	if (!duplicate_pt)
+		alloc_pages = (end - addr) >> PAGE_SHIFT;
+	else
+		alloc_pages = duplication_pool_pages(addr, end, !duplicate_pages);
+
+	for_each_node_state(node, N_MEMORY) {
+		nr_free_pages = 0;
+		cur_node = NODE_DATA(node);
+
+		for (z = 0; z < MAX_NR_ZONES; z++) {
+			zone = cur_node->node_zones + z;
+
+# ifdef CONFIG_ZONE_DEVICE
+			if (z == ZONE_DEVICE)
+				continue;
+# endif
+
+			if (!populated_zone(zone))
+				continue;
+
+			nr_free_pages += zone_page_state(zone, NR_FREE_PAGES);
+		}
+
+		if (exceeds_threshold(alloc_pages, cur_node->node_present_pages, nr_free_pages))
+			pr_alert_once("System has no memory for duplication on node %d\n", node);
+		else
+			__set_bit(node, node_mask);
+	}
 }
 
 /**
@@ -2078,34 +2266,32 @@ static void reload_pgd_and_flush(void *unused)
  * Will also update init_mm.context.node_pgds and pgds_nodemask as necessary.
  * Prints a warning if duplication failed.
  */
-int kernel_image_duplicate_page_range(void *_addr, size_t size,
-		bool page_tables_only)
+int kernel_image_duplicate_page_range(void *_addr, size_t size, bool page_tables_only)
 {
 	unsigned long addr = (unsigned long) _addr;
 	unsigned long end = addr + size;
 	int ret;
 	struct pool *pools[MAX_NUMNODES], *hpools[MAX_NUMNODES];
 	unsigned long flags;
+	DECLARE_BITMAP(duplication_node_mask, MAX_NUMNODES);
+
+	bitmap_clear(duplication_node_mask, 0, MAX_NUMNODES);
 
 	if (num_node_state(N_MEMORY) < 2)
 		return 0;
 
-	/* It seems that duplication does not make sense
-	 * on guest where memory nodes are virtual */
-	if (IS_ENABLED(CONFIG_KVM_GUEST_KERNEL) || size == 0)
+	if (!check_duplication(addr, size))
 		return 0;
 
-	might_sleep();
-	BUG_ON(addr > end || !PAGE_ALIGNED(addr) || !PAGE_ALIGNED(size));
+	calculate_duplication_thresholds(addr, end, true, !page_tables_only, duplication_node_mask);
+	if (find_first_bit(duplication_node_mask, MAX_NUMNODES) == MAX_NUMNODES) {
+		pr_alert_once("System has no memory for kernel duplication\n");
+		/* No memory can be duplicated; nothing critical, so do not return error */
+		return 0;
+	}
 
-	BUILD_BUG_ON(E2K_PT_LEVELS_NUM != 4);
-
-	/* page_to_nid() for memblock allocated pages will not work for
-	 * deferred pages (see CONFIG_DEFERRED_STRUCT_PAGE_INIT), so
-	 * avoid calling this function too early in the boot process. */
-	BUG_ON(!slab_is_available());
-
-	ret = alloc_duplication_pools(pools, hpools, addr, end, page_tables_only);
+	ret = alloc_duplication_pools(pools, hpools, addr, end, page_tables_only,
+				      duplication_node_mask);
 	if (ret) {
 		pr_info("Failed to allocate pools for duplication\n");
 		return ret;
@@ -2121,13 +2307,17 @@ int kernel_image_duplicate_page_range(void *_addr, size_t size,
 	 * 3) Duplicate all PMDs in range.
 	 * 4) Duplicate all PTEs in range.
 	 * 5) Duplicate actual data if requested. */
-	ret = call_duplication_for_each_memory_node(PT_LEVEL_PGD, addr, end, pools, hpools);
-	ret = ret ?: call_duplication_for_each_memory_node(PT_LEVEL_PUD, addr, end, pools, hpools);
-	ret = ret ?: call_duplication_for_each_memory_node(PT_LEVEL_PMD, addr, end, pools, hpools);
-	ret = ret ?: call_duplication_for_each_memory_node(PT_LEVEL_PTE, addr, end, pools, hpools);
+	ret = call_duplication_for_each_memory_node(PT_LEVEL_PGD, addr, end, pools, hpools,
+						    duplication_node_mask);
+	ret = ret ?: call_duplication_for_each_memory_node(PT_LEVEL_PUD, addr, end, pools, hpools,
+							   duplication_node_mask);
+	ret = ret ?: call_duplication_for_each_memory_node(PT_LEVEL_PMD, addr, end, pools, hpools,
+							   duplication_node_mask);
+	ret = ret ?: call_duplication_for_each_memory_node(PT_LEVEL_PTE, addr, end, pools, hpools,
+							   duplication_node_mask);
 	if (!ret && !page_tables_only)
 		ret = call_duplication_for_each_memory_node(PT_LEVEL_PAGES, addr, end,
-							    pools, hpools);
+							    pools, hpools, duplication_node_mask);
 
 	raw_spin_unlock_irqrestore(&kernel_pt_lock, flags);
 
@@ -2148,5 +2338,799 @@ int kernel_image_duplicate_page_range(void *_addr, size_t size,
 
 	return ret;
 }
+# ifdef CONFIG_TEST_KERNEL_PT_SYNC_MODULE
 EXPORT_SYMBOL(kernel_image_duplicate_page_range);
+# endif
+#endif /* CONFIG_NUMA */
+
+#ifdef CONFIG_E2K_MODULES_DUPLICATION
+static int alloc_pgd_pools(struct pool *pools[MAX_NUMNODES], unsigned long start, unsigned long end)
+{
+	int node;
+	unsigned long pool_capacity = 1; /* there is only one PGD page */
+
+	/* Zero pool pointers */
+	for (node = 0; node < MAX_NUMNODES; node++)
+		pools[node] = NULL;
+
+	for_each_node_state(node, N_MEMORY) {
+		pools[node] = pool_create(pool_capacity, 0, POOL_BUDDY, GFP_KERNEL, node);
+		if (!pools[node])
+			goto alloc_err;
+	}
+
+	return 0;
+
+alloc_err:
+	destroy_pools(pools);
+
+	return -ENOMEM;
+}
+
+/*
+ * This function duplicates PGD pages. It should be done before anything
+ * is mapped into modules area, because mapping to modules area relies on
+ * init_mm.context.pgds_nodemask bitmask.
+ */
+int duplicate_pgds_for_modules_area(void)
+{
+	unsigned long start = MODULES_VADDR, end = MODULES_END, size = end - start;
+	int ret = 0;
+	struct pool *pools[MAX_NUMNODES];
+	struct pool *hpools[MAX_NUMNODES] = {0};
+	unsigned long flags;
+	DECLARE_BITMAP(all_nodes, MAX_NUMNODES);
+
+	bitmap_set(all_nodes, 0, MAX_NUMNODES);
+
+	BUG_ON(MODULES_VADDR >= MODULES_END);
+
+	if (!check_duplication(start, size))
+		return 0;
+
+	ret = alloc_pgd_pools(pools, start, end);
+	if (ret) {
+		pr_info("Failed to allocate pools for duplication of PGD pages\n");
+		return ret;
+	}
+
+	raw_spin_lock_irqsave(&kernel_pt_lock, flags);
+
+	ret = call_duplication_for_each_memory_node(PT_LEVEL_PGD, start, end,
+						    pools, hpools, all_nodes);
+
+	raw_spin_unlock_irqrestore(&kernel_pt_lock, flags);
+
+	on_each_cpu(&reload_pgd_and_flush, NULL, 1);
+
+	flush_tlb_kernel_range(start, end);
+
+	destroy_pools(pools);
+
+	return ret;
+}
+
+static int duplicate_preallocated_pud_range(int node, p4d_t *p4d, unsigned long addr,
+					    unsigned long end, struct pool *pool)
+{
+	unsigned long next;
+	pud_t *pudp, *base_pud;
+	int ret = 0;
+
+	base_pud = (pud_t *) p4d_page_vaddr(*p4d);
+	ret = kernel_duplicate_pud_page(node, base_pud, p4d, pool);
+	if (ret)
+		return ret;
+
+	pudp = base_pud + pud_index(addr);
+	do {
+		if (!pud_none(*pudp)) {
+			/* We expect nothing to be mapped into modules area at the moment */
+			WARN(1, "Preallocated PUD page have not-none entry");
+			return -EINVAL;
+		}
+
+		next = pud_addr_end(addr, end);
+
+		++pudp;
+		addr = next;
+	} while (addr < end);
+
+	return 0;
+}
+
+static int duplicate_preallocated_p4d_range(int node, pgd_t *pgd, unsigned long addr,
+					    unsigned long end, struct pool *pool)
+{
+	p4d_t *p4d = p4d_offset(pgd, addr);
+	unsigned long next;
+	int ret;
+
+	do {
+		if (unlikely(p4d_none(*p4d) || kernel_p4d_huge(*p4d)))
+			return -EINVAL;
+
+		next = p4d_addr_end(addr, end);
+
+		ret = duplicate_preallocated_pud_range(node, p4d, addr, next, pool);
+		if (ret)
+			return ret;
+
+		++p4d;
+		addr = next;
+	} while (addr < end);
+
+	return 0;
+}
+
+static int duplicate_preallocated_pgd_range(int node, unsigned long addr, unsigned long end,
+					    struct pool *pool)
+{
+	pgd_t *pgd, *base_pgd;
+	unsigned long next;
+	int ret;
+
+	base_pgd = init_mm.context.node_pgds[node];
+	if (node != page_to_nid(virt_to_page(base_pgd))) {
+		WARN(1, "PGD page must be already duplicated");
+		return -EINVAL;
+	}
+
+	pgd = base_pgd + pgd_index(addr);
+	do {
+		BUG_ON(pgd_none(*pgd));
+
+		next = pgd_addr_end(addr, end);
+
+		ret = duplicate_preallocated_p4d_range(node, pgd, addr, next, pool);
+		if (ret)
+			return ret;
+	} while (pgd++, addr = next, addr != end);
+
+	return 0;
+}
+
+static int alloc_preallocated_pgd_pools(struct pool *pools[MAX_NUMNODES],
+					unsigned long start, unsigned long end)
+{
+	int node;
+	unsigned long pool_capacity = pt_pages_nr(start, end, P4D_SHIFT);
+
+	/* Zero pool pointers */
+	for (node = 0; node < MAX_NUMNODES; node++)
+		pools[node] = NULL;
+
+	for_each_node_state(node, N_MEMORY) {
+		if (pool_capacity) {
+			pools[node] = pool_create(pool_capacity, 0, POOL_BUDDY, GFP_KERNEL, node);
+			if (!pools[node])
+				goto alloc_err;
+		}
+	}
+
+	return 0;
+
+alloc_err:
+	destroy_pools(pools);
+
+	return -ENOMEM;
+}
+
+int duplicate_preallocated_pgds_for_modules_area(void)
+{
+	unsigned long start = MODULES_VADDR, end = MODULES_END, size = end - start;
+	int node, ret = 0;
+	struct pool *pools[MAX_NUMNODES];
+	unsigned long flags;
+
+	BUG_ON(MODULES_VADDR >= MODULES_END);
+
+	if (!check_duplication(start, size))
+		return 0;
+
+	/* No problem of preallocated pgds if kernel and user have separate PTs */
+	if (MMU_IS_SEPARATE_PT())
+		return 0;
+
+	ret = alloc_preallocated_pgd_pools(pools, start, end);
+	if (ret) {
+		pr_info("Failed to allocate pools for duplication of preallocated pgds\n");
+		return ret;
+	}
+
+	raw_spin_lock_irqsave(&kernel_pt_lock, flags);
+
+	/*
+	 * duplicate_preallocated_pgd_range() function assumes that PGD pages
+	 * are already duplicated. They are duplicated earlier, see
+	 * duplicate_pgds_for_modules_area().
+	 */
+
+	for_each_node_mm_pgdmask(node, &init_mm) {
+		ret = duplicate_preallocated_pgd_range(node, start, end, pools[node]);
+		if (ret)
+			break;
+	}
+
+	raw_spin_unlock_irqrestore(&kernel_pt_lock, flags);
+
+	/*
+	 * Error may occur during duplications of PUD level while PGD level
+	 * was duplicated successfully, so update PT root pointers and flush TLBs
+	 * regardless of whether there is an error.
+	 */
+	on_each_cpu(&reload_pgd_and_flush, NULL, 1);
+
+	flush_tlb_kernel_range(start, end);
+
+	destroy_pools(pools);
+
+	return ret;
+}
+
+struct module_pages {
+	/*
+	 * If true, module pages duplication is going on;
+	 * otherwise deduplication is going on.
+	 */
+	bool is_duplicate;
+	/*
+	 * List of page_duplication structures that describe original pages
+	 * and their copies. New entries are added to this list during the
+	 * duplication of module pages and removed during deduplication.
+	 */
+	struct list_head *duplicated_pages;
+
+	union {
+		/* Use when is_duplicate == true */
+		struct {
+			/* pool of small pages */
+			struct pool *pool;
+			/* pool of huge pages */
+			struct pool *hpool;
+			/* pool of page_duplication structures */
+			struct pool *pdpool;
+		};
+		/* Use when is_duplicate == false */
+		struct {
+			/*
+			 * List of data to be freed after kernel_pt_lock is released.
+			 * List entries are page_duplication structures removed from
+			 * 'duplicated_pages' with a pointer to small or huge page
+			 * that also must be freed after kernel_pt_lock is released.
+			 */
+			struct list_head *pdlist;
+		};
+	};
+};
+
+static int module_duplicate_one_page(int node, pte_t *ptep, struct module_pages *module_pages)
+{
+	int page_node = page_to_nid(pte_page(*ptep));
+	void *dup_addr;
+	struct page_duplication *item;
+
+	BUG_ON(!module_pages->is_duplicate);
+
+	if (page_node != node) {
+		dup_addr = sma_alloc_page__pool(module_pages->pool, node, PT_LEVEL_PAGES);
+		if (!dup_addr)
+			return -ENOMEM;
+
+		item = pool_get(module_pages->pdpool);
+		if (!item) {
+			pool_put(module_pages->pool, dup_addr);
+			return -ENOMEM;
+		}
+
+		tagged_memcpy_8(dup_addr, (void *) pte_page_vaddr(*ptep), PTE_SIZE);
+
+		smp_wmb(); /* See comment in pmd_install() */
+
+		item->orig = pte_page(*ptep);
+		item->copy = virt_to_page(dup_addr);
+		item->is_huge = false;
+		set_pte(ptep, mk_pte_phys(__pa(dup_addr), pte_pgprot(*ptep)));
+
+		list_add(&item->list, module_pages->duplicated_pages);
+	}
+
+	return 0;
+}
+
+static int module_deduplicate_one_page(pte_t *ptep, struct module_pages *module_pages)
+{
+	struct page_duplication *item;
+
+	BUG_ON(module_pages->is_duplicate);
+
+	item = find_page_in_duplicated_pages_list(module_pages->duplicated_pages, pte_page(*ptep));
+	if (item) {
+		BUG_ON(item->is_huge);
+
+		set_pte(ptep, mk_pte_phys(page_to_phys(item->orig), pte_pgprot(*ptep)));
+
+		list_move(&item->list, module_pages->pdlist);
+	}
+
+	return 0;
+}
+
+static int handle_module_pages_pte_range(int node, pmd_t *pmd, unsigned long addr,
+					 unsigned long end, struct module_pages *module_pages)
+{
+	pte_t *ptep, *base_pte;
+	int ret;
+
+	base_pte = (pte_t *) pmd_page_vaddr(*pmd);
+	if (node != page_to_nid(virt_to_page(base_pte))) {
+		WARN(1, "PTE page is located on incorrect node");
+		return -EINVAL;
+	}
+
+	ptep = base_pte + pte_index(addr);
+	do {
+		if (pte_none(*ptep))
+			return -EINVAL;
+
+		if (module_pages->is_duplicate)
+			ret = module_duplicate_one_page(node, ptep, module_pages);
+		else
+			ret = module_deduplicate_one_page(ptep, module_pages);
+		if (ret)
+			return ret;
+	} while (ptep++, addr += PAGE_SIZE, addr < end);
+
+	return 0;
+}
+
+static int module_duplicate_huge_pmd(int node, pmd_t *pmd, struct module_pages *module_pages)
+{
+	int hpage_node = page_to_nid(pmd_page(*pmd));
+	void *dup_addr;
+	struct page_duplication *item;
+
+	BUG_ON(!module_pages->is_duplicate);
+
+	if (hpage_node != node) {
+		dup_addr = sma_alloc_page__pool(module_pages->hpool, node, PT_LEVEL_PAGES);
+		if (!dup_addr)
+			return -ENOMEM;
+
+		BUG_ON(!IS_ALIGNED((unsigned long)dup_addr, PMD_SIZE));
+
+		item = pool_get(module_pages->pdpool);
+		if (!item) {
+			pool_put(module_pages->hpool, dup_addr);
+			return -ENOMEM;
+		}
+
+		tagged_memcpy_8(dup_addr, (void *) pmd_page_vaddr(*pmd), PMD_SIZE);
+
+		smp_wmb(); /* See comment in pmd_install() */
+
+		item->orig = pmd_page(*pmd);
+		item->copy = dup_addr;
+		item->is_huge = true;
+		set_pmd(pmd, pmd_mkhuge(mk_pmd_phys(__pa(dup_addr), pmd_pgprot(*pmd))));
+
+		list_add(&item->list, module_pages->duplicated_pages);
+	}
+
+	return 0;
+}
+
+static int module_deduplicate_huge_pmd(pmd_t *pmdp, struct module_pages *module_pages)
+{
+	struct page_duplication *item;
+
+	BUG_ON(module_pages->is_duplicate);
+
+	item = find_page_in_duplicated_pages_list(module_pages->duplicated_pages, pmd_page(*pmdp));
+	if (item) {
+		BUG_ON(!item->is_huge);
+
+		set_pmd(pmdp, pmd_mkhuge(mk_pmd_phys(page_to_phys(item->orig), pmd_pgprot(*pmdp))));
+
+		list_move(&item->list, module_pages->pdlist);
+	}
+
+	return 0;
+}
+
+static int handle_module_pages_pmd_range(int node, pud_t *pud, unsigned long addr,
+					 unsigned long end, struct module_pages *module_pages)
+{
+	pmd_t *pmdp, *base_pmd;
+	unsigned long next;
+	e2k_size_t page_size;
+	int ret;
+
+	base_pmd = (pmd_t *) pud_page_vaddr(*pud);
+	if (node != page_to_nid(virt_to_page(base_pmd))) {
+		WARN(1, "PMD page is located on incorrect node");
+		return -EINVAL;
+	}
+
+	pmdp = base_pmd + pmd_index(addr);
+	do {
+		if (pmd_none(*pmdp))
+			return -EINVAL;
+
+		next = pmd_addr_end(addr, end);
+
+		if (!kernel_pmd_huge(*pmdp)) {
+			ret = handle_module_pages_pte_range(node, pmdp, addr, next, module_pages);
+		} else {
+			page_size = get_pmd_level_page_size();
+			if (!IS_ALIGNED(addr, page_size) || addr + page_size > next) {
+				WARN(1, "Huge PMD page should be split already");
+				return -EINVAL;
+			}
+			if (module_pages->is_duplicate)
+				ret = module_duplicate_huge_pmd(node, pmdp, module_pages);
+			else
+				ret = module_deduplicate_huge_pmd(pmdp, module_pages);
+		}
+		if (ret)
+			return ret;
+
+		++pmdp;
+		addr = next;
+	} while (addr < end);
+
+	return 0;
+}
+
+static int handle_module_pages_pud_range(int node, p4d_t *p4d, unsigned long addr,
+					 unsigned long end, struct module_pages *module_pages)
+{
+	unsigned long next;
+	pud_t *pudp, *base_pud;
+	e2k_size_t page_size;
+
+	base_pud = (pud_t *) p4d_page_vaddr(*p4d);
+	if (node != page_to_nid(virt_to_page(base_pud))) {
+		WARN(1, "PUD page is located on incorrect node");
+		return -EINVAL;
+	}
+
+	pudp = base_pud + pud_index(addr);
+	do {
+		if (pud_none(*pudp))
+			return -EINVAL;
+
+		next = pud_addr_end(addr, end);
+
+		if (!kernel_pud_huge(*pudp)) {
+			int ret = handle_module_pages_pmd_range(node, pudp, addr, next,
+								module_pages);
+
+			if (ret)
+				return ret;
+		} else {
+			page_size = get_pud_level_page_size();
+			if (addr & (page_size - 1) || addr + page_size > next) {
+				WARN(1, "Huge PUD page should be split already");
+				return -EINVAL;
+			}
+
+			/*
+			 * Huge PUD pages are not duplicated. Getting here is a bug for
+			 * modules area, because it should be fully duplicated.
+			 */
+			BUG();
+		}
+		++pudp;
+		addr = next;
+	} while (addr < end);
+
+	return 0;
+}
+static int handle_module_pages_p4d_range(int node, pgd_t *pgd, unsigned long addr,
+					 unsigned long end, struct module_pages *module_pages)
+{
+	p4d_t *p4d = p4d_offset(pgd, addr);
+	unsigned long next;
+	int ret;
+
+	do {
+		if (unlikely(p4d_none(*p4d) || kernel_p4d_huge(*p4d)))
+			return -EINVAL;
+
+		next = p4d_addr_end(addr, end);
+
+		ret = handle_module_pages_pud_range(node, p4d, addr, next, module_pages);
+		if (ret)
+			return ret;
+	} while (p4d++, addr = next, addr < end);
+
+	return 0;
+}
+
+static int handle_module_pages_pgd_range(int node, unsigned long addr, unsigned long end,
+					 struct module_pages *module_pages)
+{
+	pgd_t *pgd, *base_pgd;
+	unsigned long next;
+	int ret;
+
+	base_pgd = init_mm.context.node_pgds[node];
+	if (node != page_to_nid(virt_to_page(base_pgd))) {
+		WARN(1, "PGD page is located on incorrect node");
+		return -EINVAL;
+	}
+
+	pgd = base_pgd + pgd_index(addr);
+
+	do {
+		BUG_ON(pgd_none(*pgd));
+
+		next = pgd_addr_end(addr, end);
+
+		ret = handle_module_pages_p4d_range(node, pgd, addr, next, module_pages);
+		if (ret)
+			return ret;
+	} while (pgd++, addr = next, addr != end);
+
+	return 0;
+}
+
+static int alloc_module_pages_pools(struct pool *pools[MAX_NUMNODES],
+				    struct pool *hpools[MAX_NUMNODES],
+				    unsigned long start, unsigned long end,
+				    unsigned long *node_mask)
+{
+	int node;
+	unsigned long pool_capacity = (end - start) >> PAGE_SHIFT;
+	unsigned long hpool_capacity = duplication_pool_huge_pages(start, end, false);
+
+	/* Zero pool pointers */
+	for (node = 0; node < MAX_NUMNODES; node++) {
+		pools[node] = NULL;
+		hpools[node] = NULL;
+	}
+
+	for_each_node_mm_pgdmask(node, &init_mm) {
+		if (!test_bit(node, node_mask))
+			continue;
+
+		if (pool_capacity) {
+			pools[node] = pool_create(pool_capacity, 0, POOL_BUDDY, GFP_KERNEL, node);
+			if (!pools[node])
+				goto alloc_err;
+		}
+
+		if (hpool_capacity) {
+			hpools[node] = pool_create(hpool_capacity,
+						   E2K_LARGE_PAGE_SHIFT - PAGE_SHIFT,
+						   POOL_BUDDY, GFP_KERNEL, node);
+			if (!hpools[node])
+				goto alloc_err;
+		}
+	}
+
+	return 0;
+
+alloc_err:
+	destroy_pools(pools);
+	destroy_pools(hpools);
+
+	return -ENOMEM;
+}
+
+static void free_pdlist(struct list_head *pdlist)
+{
+	struct page_duplication *item, *tmp;
+
+	list_for_each_entry_safe(item, tmp, pdlist, list) {
+		if (item->is_huge)
+			__free_pages(item->copy, get_order(PMD_SIZE));
+		else
+			sma_free_page__no_pool(PT_LEVEL_PAGES, page_to_virt(item->copy));
+
+		list_del(&item->list);
+		kfree(item);
+	}
+}
+
+static unsigned int handle_module_pages(unsigned long addr, unsigned long end,
+					bool duplicate, struct list_head *duplicated_pages,
+					unsigned long *node_mask)
+{
+	int node, ret = 0;
+	struct pool *pools[MAX_NUMNODES], *hpools[MAX_NUMNODES], *pdpool;
+	LIST_HEAD(pdlist);
+	unsigned long flags;
+
+	if (duplicate) {
+		ret = alloc_module_pages_pools(pools, hpools, addr, end, node_mask);
+		if (ret) {
+			pr_info("Failed to allocate pools for module pages\n");
+			return ret;
+		}
+
+		/*
+		 * No problem if we don't take into account the node_mask and allocate
+		 * a bit more page_duplication structures than we actually need.
+		 */
+		pdpool = pool_create(((end - addr) >> PAGE_SHIFT) * num_node_state(N_MEMORY),
+				     sizeof(struct page_duplication), POOL_SLAB, GFP_KERNEL,
+				     NUMA_NO_NODE);
+		if (!pdpool) {
+			pr_info("Failed to allocate pools for module pages\n");
+			destroy_pools(pools);
+			destroy_pools(hpools);
+			return -ENOMEM;
+		}
+	}
+
+	raw_spin_lock_irqsave(&kernel_pt_lock, flags);
+
+	for_each_node_mm_pgdmask(node, &init_mm) {
+		struct module_pages module_pages;
+
+		if (duplicate && !test_bit(node, node_mask))
+			continue;
+
+		module_pages.is_duplicate = duplicate;
+		module_pages.duplicated_pages = duplicated_pages;
+
+		if (duplicate) {
+			module_pages.pool = pools[node];
+			module_pages.hpool = hpools[node];
+			module_pages.pdpool = pdpool;
+		} else {
+			module_pages.pdlist = &pdlist;
+		}
+
+		ret = handle_module_pages_pgd_range(node, addr, end, &module_pages);
+		if (ret)
+			break;
+	}
+
+	raw_spin_unlock_irqrestore(&kernel_pt_lock, flags);
+
+	/* Flush TLB before freeing deduplicated pages */
+	flush_tlb_kernel_range(addr, end);
+
+	if (duplicate) {
+		destroy_pools(pools);
+		destroy_pools(hpools);
+		pool_destroy(pdpool);
+	} else {
+		/*
+		 * Free pages and page_duplication structures after kernel_pt_lock
+		 * is released because freeing can call set_memory_*() and cause
+		 * a deadlock on kernel_pt_lock.
+		 */
+		free_pdlist(&pdlist);
+	}
+
+	return ret;
+}
+
+/**
+ * duplicate_module_pages - duplicate pages in given module memory range.
+ * @_addr - start address
+ * @size - size of memory area in bytes
+ * @duplicated_pages - module's list of duplicated pages
+ *
+ * Page table for the module was duplicated while mapping. This function
+ * is used to duplicate module's pages. Also, we have to save pairs
+ * (page copy, original page) for each duplicated page to the list
+ * 'duplicated_pages'.
+ */
+int duplicate_module_pages(void *_addr, size_t size, struct list_head *duplicated_pages)
+{
+	unsigned long addr = (unsigned long) _addr;
+	unsigned long end = addr + size;
+	int ret;
+	DECLARE_BITMAP(duplication_node_mask, MAX_NUMNODES);
+
+	memset(duplication_node_mask, 0, sizeof(duplication_node_mask));
+
+	if (kernel_duplicated_nodes_num() < 2)
+		return 0;
+
+	if (!check_duplication(addr, size))
+		return 0;
+
+	calculate_duplication_thresholds(addr, end, false, true, duplication_node_mask);
+	if (find_first_bit(duplication_node_mask, MAX_NUMNODES) == MAX_NUMNODES) {
+		pr_alert_once("System has no memory for modules duplication\n");
+		/* No memory can be duplicated; nothing critical, so do not return error */
+		return 0;
+	}
+
+	/* This function should be called only on modules area */
+	if (addr < MODULES_VADDR || end > MODULES_END) {
+		WARN(1, "Incorrect range for duplication: [0x%lx, 0x%lx)", addr, end);
+		return -EINVAL;
+	}
+
+	ret = handle_module_pages(addr, end, true, duplicated_pages, duplication_node_mask);
+
+	return ret;
+}
+# ifdef CONFIG_TEST_KERNEL_PT_SYNC_MODULE
+EXPORT_SYMBOL(duplicate_module_pages);
+# endif
+
+/**
+ * deduplicate_module_pages - deduplicate pages in given module memory range.
+ * @_addr - start address
+ * @size - size of memory area in bytes
+ * @duplicated_pages - module's list of duplicated pages
+ *
+ * This function traverses module's page table, finds PTE entries pointing to
+ * duplicated pages and makes them point to original pages. Page is assumed
+ * to be duplicated if it is found in list of duplicated pages in 'mod'.
+ * Duplicated pages are then freed. Original pages are unmapped and freed
+ * later when module memory is vfree()'ed.
+ */
+void deduplicate_module_pages(void *_addr, size_t size, struct list_head *duplicated_pages)
+{
+	unsigned long addr = (unsigned long) _addr, end = addr + size;
+
+	if (kernel_duplicated_nodes_num() < 2)
+		return;
+
+	if (!check_duplication(addr, size))
+		return;
+
+	/* This function should be called only on modules area */
+	if (addr < MODULES_VADDR || end > MODULES_END) {
+		WARN(1, "Incorrect range for deduplication: [0x%lx, 0x%lx)", addr, end);
+		return;
+	}
+
+	handle_module_pages(addr, end, false, duplicated_pages, NULL);
+}
+# ifdef CONFIG_TEST_KERNEL_PT_SYNC_MODULE
+EXPORT_SYMBOL(deduplicate_module_pages);
+# endif
+#endif /* CONFIG_E2K_MODULES_DUPLICATION */
+
+#ifdef CONFIG_ARCH_HAS_SET_DIRECT_MAP
+int set_direct_map_invalid_noflush(struct page *page)
+{
+	unsigned long addr = (unsigned long)page_address(page);
+	return set_memory_np_noflush(addr, 1);
+}
+
+int set_direct_map_default_noflush(struct page *page)
+{
+	unsigned long addr = (unsigned long)page_address(page);
+
+	if (IS_ENABLED(CONFIG_SEMI_SPECULATIVE_KERNEL)) {
+		/*
+		 * We cannot fully support this API without flushes
+		 * because semi-speculative loads will:
+		 * - PTE.valid=0: cache in TLB
+		 * - PTE.valid=1 & PTE.present=0: trigger page fault
+		 *
+		 * So there is no invalid PTE value without side effects.
+		 */
+		return set_memory_p(addr, 1);
+	} else {
+		return set_memory_p_noflush(addr, 1);
+	}
+}
+
+/*
+ * Used:
+ *
+ * 1) When built with CONFIG_DEBUG_PAGEALLOC and CONFIG_HIBERNATION, this
+ * function is used to determine if a linear map page has been marked as
+ * not-valid by CONFIG_DEBUG_PAGEALLOC.
+ *
+ * 2) By hibernation to skip kfence's guard pages.
+ */
+bool kernel_page_present(struct page *page)
+{
+	unsigned long addr = (unsigned long) page_address(page);
+	probe_entry_t entry = get_MMU_DTLB_ENTRY(addr);
+	return DTLB_ENTRY_TEST_SUCCESSFUL(entry) && DTLB_ENTRY_TEST_VVA(entry);
+}
 #endif

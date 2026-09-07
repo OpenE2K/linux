@@ -72,6 +72,25 @@ typedef	union wd_counter_h {
 } wd_counter_h_t;
 
 #define WD_LIMIT		0x18
+
+#undef	POWER_COUNTER_L
+#define POWER_COUNTER_L		0x1c
+typedef	union power_counter_l {
+	u32	reg;
+	struct {			/* as fields */
+		u32	pw_c	: 32;	/* [31:0] */
+	};
+} power_counter_l_t;
+
+#undef	POWER_COUNTER_H
+#define POWER_COUNTER_H		0x20
+typedef	union power_counter_h {
+	u32	reg;
+	struct {			/* as fields */
+		u32	pw_c	: 32;	/* [31:0] */
+	};
+} power_counter_h_t;
+#define	POWER_COUNTER		POWER_COUNTER_L
 typedef	union wd_limit {
 	u32	reg;
 	struct {			/* as fields */
@@ -80,7 +99,7 @@ typedef	union wd_limit {
 } wd_limit_t;
 
 #undef	WD_CONTROL
-#define WD_CONTROL		0x1c
+#define WD_CONTROL		0x24
 typedef union wd_control {
 	u32	reg;
 	struct {			/* as fields */
@@ -92,7 +111,7 @@ typedef union wd_control {
 } wd_control_t;
 
 #undef	RESET_COUNTER_L
-#define RESET_COUNTER_L		0x20
+#define RESET_COUNTER_L		0x28
 typedef	union reset_counter_l {
 	u32	reg;
 	struct {			/* as fields */
@@ -101,7 +120,7 @@ typedef	union reset_counter_l {
 } reset_counter_l_t;
 
 #undef	RESET_COUNTER_H
-#define RESET_COUNTER_H		0x24
+#define RESET_COUNTER_H		0x2c
 typedef	union reset_counter_h {
 	u32	reg;
 	struct {			/* as fields */
@@ -110,26 +129,7 @@ typedef	union reset_counter_h {
 } reset_counter_h_t;
 #define	RESET_COUNTER		RESET_COUNTER_L
 
-#undef	POWER_COUNTER_L
-#define POWER_COUNTER_L		0x28
-typedef	union power_counter_l {
-	u32	reg;
-	struct {			/* as fields */
-		u32	pw_c	: 32;	/* [31:0] */
-	};
-} power_counter_l_t;
-
-#undef	POWER_COUNTER_H
-#define POWER_COUNTER_H		0x2c
-typedef	union power_counter_h {
-	u32	reg;
-	struct {			/* as fields */
-		u32	pw_c	: 32;	/* [31:0] */
-	};
-} power_counter_h_t;
-#define	POWER_COUNTER		POWER_COUNTER_L
-
-#define	LT_MMIO_LENGTH		(POWER_COUNTER_H + 4)
+#define	LT_MMIO_LENGTH		(RESET_COUNTER_H + 4)
 
 typedef enum lt_irq_map {
 	SYS_TIMER_IRQ_ID	=  2,

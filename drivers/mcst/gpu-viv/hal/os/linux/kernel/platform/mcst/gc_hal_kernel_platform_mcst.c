@@ -129,6 +129,10 @@ _AdjustParam (
 		if (nr_vecs > gcvCORE_COUNT)
 			nr_vecs = gcvCORE_COUNT;	
 
+		/* r2000+ is a video card(prototype) */
+		if (pdev->subsystem_device == 4)
+			nr_vecs = 1;
+
 		ret = pci_alloc_irq_vectors(pdev,
 			       	nr_vecs, nr_vecs, PCI_IRQ_MSIX);
 		if (ret < 0) {
@@ -166,7 +170,8 @@ _AdjustParam (
 			region_base += region_length;
 		}
 		/* if r2000+ is a video card */
-		if (pdev->subsystem_device == 3) {
+		if ((pdev->subsystem_device == 3) ||
+			(pdev->subsystem_device == 4)) {
 			dma_allocator_enable = 1;
 			Platform->flagBits |= gcvPLATFORM_FLAG_LIMIT_4G_ADDRESS;
 
@@ -210,6 +215,10 @@ static gceSTATUS _GetPower(IN gcsPLATFORM * Platform)
 		if (s1_proto)
 			return gcvSTATUS_OK;
 
+		/* r2000+ is a video card(prototype) */
+		if (pdev->subsystem_device == 4)
+			return gcvSTATUS_OK;
+
 		/* Signal to PMC to turn power ON */
 		pci_read_config_dword(pdev, vcfg_offset, &pdata);
 		pdata = pdata & ~0x00000008;
@@ -232,6 +241,10 @@ static gceSTATUS _PutPower(IN gcsPLATFORM * Platform)
 			return gcvSTATUS_OK;
 
 		if (s1_proto)
+			return gcvSTATUS_OK;
+
+		/* r2000+ is a video card(prototype) */
+		if (pdev->subsystem_device == 4)
 			return gcvSTATUS_OK;
 
 		if (Platform->flagBits & gcvPLATFORM_FLAG_PMC_POWER_ON) {
@@ -386,13 +399,33 @@ int gckPLATFORM_Init(struct platform_driver *pdrv,
         return -ENODEV;
 
 #ifdef DEBUG
-    gcmkPRINT("galcore: build: " __DATE__ " " __TIME__ "\n");
 #ifdef __HASH__
     gcmkPRINT("galcore: hash: " __HASH__ "\n");
 #endif
 #endif
     gcmkPRINT("galcore: ven 0x%x dev 0x%x\n",
               pciidlist[i].vendor, pciidlist[i].device);
+
+    if (pdev->dev.bus->dma_configure) {
+        struct pci_driver driver = { };
+        if (!pdev->dev.driver) /*HACK: dma_configure() uses the pointer*/
+            pdev->dev.driver = &driver.driver;
+
+        /* Bind iommu. Normally it is done just before pci-probe call,
+           but galcore is not pci driver */
+        ret = pdev->dev.bus->dma_configure(&pdev->dev);
+        if (pdev->dev.driver == &driver.driver)
+            pdev->dev.driver = NULL;
+        if (ret)
+            return ret;
+    }
+    /* Bind irq. Normally it is done just before pci-probe call,
+       but galcore is not pci driver */
+    ret = pcibios_alloc_irq(pdev);
+    if (ret < 0) {
+        pr_err("galcore: pcibios_alloc_irq failed.\n");
+	return ret;
+    }
 
     ret = pci_enable_device(pdev);
     if (ret < 0) {
@@ -401,7 +434,8 @@ int gckPLATFORM_Init(struct platform_driver *pdrv,
 
 #if defined(CONFIG_E90S)
 	/* if r2000+ is a video card */
-	if (pdev->subsystem_device == 3) {
+	if ((pdev->subsystem_device == 3) ||
+		(pdev->subsystem_device == 4)) {
 		/* 
 	 	 * It has to be done before turning the Bus Master on.
 		 */

@@ -199,7 +199,7 @@ static ssize_t wp_write(struct file *file, const char __user *buf,
        if (c == 'A') {
 	       print_IO_PICs();
 	       print_local_pics(true);
-               return count;
+	       return count;
        }
 #endif
 

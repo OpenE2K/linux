@@ -63,14 +63,6 @@ int mpv_debug_more = 0;
 #define SBUS_DEV 	1
 #define PCI_DEV  	2
 
-static int pirq = 0;
-module_param(pirq , int , 0);
-MODULE_PARM_DESC(pirq, "Used for set PIRQ=0,1,2,3 (A, B, C, D). Default =0");
-
-static int mpv_status[MAX_MPV_INSTANCES] = {[0 ... MAX_MPV_INSTANCES - 1] = 2};
-module_param_array(mpv_status, int, NULL, 0444);
-MODULE_PARM_DESC(mpv_status, " Array: 0 - disable, 1 - enable, other - use devtree");
-
 atomic_t mpv_instances = ATOMIC_INIT(0);
 
 static struct pci_dev *cur_pdev;
@@ -108,11 +100,9 @@ static int get_mpv_instance(int major, int minor, int *bus) {
 static struct class *mpv_class = NULL;
 static int rev_module_param = -1;
 
-#ifdef CONFIG_PCI
-static int mpv_pci_probe(struct pci_dev *pdev,
-			const struct pci_device_id *pci_ent);
-static void mpv_pci_remove(struct pci_dev *pci_dev);
-#endif
+static int mpv_probe(struct platform_device *pl_dev);
+static int mpv_remove(struct platform_device *pl_dev);
+static void mpv_shutdown(struct platform_device *pl_dev);
 
 static	int	mpv_open(struct inode *inode, struct file *file);
 static  ssize_t mpv_read (struct file *file, char *buf, size_t sz, loff_t *f_pos);
@@ -128,7 +118,6 @@ static int mpv_check_initial_value_reg(mpv_state_t *mpv_st);
 static irqreturn_t mpv_intr_handler(int irq, void *arg);
 static irqreturn_t mpv_threaded_handler(int irq, void *arg);
 static void mpv_reset_module(mpv_state_t *mpv_st);
-static void mpv_shutdown(struct pci_dev *dev);
 static int mpv_send_pps(u32 bus, int enable);
 static int mpv_get_freq(u32 bus);
 
@@ -147,6 +136,9 @@ static struct file_operations mpv_fops = {
 	unlocked_ioctl:	mpv_ioctl,
 #ifdef CONFIG_COMPAT
 	compat_ioctl:	mpv_compat_ioctl,
+#endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	ptr128_ioctl :	mpv_ioctl,
 #endif
 };
 
@@ -227,26 +219,21 @@ static long long get_usec_tod(void) {
 	return retval;
 }
 
-
-#ifdef CONFIG_PCI
-static struct pci_device_id mpv_pci_tbl[] = {
-	{ 0x5453, MPV_CARD_DEVID, PCI_ANY_ID, PCI_ANY_ID, },
-	{ 0x1fff, MPV_KPI2_DEVID, PCI_ANY_ID, },
-	{ 0x1fff, MPV_EIOH_DEVID, PCI_ANY_ID, },
-	{ 0x1fff, MPV4_DEVID, PCI_ANY_ID, },
-	{ 0, }
+static const struct of_device_id mpv_of_match[] = {
+	{ .compatible = "mcst,mpv", },
+	{ /* sentinel */ }
 };
+MODULE_DEVICE_TABLE(of, mpv_of_match);
 
-MODULE_DEVICE_TABLE(pci, mpv_pci_tbl);
-
-static struct pci_driver mpv_pci_driver = {
-	.name =     MPV_NAME,
-	.probe =    mpv_pci_probe,
-	.remove =   mpv_pci_remove,
+static struct platform_driver mpv_driver = {
+	.probe =    mpv_probe,
+	.remove =   mpv_remove,
 	.shutdown = mpv_shutdown,
-	.id_table = mpv_pci_tbl,
+	.driver = {
+		.name = MPV_NAME,
+		.of_match_table = mpv_of_match,
+	}
 };
-#endif
 
 static struct pci2instance {
 	unsigned char domain, bus, slot, func;
@@ -268,12 +255,12 @@ mpv_init(void)
 	}
 #ifdef CONFIG_PCI
 	{
-		int	res_pci = pci_register_driver(&mpv_pci_driver);
-		if (!res_pci) {
+		int	res_p = platform_driver_register(&mpv_driver);
+		if (!res_p) {
 			res = 0; /* pci is main */
 		} else {
-			pr_info("MPV PCI register error=%d\n", res_pci);
-			res = res_pci;
+			pr_info("MPV PCI register error=%d\n", res_p);
+			res = res_p;
 		}
 	}
 #endif
@@ -286,9 +273,8 @@ mpv_exit(void)
 {
 	dbgmpv("********* MPV_EXIT: START *********\n");
 
-#ifdef CONFIG_PCI
-	pci_unregister_driver(&mpv_pci_driver);
-#endif
+	platform_driver_unregister(&mpv_driver);
+
 	if (!mpv_class || IS_ERR(mpv_class)) {
 		pr_err("Error mpv_class=%p\n", mpv_class);
 	}
@@ -300,7 +286,7 @@ mpv_exit(void)
 }
 
 static int
-mpv_common_probe(struct device *dev, struct pci_dev *pdev, mpv_state_t **mpv_stp,
+mpv_common_probe(struct pci_dev *pci_dev, mpv_state_t **mpv_stp,
 		void *r_base, int mpv_new, int revision_id, int dev_type)
 {
 	mpv_state_t	*mpv_st;
@@ -313,7 +299,7 @@ mpv_common_probe(struct device *dev, struct pci_dev *pdev, mpv_state_t **mpv_stp
 	struct device	*device;
 	s64 start_tm1, start_tm2, fin_tm1, fin_tm2, measure_time_ns;
 
-	if (!pdev) {
+	if (!pci_dev) {
 		instance = atomic_inc_return(&mpv_instances) - 1;
 		if (instance >= MAX_MPV_INSTANCES) {
 			pr_err("MPV: number of instances > MAX_MPV_INSTANCES=%d\n",
@@ -323,10 +309,10 @@ mpv_common_probe(struct device *dev, struct pci_dev *pdev, mpv_state_t **mpv_stp
 		goto got_inst;
 	}
 	for (instance = 0; instance < (atomic_read(&mpv_instances) ? : 1); instance++) {
-		if (pci2instance[instance].domain == pci_domain_nr(pdev->bus) &&
-			pci2instance[instance].bus == pdev->bus->number &&
-			pci2instance[instance].slot == PCI_SLOT(pdev->devfn) &&
-			pci2instance[instance].func == PCI_FUNC(pdev->devfn)) {
+		if (pci2instance[instance].domain == pci_domain_nr(pci_dev->bus) &&
+			pci2instance[instance].bus == pci_dev->bus->number &&
+			pci2instance[instance].slot == PCI_SLOT(pci_dev->devfn) &&
+			pci2instance[instance].func == PCI_FUNC(pci_dev->devfn)) {
 			goto got_inst;
 		}
 	}
@@ -336,21 +322,12 @@ mpv_common_probe(struct device *dev, struct pci_dev *pdev, mpv_state_t **mpv_stp
 			MAX_MPV_INSTANCES);
 		return 1;
 	}
-	pci2instance[instance].domain = pci_domain_nr(pdev->bus);
-	pci2instance[instance].bus = pdev->bus->number;
-	pci2instance[instance].slot = PCI_SLOT(pdev->devfn);
-	pci2instance[instance].func = PCI_FUNC(pdev->devfn);
+	pci2instance[instance].domain = pci_domain_nr(pci_dev->bus);
+	pci2instance[instance].bus = pci_dev->bus->number;
+	pci2instance[instance].slot = PCI_SLOT(pci_dev->devfn);
+	pci2instance[instance].func = PCI_FUNC(pci_dev->devfn);
 
 got_inst:
-	if (mpv_status[instance] == 1) {
-		dev_info(dev, "device %d enabled in cmdline\n", instance);
-	} else if (mpv_status[instance] == 0) {
-		dev_info(dev, "device %d disabled in cmdline\n", instance);
-		return -ECANCELED;
-	} else if (dev->of_node && !of_device_is_available(dev->of_node)) {
-		dev_info(dev, "device %d disabled in device tree\n", instance);
-		return -ECANCELED;
-	}
 	mpv_st = kmalloc(sizeof(mpv_state_t), GFP_KERNEL);
 	if ( mpv_st == NULL )
 		return 1;
@@ -590,7 +567,7 @@ mpv_common_remove(mpv_state_t *mpv_st)
 
 #ifdef CONFIG_PCI
 static void
-_mpv_pci_remove(struct pci_dev *pci_dev, mpv_state_t *mpv_st)
+_mpv_remove(struct pci_dev *pci_dev, mpv_state_t *mpv_st)
 {
 	int		bar = 0;
 
@@ -607,32 +584,38 @@ _mpv_pci_remove(struct pci_dev *pci_dev, mpv_state_t *mpv_st)
 }
 
 static int
-mpv_pci_probe(struct pci_dev *pdev, const struct pci_device_id *pci_ent)
+mpv_probe(struct platform_device *pl_dev)
 {
 	mpv_state_t	*mpv_st = NULL;
 	u8		mpv_new = 0;
 	u8		revision_id;
 	u16		vendor_id, device_id;
 	void		*regs_base;
-	u8		compl_reg;
 	int		rval;
 	int		bar = 0;
+	struct pci_dev *pci_dev;
 	int		dev_id = MPV_CARD_DEVID;
 
-	rval = pci_enable_device(pdev);
+	if (WARN_ON(!pl_dev->dev.parent))
+		return -ENODEV;
+	if (WARN_ON(!dev_is_pci(pl_dev->dev.parent)))
+		return -ENXIO;
+	pci_dev = to_pci_dev(pl_dev->dev.parent);
+
+	rval = pci_enable_device(pci_dev);
 	if (rval) {
 		pr_err("%s: cannot enable pci device\n",
-				pdev->bus->name);
+				pci_dev->bus->name);
 		return rval;
 	}
-	pci_set_master(pdev);
-	pci_read_config_byte(pdev, PCI_REVISION_ID, &revision_id);
+	pci_set_master(pci_dev);
+	pci_read_config_byte(pci_dev, PCI_REVISION_ID, &revision_id);
 	if (revision_id == 0xff) {
 		dbgmpv("revision_id was 0xff. set revision_id=1\n");
 		revision_id = 1;
 	}
-	pci_read_config_word(pdev, PCI_VENDOR_ID, &vendor_id);
-	pci_read_config_word(pdev, PCI_DEVICE_ID, &device_id);
+	pci_read_config_word(pci_dev, PCI_VENDOR_ID, &vendor_id);
+	pci_read_config_word(pci_dev, PCI_DEVICE_ID, &device_id);
 	if (vendor_id == 0x1fff) {
 		if (device_id == MPV4_DEVID) {
 			mpv_new = MPV_4;
@@ -640,7 +623,7 @@ mpv_pci_probe(struct pci_dev *pdev, const struct pci_device_id *pci_ent)
 		}
 		if (device_id == MPV_KPI2_DEVID ||
 				device_id == MPV_EIOH_DEVID) {
-			pci_write_config_byte(pdev, GPIO_MPV_SW, 1);
+			pci_write_config_byte(pci_dev, GPIO_MPV_SW, 1);
 			bar = 1;
 			if (device_id == MPV_KPI2_DEVID)
 				mpv_new = MPV_KPI2;
@@ -650,12 +633,12 @@ mpv_pci_probe(struct pci_dev *pdev, const struct pci_device_id *pci_ent)
 	}
 	dbgmpv("MPV DEV_ID=0x%x vendor_id=0x%x bar=%d\n",
 		dev_id, vendor_id, bar);
-	rval = pci_request_region(pdev, bar, MPV_NAME);
+	rval = pci_request_region(pci_dev, bar, MPV_NAME);
 	if (rval) {
 		pr_err("can't alloc PCI BAR %d for mpv\n", bar);
 		return rval;
 	}
-	regs_base = pci_iomap(pdev, bar, 0);
+	regs_base = pci_iomap(pci_dev, bar, 0);
 	dbgmpv("%s %s revision_id=%d bar=%d, regs_base=%p\n",
 			__func__, mpv_new ? "MPViohub2" : "MPV",
 			revision_id, bar, regs_base);
@@ -663,29 +646,24 @@ mpv_pci_probe(struct pci_dev *pdev, const struct pci_device_id *pci_ent)
 		pr_err("%s(): Unable to map registers\n", __func__);
 		return -EFAULT;
 	}
-	cur_pdev = pdev;
-	rval = mpv_common_probe(&pdev->dev, pdev, &mpv_st, regs_base, mpv_new, revision_id,
+	cur_pdev = pci_dev;
+	rval = mpv_common_probe(pci_dev, &mpv_st, regs_base, mpv_new, revision_id,
 								PCI_DEV);
 	if (rval) {
 		if (rval == -ECANCELED) { /*device is disabled*/
-			pci_iounmap(pdev, regs_base);
+			pci_iounmap(pci_dev, regs_base);
 			rval = 0;
 		}
 		goto err_unmap;
 	}
 #define PCI_HW_REV_ID	0x44
-	pci_read_config_byte(pdev, PCI_HW_REV_ID, &(mpv_st->hw_rev_id));
-	mpv_st->pdev = pdev;
-	pci_set_drvdata(pdev, (void *)mpv_st);
-	mpv_st->irq_orig = pdev->irq;
-	mpv_st->irq = pdev->irq;
-	if (pirq) {
-		pci_read_config_byte(pdev, PCI_COMPLEMENT, &compl_reg);
-		pci_write_config_byte(pdev, PCI_COMPLEMENT, compl_reg | 1);
-		pci_write_config_byte(pdev, PCI_INTERRUPT_PIN, pirq);
-		pci_write_config_byte(pdev, PCI_COMPLEMENT, compl_reg & ~1);
-		mpv_st->irq = ((mpv_st->irq_orig - 16) + pirq - 1) % 4 + 16;
-	}
+	pci_read_config_byte(pci_dev, PCI_HW_REV_ID, &(mpv_st->hw_rev_id));
+	mpv_st->pci_dev = pci_dev;
+	platform_set_drvdata(pl_dev, (void *)mpv_st);
+	mpv_st->irq = platform_get_irq(pl_dev, 0);
+	mpv_st->irq1 = platform_get_irq(pl_dev, 1);
+	mpv_st->irq2 = platform_get_irq(pl_dev, 2);
+
 	if (mpv_new == MPV_KPI2) {
 		rval = request_threaded_irq(mpv_st->irq, &mpv_intr_handler,
 			&mpv_threaded_handler,
@@ -695,12 +673,12 @@ mpv_pci_probe(struct pci_dev *pdev, const struct pci_device_id *pci_ent)
 				mpv_st->inst, mpv_st->irq, rval);
 			goto err_unmap;
 		}
-		rval = request_threaded_irq(mpv_st->irq + 1, &mpv_intr_handler,
+		rval = request_threaded_irq(mpv_st->irq1, &mpv_intr_handler,
 			&mpv_threaded_handler,
 			IRQF_SHARED | IRQF_NO_THREAD, MPV_NAME, (void *)mpv_st);
 		if (rval) {
 			pr_err("MPV-%d: Can't get irq %d, err [%d]\n",
-				mpv_st->inst, mpv_st->irq + 1, rval);
+				mpv_st->inst, mpv_st->irq1, rval);
 			goto err_unmap;
 		}
 	} else if (mpv_new == MPV_EIOH) {
@@ -712,20 +690,20 @@ mpv_pci_probe(struct pci_dev *pdev, const struct pci_device_id *pci_ent)
 				mpv_st->inst, mpv_st->irq, rval);
 			goto err_unmap;
 		}
-		rval = request_threaded_irq(mpv_st->irq + 1, &mpv_intr_handler,
+		rval = request_threaded_irq(mpv_st->irq1, &mpv_intr_handler,
 			&mpv_threaded_handler,
 			IRQF_SHARED | IRQF_NO_THREAD, MPV_NAME, (void *)mpv_st);
 		if (rval) {
 			pr_err("MPV-%d: Can't get 2-nd irq %d, err [%d]\n",
-				mpv_st->inst, mpv_st->irq, rval);
+				mpv_st->inst, mpv_st->irq1, rval);
 			goto err_unmap;
 		}
-		rval = request_threaded_irq(mpv_st->irq + 2, &mpv_intr_handler,
+		rval = request_threaded_irq(mpv_st->irq2, &mpv_intr_handler,
 			&mpv_threaded_handler,
 			IRQF_SHARED | IRQF_NO_THREAD, MPV_NAME, (void *)mpv_st);
 		if (rval) {
 			pr_err("MPV-%d: Can't get 3-rd irq %d, err [%d]\n",
-				mpv_st->inst, mpv_st->irq, rval);
+				mpv_st->inst, mpv_st->irq2, rval);
 			goto err_unmap;
 		}
 	} else {
@@ -745,68 +723,71 @@ mpv_pci_probe(struct pci_dev *pdev, const struct pci_device_id *pci_ent)
 		pr_info("%d-MPV KPI-2 DEV=0x%x VEND=0x%x REV=0x%x drv.ver.%d IRQ 0=%d IRQ 1,2=%d, BUS =%s, femtosecond per counter clock = %lld\n",
 			mpv_st->inst,
 			MPV_KPI2_DEVID, vendor_id, mpv_st->revision_id,
-			MPV_DRV_VER, mpv_st->irq, mpv_st->irq + 1,
-			pci_name(pdev), mpv_st->fsecs_per_mpvclock);
+			MPV_DRV_VER, mpv_st->irq, mpv_st->irq1,
+			pci_name(pci_dev), mpv_st->fsecs_per_mpvclock);
 	} else
 		if (mpv_st->mpv_new == MPV_EIOH) {
 			pr_info("%d-MPV EIOH DEV=0x%x VEND=0x%x REV=0x%x drv.ver.%d IRQ 0=%d IRQ 1=%d IRQ 2=%d, BUS =%s, femtosecond per counter clock = %lld\n",
 				mpv_st->inst,
 				MPV_KPI2_DEVID, vendor_id, mpv_st->revision_id,
-				MPV_DRV_VER, mpv_st->irq, mpv_st->irq + 1,
-								mpv_st->irq + 2,
-				pci_name(pdev), mpv_st->fsecs_per_mpvclock);
+				MPV_DRV_VER, mpv_st->irq, mpv_st->irq1,
+								mpv_st->irq2,
+				pci_name(pci_dev), mpv_st->fsecs_per_mpvclock);
 	} else {
 		if (mpv_st->mpv_new == MPV_4)
 			dev_id = MPV4_DEVID;
-		pr_info("%d-MPV DEV=0x%x VEND=0x%x REV=0x%x HWREV=0x%x. drv.ver.%d IRQ=%d (pirq=%d), BUS =%s, femtosecond per counter clock = %lld\n",
+		pr_info("%d-MPV DEV=0x%x VEND=0x%x REV=0x%x HWREV=0x%x. drv.ver.%d IRQ=%d, BUS =%s, femtosecond per counter clock = %lld\n",
 			mpv_st->inst, dev_id, vendor_id, mpv_st->revision_id,
-			mpv_st->hw_rev_id, MPV_DRV_VER, mpv_st->irq, pirq,
-			pci_name(pdev), mpv_st->fsecs_per_mpvclock);
+			mpv_st->hw_rev_id, MPV_DRV_VER, mpv_st->irq,
+			pci_name(pci_dev), mpv_st->fsecs_per_mpvclock);
 	}
 	dbgmpv("MPV inst. =%d :MAJOR =%d, MINOR =%03d-%03d\n",
 		mpv_st->inst, mpv_st->major, mpv_st->minor_base, minor_max);
 	return 0;
 err_unmap:
-	pci_disable_device(pdev);
-	_mpv_pci_remove(pdev, mpv_st);
+	pci_disable_device(pci_dev);
+	_mpv_remove(pci_dev, mpv_st);
 	if (rval)
 		pr_err("%s(): inst. %d finished with error.\n", __func__, mpv_st->inst);
 	return rval;
 }
-static void
-mpv_pci_remove(struct pci_dev *pci_dev)
+static int
+mpv_remove(struct platform_device *pl_dev)
 {
-	mpv_state_t	*mpv_st = pci_get_drvdata(pci_dev);
+	struct pci_dev *pci_dev;
+	mpv_state_t	*mpv_st = platform_get_drvdata(pl_dev);
 
 	if (mpv_st == NULL) {
-		pr_err("%s(): device instance = %d isn't loaded.\n",
-			__func__, mpv_st->inst);
-		return;
+		pr_err("%s(): device isn't loaded.\n",
+			__func__);
+		return 0;
 	}
-	pr_info("mpv_pci_remove BUS= %s mpv_%d\n", pci_name(pci_dev), mpv_st->inst);
+	pci_dev = mpv_st->pci_dev;
+	pr_info("mpv_remove BUS= %s mpv_%d\n", pci_name(pci_dev), mpv_st->inst);
 	if (mpv_st->open_in || mpv_st->open_out || mpv_st->open_st) {
-		pr_err("mpv_pci_remove ERROR: There is open file. The open masks: in 0x%x out 0x%x st  0x%x\n",
+		pr_err("mpv_remove ERROR: There is open file. The open masks: in 0x%x out 0x%x st  0x%x\n",
 			mpv_st->open_in, mpv_st->open_out, mpv_st->open_st);
 	}
 	if (mpv_st->mpv_new == MPV_KPI2) {
-		pci_write_config_byte(mpv_st->pdev, GPIO_MPV_SW, 0);
+		pci_write_config_byte(mpv_st->pci_dev, GPIO_MPV_SW, 0);
 		free_irq(mpv_st->irq, mpv_st);
-		free_irq(mpv_st->irq + 1, mpv_st);
+		free_irq(mpv_st->irq1, mpv_st);
 	} else if (mpv_st->mpv_new == MPV_EIOH) {
-		pci_write_config_byte(mpv_st->pdev, GPIO_MPV_SW, 0);
+		pci_write_config_byte(mpv_st->pci_dev, GPIO_MPV_SW, 0);
 		free_irq(mpv_st->irq, mpv_st);
-		free_irq(mpv_st->irq + 1, mpv_st);
-		free_irq(mpv_st->irq + 2, mpv_st);
+		free_irq(mpv_st->irq1, mpv_st);
+		free_irq(mpv_st->irq2, mpv_st);
 	} else {
 		free_irq(mpv_st->irq, mpv_st);
 	}
-	_mpv_pci_remove(pci_dev, mpv_st);
+	_mpv_remove(pci_dev, mpv_st);
 	dbgmpv("inst. %d %s: finished.\n", mpv_st->inst, __func__);
+	return 0;
 }
 static void
-mpv_shutdown(struct pci_dev *pci_dev)
+mpv_shutdown(struct platform_device *pl_dev)
 {
-	mpv_state_t	*mpv_st = pci_get_drvdata(pci_dev);
+	mpv_state_t	*mpv_st = platform_get_drvdata(pl_dev);
 
 	if (mpv_st == NULL) {
 		pr_err("%s(): device instance = %d isn't loaded.\n",
@@ -815,14 +796,14 @@ mpv_shutdown(struct pci_dev *pci_dev)
 	}
 	mpv_reset_module(mpv_st);
 	if (mpv_st->mpv_new == MPV_KPI2) {
-		pci_write_config_byte(mpv_st->pdev, GPIO_MPV_SW, 0);
+		pci_write_config_byte(mpv_st->pci_dev, GPIO_MPV_SW, 0);
 		free_irq(mpv_st->irq, mpv_st);
-		free_irq(mpv_st->irq + 1, mpv_st);
+		free_irq(mpv_st->irq1, mpv_st);
 	} else if (mpv_st->mpv_new == MPV_EIOH) {
-		pci_write_config_byte(mpv_st->pdev, GPIO_MPV_SW, 0);
+		pci_write_config_byte(mpv_st->pci_dev, GPIO_MPV_SW, 0);
 		free_irq(mpv_st->irq, mpv_st);
-		free_irq(mpv_st->irq + 1, mpv_st);
-		free_irq(mpv_st->irq + 2, mpv_st);
+		free_irq(mpv_st->irq1, mpv_st);
+		free_irq(mpv_st->irq2, mpv_st);
 	} else {
 		free_irq(mpv_st->irq, mpv_st);
 	}
@@ -1007,7 +988,10 @@ mpv_read (struct file *file, char *buf, size_t sz, loff_t *f_pos)
 	int min_sz	= sizeof (mpv_rd_inf_t);
 	int		corr_cnt = 0;
 	int interrupts;
-	unsigned long long clock_limit, prev_cycl, cur_cycl;
+	unsigned long long clock_limit, prev_cycl;
+#ifdef SHOW_WOKEN_TIME
+	unsigned long long cur_cycl;
+#endif
 	struct	timespec64 intr_real_tm;
 	unsigned long	expire;
 
@@ -1060,13 +1044,13 @@ mpv_read (struct file *file, char *buf, size_t sz, loff_t *f_pos)
 			raw_spin_unlock_irq(&mpv_st->mpv_lock);
 			return -ETIME;
 got:
-			cur_cycl = get_cycles();
 			if (mpv_st->num_time_regs >= bus) {
 				corr_cnt = mpv_read_regl(mpv_st,
 						mpv_st->corr_cnt_reg[bus]);
 			}
 			mpv_st->kdata_intr[bus].num_reciv_intr++;
-#ifdef CONFIG_MCST
+#ifdef SHOW_WOKEN_TIME
+			cur_cycl = get_cycles();
 			mpv_st->kdata_intr[bus].irq_enter_clks =
 				cycles_2nsec(cur_cycl - prev_cycl);
 #endif
@@ -1342,17 +1326,17 @@ mpv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			selftest_t st;
 			int rval;
 			selftest_pci_t *st_pci = &st.info.pci;
-			struct pci_dev *pdev = mpv_st->pdev;
-			st_pci->vendor = pdev->vendor;
-			st_pci->device = pdev->device;
+			struct pci_dev *pci_dev = mpv_st->pci_dev;
+			st_pci->vendor = pci_dev->vendor;
+			st_pci->device = pci_dev->device;
 
 			st.bus_type = BUS_PCI;
 
 			strcpy(st_pci->name, MPV_NAME);
-			st_pci->bus = pdev->bus->number;
-			st_pci->slot = PCI_SLOT(pdev->devfn);
-			st_pci->func = PCI_FUNC(pdev->devfn);
-			st_pci->class = pdev->class;
+			st_pci->bus = pci_dev->bus->number;
+			st_pci->slot = PCI_SLOT(pci_dev->devfn);
+			st_pci->func = PCI_FUNC(pci_dev->devfn);
+			st_pci->class = pci_dev->class;
 
 			st_pci->major = MAJOR(dev);
 			st_pci->minor = MINOR(dev);
@@ -1479,55 +1463,8 @@ mpv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 	case MPVIO_SET_CONFIG_INTR:
 	{
-		int	int_num;
-		u8	compl_reg;
-		struct pci_dev *pdev = mpv_st->pdev;
-
-		rval = copy_from_user((void *)&int_num, (void *)arg, sizeof (int));
-		if ( rval != 0 ) {
-			printk( "inst. %d mpv_ioctl: "
-				"copy_from_user() finished with error.\n",
-				instance);
-			rval = -EFAULT;
-			break;
-		}
-		raw_spin_lock_irqsave(&mpv_st->mpv_lock, flags);
-		if (mpv_st->dev_type == PCI_DEV) {
-			if (int_num < 1 ||  int_num > 4) {
-				pr_err("MPVIO_SET_CONFIG_INTR:"
-					"int(%d)should be 1-4\n", int_num);
-				raw_spin_unlock_irqrestore(&mpv_st->mpv_lock,
-					flags);
-				return -EINVAL;
-			}
-			pirq = int_num;
-			free_irq(mpv_st->irq, mpv_st);
-			pci_read_config_byte(pdev, PCI_COMPLEMENT, &compl_reg);
-			pci_write_config_byte(pdev, PCI_COMPLEMENT,
-				compl_reg | 1);
-			pci_write_config_byte(pdev, PCI_INTERRUPT_PIN, pirq);
-			pci_write_config_byte(pdev, PCI_COMPLEMENT,
-				compl_reg & ~1);
-			mpv_st->irq = ((mpv_st->irq_orig - 16) +
-					pirq - 1) % 4 + 16;
-			pr_warn("MPVIO_SET_CONFIG_INTR: new irq=%d\n",
-				mpv_st->irq);
-			rval = request_threaded_irq(mpv_st->irq,
-					&mpv_intr_handler,
-					&mpv_threaded_handler,
-					IRQF_SHARED | IRQF_NO_THREAD, MPV_NAME,
-					(void *)mpv_st);
-			if (rval) {
-				pr_err("MPV:Can't get irq %d err %d\n",
-					mpv_st->irq, rval);
-				raw_spin_unlock_irqrestore(&mpv_st->mpv_lock,
-					flags);
-				return -EAGAIN;
-			}
-		}
-#if defined(CONFIG_MCST_RT) && defined(CONFIG_PCI)
-		mk_hndl_first(mpv_st->irq, MPV_NAME);
-#endif
+		/*obsolete*/
+		rval = -ENOTSUPP;
 		break;
 	}
 	case MPVIO_RUN_DEVICE:
@@ -1571,7 +1508,7 @@ mpv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		rval = copy_from_user((caddr_t)&intr_user, (caddr_t)arg, sizeof (mpv_intr_t));
 		if (rval != 0) {
 			printk( "mpv_ioctl (MPVIO_WAIT_INTR): copy_from_user() finished with error.");
-   			return (-EFAULT);
+			return (-EFAULT);
 		};
 		raw_spin_lock_irq(&mpv_st->mpv_lock);
 		if (mpv_st->intr_assemble == 0) {
@@ -1608,7 +1545,7 @@ mpv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 				};
 #endif
 				raw_spin_unlock_irq(&mpv_st->mpv_lock);   
-   				return (-ETIME);
+				return (-ETIME);
 			}
 		} else {
 			/* handler could mask some input if it is 'alive' */
@@ -2359,8 +2296,9 @@ mpv_intr_handler(int irq, void *arg)
 	long prv_clk;
 	unsigned long long fsecs_per_clck;
 	long long prev_interv = 0;
+	int wk_cpu = -1;
 
-#ifdef CONFIG_MCST
+#ifdef SHOW_WOKEN_TIME
 	long long	irq_enter_clks;
 	irq_enter_clks = get_cycles() - current_thread_info()->irq_enter_clk;
 #endif
@@ -2458,7 +2396,7 @@ mpv_intr_handler(int irq, void *arg)
 					    mpv_st->corr_cnt_reg[stv_in_nmb]));
 		}
 #endif
-#ifdef CONFIG_MCST
+#ifdef SHOW_WOKEN_TIME
 		mpv_st->kdata_intr[stv_in_nmb].irq_enter_clks = irq_enter_clks;
 #endif
 		if (mpv_st->mpv_new || mpv_st->revision_id >= 2)
@@ -2528,7 +2466,7 @@ mpv_intr_handler(int irq, void *arg)
 			mpv_st->kdata_intr[i].correct_counter_nsec = 0;
 			mpv_st->kdata_intr[i].read_cc_ns = 0;
 		}
-#ifdef CONFIG_MCST
+#ifdef SHOW_WOKEN_TIME
 		mpv_st->kdata_intr[i].irq_enter_clks = irq_enter_clks;
 #endif
 		if (mpv_st->mpv_new || mpv_st->revision_id >= 2)
@@ -2546,16 +2484,18 @@ mpv_intr_handler(int irq, void *arg)
 				&mpv_st->kdata_intr[i].wait1_task_list) {
 			waiter_item = list_entry(tmp, raw_wqueue_t, task_list);
 			wake_up_process(waiter_item->task);
+			wk_cpu = task_cpu(waiter_item->task);
 		}
 	};
 	/* wake up for ioctl(MPVIO_WAIT_INTR) -- any interrupt */
 out:	list_for_each_safe(tmp, next, &mpv_st->any_in_task_list) {
 		waiter_item = list_entry(tmp, raw_wqueue_t, task_list);
 		wake_up_process(waiter_item->task);
+		wk_cpu = task_cpu(waiter_item->task);
 	}
 	raw_spin_unlock_irqrestore(&mpv_st->mpv_lock, flags);
-	/* do it for the last mpv_in but not under spinlock */
-	do_postpone_tick(prev_interv);
+	if (wk_cpu != smp_processor_id())
+		do_postpone_tick(prev_interv);
 	if (waitqueue_active(&mpv_st->pollhead))
 		return IRQ_WAKE_THREAD;
 	return IRQ_HANDLED;

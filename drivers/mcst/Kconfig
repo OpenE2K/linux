@@ -3,6 +3,13 @@
 
 menu "Elbrus MCST Device Drivers"
 
+config GPIO_MPV
+	tristate "MCST GPIO-MPV Controller Support"
+	depends on E2K || E90S
+	default y
+	help
+	GPIO-MPV base driver
+
 config MCST_LTD
 	tristate "MCST LTD (Log Transmit Device) Support"
 	depends on E2K || E90S
@@ -72,7 +79,7 @@ config ACPI_L_SPMC
 
 config IOHUB_GPIO
 	tristate "IOHUB Gpiolib"
-	depends on GPIOLIB &&(E2K || E90S)
+	depends on GPIOLIB && (E2K || E90S)
 	default m
 	help
 	   Gpiolib implementation for Elbrus IOHUB.
@@ -192,18 +199,35 @@ config APKPWR
 config MEM2ALLOC
 	tristate "DMA memory allocator"
 	default m
+	depends on E2K && PCI && (CPU_E2C3 || CPU_E8V7)
 	help
 	  DMA memory allocator.
 
 config HANTRODEC
 	tristate "Google hantrodec VP9 driver"
 	default m
+	depends on E2K && PCI && CPU_E2C3
 	help
 	  Google VP9 driver.
+
+config MCST_VC9000D
+	tristate "Verisilicon hantrodec VC9000D driver"
+	default m
+	depends on E2K && PCI && (CPU_E2C3 || CPU_E8V7)
+	help
+	  Verisilicon VC9000D video decoder technological driver.
+
+config MCST_HANTRO_DRIVER
+	tristate "Verisilicon Hantro DRM driver for VA-API"
+	default m
+	depends on E2K && PCI && (CPU_E2C3 || CPU_E8V7)
+	help
+	  Verisilicon Hantro DRM driver for VA-API (for VC9000D video decoder in e8v7 SoC).
 
 config BIGE
 	tristate "Google bige VP9 encoder driver"
 	default m
+	depends on E2K && PCI && (CPU_E2C3 || CPU_E8V7)
 	select UIO
 	help
 	  Google VP9 encoder driver.
@@ -211,6 +235,11 @@ config BIGE
 config E8CPCS
 	tristate "E8C Power Control System (PCS) hwmon driver"
 	depends on E2K && (CPU_E8C || CPU_E8C2)
+	default m
+
+config DDRMEM
+	tristate "Memory Test driver"
+	depends on E2K && (CPU_E8C2 || CPU_E2C3 || CPU_E16C)
 	default m
 
 config PCSM
@@ -222,7 +251,7 @@ config PCSM
 
 config IMGTEC
 	tristate "Imagination codec driver"
-	depends on E2K
+	depends on E2K && CPU_E2C3
 	default m
 	select BUS_MASTERING
 	select VXD_FPGA
@@ -242,17 +271,17 @@ config MCST_GPU_IMGTEC
         select DRM_VM
         depends on IMGTEC
         default m
-choice
-        prompt "Choice Imagination`s GPU module version to build"
-        default MCST_GPU_IMGTEC_R5878540
 
-        config MCST_GPU_IMGTEC_R4991288
-                bool "Rogue_DDK_Linux_WS_REL_1.9@4991288 with desktop OpenGL"
-        	depends on IMGTEC
-        config MCST_GPU_IMGTEC_R5878540
-                bool "Rogue_DDK_Linux_WS_REL_1.13@5878540 w/o desktop OpenGL"
-        	depends on IMGTEC
-endchoice
+config MCST_GPU_IMGTEC_R4991288
+        bool "Rogue_DDK_Linux_WS_REL_1.9@4991288 with desktop OpenGL"
+      	depends on IMGTEC
+	    default y
+
+config MCST_GPU_IMGTEC_R5878540
+        bool "Rogue_DDK_Linux_WS_REL_1.13@5878540 w/o desktop OpenGL"
+     	depends on IMGTEC
+	    default y
+
 source "drivers/mcst/gpu-imgtec.r4991288/Kconfig"
 source "drivers/mcst/gpu-imgtec.r5878540/Kconfig"
 
@@ -325,6 +354,7 @@ config DS125DF111
 config I2C_V7
 	tristate "MCST I2C V7 master controller"
 	depends on E2K
+	default m
 	help
 	  Module for MCST I2C master controller for V7 architecture.
 

@@ -161,6 +161,9 @@ static const struct file_operations bsg_fops = {
 	.release	=	bsg_release,
 	.unlocked_ioctl	=	bsg_ioctl,
 	.compat_ioctl	=	compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   =	bsg_ioctl,
+#endif
 	.owner		=	THIS_MODULE,
 	.llseek		=	default_llseek,
 };

@@ -66,7 +66,7 @@ typedef struct {
 #define AP_SIZE_ALIGN_20	(1LL << 45)
 #define AP_SIZE_ALIGN_24	(1LL << 48)
 
-static __always_inline int get_v7_ap_align(unsigned long size)
+static __always_inline int ap_alignment(unsigned long size)
 {
 	if (size <= AP_SIZE_ALIGN_0) {
 		return 0;
@@ -85,6 +85,24 @@ static __always_inline int get_v7_ap_align(unsigned long size)
 	}
 }
 
+static __always_inline unsigned long ap_align_mask(unsigned long size)
+{
+	if (size <= AP_SIZE_ALIGN_0) {
+		return 0;
+	} else if (size <= AP_SIZE_ALIGN_4) {
+		return (1 << 4) - 1;
+	} else if (size <= AP_SIZE_ALIGN_8) {
+		return (1 << 8) - 1;
+	} else if (size <= AP_SIZE_ALIGN_12) {
+		return (1 << 12) - 1;
+	} else if (size <= AP_SIZE_ALIGN_16) {
+		return (1 << 16) - 1;
+	} else if (size <= AP_SIZE_ALIGN_20) {
+		return (1 << 20) - 1;
+	} else {
+		return (1 << 24) - 1;
+	}
+}
 #endif /* __ASSEMBLY__ */
 
 #endif /* _BASE_REGS_TYPES_H_ */

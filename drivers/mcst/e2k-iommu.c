@@ -21,17 +21,12 @@
 #include <linux/dma-map-ops.h>
 #include <linux/of_platform.h>
 #include <linux/irq.h>
-
 #include <asm/sic_regs.h>
 #include <asm/sic_regs_access.h>
 #include <asm/pic.h>
 #include <asm/e2k-iommu.h>
 #include <asm/e2k_debug.h>
-
-#include <asm-l/swiotlb.h>
-
 #include "../../../drivers/iommu/dma-iommu.h"
-
 #include <trace/events/iommu.h>
 
 #undef	DEBUG_PASSTHROUGH_MODE
@@ -336,6 +331,7 @@ static struct dte *dev_to_dte(struct e2k_iommu *i, struct device *dev)
 #define E2K_IOMMU_DATA		(SIC_iommu_cmd_d_lo - SIC_iommu_ctrl)
 #define E2K_IOMMU_ERR		(SIC_iommu_err - SIC_iommu_ctrl)
 
+#define E2K_IOMMU_ERR_MASK		(~(GENMASK(61, 43) | GENMASK(29, 12)))
 #define	E2K_IOMMU_MMU_MISS		(1 << 0)
 #define	E2K_IOMMU_PROT_VIOL_WR		(1 << 1)
 #define	E2K_IOMMU_PROT_VIOL_RD		(1 << 2)
@@ -555,8 +551,10 @@ static void e2k_iommu_cleanup(struct e2k_iommu *i, int stage)
 	switch (stage) {
 	case 3:
 		iommu_device_unregister(&i->iommu);
+		fallthrough;
 	case 2:
 		iommu_device_sysfs_remove(&i->iommu);
+		fallthrough;
 	case 1:
 		/* TODO:
 		if (e2k_iommu_direct_map)
@@ -659,6 +657,7 @@ static int __e2k_iommu_init(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct e2k_iommu *i = devm_kzalloc(dev, sizeof(*i), GFP_KERNEL);
 	int node = e2k_dev_to_node(dev);
+	int nr = platform_irq_count(pdev);
 
 	if (!i)
 		return -ENOMEM;
@@ -667,12 +666,14 @@ static int __e2k_iommu_init(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
-	ret = platform_get_irq(pdev, 0);
-	if (ret <= 0)
-		return ret;
-	i->irq = ret;
-	ret = devm_request_irq(dev, i->irq, e2k_iommu_error_interrupt,
-			       0, dev_name(dev), i);
+	for (j = 0; j < nr && ret >= 0; j++) {
+		ret = platform_get_irq(pdev, j);
+		if (ret <= 0)
+			break;
+		i->irq = ret;
+		ret = devm_request_irq(dev, i->irq, e2k_iommu_error_interrupt,
+				0, dev_name(dev), i);
+	}
 	if (WARN(ret, "%s: %d", dev_name(dev), ret))
 		return ret;
 
@@ -945,7 +946,7 @@ static bool e2k_iommu_error_check_one(struct e2k_iommu *i, int j,
 	io_pte *pte = __va(e2k_iommu_readq(i, j, E2K_IOMMU_PTBAR) &
 					IO_PAGE_MASK);
 
-	if (err == 0 || err == ~0ULL)
+	if ((err & E2K_IOMMU_ERR_MASK) == 0 || err == ~0ULL)
 		return false;
 	if (e2k_iommu_no_domains)
 		dte = NULL;
@@ -1121,7 +1122,7 @@ static int e2k_iommu_map(struct iommu_domain *iommu_domain,
 
 static size_t e2k_iommu_unmap(struct iommu_domain *iommu_domain,
 				unsigned long iova, size_t size,
-     				struct iommu_iotlb_gather *gather)
+				struct iommu_iotlb_gather *gather)
 {
 	struct e2k_iommu_domain *d = to_e2k_domain(iommu_domain);
 	size_t unmapped;
@@ -1151,7 +1152,6 @@ static void e2k_iommu_detach_device(struct iommu_domain *iommu_domain,
 				    struct device *dev)
 {
 	struct e2k_iommu *i;
-	struct e2k_iommu_domain *d = to_e2k_domain(iommu_domain);
 	unsigned long flags;
 	struct dte *dte;
 	if (!e2k_iommu_check_device(dev))
@@ -1410,7 +1410,8 @@ static void e2k_iommu_get_resv_regions(struct device *dev,
 
 	msi_addr = ((u64)msg.address_hi) << 32 |
 			(msg.address_lo & ~(RT_MSI_MEMORY_SIZE - 1));
-
+	if (WARN_ON(msi_addr == 0))
+		return;
 	region = iommu_alloc_resv_region(msi_addr, RT_MSI_MEMORY_SIZE,
 				prot, IOMMU_RESV_MSI, GFP_KERNEL);
 	if (!region)
@@ -1470,8 +1471,6 @@ static struct iommu_ops e2k_iommu_ops = {
 static int e2k_iommu_suspend(struct platform_device *pdev, pm_message_t state)
 {
 	struct e2k_iommu *i = platform_get_drvdata(pdev);
-	if (!e2k_iommu_supported() || (l_use_swiotlb && !e2k_iommu_direct_map))
-		return 0;
 	e2k_iommu_stop_hw(i);
 	return 0;
 }
@@ -1479,8 +1478,6 @@ static int e2k_iommu_suspend(struct platform_device *pdev, pm_message_t state)
 static int e2k_iommu_resume(struct platform_device *pdev)
 {
 	struct e2k_iommu *i = platform_get_drvdata(pdev);
-	if (!e2k_iommu_supported() || (l_use_swiotlb && !e2k_iommu_direct_map))
-		return 0;
 	e2k_iommu_init_hw(i);
 	return 0;
 }
@@ -1515,8 +1512,6 @@ __setup("e2k-iommu=", e2k_iommu_setup);
 static int e2k_iommu_remove(struct platform_device *pdev)
 {
 	struct e2k_iommu *i = platform_get_drvdata(pdev);
-	if (!e2k_iommu_supported() || (l_use_swiotlb && !e2k_iommu_direct_map))
-		return 0;
 
 	e2k_iommu_cleanup(i, 3);
 	platform_set_drvdata(pdev, NULL);
@@ -1525,9 +1520,6 @@ static int e2k_iommu_remove(struct platform_device *pdev)
 
 static int e2k_iommu_probe(struct platform_device *pdev)
 {
-	if (!e2k_iommu_supported() || (l_use_swiotlb && !e2k_iommu_direct_map))
-		return 0;
-
 	BUILD_BUG_ON(sizeof(struct dte) != 32);
 
 	return __e2k_iommu_init(pdev);

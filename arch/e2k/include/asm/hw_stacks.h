@@ -186,6 +186,8 @@ static __always_inline int get_cr0(e2k_cr0_t *cr0, u64 base, u64 cr_ind)
 
 	cr0->lo = *((u64 *)(base + cr_ind + CR0_LO_I));
 	cr0->hi = *((u64 *)(base + cr_ind + CR0_HI_I));
+
+	return 0;
 }
 
 static __always_inline int get_cr1(e2k_cr1_t *cr1, u64 base, u64 cr_ind)
@@ -198,6 +200,8 @@ static __always_inline int get_cr1(e2k_cr1_t *cr1, u64 base, u64 cr_ind)
 
 	cr1->lo = *((u64 *)(base + cr_ind + CR1_LO_I));
 	cr1->hi = *((u64 *)(base + cr_ind + CR1_HI_I));
+
+	return 0;
 }
 
 static __always_inline int get_crs(e2k_mem_crs_t *crs, u64 base, u64 ind)
@@ -212,6 +216,8 @@ static __always_inline int get_crs(e2k_mem_crs_t *crs, u64 base, u64 ind)
 	crs->cr0.hi = *((u64 *)(base + ind + CR0_HI_I));
 	crs->cr1.lo = *((u64 *)(base + ind + CR1_LO_I));
 	crs->cr1.hi = *((u64 *)(base + ind + CR1_HI_I));
+
+	return 0;
 }
 
 extern int chain_stack_frame_init(e2k_mem_crs_t *crs, unsigned long fn,

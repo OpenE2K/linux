@@ -48,4 +48,8 @@ long amdgpu_drm_ioctl(struct file *filp,
 long amdgpu_kms_compat_ioctl(struct file *filp,
 			     unsigned int cmd, unsigned long arg);
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+long amdgpu_kms_ptr128_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
+#endif
+
 #endif

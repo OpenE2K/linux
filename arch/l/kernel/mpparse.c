@@ -62,7 +62,7 @@ int rtc_model = 0;
 int rtc_syncintr = 0;
 int nr_timers = 0;
 
-int IOHUB_revision = 0;
+int IOHUB_revision __ro_after_init = 0;
 EXPORT_SYMBOL(IOHUB_revision);
 						/* CPU present map (passed by */
 						/* BIOS thru MP table) */
@@ -242,7 +242,7 @@ MP_timer_info(mpc_config_timer_t *m)
 	nr_timers++;
 }
 
-static void MP_i2c_spi_info(struct mpc_config_i2c *mpc)
+static void __init MP_i2c_spi_info(struct mpc_config_i2c *mpc)
 {
 	void *i2ccntrladdr = (void *)get_unaligned(&mpc->mpc_i2ccntrladdr);
 	void *i2cdataaddr = (void *)get_unaligned(&mpc->mpc_i2cdataaddr);
@@ -252,20 +252,6 @@ static void MP_i2c_spi_info(struct mpc_config_i2c *mpc)
 		i2ccntrladdr, i2cdataaddr,
 		mpc->mpc_i2c_irq,
 		IOHUB_revision);
-}
-
-
-static void __init MP_intsrc_info(struct mpc_intsrc *m)
-{
-#ifdef CONFIG_KVM
-	mp_irqs[mp_irq_entries] = *m;
-	DebugMPT("Int: type %d, pol %d, trig %d, bus %d, IRQ %02x, APIC ID %x, APIC INT %02x\n",
-			m->irqtype, m->irqflag & 3,
-			(m->irqflag >> 2) & 3, m->srcbus,
-			m->srcbusirq, m->dstapic, m->dstirq);
-	if (++mp_irq_entries == MAX_IRQ_SOURCES)
-		panic("Max # of irq sources exceeded!!\n");
-#endif
 }
 
 static void __init MP_lintsrc_info(struct mpc_config_lintsrc *m)
@@ -387,7 +373,6 @@ static int __init smp_read_mpc(struct mpc_table *mpc)
 			{
 				struct mpc_intsrc *m =
 						(struct mpc_intsrc *) mpt;
-				MP_intsrc_info(m);
 				mpt += MP_SIZE_ALIGN( sizeof(*m));
 				count += MP_SIZE_ALIGN(sizeof(*m));
 				break;
@@ -506,41 +491,6 @@ int mp_find_iolink_io_apicid(int node, int link)
 #else  /* ! CONFIG_IOHUB_DOMAINS */
 #define	MP_construct_default_iolinks()
 #endif /* CONFIG_IOHUB_DOMAINS */
-
-void mp_pci_add_resources(struct list_head *resources, struct iohub_sysdata *sd)
-{
-	mpc_config_iolink_t *iolink = NULL;
-	struct resource	*mem;
-
-#ifdef	CONFIG_IOHUB_DOMAINS
-	int i;
-
-	for (i = 0; i < mp_iolinks_num; i++) {
-		iolink = &mp_iolinks[i];
-		if (iolink->mpc_iolink_type != MP_IOLINK_IOHUB)
-			continue;
-		if (iolink->node == sd->node && iolink->link == sd->link)
-			break;
-	}
-	BUG_ON(i == mp_iolinks_num);
-#else
-	iolink = &mp_iolinks[0];
-#endif
-	sd->mem_space.name	= "PCI mem";
-	sd->mem_space.flags	= IORESOURCE_MEM;
-	if (iolink->pci_mem_end) {
-		sd->mem_space.start	= iolink->pci_mem_start;
-		sd->mem_space.end	= iolink->pci_mem_end - 1;
-		WARN_ON(request_resource(&iomem_resource, &sd->mem_space));
-		mem = &sd->mem_space;
-	} else {
-		mem = &iomem_resource;
-	}
-	pci_add_resource_offset(resources, &ioport_resource,
-					L_IOPORT_RESOURCE_OFFSET);
-	pci_add_resource_offset(resources, mem,
-					L_IOMEM_RESOURCE_OFFSET);
-}
 
 static inline void __init
 MP_construct_default_timer(void)

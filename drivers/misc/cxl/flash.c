@@ -511,6 +511,9 @@ static const struct file_operations fops = {
 	.unlocked_ioctl	= device_ioctl,
 	.compat_ioctl	= compat_ptr_ioctl,
 	.release	= device_close,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = device_ioctl,
+#endif
 };
 
 void cxl_guest_remove_chardev(struct cxl *adapter)

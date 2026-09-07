@@ -13,6 +13,7 @@
 #include <linux/mm.h>
 #include <linux/threads.h>
 #include <linux/vmalloc.h>
+#include <linux/crash_dump.h>
 
 #include <asm/types.h>
 #include <asm/errors_hndl.h>
@@ -81,8 +82,12 @@ static inline pgd_t *pgd_alloc_node(struct mm_struct *mm, int node)
 		 * the function assumes that page hasn't been duplicated, and this
 		 * assumption works only when each node's duplicated page tables
 		 * reside strictly on that node's memory. */
-		gfp |= __GFP_THISNODE;
-		page = alloc_pages_node(node, gfp, 0);
+		if (!is_kdump_kernel()) {
+			gfp |= __GFP_THISNODE;
+			page = alloc_pages_node(node, gfp, 0);
+		} else {
+			page = alloc_pages_node(NUMA_NO_NODE, gfp, 0);
+		}
 	} else {
 		page = alloc_page(gfp);
 	}
@@ -285,6 +290,20 @@ static inline void p4d_populate(struct mm_struct *mm, p4d_t *p4d, pud_t *pud)
 	else
 		p4d_populate_user(mm, p4d, pud);
 }
+
+#ifdef CONFIG_E2K_MODULES_DUPLICATION
+/*
+ * Like p4d_populate_kernel(), but populates only given P4D entry. Callers must
+ * consider it and call this function on all nodes.
+ */
+static inline void p4d_populate_kernel_numa(struct mm_struct *mm, p4d_t *p4d, pud_t *pud)
+{
+	BUG_ON(mm != &init_mm);
+
+	p4d_set_k(p4d, pud);
+	virt_kernel_p4d_populate(mm, p4d);
+}
+#endif /* CONFIG_E2K_MODULES_DUPLICATION */
 
 static inline void p4d_populate_user_not_present(struct mm_struct *mm, e2k_addr_t addr, p4d_t *p4d)
 {

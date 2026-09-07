@@ -427,7 +427,11 @@ struct _gcsPLATFORM {
     gctUINT32               PcieFunction[gcdPLATFORM_COUNT];
 };
 
+#if defined(CONFIG_MCST)
+int gckPLATFORM_Init(struct pci_dev *pdev, gcsPLATFORM **platform);
+#else
 int gckPLATFORM_Init(struct platform_driver *pdrv, gcsPLATFORM **platform);
+#endif
 int gckPLATFORM_Terminate(gcsPLATFORM *platform);
 
 #endif

@@ -49,7 +49,7 @@ void notrace add_boot_trace_event(const char *fmt, ...)
 	va_end(ap);
 }
 
-void stop_boot_trace()
+void stop_boot_trace(void)
 {
 	boot_trace_enabled = 0;
 }

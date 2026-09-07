@@ -16,12 +16,14 @@
 #include <uapi/asm/iset_ver.h>
 
 /* only the following number of NBSR registers is now supported */
-#define MAX_SUPPORTED_NODE_NBSR_OFFSET	(SIC_prepic_linp5 + 4)
+#define MAX_SUPPORTED_NODE_NBSR_OFFSET	(SIC_xmu_d_hc_ctrl + 4)
 #define MAX_SUPPORTED_NODE_NBSR_NUM	(MAX_SUPPORTED_NODE_NBSR_OFFSET / 4)
 
 typedef struct kvm_nbsr_regs {
 	u32 regs[MAX_SUPPORTED_NODE_NBSR_NUM];
+	u32 write_mask[MAX_SUPPORTED_NODE_NBSR_NUM];
 	u32 bc_regs[BC_MM_REG_NUM];
+	u32 efuse_ram[EFUSE_RAM_LINES];
 } kvm_nbsr_regs_t;
 
 typedef struct kvm_nbsr {
@@ -68,7 +70,7 @@ do {									\
 #define	RT_XMU_c	'c'
 #define	RT_XMU_d	'd'
 
-extern int kvm_nbsr_init(struct kvm *kvm);
+extern int kvm_nbsr_init(struct kvm *kvm, unsigned long cpu_iset);
 extern void kvm_nbsr_destroy(struct kvm *kvm);
 extern int nbsr_setup_memory_region(struct kvm_nbsr *nbsr, int node_id,
 					gpa_t base, gpa_t size);

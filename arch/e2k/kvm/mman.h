@@ -57,6 +57,7 @@ extern void do_free_gmm(struct kvm *kvm, gmm_struct_t *gmm,
 			gmmid_table_t *gmmid_table);
 extern void gmm_drop(struct kvm *kvm, gmm_struct_t *gmm);
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline void free_gmm(struct kvm *kvm, gmm_struct_t *gmm)
 {
 	gmmid_table_t *gmmid_table = &kvm->arch.gmmid_table;
@@ -113,6 +114,7 @@ static inline int kvm_gmm_put_and_drop(struct kvm *kvm, gthread_info_t *gti)
 {
 	return kvm_do_gmm_put(kvm, gti, false, true);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #ifdef	CONFIG_GUEST_MM_SPT_LIST
 static inline void kvm_init_sp_gmm_entry(struct kvm_mmu_page *sp)

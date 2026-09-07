@@ -56,6 +56,13 @@
 #define	GUEST_SET_MMU_DEBUG_REG(reg_no, value)				\
 		E2K_STORE_GUEST_VCPU_STATE_D(GUEST_MMU_DEBUG_REG(reg_no), value)
 
+
+static inline void set_MMU_TRAP_POINT(unsigned long trap_cellar)
+{
+	KVM_WRITE_MMU_REG(_MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_TRAP_POINT_NO),
+			  _MMU_TRAP_POINT((e2k_addr_t)trap_cellar));
+}
+
 /*
  * Write/read MMU register
  */
@@ -209,9 +216,9 @@ static inline void KVM_RESET_MMU_TRAP_COUNT(void)
 	KVM_WRITE_MMU_REG(MMU_ADDR_TRAP_COUNT, 0);
 }
 
-static inline void BOOT_KVM_RESET_MMU_TRAP_COUNT(void)
+static inline void reset_MMU_TRAP_COUNT(void)
 {
-	BOOT_KVM_WRITE_MMU_REG(MMU_ADDR_TRAP_COUNT, 0);
+	KVM_RESET_MMU_TRAP_COUNT();
 }
 
 static inline unsigned long KVM_READ_TC_ADDRESS(int tc_no)
@@ -581,11 +588,6 @@ static inline mmu_reg_t READ_MMU_REG(mmu_addr_t mmu_addr)
 	return (mmu_reg_t)KVM_READ_MMU_REG(mmu_addr);
 }
 
-#define	BOOT_WRITE_MMU_REG(addr_val, reg_val)	\
-		BOOT_KVM_WRITE_MMU_REG(addr_val, reg_val)
-#define	BOOT_READ_MMU_REG(addr_val)		\
-		BOOT_KVM_READ_MMU_REG(addr_val)
-
 static inline void WRITE_MMU_OS_PPTB(mmu_reg_t reg_val)
 {
 	KVM_WRITE_MMU_OS_PPTB_REG(reg_val);
@@ -625,6 +627,31 @@ static inline unsigned long READ_MMU_PID(void)
 {
 	return KVM_READ_MMU_PID_REG();
 }
+
+#define	WRITE_MMU_U_PPTB(mmu_phys_ptb)	\
+		KVM_WRITE_MMU_REG( \
+			_MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_U_PPTB_NO), \
+			mmu_reg_val(mmu_phys_ptb))
+
+#define	BOOT_WRITE_MMU_U_PPTB(mmu_phys_ptb)	\
+		BOOT_KVM_WRITE_MMU_REG( \
+			_MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_U_PPTB_NO), \
+			mmu_reg_val(mmu_phys_ptb))
+
+#define	BOOT_WRITE_MMU_U_VPTB(mmu_virt_ptb)	\
+		BOOT_KVM_WRITE_MMU_REG( \
+			_MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_U_VPTB_NO), \
+			mmu_reg_val(mmu_virt_ptb))
+
+#define	WRITE_MMU_U_VPTB(mmu_virt_ptb)	\
+		WRITE_MMU_REG( \
+			_MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_U_VPTB_NO), \
+			mmu_reg_val(mmu_virt_ptb))
+
+#define	WRITE_MMU_TRAP_COUNT(counter)	\
+		WRITE_MMU_REG(_MMU_REG_NO_TO_MMU_ADDR_VAL( \
+						_MMU_TRAP_COUNT_NO), \
+			(unsigned long)_MMU_TRAP_COUNT(counter))
 
 static inline void BOOT_WRITE_MMU_OS_PPTB(mmu_reg_t reg_val)
 {
@@ -810,22 +837,22 @@ static inline void WRITE_CLW_REG(clw_addr_t clw_addr, clw_reg_t val)
 /*
  * KVM MMU DEBUG registers access
  */
-static inline mmu_reg_t READ_DDBAR0_REG_VALUE(void)
+static inline mmu_reg_t READ_DDBAR0_REG(void)
 {
 	return KVM_READ_DDBAR0_REG_VALUE();
 }
 
-static inline mmu_reg_t READ_DDBAR1_REG_VALUE(void)
+static inline mmu_reg_t READ_DDBAR1_REG(void)
 {
 	return KVM_READ_DDBAR1_REG_VALUE();
 }
 
-static inline mmu_reg_t READ_DDBAR2_REG_VALUE(void)
+static inline mmu_reg_t READ_DDBAR2_REG(void)
 {
 	return KVM_READ_DDBAR2_REG_VALUE();
 }
 
-static inline mmu_reg_t READ_DDBAR3_REG_VALUE(void)
+static inline mmu_reg_t READ_DDBAR3_REG(void)
 {
 	return KVM_READ_DDBAR3_REG_VALUE();
 }
@@ -840,22 +867,22 @@ static inline mmu_reg_t READ_DDBSR_REG_VALUE(void)
 	return KVM_READ_DDBSR_REG_VALUE();
 }
 
-static inline mmu_reg_t READ_DDMAR0_REG_VALUE(void)
+static inline mmu_reg_t READ_DDMAR0_REG(void)
 {
 	return KVM_READ_DDMAR0_REG_VALUE();
 }
 
-static inline mmu_reg_t READ_DDMAR1_REG_VALUE(void)
+static inline mmu_reg_t READ_DDMAR1_REG(void)
 {
 	return KVM_READ_DDMAR1_REG_VALUE();
 }
 
-static inline mmu_reg_t READ_DDMAR2_REG_VALUE(void)
+static inline mmu_reg_t READ_DDMAR2_REG(void)
 {
 	return KVM_READ_DDMAR2_REG_VALUE();
 }
 
-static inline mmu_reg_t READ_DDMAR3_REG_VALUE(void)
+static inline mmu_reg_t READ_DDMAR3_REG(void)
 {
 	return KVM_READ_DDMAR3_REG_VALUE();
 }

@@ -128,7 +128,7 @@ static inline const pt_struct_t *get_cpu_iset_mmu_pt_struct(int iset, bool mmu_p
 static inline const pt_struct_t *kvm_get_cpu_host_pt_struct(struct kvm *kvm)
 {
 	return get_cpu_iset_mmu_pt_struct(machine.native_iset_ver,
-					  mmu_features.mmu_pt_v6);
+					  cpu_has(CPU_FEAT_PAGE_TABLE_V6));
 }
 
 static inline const pt_struct_t *kvm_get_cpu_mmu_pt_struct(struct kvm_vcpu *vcpu)
@@ -346,12 +346,14 @@ mmu_pt_account_shadowed(struct kvm *kvm, struct kvm_mmu_page *sp)
 	kvm->arch.mmu_pt_ops.account_shadowed(kvm, sp);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline int
 mmu_pt_walk_shadow_pts(struct kvm_vcpu *vcpu, gva_t addr,
 			struct kvm_shadow_trans *st, hpa_t spt_root)
 {
 	return vcpu->kvm->arch.mmu_pt_ops.walk_shadow_pts(vcpu, addr, st, spt_root);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline void
 mmu_pt_unaccount_shadowed(struct kvm *kvm, struct kvm_mmu_page *sp)
@@ -584,11 +586,6 @@ static inline void mmu_pt_init_nonpaging_pt_structs(struct kvm *kvm, hpa_t root)
 static inline void mmu_pt_setup_shadow_pt_structs(struct kvm_vcpu *vcpu)
 {
 	vcpu->kvm->arch.mmu_pt_ops.setup_shadow_pt_structs(vcpu);
-}
-
-static inline void mmu_pt_setup_tdp_pt_structs(struct kvm_vcpu *vcpu)
-{
-	vcpu->kvm->arch.mmu_pt_ops.setup_tdp_pt_structs(vcpu);
 }
 
 static inline void mmu_pt_init_mmu_spt_context(struct kvm_vcpu *vcpu,

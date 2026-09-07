@@ -5663,74 +5663,100 @@ static long btrfs_protected_ioctl_v2(struct file *file,
 	struct btrfs_protected_ioctl_vol_args_v2 __user *arg128 =
 				(struct btrfs_protected_ioctl_vol_args_v2 *)arg;
 	/* Pointer to converted struct */
-	struct btrfs_ioctl_vol_args_v2 *arg64;
+	struct btrfs_ioctl_vol_args_v2 *arg64p;
+	__u64 size;
 	__u64 flags;
-	long buf_size = sizeof(struct btrfs_ioctl_vol_args_v2);
 
-	/* Allocate a stack to convert user's arg128 to 64bit.
-	 * A memory alignment is not required.
-	 * (see arch_protected_alloc_user_data_stack() in arch/e2k/mm/fault.c)
-	 */
-	arg64 = arch_protected_alloc_user_data_stack(buf_size);
+	/* struct btrfs_ioctl_vol_args_v2 is huge. Avoid to allocate it in stack */
 
-	/* The structure is a monster(size=4112)!
-	 * Let's convert it semi-manually!
-	 */
+	if (arg + sizeof(struct btrfs_protected_ioctl_vol_args_v2) > get_u_border()) {
+		return -EFAULT;
+	}
+	arg64p = arch_protected_alloc_user_data_stack(sizeof(struct btrfs_ioctl_vol_args_v2));
+	if (arg64p == NULL) {
+		return -ENOMEM;
+	}
+	set_u_border(MAX_U_BORDER);
+	if (copy_in_user(arg64p, arg128, 3 * sizeof(__u64))) {
+		/* fd, transid, flags */
+		return -EFAULT;
+	}
+	if (copy_in_user(arg64p + offsetof(struct btrfs_ioctl_vol_args_v2, devid),
+		     arg128 + offsetof(struct btrfs_protected_ioctl_vol_args_v2, devid),
+		     sizeof(struct btrfs_ioctl_vol_args_v2) -
+			    offsetof(struct btrfs_ioctl_vol_args_v2, devid))) {
+		/* union {name, devid, subvolid */
+		return -EFAULT;
+	}
 	if (get_user(flags, (__u64 __user *)&arg128->flags))
 		return -EFAULT;
-
-	if (flags & BTRFS_SUBVOL_QGROUP_INHERIT) {
-		/* Convert user's struct:
-		 * {long, long, long, long, descr;}
-		 */
-		if (get_pm_struct_simple(
-				(long __user *)arg128,
-				(long __user *)arg64,
-				sizeof(struct btrfs_protected_ioctl_vol_args_v2),
-				5, 1, 0x31111, 0x33311, NULL))
-			return -EINVAL;
-	} else {
-		/* __s64 fd, __u64 transid, __u64 flags; */
-		if (copy_in_user((void __user *)arg64, arg128, 3*8))
-			return -EFAULT;
+	if (!(flags & BTRFS_SUBVOL_QGROUP_INHERIT)) {
+		/* qgroup_inherit not used */
+		return btrfs_ioctl(file, cmd, (unsigned long)arg64p);
 	}
-
-	/* name[BTRFS_SUBVOL_NAME_MAX+1=4040] */
-	if (copy_in_user((void __user *)&arg64->name[0],
-						(void __user *)(&arg128->name[0]),
-						 BTRFS_SUBVOL_NAME_MAX+1))
+	/* struct btrfs_qgroup_inherit __user *qgroup_inherit is in use conversion required */
+	e2k_ap_t ap;
+	int tag;
+	if (get_user(size, &arg128->size))
 		return -EFAULT;
-
-	return btrfs_ioctl(file, cmd, (unsigned long)arg64);
+	if (get_user_tagged_16(ap.qword, tag, &arg128->qgroup_inherit) || !IS_AP(ap, tag) ||
+					AP_OBJ_SIZE(ap) < size) {
+		return -EFAULT;
+	}
+	if (put_user((void *)AP_PTR, &arg64p->qgroup_inherit) ||
+	    put_user(size, &arg64p->size))
+		return -EFAULT;
+	return btrfs_ioctl(file, cmd, (unsigned long)arg64p);
 }
 
-/* a size of struct btrfs_ioctl_send_args in PM */
-#define STRUCT_BTRFS_SEND_ARGS_SIZE 80
 
+struct btrfs_ptr128_ioctl_send_args {
+	__s64 send_fd;			/* in */
+	__u64 clone_sources_count;	/* in */
+	e2k_ap_t  clone_sources;	/* in */
+	__u64 parent_root;		/* in */
+	__u64 flags;			/* in */
+	__u32 version;			/* in */
+	__u8  reserved[28];		/* in */
+};
 static long btrfs_protected_send_ioctl(struct file *file,
 					 unsigned long cmd, unsigned long arg)
 {
 	/* Pointer to converted structure */
-	struct btrfs_ioctl_send_args *arg64;
-	long buf_size = sizeof(struct btrfs_ioctl_send_args);
+	struct btrfs_ioctl_send_args *arg64p;
+	struct btrfs_ptr128_ioctl_send_args arg128;
+	struct btrfs_ptr128_ioctl_send_args __user *arg128p =
+			(struct btrfs_ptr128_ioctl_send_args __user *)arg;
+	long buf_size;
+	e2k_ap_t ap;
+	int tag;
 
-	/* Allocate a stack to convert user's arg to arg64. */
-	arg64 = arch_protected_alloc_user_data_stack(buf_size);
-
-	/* Convert user's arg to arg64:
-	 * user's struct {long; long; descr, long, long}
-	 */
-	if (get_pm_struct_simple(
-			(long __user *)arg, (long __user *)arg64,
-			STRUCT_BTRFS_SEND_ARGS_SIZE,
-			5, 1, 0x11311, 0x11311, NULL)) {
-		return -EINVAL;
+	if (copy_from_user(&arg128, arg128p, sizeof(struct btrfs_ptr128_ioctl_send_args))) {
+		return -EFAULT;
 	}
-
-	return btrfs_ioctl(file, cmd, (unsigned long)arg64);
+	arg64p = arch_protected_alloc_user_data_stack(sizeof(struct btrfs_ioctl_send_args));
+	if (arg64p == NULL) {
+		return -ENOMEM;
+	}
+	buf_size = array_size(sizeof(__u64), arg128.clone_sources_count);
+	if (buf_size && (get_user_tagged_16(ap.qword, tag, &arg128p->clone_sources) ||
+			!IS_AP(ap, tag) || AP_OBJ_SIZE(ap) < buf_size)) {
+		return -EFAULT;
+	}
+	set_u_border(MAX_U_BORDER);
+	if (put_user(arg128.clone_sources_count, &arg64p->clone_sources_count) ||
+	    arg128.clone_sources_count ?
+		put_user((__u64 *)AP_PTR(ap), &arg64p->clone_sources) : 0 ||
+	    put_user(arg128.send_fd, &arg64p->send_fd) ||
+	    put_user(arg128.parent_root, &arg64p->parent_root) ||
+	    put_user(arg128.flags, &arg64p->flags) ||
+	    put_user(arg128.version, &arg64p->version)) {
+		return -EFAULT;
+	}
+	return btrfs_ioctl(file, cmd, (unsigned long)arg64p);
 }
 
-long btrfs_protected_ioctl(struct file *file, unsigned long cmd,
+long btrfs_protected_ioctl(struct file *file, unsigned int cmd,
 					 unsigned long arg)
 {
 	switch (cmd) {

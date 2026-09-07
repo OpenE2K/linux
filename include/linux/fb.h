@@ -289,7 +289,11 @@ struct fb_ops {
 	/* Handle 32bit compat ioctl (optional) */
 	int (*fb_compat_ioctl)(struct fb_info *info, unsigned cmd,
 			unsigned long arg);
-
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	/* Handle e2k ptr128 ioctl (optional) */
+	int (*fb_ptr128_ioctl)(struct fb_info *info, unsigned cmd,
+			unsigned long arg);
+#endif
 	/* perform fb specific mmap */
 	int (*fb_mmap)(struct fb_info *info, struct vm_area_struct *vma);
 

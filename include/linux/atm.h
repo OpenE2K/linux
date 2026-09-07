@@ -13,4 +13,12 @@ struct compat_atmif_sioc {
 	compat_uptr_t arg;
 };
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#include <asm/e2k_ptypes.h>
+struct ptr128_atmif_sioc {
+	int number;
+	int length;
+	e2k_ap_t arg;
+};
+#endif
 #endif

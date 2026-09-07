@@ -16,7 +16,8 @@
  */
 
 /* Inode operations */
-struct dentry *rtcfs_proc_lookup(struct inode *dir, struct dentry *dentry, unsigned int)
+struct dentry *rtcfs_proc_lookup(struct inode *dir, struct dentry *dentry,
+		unsigned int flags)
 {
 	struct path file_path;
 
@@ -201,18 +202,16 @@ int rtcfs_proc_open(struct inode *inode, struct file *rtcfs_file)
 	/* Allocate struct file and open procfs path */
 	proc_file = open_with_fake_path(&proc_path, rtcfs_file->f_flags,
 					proc_inode, rtcfs_file->f_cred);
-	if (IS_ERR(proc_file)) {
-		spin_unlock(&inode->i_lock);
+	if (IS_ERR(proc_file))
 		return PTR_ERR(proc_file);
-	}
 
 	rtcfs_file->private_data = proc_file;
 	/*
 	 * f_mode can be used to determine allowed file operations
 	 * (and which may be not NULL, see nonseekable_open()
 	 */
-	rtcfs_file->f_mode = proc_file->f_mode;
-
+	if (!(proc_file->f_mode & FMODE_LSEEK))
+		rtcfs_file->f_mode &= ~FMODE_LSEEK;
 	return 0;
 }
 
@@ -221,7 +220,6 @@ int rtcfs_proc_open(struct inode *inode, struct file *rtcfs_file)
  */
 int rtcfs_proc_release(struct inode *inode, struct file *rtcfs_file)
 {
-	struct rtcfs_inode *rtcfs_inode = RTCFS_I(inode);
 	struct file *proc_file = (struct file *)rtcfs_file->private_data;
 
 	if (proc_file)
@@ -299,18 +297,20 @@ struct file_operations *rtcfs_install_fop_wrappers(struct inode *inode,
 		RTCFS_SET_OP(fop, unlocked_ioctl,	proc_fop);
 		RTCFS_SET_OP(fop, compat_ioctl,		proc_fop);
 		RTCFS_SET_OP(fop, mmap,			proc_fop);
-		RTCFS_SET_OP(fop, release,		proc_fop);
 		RTCFS_SET_OP(fop, get_unmapped_area,	proc_fop);
 		RTCFS_SET_OP(fop, splice_write,		proc_fop);
 		RTCFS_SET_OP(fop, splice_read,		proc_fop);
 
 		/**
-		 * Inodes can have nulled open function, but it's required
-		 * to have opened original proc file for proper methods work.
-		 * Therefore, the rtcfs_proc_open() function is forcibly
-		 * setted here.
+		 * Inodes can have default (nulled) open function, but in
+		 * order to have a pointer to the original proc file, we need
+		 * to call our open(). It is possible that release() method
+		 * is set to null too, so we always install our auxiliary
+		 * functions here: one for getting the original file,
+		 * and one for releasing it.
 		 */
-		fop->open = rtcfs_proc_open;
+		fop->open	= rtcfs_proc_open;
+		fop->release	= rtcfs_proc_release;
 	}
 
 	return fop;

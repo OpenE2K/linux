@@ -1307,6 +1307,15 @@ static pageout_t pageout(struct folio *folio, struct address_space *mapping,
 
 	return PAGE_CLEAN;
 }
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+void pageout4sanit(struct page *page)
+{
+	 struct swap_iocb *plug = NULL;
+	 pageout(page_folio(page), page_mapping(page), &plug);
+	return;
+}
+EXPORT_SYMBOL(pageout4sanit);
+#endif
 
 /*
  * Same as remove_mapping, but if the folio is removed from the mapping, it

@@ -30,30 +30,30 @@
 
 
 #define NODE 0
-#include "include/e2s.dtsi"
+#include "include/e2k-v4.dtsi"
 # undef NODE
 
 /* linux initializes devices in reverse order */
 #if NODES > 3
 # define NODE 3
-# include "include/e2s-node.dtsi"
+# include "include/e2k-v4-uncore.dtsi"
 # include "include/iohub2.dtsi"
 # undef NODE
 #endif
 #if NODES > 2
 # define NODE 2
-# include "include/e2s-node.dtsi"
+# include "include/e2k-v4-uncore.dtsi"
 # include "include/iohub2.dtsi"
 # undef NODE
 #endif
 #if NODES > 1
 # define NODE 1
-# include "include/e2s-node.dtsi"
+# include "include/e2k-v4-uncore.dtsi"
 # include "include/iohub2.dtsi"
 # undef NODE
 #endif
 #define NODE 0
-#include "include/e2s-node.dtsi"
+#include "include/e2k-v4-uncore.dtsi"
 #include "include/iohub2.dtsi"
 #undef NODE
 

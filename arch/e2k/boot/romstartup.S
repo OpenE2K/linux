@@ -3,13 +3,10 @@
  * Copyright (c) 2023 MCST
  */
 
-/* $Id: romstartup.S,v 1.8 2005/08/16 12:32:40 atic Exp $ */
-//
 // primary linux startup module
 // lintel_startup.s, written by <karbo@lab.sun.mcst.ru>
 // linux_startup.s, written by <atic@soft.sun.mcst.ru> as modification
 // of 'lintel_startup.s' to start up linux secondary module
-//
 
 #include <linux/linkage.h>
 
@@ -18,6 +15,8 @@
 #define RSZ		0x10 			/* 10 quadwords	*/
 
 #define UPSR		0x1			/* fpu enabled */
+
+#define BGR		0xff			/* %g24-%g31 enabled */
 
 #define OSEM		0x0			/* no software traps enabled */
 
@@ -31,8 +30,10 @@ SYM_FUNC_START(start)
 		setbp	psz = 0
 	}
 	rws UPSR,%upsr
+	rws BGR,%bgr
 	disp %ctpr1,loader
 	rwd OSEM,%osem
+	wait all_e=1
 	ct %ctpr1
 SYM_FUNC_END(start)
 

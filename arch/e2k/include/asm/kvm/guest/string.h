@@ -154,7 +154,7 @@ static inline size_t kvm_fast_tagged_memory_copy_from_user(void *dst,
 				strd_opcode, ldrd_opcode, prefetch);
 }
 
-static inline void kvm_tagged_memcpy_8(void *dst, const void *src, size_t n)
+static inline void kvm_tagged_memcpy_8(volatile void *dst, const volatile void *src, size_t n)
 {
 	E2K_PREFETCH_L1_SPEC(src);
 

@@ -22,17 +22,11 @@
  * to preserve the old (v6) and new (v7) format of registers
  */
 
-static __always_inline e2k_usd_t native_read_sh_USD_reg(void)
+static __always_inline e2k_usd_t native_read_guest_USD_reg(void)
 {
-	u64 lo = NATIVE_RRSH_DSREG_CLOSED_ISET(7, usd.lo);
-	u64 hi = NATIVE_RRSH_DSREG_CLOSED_ISET(7, usd.hi);
+	u64 lo = RRSH_DREG(usd.lo);
+	u64 hi = RRSH_DREG(usd.hi);
 	return (e2k_usd_t) { .lo = lo, .hi = hi };
-}
-
-static __always_inline void native_write_sh_USD_reg(e2k_usd_t usd)
-{
-	NATIVE_RWSH_DSREG_CLOSED_ISET(7, usd.hi, usd.hi);
-	NATIVE_RWSH_DSREG_CLOSED_ISET(7, usd.lo, usd.lo);
 }
 
 /*
@@ -42,16 +36,13 @@ static __always_inline void native_write_sh_USD_reg(e2k_usd_t usd)
 static __always_inline virt_ctrl_cu_t read_VIRT_CTRL_CU_reg(void)
 {
 	return (virt_ctrl_cu_t) {
-		.word = NATIVE_GET_DSREG_CLOSED_ISET(6, virt_ctrl_cu)
+		.word = NATIVE_GET_DREG_CLOSED_ISET(6, virt_ctrl_cu)
 	};
 }
 
 static __always_inline void write_VIRT_CTRL_CU_reg(virt_ctrl_cu_t vcc)
 {
-/* Bug #127239: on some CPUs "rwd %virt_ctrl_cu" instruction must also
- * contain a NOP.  This is already accomplished by using delay "5" here. */
-
-	NATIVE_SET_DSREG_CLOSED_NOEXC_ISET(6, virt_ctrl_cu, vcc.word, 5, 7);
+	NATIVE_SET_VIRT_CTRL_CU(vcc.word);
 }
 
 /* Shadow CPU registers */
@@ -63,15 +54,14 @@ static __always_inline void write_VIRT_CTRL_CU_reg(virt_ctrl_cu_t vcc)
 static __always_inline e2k_cud_t read_SH_OSCUD_reg(void)
 {
 	return (e2k_cud_t) {
-		.lo = NATIVE_GET_DSREG_CLOSED_ISET(6, sh_oscud.lo),
-		.hi = NATIVE_GET_DSREG_CLOSED_ISET(6, sh_oscud.hi)
+		.lo = NATIVE_GET_DREG_CLOSED_ISET(6, sh_oscud.lo),
+		.hi = NATIVE_GET_DREG_CLOSED_ISET(6, sh_oscud.hi)
 	};
 }
 
 static __always_inline void write_SH_OSCUD_reg(e2k_cud_t cud)
 {
-	NATIVE_SET_DSREG_CLOSED_NOEXC_ISET(6, sh_oscud.lo, cud.lo, 5, 7);
-	NATIVE_SET_DSREG_CLOSED_NOEXC_ISET(6, sh_oscud.hi, cud.hi, 5, 7);
+	NATIVE_SET_DREGS_NOEXC(6, sh_oscud.lo, sh_oscud.hi, cud.lo, cud.hi);
 }
 
 /*
@@ -81,15 +71,14 @@ static __always_inline void write_SH_OSCUD_reg(e2k_cud_t cud)
 static __always_inline e2k_gd_t read_SH_OSGD_reg(void)
 {
 	return (e2k_gd_t) {
-		.lo = NATIVE_GET_DSREG_CLOSED_ISET(6, sh_osgd.lo),
-		.hi = NATIVE_GET_DSREG_CLOSED_ISET(6, sh_osgd.hi)
+		.lo = NATIVE_GET_DREG_CLOSED_ISET(6, sh_osgd.lo),
+		.hi = NATIVE_GET_DREG_CLOSED_ISET(6, sh_osgd.hi)
 	};
 }
 
 static __always_inline void write_SH_OSGD_reg(e2k_gd_t osgd)
 {
-	NATIVE_SET_DSREG_CLOSED_NOEXC_ISET(6, sh_osgd.lo, osgd.lo, 5, 7);
-	NATIVE_SET_DSREG_CLOSED_NOEXC_ISET(6, sh_osgd.hi, osgd.hi, 5, 7);
+	NATIVE_SET_DREGS_NOEXC(6, sh_osgd.lo, sh_osgd.hi, osgd.lo, osgd.hi);
 }
 
 /*
@@ -100,29 +89,27 @@ static __always_inline void write_SH_OSGD_reg(e2k_gd_t osgd)
 static __always_inline e2k_psp_t read_SH_PSP_reg(void)
 {
 	return (e2k_psp_t) {
-		.lo = NATIVE_GET_DSREG_CLOSED_ISET(6, sh_psp.lo),
-		.hi = NATIVE_GET_DSREG_CLOSED_ISET(6, sh_psp.hi)
+		.lo = NATIVE_GET_DREG_CLOSED_ISET(6, sh_psp.lo),
+		.hi = NATIVE_GET_DREG_CLOSED_ISET(6, sh_psp.hi)
 	};
 }
 
 static __always_inline void write_SH_PSP_reg(e2k_psp_t psp)
 {
-	NATIVE_SET_DSREG_CLOSED_NOEXC_ISET(6, sh_psp.lo, psp.lo, 5, 7);
-	NATIVE_SET_DSREG_CLOSED_NOEXC_ISET(6, sh_psp.hi, psp.hi, 5, 7);
+	NATIVE_SET_DREGS_NOEXC(6, sh_psp.lo, sh_psp.hi, psp.lo, psp.hi);
 }
 
 static __always_inline e2k_psp_t read_BU_PSP_reg(void)
 {
 	return (e2k_psp_t) {
-		.lo = NATIVE_GET_DSREG_CLOSED_ISET(6, bu_psp.lo),
-		.hi = NATIVE_GET_DSREG_CLOSED_ISET(6, bu_psp.hi)
+		.lo = NATIVE_GET_DREG_CLOSED_ISET(6, bu_psp.lo),
+		.hi = NATIVE_GET_DREG_CLOSED_ISET(6, bu_psp.hi)
 	};
 }
 
 static __always_inline void write_BU_PSP_reg(e2k_psp_t psp)
 {
-	NATIVE_SET_DSREG_CLOSED_NOEXC_ISET(6, bu_psp.lo, psp.lo, 5, 7);
-	NATIVE_SET_DSREG_CLOSED_NOEXC_ISET(6, bu_psp.hi, psp.hi, 5, 7);
+	NATIVE_SET_DREGS_NOEXC(6, bu_psp.lo, bu_psp.hi, psp.lo, psp.hi);
 }
 
 /*
@@ -133,45 +120,43 @@ static __always_inline void write_BU_PSP_reg(e2k_psp_t psp)
 static __always_inline e2k_pcsp_t read_SH_PCSP_reg(void)
 {
 	return (e2k_pcsp_t) {
-		.lo = NATIVE_GET_DSREG_CLOSED_ISET(6, sh_pcsp.lo),
-		.hi = NATIVE_GET_DSREG_CLOSED_ISET(6, sh_pcsp.hi)
+		.lo = NATIVE_GET_DREG_CLOSED_ISET(6, sh_pcsp.lo),
+		.hi = NATIVE_GET_DREG_CLOSED_ISET(6, sh_pcsp.hi)
 	};
 }
 
 static __always_inline void write_SH_PCSP_reg(e2k_pcsp_t pcsp)
 {
-	NATIVE_SET_DSREG_CLOSED_NOEXC_ISET(6, sh_pcsp.lo, pcsp.lo, 5, 7);
-	NATIVE_SET_DSREG_CLOSED_NOEXC_ISET(6, sh_pcsp.hi, pcsp.hi, 5, 7);
+	NATIVE_SET_DREGS_NOEXC(6, sh_pcsp.lo, sh_pcsp.hi, pcsp.lo, pcsp.hi);
 }
 
 static __always_inline e2k_pcsp_t read_BU_PCSP_reg(void)
 {
 	return (e2k_pcsp_t) {
-		.lo = NATIVE_GET_DSREG_CLOSED_ISET(6, bu_pcsp.lo),
-		.hi = NATIVE_GET_DSREG_CLOSED_ISET(6, bu_pcsp.hi)
+		.lo = NATIVE_GET_DREG_CLOSED_ISET(6, bu_pcsp.lo),
+		.hi = NATIVE_GET_DREG_CLOSED_ISET(6, bu_pcsp.hi)
 	};
 }
 
 static __always_inline void write_BU_PCSP_reg(e2k_pcsp_t pcsp)
 {
-	NATIVE_SET_DSREG_CLOSED_NOEXC_ISET(6, bu_pcsp.lo, pcsp.lo, 5, 7);
-	NATIVE_SET_DSREG_CLOSED_NOEXC_ISET(6, bu_pcsp.hi, pcsp.hi, 5, 7);
+	NATIVE_SET_DREGS_NOEXC(6, bu_pcsp.lo, bu_pcsp.hi, pcsp.lo, pcsp.hi);
 }
 
 /*
- * Read/write word Procedure Stack Harware Top Pointer (SH_PSHTP)
+ * Read/write word Procedure Stack Hardware Top Pointer (SH_PSHTP)
  */
 
 static __always_inline e2k_pshtp_t read_SH_PSHTP_reg(void)
 {
 	return (e2k_pshtp_t) {
-		.word = NATIVE_GET_DSREG_CLOSED_ISET(6, sh_pshtp)
+		.word = NATIVE_GET_DREG_CLOSED_ISET(6, sh_pshtp)
 	};
 }
 
 static __always_inline void write_SH_PSHTP_reg(e2k_pshtp_t pshtp)
 {
-	NATIVE_SET_DSREG_CLOSED_NOEXC_ISET(6, sh_pshtp, pshtp.word, 5, 7);
+	NATIVE_SET_DREG_NOEXC(6, sh_pshtp, pshtp.word);
 }
 
 
@@ -189,7 +174,7 @@ static __always_inline e2k_pcshtp_t read_SH_PCSHTP_reg(void)
 
 static __always_inline void write_SH_PCSHTP_reg(e2k_pcshtp_t pcshtp)
 {
-	NATIVE_SET_SREG_CLOSED_NOEXC_ISET(6, sh_pcshtp, AW(pcshtp), 5, 7);
+	NATIVE_SET_SREG_NOEXC(6, sh_pcshtp, AW(pcshtp));
 }
 
 
@@ -200,13 +185,13 @@ static __always_inline void write_SH_PCSHTP_reg(e2k_pcshtp_t pcshtp)
 static __always_inline e2k_wd_t read_SH_WD_reg(void)
 {
 	return (e2k_wd_t) {
-		.word = NATIVE_GET_DSREG_CLOSED_ISET(6, sh_wd)
+		.word = NATIVE_GET_DREG_CLOSED_ISET(6, sh_wd)
 	};
 }
 
 static __always_inline void write_SH_WD_reg(e2k_wd_t wd)
 {
-	NATIVE_SET_DSREG_CLOSED_NOEXC_ISET(6, sh_wd, AW(wd), 5, 7);
+	NATIVE_SET_DREG_NOEXC(6, sh_wd, AW(wd));
 }
 
 /*
@@ -215,28 +200,39 @@ static __always_inline void write_SH_WD_reg(e2k_wd_t wd)
 
 static __always_inline u64 read_SH_T_off_reg(void)
 {
-	return NATIVE_GET_DSREG_CLOSED_ISET(7, sh_t_off);
+	return NATIVE_GET_DREG_CLOSED_ISET(7, sh_t_off);
 }
 
 static __always_inline void write_SH_T_off_reg(u64 off)
 {
-	NATIVE_SET_DSREG_CLOSED_NOEXC_ISET(7, sh_t_off, off, 6, 6);
+	NATIVE_SET_DREG_NOEXC(7, sh_t_off, off);
 }
 
 /*
- * Read/write OS register which point to current process thread info
- * structure (SH_OSR0)
+ * Read/write OS-specific registers
  */
 
 static __always_inline u64 read_SH_OSR0_reg_value(void)
 {
-	return (u64)NATIVE_GET_DSREG_CLOSED_ISET(6, sh_osr0);
+	return (u64)NATIVE_GET_DREG_CLOSED_ISET(6, sh_osr0);
 }
 
 static __always_inline void write_SH_OSR0_reg_value(u64 osr0)
 {
-	NATIVE_SET_DSREG_CLOSED_NOEXC_ISET(6, sh_osr0, osr0, 5, 6);
+	NATIVE_SET_DREG_NOEXC(6, sh_osr0, osr0);
 }
+
+#ifdef CONFIG_CPU_HAS_OSR1
+static __always_inline u64 read_SH_OSR1_reg_value(void)
+{
+	return (u64)NATIVE_GET_DREG_CLOSED_ISET(7, sh_osr1);
+}
+
+static __always_inline void write_SH_OSR1_reg_value(u64 osr1)
+{
+	NATIVE_SET_DREG_NOEXC(7, sh_osr1, osr1);
+}
+#endif
 
 /*
  * Read/Write system clock registers (SH_SCLKM3)
@@ -244,13 +240,13 @@ static __always_inline void write_SH_OSR0_reg_value(u64 osr0)
 
 static __always_inline u64 read_SH_SCLKM3_reg_value(void)
 {
-	return (u64) NATIVE_GET_DSREG_CLOSED_ISET(6, sh_sclkm3);
+	return (u64) NATIVE_GET_DREG_CLOSED_ISET(6, sh_sclkm3);
 
 }
 
 static __always_inline void write_SH_SCLKM3_reg_value(u64 val)
 {
-	NATIVE_SET_DSREG_CLOSED_NOEXC_ISET(6, sh_sclkm3, val, 4, 6);
+	NATIVE_SET_DREG_NOEXC(6, sh_sclkm3, val);
 }
 
 /*
@@ -260,13 +256,13 @@ static __always_inline void write_SH_SCLKM3_reg_value(u64 val)
 static __always_inline e2k_cutd_t read_SH_OSCUTD_reg(void)
 {
 	return (e2k_cutd_t) {
-		.word = NATIVE_GET_DSREG_CLOSED_ISET(6, sh_oscutd)
+		.word = NATIVE_GET_DREG_CLOSED_ISET(6, sh_oscutd)
 	};
 }
 
 static __always_inline void write_SH_OSCUTD_reg(e2k_cutd_t cutd)
 {
-	NATIVE_SET_DSREG_CLOSED_NOEXC_ISET(6, sh_oscutd, cutd.word, 7, 7);
+	NATIVE_SET_DREG_NOEXC(6, sh_oscutd, cutd.word);
 }
 
 /*
@@ -282,7 +278,7 @@ static __always_inline e2k_cuir_t read_SH_OSCUIR_reg(void)
 
 static __always_inline void write_SH_OSCUIR_reg(e2k_cuir_t oscuir)
 {
-	NATIVE_SET_DSREG_CLOSED_NOEXC_ISET(6, sh_oscuir, oscuir.word, 7, 7);
+	NATIVE_SET_DREG_NOEXC(6, sh_oscuir, oscuir.word);
 }
 
 /*
@@ -298,7 +294,7 @@ static __always_inline e2k_core_mode_t read_SH_CORE_MODE_reg(void)
 
 static __always_inline void write_SH_CORE_MODE_reg(e2k_core_mode_t cm)
 {
-	NATIVE_SET_SREG_CLOSED_NOEXC_ISET(6, sh_core_mode, AW(cm), 5, 7);
+	NATIVE_SET_SREG_NOEXC(6, sh_core_mode, AW(cm));
 }
 
 
@@ -308,13 +304,13 @@ static __always_inline void write_SH_CORE_MODE_reg(e2k_core_mode_t cm)
 static __always_inline e2k_g_preempt_tmr_t read_G_PREEMPT_TMR_reg(void)
 {
 	return (e2k_g_preempt_tmr_t) {
-		.word = NATIVE_GET_DSREG_CLOSED(g_preempt_tmr)
+		.word = NATIVE_GET_DREG_CLOSED(g_preempt_tmr)
 	};
 }
 
 static __always_inline void write_G_PREEMPT_TMR_reg(e2k_g_preempt_tmr_t gpt)
 {
-	NATIVE_SET_DSREG_CLOSED_NOEXC_ISET(6, g_preempt_tmr, AW(gpt), 5, 7);
+	NATIVE_SET_DREG_NOEXC(6, g_preempt_tmr, AW(gpt));
 }
 
 /*
@@ -323,25 +319,24 @@ static __always_inline void write_G_PREEMPT_TMR_reg(e2k_g_preempt_tmr_t gpt)
 
 static __always_inline u64 read_INTC_PTR_CU_reg_value(void)
 {
-	return (u64) NATIVE_GET_DSREG_CLOSED_ISET(6, intc_ptr_cu);
+	return (u64) NATIVE_GET_DREG_CLOSED_ISET(6, intc_ptr_cu);
 }
 
 static __always_inline u64 read_INTC_INFO_CU_reg_value(void)
 {
-	return (u64) NATIVE_GET_DSREG_CLOSED_ISET(6, intc_info_cu);
+	return (u64) NATIVE_GET_DREG_CLOSED_ISET(6, intc_info_cu);
 }
 
-static __always_inline void write_INTC_INFO_CU_reg_value(u64 v)
+static __always_inline void write_INTC_INFO_CU_pair_value(u64 lo, u64 hi)
 {
-	NATIVE_SET_DSREG_CLOSED_NOEXC_ISET(6, intc_info_cu, v, 5, 7);
+	NATIVE_SET_DREGS_EXC(6, intc_info_cu, intc_info_cu, lo, hi);
 }
 
 /* Clear INTC_INFO_CU header and INTC_PTR_CU */
 static inline void clear_intc_info_cu(void)
 {
 	(void)read_INTC_PTR_CU_reg_value();
-	write_INTC_INFO_CU_reg_value(0ULL);
-	write_INTC_INFO_CU_reg_value(0ULL);
+	write_INTC_INFO_CU_pair_value(0ULL, 0ULL);
 	(void)read_INTC_PTR_CU_reg_value();
 }
 
@@ -372,7 +367,6 @@ static inline void save_intc_info_cu(intc_info_cu_t *info, int *num)
 	for (; info_ptr > 0; info_ptr -= 2) {
 		info->entry[i].lo = read_INTC_INFO_CU_reg_value();
 		info->entry[i].hi = read_INTC_INFO_CU_reg_value();
-		info->entry[i].no_restore = false;
 		++i;
 	};
 
@@ -394,218 +388,9 @@ static inline void restore_intc_info_cu(const intc_info_cu_t *info, int num)
 	 * Restore intercepted events. Header flags aren't used for reexecution,
 	 * so restore 0 in header.
 	 */
-	write_INTC_INFO_CU_reg_value(0ULL);
-	write_INTC_INFO_CU_reg_value(0ULL);
+	write_INTC_INFO_CU_pair_value(0ULL, 0ULL);
 	for (i = 0; i < num; i++) {
-		if (!info->entry[i].no_restore) {
-			write_INTC_INFO_CU_reg_value(info->entry[i].lo);
-			write_INTC_INFO_CU_reg_value(info->entry[i].hi);
-		}
-	}
-}
-
-static inline void kvm_reset_intc_info_cu_is_updated(struct kvm_vcpu *vcpu)
-{
-	vcpu->arch.intc_ctxt.cu_updated = false;
-}
-
-static inline void kvm_set_intc_info_cu_is_updated(struct kvm_vcpu *vcpu)
-{
-	vcpu->arch.intc_ctxt.cu_updated = true;
-}
-
-static inline bool kvm_get_intc_info_cu_is_updated(struct kvm_vcpu *vcpu)
-{
-	return vcpu->arch.intc_ctxt.cu_updated;
-}
-
-static __always_inline e2k_usd_t
-vcpu_read_sh_usd_reg_v7(struct kvm_vcpu *vcpu)
-{
-	/* use always rrsh/rwsh operations to access descriptor registers */
-	return native_read_sh_USD_reg();
-}
-
-static __always_inline e2k_usd_t
-vcpu_read_usd_reg(struct kvm_vcpu *vcpu)
-{
-	/* host & guest have always same old or new format */
-	return native_read_USD_reg();
-}
-
-static __always_inline e2k_usd_t
-vcpu_save_usd_reg_v7(struct kvm_vcpu *vcpu, bool to_guest)
-{
-	/*
-	 * host & guest can have different descriptor-registers format:
-	 *	host always has v7 format
-	 *	guest can have both format v7 or v6
-	 */
-	if (to_guest) {
-		/* host saved, guest restored */
-		return vcpu_read_usd_reg(vcpu);
-	} else {
-		/* guest saved, host restored */
-		if (vcpu_descr_v7(vcpu)) {
-			/* guest has same v7 format */
-			return vcpu_read_usd_reg(vcpu);
-		} else {
-			/* guest has old format of registers, use 'rrsh' */
-			return vcpu_read_sh_usd_reg_v7(vcpu);
-		}
-	}
-}
-
-/* registers-descriptor access (read/write) */
-
-static __always_inline e2k_usd_t
-vcpu_save_usd_reg(struct kvm_vcpu *vcpu, bool to_guest)
-{
-	if (cpu_has(CPU_FEAT_V7_CPU_REGS)) {
-		return vcpu_save_usd_reg_v7(vcpu, to_guest);
-	} else {
-		return vcpu_read_usd_reg(vcpu);
-	}
-}
-
-static __always_inline void
-vcpu_write_sh_usd_reg_v7(struct kvm_vcpu *vcpu, e2k_usd_t usd)
-{
-	/* use always rrsh/rwsh operations to access descriptor registers */
-	return native_write_sh_USD_reg(usd);
-}
-
-static __always_inline void
-vcpu_write_usd_sbr_reg(struct kvm_vcpu *vcpu, e2k_sbr_t sbr, e2k_usd_t usd)
-{
-	/* host & guest have always native descriptor-registers old format v6 */
-	native_write_USBR_USD_regs(sbr, usd);
-}
-
-static __always_inline void
-vcpu_restore_usd_sbr_reg_v7(struct kvm_vcpu *vcpu, e2k_sbr_t sbr, e2k_usd_t usd,
-			    bool to_guest)
-{
-	/*
-	 * host & guest can have different descriptor-registers format:
-	 *	host always has v7 format
-	 *	guest can have both format v7 or v6
-	 */
-	if (to_guest) {
-		/* guest restored, host saved */
-		if (vcpu_descr_v7(vcpu)) {
-			/* guest has new format of registers same as host */
-			vcpu_write_usd_sbr_reg(vcpu, sbr, usd);
-		} else {
-			/* guest has old format of registers, use 'rwsh' */
-			native_write_USBR_reg(sbr);
-			vcpu_write_sh_usd_reg_v7(vcpu, usd);
-		}
-	} else {
-		/* host restored, guest saved,  */
-		vcpu_write_usd_sbr_reg(vcpu, sbr, usd);
-	}
-}
-
-static __always_inline void
-vcpu_restore_usd_sbr_reg(struct kvm_vcpu *vcpu, e2k_sbr_t sbr, e2k_usd_t usd,
-			 bool to_guest)
-{
-	if (cpu_has(CPU_FEAT_V7_CPU_REGS)) {
-		vcpu_restore_usd_sbr_reg_v7(vcpu, sbr, usd, to_guest);
-	} else {
-		vcpu_write_usd_sbr_reg(vcpu, sbr, usd);
-	}
-}
-
-static __always_inline e2k_usincr_t
-vcpu_save_usincr_reg_v7(struct kvm_vcpu *vcpu, bool to_guest)
-{
-	if (to_guest) {
-		/* host saved, guest restored */
-		return native_read_USINCR_reg();
-	} else {
-		/* guest saved, host restored */
-		if (vcpu_getsp_v7(vcpu)) {
-			/* guest support the register */
-			return native_read_USINCR_reg();
-		} else {
-			/* guest does not support this register */
-			return (e2k_usincr_t){ .word = 0 };
-		}
-	}
-}
-
-static __always_inline e2k_usincr_t
-vcpu_save_usincr_reg_v6(struct kvm_vcpu *vcpu)
-{
-	/* host & guest have not this register */
-	return (e2k_usincr_t) { .word = 0 };
-}
-
-static __always_inline e2k_usincr_t
-vcpu_save_usincr_reg(struct kvm_vcpu *vcpu, bool to_guest)
-{
-	if (cpu_has(CPU_FEAT_ISET_V7)) {
-		return vcpu_save_usincr_reg_v7(vcpu, to_guest);
-	} else {
-		return vcpu_save_usincr_reg_v6(vcpu);
-	}
-}
-
-static __always_inline void
-vcpu_restore_usincr_reg_v7(struct kvm_vcpu *vcpu, e2k_usincr_t usincr, bool to_guest)
-{
-	if (to_guest) {
-		/* guest restored, host saved */
-		if (vcpu_getsp_v7(vcpu)) {
-			/* guest support the register */
-			native_write_USINCR_reg(usincr);
-		} else {
-			/* guest does not support this register */
-			;
-		}
-	} else {
-		/* host restored, guest saved */
-		native_write_USINCR_reg(usincr);
-	}
-}
-
-static __always_inline void
-vcpu_restore_usincr_reg_v6(struct kvm_vcpu *vcpu, e2k_usincr_t usincr)
-{
-	/* host & guest have not this register */
-}
-
-static __always_inline void
-vcpu_restore_usincr_reg(struct kvm_vcpu *vcpu, e2k_usincr_t usincr, bool to_guest)
-{
-	if (cpu_has(CPU_FEAT_ISET_V7)) {
-		return vcpu_restore_usincr_reg_v7(vcpu, usincr, to_guest);
-	} else {
-		return vcpu_restore_usincr_reg_v6(vcpu, usincr);
-	}
-}
-
-static __always_inline void
-vcpu_restore_us_cl_low_v7(struct kvm_vcpu *vcpu, clw_reg_t us_cl_up, u64 usd_lo)
-{
-	if (vcpu_descr_v7(vcpu)) {
-		/* guest has new format of registers same as host */
-		RESTORE_US_CL_LOW(us_cl_up, usd_lo);
-	} else {
-		/* guest has old format of registers, use 'rwsh' */
-		RESTORE_US_CL_LOW_V7_FOR_V6(us_cl_up, usd_lo);
-	}
-}
-
-static __always_inline void
-vcpu_restore_us_cl_low(struct kvm_vcpu *vcpu, clw_reg_t us_cl_up, u64 usd_lo)
-{
-	if (cpu_has(CPU_FEAT_ISET_V7)) {
-		vcpu_restore_us_cl_low_v7(vcpu, us_cl_up, usd_lo);
-	} else {
-		RESTORE_US_CL_LOW(us_cl_up, usd_lo);
+		write_INTC_INFO_CU_pair_value(info->entry[i].lo, info->entry[i].hi);
 	}
 }
 

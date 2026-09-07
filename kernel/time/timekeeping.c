@@ -837,7 +837,7 @@ void ktime_get_real_ts64(struct timespec64 *ts)
 EXPORT_SYMBOL(ktime_get_real_ts64);
 
 #ifdef CONFIG_MCST
-s64 getns64timeofday()
+s64 getns64timeofday(void)
 {
 	struct timekeeper *tk = &tk_core.timekeeper;
 	ktime_t base;
@@ -1535,9 +1535,6 @@ int timekeeping_notify(struct clocksource *clock)
 	tick_clock_notify();
 	return tk->tkr_mono.clock == clock ? 0 : -1;
 }
-#ifdef CONFIG_MCST
-EXPORT_SYMBOL(timekeeping_notify);
-#endif
 
 /**
  * ktime_get_raw_ts64 - Returns the raw monotonic time in a timespec

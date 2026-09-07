@@ -6,7 +6,7 @@
 /*
  * Memory management utilities
  */
- 
+
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/string.h>
@@ -186,6 +186,7 @@ void print_va_all_tlb_levels(e2k_addr_t addr, bool huge_page)
 	probe_entry_t probe, pte_probe, pmd_probe, pud_probe;
 	struct mm_struct *mm = current->active_mm;
 	unsigned long cntx;
+	e2k_mmu_cr_t mmu_cr;
 
 	/* Only older CPUs cached intermediate levels of page table in DTLB */
 	bool print_intermediate_levels = !cpu_has(CPU_FEAT_ISET_V6);
@@ -201,7 +202,9 @@ void print_va_all_tlb_levels(e2k_addr_t addr, bool huge_page)
 	if (huge_page) {
 		get_va_tlb_state(&huge_line, addr, 1);
 	}
+	mmu_cr = svsc_save();
 	probe = get_MMU_DTLB_ENTRY(addr);
+	svsc_restore(mmu_cr);
 
 	if (print_intermediate_levels) {
 		pte_addr = pte_virt_offset(round_down(addr, PTE_SIZE));
@@ -353,7 +356,7 @@ static int e2k_make_single_pmd_valid(struct vm_area_struct *vma, pmd_t *pmd,
 	spinlock_t *ptl = NULL;
 	pmd_t pmdv;
 
-	DebugPMD("started from 0x%lx for pmd 0x%lx to %s\n",
+	DebugPMD("started from 0x%lx for pmd 0x%px to %s\n",
 		 address, pmd, (set_invalid) ? "invalidate" : "validate");
 
 	if (hpage) {
@@ -576,7 +579,7 @@ static int e2k_make_p4d_pages_valid(struct vm_area_struct *vma, pgd_t *pgd, e2k_
 		if (p4d_none(*p4d)) {
 			if ((address & P4D_MASK) == address &&
 					end_addr >= p4d_addr_bound(address)) {
-				DebugPTD("will make p4d 0x%lx valid & !present for addr 0x%lx\n",
+				DebugPTD("will make p4d 0x%px valid & !present for addr 0x%lx\n",
 					p4d, address);
 				make_pud_valid = false;
 				p4d_populate_user_not_present(vma->vm_mm, address, p4d);
@@ -621,7 +624,7 @@ static int e2k_make_vma_pages_valid(struct vm_area_struct *vma, e2k_addr_t start
 		if (ret)
 			return ret;
 	} while (pgd++, address = next, (address < end_addr));
-	
+
 	/*
 	 * Semispeculative requests can access virtual addresses from this validated VM area while
 	 * these addresses were not yet existed and write invalid TLB entry (valid bit = 0).

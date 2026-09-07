@@ -1583,7 +1583,6 @@ static int lo_ioctl(struct block_device *bdev, fmode_t mode,
 		err = lo_simple_ioctl(lo, cmd, arg);
 		break;
 	}
-
 	return err;
 }
 
@@ -1762,6 +1761,9 @@ static const struct block_device_operations lo_fops = {
 	.ioctl =	lo_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl =	lo_compat_ioctl,
+#endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl =	lo_ioctl,
 #endif
 	.free_disk =	lo_free_disk,
 };
@@ -2205,6 +2207,9 @@ static const struct file_operations loop_ctl_fops = {
 	.open		= nonseekable_open,
 	.unlocked_ioctl	= loop_control_ioctl,
 	.compat_ioctl	= loop_control_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	= loop_control_ioctl,
+#endif
 	.owner		= THIS_MODULE,
 	.llseek		= noop_llseek,
 };

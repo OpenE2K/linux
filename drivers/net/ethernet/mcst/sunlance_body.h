@@ -3,88 +3,6 @@
  * Copyright (c) 2023 MCST
  */
 
-/* $Id: sunlance.c,v 1.112 2002/01/15 06:48:55 davem Exp $
- * lance.c: Linux/Sparc/Lance driver
- *
- *	Written 1995, 1996 by Miguel de Icaza
- * Sources:
- *	The Linux  depca driver
- *	The Linux  lance driver.
- *	The Linux  skeleton driver.
- *	The NetBSD Sparc/Lance driver.
- *	Theo de Raadt (deraadt@openbsd.org)
- *	NCR92C990 Lan Controller manual
- *
- * 1.4:
- *	Added support to run with a ledma on the Sun4m
- *
- * 1.5:
- *	Added multiple card detection.
- *
- *	 4/17/96: Burst sizes and tpe selection on sun4m by Eddie C. Dost
- *		  (ecd@skynet.be)
- *
- *	 5/15/96: auto carrier detection on sun4m by Eddie C. Dost
- *		  (ecd@skynet.be)
- *
- *	 5/17/96: lebuffer on scsi/ether cards now work David S. Miller
- *		  (davem@caip.rutgers.edu)
- *
- *	 5/29/96: override option 'tpe-link-test?', if it is 'false', as
- *		  this disables auto carrier detection on sun4m. Eddie C. Dost
- *		  (ecd@skynet.be)
- *
- * 1.7:
- *	 6/26/96: Bug fix for multiple ledmas, miguel.
- *
- * 1.8:
- *		  Stole multicast code from depca.c, fixed lance_tx.
- *
- * 1.9:
- *	 8/21/96: Fixed the multicast code (Pedro Roque)
- *
- *	 8/28/96: Send fake packet in lance_open() if auto_select is true,
- *		  so we can detect the carrier loss condition in time.
- *		  Eddie C. Dost (ecd@skynet.be)
- *
- *	 9/15/96: Align rx_buf so that eth_copy_and_sum() won't cause an
- *		  MNA trap during chksum_partial_copy(). (ecd@skynet.be)
- *
- *	11/17/96: Handle LE_C0_MERR in lance_interrupt(). (ecd@skynet.be)
- *
- *	12/22/96: Don't loop forever in lance_rx() on incomplete packets.
- *		  This was the sun4c killer. Shit, stupid bug.
- *		  (ecd@skynet.be)
- *
- * 1.10:
- *	 1/26/97: Modularize driver. (ecd@skynet.be)
- *
- * 1.11:
- *	12/27/97: Added sun4d support. (jj@sunsite.mff.cuni.cz)
- *
- * 1.12:
- * 	 11/3/99: Fixed SMP race in lance_start_xmit found by davem.
- * 	          Anton Blanchard (anton@progsoc.uts.edu.au)
- * 2.00: 11/9/99: Massive overhaul and port to new SBUS driver interfaces.
- *		  David S. Miller (davem@redhat.com)
- * 2.01:
- *      11/08/01: Use library crc32 functions (Matt_Domsch@dell.com)
- *
-* 2.02-mcst:
- *      14/04/06: MCST le100 hardware bug walkaround
- * 3.00-mcst:
- *      22/08/07: PCI Sunlance support
- *                Shmelev Alexander (ashmelev@task.sun.mcst.ru) 
- * 3.01-mcst:
- *      26/01/09: PCI Sunlance is now unsupported here
- *                see pci_sunlance.c
- *                Alexey V. Sitnikov (alexmipt@mcst.ru)
- * 3.02-mcst:
- *      04/16/10: Merging to kernel 2.6.33
- *                Vadim Revyakin  (rev@mcst.ru)
- */
-
-
 #define DEBUG_DRIVER    0
 
 #define dbg_print       if (DEBUG_DRIVER) printk
@@ -182,8 +100,8 @@ static char lancestr[] = "LANCE";
 #define LANCE_WATCHDOG_TIMEOUT (jiffies + (2 * HZ))
 
 #define LANCE_MSG_DEFAULT (NETIF_MSG_DRV | NETIF_MSG_PROBE \
-                               | NETIF_MSG_LINK  /* | NETIF_MSG_TX_QUEUED | NETIF_MSG_PKTDATA*/ \
-                               | NETIF_MSG_RX_ERR | NETIF_MSG_TX_ERR /*| NETIF_MSG_INTR*/)
+			       | NETIF_MSG_LINK  /* | NETIF_MSG_TX_QUEUED | NETIF_MSG_PKTDATA*/ \
+			       | NETIF_MSG_RX_ERR | NETIF_MSG_TX_ERR /*| NETIF_MSG_INTR*/)
 
 
 #define DRV_NAME	"sunlance"
@@ -298,10 +216,10 @@ MODULE_LICENSE("GPL v2");
 #define RGMII_EN_0     (1 << 12)
 /* This two fields enable either RGMII or GMII/MII */
        /* 1:1 - RGMII 3com mode 
-        * 1:0 - RGMII Hp mode 
-        * 0:1 - GMII/MII mode
-        * 0:0 - GMII/MII mode 
-        */
+	* 1:0 - RGMII Hp mode 
+	* 0:1 - GMII/MII mode
+	* 0:0 - GMII/MII mode 
+	*/
 
 /* Some of PHY_LED_CTRL's fields */
 #define RED_LEN_EN     (1 << 5) /* Reduced LED enable */
@@ -361,7 +279,7 @@ MODULE_LICENSE("GPL v2");
 static inline u32 rotate_32 (u32 l)
 {
        return ((l&0xff)<<24) | (((l>>8)&0xff)<<16) |
-                       (((l>>16)&0xff)<<8)| ((l>>24)&0xff);
+		       (((l>>16)&0xff)<<8)| ((l>>24)&0xff);
 }
 static inline u16 rotate_16 (u16 l)
 {
@@ -480,24 +398,24 @@ typedef struct napi_work {
 struct lance_private {
        /* Lance RAP/RDP regs.          */
        struct {
-               void __iomem    *vbase; /* Lance regs virtual base address */
-               void __iomem    *rdp;   /* RDP reg virtual address */
-               void __iomem    *rap;   /* RAP reg virtual address */
+	       void __iomem    *vbase; /* Lance regs virtual base address */
+	       void __iomem    *rdp;   /* RDP reg virtual address */
+	       void __iomem    *rap;   /* RAP reg virtual address */
        } lregs;
 	int csr0;	/* to save csr0 in primary handler for threaded fn */
-        void __iomem    *ioctl_lregs;   /* Lance channels ioctl regs    */
-        spinlock_t      ioctl_lock;
+	void __iomem    *ioctl_lregs;   /* Lance channels ioctl regs    */
+	spinlock_t      ioctl_lock;
 	void __iomem	*dregs;		/* DMA controller regs.		*/
 	struct lance_init_block __iomem *init_block_iomem;
 	struct lance_init_block *init_block_mem;
 #ifdef CONFIG_MCST_RT
 	unsigned long	rt_bits;
-        raw_spinlock_t    rt_stuff_lock;
-        struct lance_rt  *rt_stuff;
+	raw_spinlock_t    rt_stuff_lock;
+	struct lance_rt  *rt_stuff;
 #ifdef CONFIG_E90
-        unsigned long long   t_start;
-        int                  t_max_loop;
-        int                  calculate_t_max_loop;
+	unsigned long long   t_start;
+	int                  t_max_loop;
+	int                  calculate_t_max_loop;
 #endif
 #endif
 	struct napi_struct	napi;
@@ -505,8 +423,8 @@ struct lance_private {
 	int			napi_cpu;
 	struct ctl_table_header	*ctl_table_header;
 #endif /* CONFIG_SYSCTL */
-        raw_spinlock_t		lock;
-        raw_spinlock_t		init_lock;
+	raw_spinlock_t		lock;
+	raw_spinlock_t		init_lock;
 	int		rx_new, tx_new;
 	int		rx_old, tx_old;
 
@@ -519,13 +437,13 @@ struct lance_private {
 	void (*rx)(struct net_device *);
 	void (*tx)(struct net_device *);
 
-        struct sunlance_access *a;
+	struct sunlance_access *a;
 
-        struct mii_if_info     mii_if;
-        unsigned int            mii:1;         /* mii port available */
-        struct timer_list      watchdog_timer;
+	struct mii_if_info     mii_if;
+	unsigned int            mii:1;         /* mii port available */
+	struct timer_list      watchdog_timer;
 
-        u32                    msg_enable;     /* debug message level */
+	u32                    msg_enable;     /* debug message level */
 
 	char	       	       *name;
 	dma_addr_t		init_block_dvma;
@@ -533,7 +451,7 @@ struct lance_private {
 #ifdef SUNLANCE_BODY_FOR_SBUS
 	struct of_device       *op;
 	struct of_device       *lebuffer;
-        struct of_device *ledma;        /* If set this points to ledma  */
+	struct of_device *ledma;        /* If set this points to ledma  */
 #endif
 #ifdef SUNLANCE_BODY_FOR_P2S
 	struct sbus_dev *sdev;
@@ -542,18 +460,18 @@ struct lance_private {
 	struct pci_dev *pdev;
 #endif
 	struct timer_list       multicast_timer;
-        int stat_tx_delay[MAX_DSK_TX_WAIT];
-        int stat_rx_delay[MAX_DSK_RX_WAIT];
+	int stat_tx_delay[MAX_DSK_TX_WAIT];
+	int stat_rx_delay[MAX_DSK_RX_WAIT];
 
 #ifdef SUNLANCE_CHECK_TMD
 	u16	saved_tmd0[TX_RING_SIZE];
 	u8	saved_tmdh[TX_RING_SIZE];
 #endif
-        // for debug and dump device
+	// for debug and dump device
 #define LAST_RCV_LEN  80 
-        char    lasl_rcv[LAST_RCV_LEN];
-        int     lasl_entry;
-        int     lasl_len;
+	char    lasl_rcv[LAST_RCV_LEN];
+	int     lasl_entry;
+	int     lasl_len;
 };
 
 #define TX_BUFFS_AVAIL ((lp->tx_old<=lp->tx_new)?\
@@ -817,13 +735,13 @@ static void lance_get_drvinfo(struct net_device *dev, struct ethtool_drvinfo *in
 }
 
 static struct ethtool_ops lance_ethtool_ops = {
-        .get_link_ksettings	= lance_get_link_ksettings,
-        .set_link_ksettings	= lance_set_link_ksettings,
-        .get_drvinfo		= lance_get_drvinfo,
-        .get_msglevel		= lance_get_msglevel,
-        .set_msglevel		= lance_set_msglevel,
-        .nway_reset		= lance_nway_reset,
-        .get_link		= lance_get_link,
+	.get_link_ksettings	= lance_get_link_ksettings,
+	.set_link_ksettings	= lance_set_link_ksettings,
+	.get_drvinfo		= lance_get_drvinfo,
+	.get_msglevel		= lance_get_msglevel,
+	.set_msglevel		= lance_set_msglevel,
+	.nway_reset		= lance_nway_reset,
+	.get_link		= lance_get_link,
 };
 
 static void sunlance_watchdog(struct timer_list *t)
@@ -846,43 +764,43 @@ static int sunlance_uses_poll = 0;
 
 static int __init set_sunlance_uses_poll(char *str)
 {
-        get_option(&str, &sunlance_uses_poll);
-        if (sunlance_uses_poll) {
+	get_option(&str, &sunlance_uses_poll);
+	if (sunlance_uses_poll) {
 #if 0
-               printk("SunLance uses net-poll\n");
+	       printk("SunLance uses net-poll\n");
 #else
-        printk("sunlance_uses_poll not implemented yet\n");
+	printk("sunlance_uses_poll not implemented yet\n");
 	sunlance_uses_poll = 0;
 #endif
-        }
-        return 1;
+	}
+	return 1;
 }
 __setup("sunlance_uses_poll=", set_sunlance_uses_poll);
 #endif
 
 #ifdef CONFIG_MCST_RT
-        /*
-             lance RT stuff handling. It's implemented for fast
-              poit-to-point sequential data exchange
-         */
+	/*
+	     lance RT stuff handling. It's implemented for fast
+	      poit-to-point sequential data exchange
+	 */
 struct lance_rt {
-        char rx_buf[ETH_DATA_LEN];
-        struct sk_buff *skb_tx;
-        int recieved;
-        int rx_len;
-        int proto;
-        struct task_struct *rx_waiter;
-        u16    saved_mode;
+	char rx_buf[ETH_DATA_LEN];
+	struct sk_buff *skb_tx;
+	int recieved;
+	int rx_len;
+	int proto;
+	struct task_struct *rx_waiter;
+	u16    saved_mode;
 };
 
 static int
 sunlance_rt_open(struct net_device *dev, struct lance_private *lp)
 {
-        struct lance_rt *rt_stuff;
-        struct sk_buff *skb_tx;
-        struct lance_init_block *ib_mem = lp->init_block_mem;
-        u16 mode;
-        int r = 0;
+	struct lance_rt *rt_stuff;
+	struct sk_buff *skb_tx;
+	struct lance_init_block *ib_mem = lp->init_block_mem;
+	u16 mode;
+	int r = 0;
 
 	if (test_and_set_bit(RT_BIT_OPEN, &lp->rt_bits)) {
 		return -EBUSY;
@@ -891,37 +809,37 @@ sunlance_rt_open(struct net_device *dev, struct lance_private *lp)
 		clear_bit(RT_BIT_OPEN, &lp->rt_bits);
 		return 0;
 	}
-        rt_stuff = kmalloc(sizeof ( struct lance_rt), GFP_KERNEL);
-        if (rt_stuff == NULL) {
-                return -ENOMEM;
-        }
-        skb_tx = dev_alloc_skb(ETH_DATA_LEN + 2);
-        if (skb_tx == NULL) {
-                kfree(rt_stuff);
-                return -ENOMEM;
-        }
-        memset(rt_stuff, 0, sizeof ( struct lance_rt));
-        rt_stuff->skb_tx = skb_tx;
-        mode = flip_16(ib_mem->mode);
-        rt_stuff->saved_mode = mode;
-        if (!(mode & LE_MO_PROM)) {
-                r = lance_set_promuscuous(dev, 1);
-        }
-        lp->rt_stuff = rt_stuff;
+	rt_stuff = kmalloc(sizeof ( struct lance_rt), GFP_KERNEL);
+	if (rt_stuff == NULL) {
+		return -ENOMEM;
+	}
+	skb_tx = dev_alloc_skb(ETH_DATA_LEN + 2);
+	if (skb_tx == NULL) {
+		kfree(rt_stuff);
+		return -ENOMEM;
+	}
+	memset(rt_stuff, 0, sizeof ( struct lance_rt));
+	rt_stuff->skb_tx = skb_tx;
+	mode = flip_16(ib_mem->mode);
+	rt_stuff->saved_mode = mode;
+	if (!(mode & LE_MO_PROM)) {
+		r = lance_set_promuscuous(dev, 1);
+	}
+	lp->rt_stuff = rt_stuff;
 	if (lp->mii) {
 		del_timer_sync(&lp->watchdog_timer);
 	}
 	set_bit(RT_BIT_READY, &lp->rt_bits);
 	clear_bit(RT_BIT_OPEN, &lp->rt_bits);
-        return 0;
+	return 0;
 }
 
 
 static void
 sunlance_rt_close(struct net_device *dev, struct lance_private *lp)
 {
-        struct lance_rt *rt_stuff;
-        u16 mode;
+	struct lance_rt *rt_stuff;
+	u16 mode;
 
 	while (test_and_set_bit(RT_BIT_OPEN, &lp->rt_bits)) {
 		cpu_relax();
@@ -936,64 +854,64 @@ sunlance_rt_close(struct net_device *dev, struct lance_private *lp)
 	while (test_bit(RT_BIT_WR, &lp->rt_bits)) {
 		cpu_relax();
 	}
-        rt_stuff = lp->rt_stuff;
-        if (rt_stuff == NULL) {
-                raw_spin_unlock_irq(&lp->rt_stuff_lock);
-                return;
-        }
-        lp->rt_stuff = NULL;
-        mode = rt_stuff->saved_mode;
-        if (!(mode & LE_MO_PROM)) {
-                 lance_set_promuscuous(dev, 0);
-        }
-        if (rt_stuff->skb_tx) {
-                dev_kfree_skb(rt_stuff->skb_tx);
-        }
-        if (rt_stuff->rx_waiter) {
-                wake_up_process(rt_stuff->rx_waiter);
-        }
-        kfree(rt_stuff);
+	rt_stuff = lp->rt_stuff;
+	if (rt_stuff == NULL) {
+		raw_spin_unlock_irq(&lp->rt_stuff_lock);
+		return;
+	}
+	lp->rt_stuff = NULL;
+	mode = rt_stuff->saved_mode;
+	if (!(mode & LE_MO_PROM)) {
+		 lance_set_promuscuous(dev, 0);
+	}
+	if (rt_stuff->skb_tx) {
+		dev_kfree_skb(rt_stuff->skb_tx);
+	}
+	if (rt_stuff->rx_waiter) {
+		wake_up_process(rt_stuff->rx_waiter);
+	}
+	kfree(rt_stuff);
 	if (lp->mii) {
 		mod_timer(&(lp->watchdog_timer), LANCE_WATCHDOG_TIMEOUT);
 	}
 	clear_bit(RT_BIT_OPEN, &lp->rt_bits);
-        return;
+	return;
 }
 
 static void
 sunlance_rt_rx_complete(struct lance_private *lp, char *data, int len)
 {
-        unsigned long flags;
-        struct lance_rt *rt_stuff;
-         struct task_struct *rx_waiter;
+	unsigned long flags;
+	struct lance_rt *rt_stuff;
+	 struct task_struct *rx_waiter;
 
-        raw_spin_lock_irqsave(&lp->rt_stuff_lock, flags);
+	raw_spin_lock_irqsave(&lp->rt_stuff_lock, flags);
 	rt_stuff = lp->rt_stuff;
-        if (rt_stuff == NULL) {
-                 raw_spin_unlock_irqrestore(&lp->rt_stuff_lock, flags);
-                return;
-        }
-        memcpy(rt_stuff->rx_buf, data + ETH_HLEN, len - ETH_HLEN);
-        rt_stuff->rx_len = len - ETH_HLEN;
-        rt_stuff->recieved++;
+	if (rt_stuff == NULL) {
+		 raw_spin_unlock_irqrestore(&lp->rt_stuff_lock, flags);
+		return;
+	}
+	memcpy(rt_stuff->rx_buf, data + ETH_HLEN, len - ETH_HLEN);
+	rt_stuff->rx_len = len - ETH_HLEN;
+	rt_stuff->recieved++;
 	rt_stuff->proto = (int)be16_to_cpu(*((u16 *)(data + 2 * ETH_ALEN)));
-        rx_waiter = rt_stuff->rx_waiter;
-        raw_spin_unlock_irqrestore(&lp->rt_stuff_lock, flags);
-        if (rx_waiter) {
-                wake_up_process(rx_waiter);
-        }
+	rx_waiter = rt_stuff->rx_waiter;
+	raw_spin_unlock_irqrestore(&lp->rt_stuff_lock, flags);
+	if (rx_waiter) {
+		wake_up_process(rx_waiter);
+	}
 }
 
 static int sunlance_rt_read(struct lance_private *lp, struct ifreq *rq)
 {
-        struct lance_rt *rt_stuff;
-        el_netdev_udata_t *ud;
-        char *buf = NULL;
-        int skipped;
-        int proto;
-        int len = -1;
-        int r;
-        int timeout= -1;
+	struct lance_rt *rt_stuff;
+	el_netdev_udata_t *ud;
+	char *buf = NULL;
+	int skipped;
+	int proto;
+	int len = -1;
+	int r;
+	int timeout= -1;
 
 	if (test_and_set_bit(RT_BIT_RD, &lp->rt_bits)) {
 		return -EBUSY;
@@ -1002,63 +920,63 @@ static int sunlance_rt_read(struct lance_private *lp, struct ifreq *rq)
 		clear_bit(RT_BIT_RD, &lp->rt_bits);
 		return -EINVAL;
 	}
-        ud = (el_netdev_udata_t *)(rq->ifr_data);
-        r = get_user(len, &ud->rx_len);
-        r |= get_user(timeout, &ud->timeout);
-        r |= get_user(buf, &ud->rx_buf);
-        if (r) {
+	ud = (el_netdev_udata_t *)(rq->ifr_data);
+	r = get_user(len, &ud->rx_len);
+	r |= get_user(timeout, &ud->timeout);
+	r |= get_user(buf, &ud->rx_buf);
+	if (r) {
 		clear_bit(RT_BIT_RD, &lp->rt_bits);
-                return -EFAULT;
-        }
+		return -EFAULT;
+	}
 	if (len < ETH_HLEN) {
 		clear_bit(RT_BIT_RD, &lp->rt_bits);
 		return -EINVAL;
 	}
-        if (timeout > 0) {
-                timeout = (timeout * HZ) / 1000;
-        }
-        rt_stuff = lp->rt_stuff;
+	if (timeout > 0) {
+		timeout = (timeout * HZ) / 1000;
+	}
+	rt_stuff = lp->rt_stuff;
 retry :
-        raw_spin_lock_irq(&lp->rt_stuff_lock);
-        if (!rt_stuff->recieved) {
-                // we dont have data
-                if (timeout == 0) {
-                        raw_spin_unlock_irq(&lp->rt_stuff_lock);
+	raw_spin_lock_irq(&lp->rt_stuff_lock);
+	if (!rt_stuff->recieved) {
+		// we dont have data
+		if (timeout == 0) {
+			raw_spin_unlock_irq(&lp->rt_stuff_lock);
 			clear_bit(RT_BIT_RD, &lp->rt_bits);
-                        return -ETIMEDOUT;
-                }
-                current->__state = TASK_INTERRUPTIBLE;
-                rt_stuff->rx_waiter = current;
-                raw_spin_unlock_irq(&lp->rt_stuff_lock);
-                if (timeout > 0) {
-                        timeout = schedule_timeout(timeout);
-                } else {
-                        schedule();
-                }
-                rt_stuff->rx_waiter = NULL;
-                if (rt_stuff->recieved) {
-                        goto retry;
-                }
+			return -ETIMEDOUT;
+		}
+		current->__state = TASK_INTERRUPTIBLE;
+		rt_stuff->rx_waiter = current;
+		raw_spin_unlock_irq(&lp->rt_stuff_lock);
+		if (timeout > 0) {
+			timeout = schedule_timeout(timeout);
+		} else {
+			schedule();
+		}
+		rt_stuff->rx_waiter = NULL;
+		if (rt_stuff->recieved) {
+			goto retry;
+		}
 		clear_bit(RT_BIT_RD, &lp->rt_bits);
-                return -ETIMEDOUT;
-        }
-        skipped = rt_stuff->recieved - 1;
-        proto = rt_stuff->proto;
-        len = (len > rt_stuff->rx_len) ? rt_stuff->rx_len : len;
-        rt_stuff->recieved = 0;
-        raw_spin_unlock_irq(&lp->rt_stuff_lock);
-        if (copy_to_user(buf, rt_stuff->rx_buf, len)) {
+		return -ETIMEDOUT;
+	}
+	skipped = rt_stuff->recieved - 1;
+	proto = rt_stuff->proto;
+	len = (len > rt_stuff->rx_len) ? rt_stuff->rx_len : len;
+	rt_stuff->recieved = 0;
+	raw_spin_unlock_irq(&lp->rt_stuff_lock);
+	if (copy_to_user(buf, rt_stuff->rx_buf, len)) {
 		clear_bit(RT_BIT_RD, &lp->rt_bits);
-                return -EFAULT;
-        }
-        r  = put_user(len, &ud->rx_len);
-        r |= put_user(skipped, &ud->skipped);
-        r |= put_user(proto, &ud->proto);
+		return -EFAULT;
+	}
+	r  = put_user(len, &ud->rx_len);
+	r |= put_user(skipped, &ud->skipped);
+	r |= put_user(proto, &ud->proto);
 	clear_bit(RT_BIT_RD, &lp->rt_bits);
-        if (r) {
-                return -EFAULT;
-        }
-        return 0;
+	if (r) {
+		return -EFAULT;
+	}
+	return 0;
 }
 
 
@@ -1066,11 +984,11 @@ retry :
 
 static int sunlance_rt_write(struct net_device *dev, struct ifreq *rq)
 {
-        struct lance_private *lp = netdev_priv(dev);
-        el_netdev_udata_t ud, *udp;
-        struct lance_rt *rt_stuff;
-        struct sk_buff *skb;
-        int r;
+	struct lance_private *lp = netdev_priv(dev);
+	el_netdev_udata_t ud, *udp;
+	struct lance_rt *rt_stuff;
+	struct sk_buff *skb;
+	int r;
 
 	if (test_and_set_bit(RT_BIT_WR, &lp->rt_bits)) {
 		return -EBUSY;
@@ -1079,34 +997,34 @@ static int sunlance_rt_write(struct net_device *dev, struct ifreq *rq)
 		clear_bit(RT_BIT_WR, &lp->rt_bits);
 		return -EINVAL;
 	}
-        udp = (el_netdev_udata_t *)(rq->ifr_data);
-        if (copy_from_user(&ud, udp, sizeof (el_netdev_udata_t))) {
+	udp = (el_netdev_udata_t *)(rq->ifr_data);
+	if (copy_from_user(&ud, udp, sizeof (el_netdev_udata_t))) {
 		clear_bit(RT_BIT_WR, &lp->rt_bits);
-                return -EFAULT;
-        }
+		return -EFAULT;
+	}
 	if (ud.tx_len <= 0) {
 		clear_bit(RT_BIT_WR, &lp->rt_bits);
 		return -EINVAL;
 	}
-        if (ud.tx_len > ETH_DATA_LEN) {
+	if (ud.tx_len > ETH_DATA_LEN) {
 		clear_bit(RT_BIT_WR, &lp->rt_bits);
-                return -EINVAL;
-        }
-        rt_stuff = lp->rt_stuff;
-        skb = rt_stuff->skb_tx;
-        if (copy_from_user(skb->data + ETH_HLEN, ud.tx_buf, ud.tx_len)) {
+		return -EINVAL;
+	}
+	rt_stuff = lp->rt_stuff;
+	skb = rt_stuff->skb_tx;
+	if (copy_from_user(skb->data + ETH_HLEN, ud.tx_buf, ud.tx_len)) {
 		clear_bit(RT_BIT_WR, &lp->rt_bits);
-                return -EFAULT;
-        }
-        memcpy(skb->data, ud.dst_mac, ETH_ALEN);
-        memcpy(skb->data + ETH_ALEN, ud.src_mac, ETH_ALEN);
+		return -EFAULT;
+	}
+	memcpy(skb->data, ud.dst_mac, ETH_ALEN);
+	memcpy(skb->data + ETH_ALEN, ud.src_mac, ETH_ALEN);
 	*((u16 *)(skb->data + 2 * ETH_ALEN)) = cpu_to_be16((u16)(ud.proto));
-        skb->len = ud.tx_len + ETH_HLEN;
-        raw_spin_lock_irq(&lp->lock);
-        r = lance_start_xmit_generic(skb, dev, lp);
-        raw_spin_unlock_irq(&lp->lock);
+	skb->len = ud.tx_len + ETH_HLEN;
+	raw_spin_lock_irq(&lp->lock);
+	r = lance_start_xmit_generic(skb, dev, lp);
+	raw_spin_unlock_irq(&lp->lock);
 	clear_bit(RT_BIT_WR, &lp->rt_bits);
-        return r;
+	return r;
 }
 
 #ifdef CONFIG_COMPAT
@@ -1115,14 +1033,14 @@ static int sunlance_rt_write(struct net_device *dev, struct ifreq *rq)
 
 static int sunlance_rt_compat_read(struct lance_private *lp, struct ifreq *rq)
 {
-        struct lance_rt *rt_stuff;
-        el_netdev_udata_compat_t *udp, ud;
-        char *buf = NULL;
-        int skipped;
-        int proto;
-        int len = -1;
-        int r;
-        int timeout= -1;
+	struct lance_rt *rt_stuff;
+	el_netdev_udata_compat_t *udp, ud;
+	char *buf = NULL;
+	int skipped;
+	int proto;
+	int len = -1;
+	int r;
+	int timeout= -1;
 
 	if (test_and_set_bit(RT_BIT_RD, &lp->rt_bits)) {
 		return -EBUSY;
@@ -1131,75 +1049,75 @@ static int sunlance_rt_compat_read(struct lance_private *lp, struct ifreq *rq)
 		clear_bit(RT_BIT_RD, &lp->rt_bits);
 		return -EINVAL;
 	}
-        udp = (el_netdev_udata_compat_t *)(rq->ifr_data);
-        if (copy_from_user(&ud, udp, sizeof(ud))) {
+	udp = (el_netdev_udata_compat_t *)(rq->ifr_data);
+	if (copy_from_user(&ud, udp, sizeof(ud))) {
 		clear_bit(RT_BIT_RD, &lp->rt_bits);
-                return -EFAULT;
-        }
-        len = ud.rx_len;
+		return -EFAULT;
+	}
+	len = ud.rx_len;
 	if (len < ETH_HLEN) {
 		clear_bit(RT_BIT_RD, &lp->rt_bits);
 		return -EINVAL;
 	}
-        timeout = ud.timeout;
-        buf = (char *)(long)ud.rx_buf;
-        if (timeout > 0) {
-                timeout = (timeout * HZ) / 1000;
-        }
-        rt_stuff = lp->rt_stuff;
+	timeout = ud.timeout;
+	buf = (char *)(long)ud.rx_buf;
+	if (timeout > 0) {
+		timeout = (timeout * HZ) / 1000;
+	}
+	rt_stuff = lp->rt_stuff;
 retry :
-        raw_spin_lock_irq(&lp->rt_stuff_lock);
-        if (!rt_stuff->recieved) {
-                // we dont have data
-                if (timeout == 0) {
-                        raw_spin_unlock_irq(&lp->rt_stuff_lock);
+	raw_spin_lock_irq(&lp->rt_stuff_lock);
+	if (!rt_stuff->recieved) {
+		// we dont have data
+		if (timeout == 0) {
+			raw_spin_unlock_irq(&lp->rt_stuff_lock);
 			clear_bit(RT_BIT_RD, &lp->rt_bits);
-                        return -ETIMEDOUT;
-                }
-                current->__state = TASK_INTERRUPTIBLE;
-                rt_stuff->rx_waiter = current;
-                raw_spin_unlock_irq(&lp->rt_stuff_lock);
-                if (timeout > 0) {
-                        timeout = schedule_timeout(timeout);
-                } else {
-                        schedule();
-                }
-                rt_stuff->rx_waiter = NULL;
-                if (rt_stuff->recieved) {
-                        goto retry;
-                }
+			return -ETIMEDOUT;
+		}
+		current->__state = TASK_INTERRUPTIBLE;
+		rt_stuff->rx_waiter = current;
+		raw_spin_unlock_irq(&lp->rt_stuff_lock);
+		if (timeout > 0) {
+			timeout = schedule_timeout(timeout);
+		} else {
+			schedule();
+		}
+		rt_stuff->rx_waiter = NULL;
+		if (rt_stuff->recieved) {
+			goto retry;
+		}
 		clear_bit(RT_BIT_RD, &lp->rt_bits);
-                return -ETIMEDOUT;
-        }
-        skipped = rt_stuff->recieved - 1;
-        proto = rt_stuff->proto;
-        len = (len > rt_stuff->rx_len) ? rt_stuff->rx_len : len;
-        rt_stuff->recieved = 0;
-        raw_spin_unlock_irq(&lp->rt_stuff_lock);
-        if (copy_to_user(buf, rt_stuff->rx_buf, len)) {
+		return -ETIMEDOUT;
+	}
+	skipped = rt_stuff->recieved - 1;
+	proto = rt_stuff->proto;
+	len = (len > rt_stuff->rx_len) ? rt_stuff->rx_len : len;
+	rt_stuff->recieved = 0;
+	raw_spin_unlock_irq(&lp->rt_stuff_lock);
+	if (copy_to_user(buf, rt_stuff->rx_buf, len)) {
 		clear_bit(RT_BIT_RD, &lp->rt_bits);
-                return -EFAULT;
-        }
-        r  = put_user(len, &udp->rx_len);
-        r |= put_user(skipped, &udp->skipped);
-        r |= put_user(proto, &udp->proto);
+		return -EFAULT;
+	}
+	r  = put_user(len, &udp->rx_len);
+	r |= put_user(skipped, &udp->skipped);
+	r |= put_user(proto, &udp->proto);
 	clear_bit(RT_BIT_RD, &lp->rt_bits);
-        if (r) {
-                return -EFAULT;
-        }
-        return 0;
+	if (r) {
+		return -EFAULT;
+	}
+	return 0;
 }
 
 
 
 static int sunlance_rt_compat_write(struct net_device *dev, struct ifreq *rq)
 {
-        struct lance_private *lp = netdev_priv(dev);
-        el_netdev_udata_compat_t ud, *udp;
-        struct lance_rt *rt_stuff;
-        struct sk_buff *skb;
+	struct lance_private *lp = netdev_priv(dev);
+	el_netdev_udata_compat_t ud, *udp;
+	struct lance_rt *rt_stuff;
+	struct sk_buff *skb;
 	char *buf;
-        int r;
+	int r;
 
 	if (test_and_set_bit(RT_BIT_WR, &lp->rt_bits)) {
 		return -EBUSY;
@@ -1208,35 +1126,35 @@ static int sunlance_rt_compat_write(struct net_device *dev, struct ifreq *rq)
 		clear_bit(RT_BIT_WR, &lp->rt_bits);
 		return -EINVAL;
 	}
-        udp = (el_netdev_udata_compat_t *)(rq->ifr_data);
-        if (copy_from_user(&ud, udp, sizeof(ud))) {
+	udp = (el_netdev_udata_compat_t *)(rq->ifr_data);
+	if (copy_from_user(&ud, udp, sizeof(ud))) {
 		clear_bit(RT_BIT_WR, &lp->rt_bits);
-                return -EFAULT;
-        }
+		return -EFAULT;
+	}
 	if (ud.tx_len <= 0) {
 		clear_bit(RT_BIT_WR, &lp->rt_bits);
 		return -EINVAL;
 	}
-        if (ud.tx_len > ETH_DATA_LEN) {
+	if (ud.tx_len > ETH_DATA_LEN) {
 		clear_bit(RT_BIT_WR, &lp->rt_bits);
-                return -EINVAL;
-        }
-        rt_stuff = lp->rt_stuff;
+		return -EINVAL;
+	}
+	rt_stuff = lp->rt_stuff;
 	buf = (char *)(long)ud.tx_buf;
-        skb = rt_stuff->skb_tx;
-        if (copy_from_user(skb->data + ETH_HLEN, buf, ud.tx_len)) {
+	skb = rt_stuff->skb_tx;
+	if (copy_from_user(skb->data + ETH_HLEN, buf, ud.tx_len)) {
 		clear_bit(RT_BIT_WR, &lp->rt_bits);
-                return -EFAULT;
-        }
-        memcpy(skb->data, ud.dst_mac, ETH_ALEN);
-        memcpy(skb->data + ETH_ALEN, ud.src_mac, ETH_ALEN);
+		return -EFAULT;
+	}
+	memcpy(skb->data, ud.dst_mac, ETH_ALEN);
+	memcpy(skb->data + ETH_ALEN, ud.src_mac, ETH_ALEN);
 	*((u16 *)(skb->data + 2 * ETH_ALEN)) = cpu_to_be16((u16)(ud.proto));
-        skb->len = ud.tx_len + ETH_HLEN;
-        raw_spin_lock_irq(&lp->lock);
-        r = lance_start_xmit_generic(skb, dev, lp);
-        raw_spin_unlock_irq(&lp->lock);
+	skb->len = ud.tx_len + ETH_HLEN;
+	raw_spin_lock_irq(&lp->lock);
+	r = lance_start_xmit_generic(skb, dev, lp);
+	raw_spin_unlock_irq(&lp->lock);
 	clear_bit(RT_BIT_WR, &lp->rt_bits);
-        return r;
+	return r;
 }
 
 #endif //CONFIG_COMPAT
@@ -1247,141 +1165,141 @@ static int sunlance_rt_compat_write(struct net_device *dev, struct ifreq *rq)
 
 static unsigned int read_rdata(void * base_reg)
 {
-        int i, res;
+	int i, res;
 
-        for (i=0;i<10;i++) {
+	for (i=0;i<10;i++) {
 		res = (lance_readl(base_reg + R_DATA) >> 13) & 1;
-                if (res) {
+		if (res) {
 			res = lance_readl(base_reg + R_CMD) & 0xfffffff;
-                        return(res);
-                }
-                udelay(10000);
-        }
-        return NILL_DATA;
+			return(res);
+		}
+		udelay(10000);
+	}
+	return NILL_DATA;
 }
 
 
 /* Lance channels ioctl */
 static int lance_ioctl (struct net_device *dev, struct ifreq *rq, int cmd)
 {
-        struct lance_private *lp = netdev_priv(dev);
-        int res;
-        int w;
-        unsigned long flags;
+	struct lance_private *lp = netdev_priv(dev);
+	int res;
+	int w;
+	unsigned long flags;
 
-        spin_lock_irqsave(&lp->ioctl_lock,flags);
+	spin_lock_irqsave(&lp->ioctl_lock,flags);
 
-        switch (cmd) {
-        case RESET_IOCTL:
+	switch (cmd) {
+	case RESET_IOCTL:
 		w = lance_readl(lp->ioctl_lregs + R_DATA);
-                w |= 0x4;
+		w |= 0x4;
 		lance_writel(w, lp->ioctl_lregs + R_DATA);
 		w = lance_readl(lp->ioctl_lregs + R_DATA);
-                w &= ~(0x4);
+		w &= ~(0x4);
 		lance_writel(w, lp->ioctl_lregs + R_DATA);
-                res = 0;
-                break;
+		res = 0;
+		break;
 
-        case CHANEL_OFFLINE1_IOCTL:
+	case CHANEL_OFFLINE1_IOCTL:
 		lance_writel((unsigned int)CH1_OFF_CMD,
 			lp->ioctl_lregs + R_CMD);
-                if ((res = read_rdata(lp->ioctl_lregs)) == NILL_DATA) {
-                        printk("Offline: Don't ready channel register\n");
-                        res = -1;
-                        break;
-                }
+		if ((res = read_rdata(lp->ioctl_lregs)) == NILL_DATA) {
+			printk("Offline: Don't ready channel register\n");
+			res = -1;
+			break;
+		}
 		w = lance_readl(lp->ioctl_lregs + R_DATA);
-                w |= 0x180;
+		w |= 0x180;
 		lance_writel(w, lp->ioctl_lregs + R_DATA);
-                res = 0;
-                break;
+		res = 0;
+		break;
 
-        case CHANEL_OFFLINE2_IOCTL:
-		lance_writel((unsigned int)CH2_OFF_CMD,
-			lp->ioctl_lregs + R_CMD);
-                if ((res = read_rdata(lp->ioctl_lregs)) == NILL_DATA) {
-                        printk("Offline: Don't ready channel register\n");
-                        res = -1;
-                        break;
-                }
-		w = lance_readl(lp->ioctl_lregs + R_DATA);
-                w |= 0x180;
-		lance_writel(w, lp->ioctl_lregs + R_DATA);
-                res = 0;
-                break;
-
-        case CHANEL_ONLINE1_IOCTL:
+	case CHANEL_OFFLINE2_IOCTL:
 		lance_writel((unsigned int)CH2_OFF_CMD,
 			lp->ioctl_lregs + R_CMD);
 		if ((res = read_rdata(lp->ioctl_lregs)) == NILL_DATA) {
-                        printk("Offline: Don't ready channel register\n");
-                        res = -1;
-                        break;
-                }
+			printk("Offline: Don't ready channel register\n");
+			res = -1;
+			break;
+		}
 		w = lance_readl(lp->ioctl_lregs + R_DATA);
-                w |= 0x180;
+		w |= 0x180;
+		lance_writel(w, lp->ioctl_lregs + R_DATA);
+		res = 0;
+		break;
+
+	case CHANEL_ONLINE1_IOCTL:
+		lance_writel((unsigned int)CH2_OFF_CMD,
+			lp->ioctl_lregs + R_CMD);
+		if ((res = read_rdata(lp->ioctl_lregs)) == NILL_DATA) {
+			printk("Offline: Don't ready channel register\n");
+			res = -1;
+			break;
+		}
+		w = lance_readl(lp->ioctl_lregs + R_DATA);
+		w |= 0x180;
 		lance_writel(w, lp->ioctl_lregs + R_DATA);
 
 		lance_writel(CH1_ON_CMD, lp->ioctl_lregs + R_CMD);
-                if ((res = read_rdata(lp->ioctl_lregs)) == NILL_DATA) {
-                        printk("Online: Don't ready channel register\n");
-                        res = -1;
-                        break;
-                }      
+		if ((res = read_rdata(lp->ioctl_lregs)) == NILL_DATA) {
+			printk("Online: Don't ready channel register\n");
+			res = -1;
+			break;
+		}      
 		w = lance_readl(lp->ioctl_lregs + R_DATA);
-                w &= ~(0x100);
+		w &= ~(0x100);
 		lance_writel(w, lp->ioctl_lregs + R_DATA);
-                res = 0;
-                break;
+		res = 0;
+		break;
 
-        case CHANEL_ONLINE2_IOCTL:
+	case CHANEL_ONLINE2_IOCTL:
 		lance_writel((unsigned int)CH1_OFF_CMD,
 			lp->ioctl_lregs + R_CMD);
-                if ((res = read_rdata(lp->ioctl_lregs)) == NILL_DATA) {
-                        printk("Offline: Don't ready channel register\n");
-                        res = -1;
-                        break;
-                }
+		if ((res = read_rdata(lp->ioctl_lregs)) == NILL_DATA) {
+			printk("Offline: Don't ready channel register\n");
+			res = -1;
+			break;
+		}
 		w = lance_readl(lp->ioctl_lregs + R_DATA);
-                w |= 0x180;
+		w |= 0x180;
 		lance_writel(w, lp->ioctl_lregs + R_DATA);
 
 		lance_writel(CH2_ON_CMD, lp->ioctl_lregs + R_CMD);
-                if ((res = read_rdata(lp->ioctl_lregs)) == NILL_DATA) {
-                        printk("Online: Don't ready channel register\n");
-                        res = -1;
-                        break;
-                }
+		if ((res = read_rdata(lp->ioctl_lregs)) == NILL_DATA) {
+			printk("Online: Don't ready channel register\n");
+			res = -1;
+			break;
+		}
 		w = lance_readl(lp->ioctl_lregs + R_DATA);
-                w &= ~(0x80);
+		w &= ~(0x80);
 		lance_writel(w, lp->ioctl_lregs + R_DATA);
-                res = 0;
-                break;
+		res = 0;
+		break;
 
-        case POLL_STATUS1_IOCTL:
+	case POLL_STATUS1_IOCTL:
 		lance_writel(CH1_POLL_CMD, lp->ioctl_lregs + R_CMD);
-                if ((res = read_rdata(lp->ioctl_lregs)) == NILL_DATA) {
-                        res = -1;
-                        break;
-                }
-                res = (res >> 10) & 1;
-                break;
+		if ((res = read_rdata(lp->ioctl_lregs)) == NILL_DATA) {
+			res = -1;
+			break;
+		}
+		res = (res >> 10) & 1;
+		break;
 
-        case POLL_STATUS2_IOCTL:
+	case POLL_STATUS2_IOCTL:
 		lance_writel(CH2_POLL_CMD, lp->ioctl_lregs + R_CMD);
-                if ((res = read_rdata(lp->ioctl_lregs)) == NILL_DATA) {
-                        res = -1;
-                        break;
-                }
-                res = (res >> 10) & 1;
-                break;
+		if ((res = read_rdata(lp->ioctl_lregs)) == NILL_DATA) {
+			res = -1;
+			break;
+		}
+		res = (res >> 10) & 1;
+		break;
 
-        default:
-                res = -EOPNOTSUPP;
-        }
+	default:
+		res = -EOPNOTSUPP;
+	}
 
-        spin_unlock_irqrestore(&lp->ioctl_lock,flags);
-        return res;
+	spin_unlock_irqrestore(&lp->ioctl_lock,flags);
+	return res;
 }
 #endif	// FOR_SBUS && E90
 
@@ -1411,14 +1329,14 @@ static void lance_print_media(struct mii_if_info *mii)
 
 static int our_ioctl (struct net_device *dev, struct ifreq *rq, int cmd)
 {
-        struct lance_private *lp = netdev_priv(dev);
-        struct lance_init_block *ib = lp->init_block_mem;
-        int res = -EINVAL;
-        int i;
+	struct lance_private *lp = netdev_priv(dev);
+	struct lance_init_block *ib = lp->init_block_mem;
+	int res = -EINVAL;
+	int i;
 
-        switch (cmd) {
-        case SIOCDEVPRIVATE + 10 :
-                printk("\n============= IOCTL for %s ===============\n", dev->name);
+	switch (cmd) {
+	case SIOCDEVPRIVATE + 10 :
+		printk("\n============= IOCTL for %s ===============\n", dev->name);
 		lance_print_media(&lp->mii_if);	
 		lance_writew(LE_CSR0, lp->lregs.rap);
 
@@ -1430,63 +1348,63 @@ static int our_ioctl (struct net_device *dev, struct ifreq *rq, int cmd)
 			lance_readl(lp->dregs + DMA_ADDR),
 			lance_readl(lp->dregs + DMA_COUNT),
 			lance_readl(lp->dregs + DMA_TEST));
-                printk("lp=%p; ib=%p; mode=0x%x\n", lp, ib, flip_16(ib->mode));
-                printk("ib->mode = 0x%x\n", flip_16(ib->mode));
+		printk("lp=%p; ib=%p; mode=0x%x\n", lp, ib, flip_16(ib->mode));
+		printk("ib->mode = 0x%x\n", flip_16(ib->mode));
 		i = lance_readw(lp->lregs.rdp);
        
-               printk("lance_init_block rx=%p tx=%p\n", ib->brx_ring, ib->btx_ring);
-               printk("Tx desk wait delay (mksec) -- number\n");
-               for (i=0; i < MAX_DSK_TX_WAIT; i++) {
-                       if (lp->stat_tx_delay[i] == 0 ) continue;
-                       printk("%d, \t%d\n", DESK_WAIT_TIME * i, lp->stat_tx_delay[i]);
-                       lp->stat_tx_delay[i] = 0;
-               }
-               printk("Rx desk wait delay (mksec) -- number\n");
-               for (i=0; i < MAX_DSK_RX_WAIT; i++) {
-                       if (lp->stat_rx_delay[i] == 0 ) continue;
-                       printk("%d, \t%d\n", DESK_WAIT_TIME * i, lp->stat_rx_delay[i]);
-                       lp->stat_rx_delay[i] = 0;
-               }
+	       printk("lance_init_block rx=%p tx=%p\n", ib->brx_ring, ib->btx_ring);
+	       printk("Tx desk wait delay (mksec) -- number\n");
+	       for (i=0; i < MAX_DSK_TX_WAIT; i++) {
+		       if (lp->stat_tx_delay[i] == 0 ) continue;
+		       printk("%d, \t%d\n", DESK_WAIT_TIME * i, lp->stat_tx_delay[i]);
+		       lp->stat_tx_delay[i] = 0;
+	       }
+	       printk("Rx desk wait delay (mksec) -- number\n");
+	       for (i=0; i < MAX_DSK_RX_WAIT; i++) {
+		       if (lp->stat_rx_delay[i] == 0 ) continue;
+		       printk("%d, \t%d\n", DESK_WAIT_TIME * i, lp->stat_rx_delay[i]);
+		       lp->stat_rx_delay[i] = 0;
+	       }
 
-                /* print the Tx ring entries */
-                printk("TX RING: tx_new = %d; old = %d; tx_ptr = 0x%x; tx_len = 0x%x\n",
-                         (lp->tx_new - 1) & TX_RING_MOD_MASK,
-                         (lp->tx_old) & TX_RING_MOD_MASK,
-                         flip_16(ib->tx_ptr), flip_16(ib->tx_len));
-                {int *lst_rcv = (int *)(&ib->tx_buf[(lp->tx_new - 1) & TX_RING_MOD_MASK][0]);
-                        printk("Last transmitted buffer: %d \n",
-                             (lp->tx_new - 1) & TX_RING_MOD_MASK);
-                        for (i = 0; i < LAST_RCV_LEN / sizeof (int); i += sizeof (int)) {
-                                printk("0x%08x  0x%08x  0x%08x  0x%08x\n",
-                                  *(lst_rcv + i), *(lst_rcv + i + 1), *(lst_rcv + i + 2), *(lst_rcv + i + 3));
-                        }
-                }
+		/* print the Tx ring entries */
+		printk("TX RING: tx_new = %d; old = %d; tx_ptr = 0x%x; tx_len = 0x%x\n",
+			 (lp->tx_new - 1) & TX_RING_MOD_MASK,
+			 (lp->tx_old) & TX_RING_MOD_MASK,
+			 flip_16(ib->tx_ptr), flip_16(ib->tx_len));
+		{int *lst_rcv = (int *)(&ib->tx_buf[(lp->tx_new - 1) & TX_RING_MOD_MASK][0]);
+			printk("Last transmitted buffer: %d \n",
+			     (lp->tx_new - 1) & TX_RING_MOD_MASK);
+			for (i = 0; i < LAST_RCV_LEN / sizeof (int); i += sizeof (int)) {
+				printk("0x%08x  0x%08x  0x%08x  0x%08x\n",
+				  *(lst_rcv + i), *(lst_rcv + i + 1), *(lst_rcv + i + 2), *(lst_rcv + i + 3));
+			}
+		}
 		i = (lp->tx_old) & TX_RING_MOD_MASK;
 		pr_err("Old tmd0 = 0x%x (unFlipped: %llx); tmd1_hadr = 0x%x; tmd1_bits = 0x%x; misc = 0x%x\n",
 			flip_16(ib->btx_ring[i].tmd0),
 			*((long long *)(&(ib->btx_ring[i]))),
 			ib->btx_ring[i].tmd1_hadr,
-                        ib->btx_ring [i].tmd1_bits, flip_16(ib->btx_ring [i].misc));
-                for (i = 0; i < TX_RING_SIZE; i++) {
-                        u16 *packet;
-                        packet = (u16 *)(ib->tx_buf[i]);
-                        if ((i - lp->tx_new) > 3) {
-                                continue;
-                        }
-                        if ((lp->tx_new - i) > 3) {
-                                continue;
-                        }
-                        printk("tx buf %d(%p): 0x%04hx%04hx%04hx 0x%04hx%04hx%04hx 0x%04hx: ",
-                                i, ib->tx_buf[i],
-                                 *packet, *(packet+1),
-                                *(packet+2), *(packet+3), *(packet+4), *(packet+5), *(packet+6));
-                        packet += 21;  // remove eth, ip, udp headers
-                        printk("0x%04x%hx 0x%04x%hx 0x%04x%hx 0x%04x%hx %d %d  0x%x\n",
-                                *packet, *(packet + 1), *(packet + 2), *(packet + 3),
-                                *(packet + 4), *(packet + 5), *(packet + 6), *(packet + 7),
-                                (int)(*(packet + 8)<<16 | *(packet + 9)),
-                                (int)(*(packet + 10)<<16 | *(packet + 11)),
-                                (int)(*(packet + 12)<<16 | *(packet + 13)));
+			ib->btx_ring [i].tmd1_bits, flip_16(ib->btx_ring [i].misc));
+		for (i = 0; i < TX_RING_SIZE; i++) {
+			u16 *packet;
+			packet = (u16 *)(ib->tx_buf[i]);
+			if ((i - lp->tx_new) > 3) {
+				continue;
+			}
+			if ((lp->tx_new - i) > 3) {
+				continue;
+			}
+			printk("tx buf %d(%p): 0x%04hx%04hx%04hx 0x%04hx%04hx%04hx 0x%04hx: ",
+				i, ib->tx_buf[i],
+				 *packet, *(packet+1),
+				*(packet+2), *(packet+3), *(packet+4), *(packet+5), *(packet+6));
+			packet += 21;  // remove eth, ip, udp headers
+			printk("0x%04x%hx 0x%04x%hx 0x%04x%hx 0x%04x%hx %d %d  0x%x\n",
+				*packet, *(packet + 1), *(packet + 2), *(packet + 3),
+				*(packet + 4), *(packet + 5), *(packet + 6), *(packet + 7),
+				(int)(*(packet + 8)<<16 | *(packet + 9)),
+				(int)(*(packet + 10)<<16 | *(packet + 11)),
+				(int)(*(packet + 12)<<16 | *(packet + 13)));
 			printk("    tmd0 = 0x%x; tmd1_hadr = 0x%x;"
 				" tmd1_bits = 0x%x (addr:%p);"
 				" length = 0x%x; misc = 0x%x\n",
@@ -1496,108 +1414,108 @@ static int our_ioctl (struct net_device *dev, struct ifreq *rq, int cmd)
 				&(ib->btx_ring[i].tmd1_bits),
 				flip_16(ib->btx_ring[i].length),
 				flip_16(ib->btx_ring[i].misc));
-                }
-                printk("\n");
+		}
+		printk("\n");
 
-                /* print the Rx ring entries */
-                        printk("RX RING: curr = %d; rx_ptr = 0x%x, rx_len = 0x%x\n",
-                                 lp->rx_new, flip_16(ib->rx_ptr), flip_16(ib->rx_len));
+		/* print the Rx ring entries */
+			printk("RX RING: curr = %d; rx_ptr = 0x%x, rx_len = 0x%x\n",
+				 lp->rx_new, flip_16(ib->rx_ptr), flip_16(ib->rx_len));
 #if 0 /* FIXME */
-                {int *lst_rcv = (int *)(&lp->lasl_rcv[0]);
-                        printk("Last recieved buffer: %d (len = %d)\n", lp->lasl_entry, lp->lasl_len);
-                        for (i = 0; i < LAST_RCV_LEN / 4; i += 4) {
-                                printk("0x%08x  0x%08x  0x%08x  0x%08x\n",
-                                  *(lst_rcv + i), *(lst_rcv + i + 1), *(lst_rcv + i + 2), *(lst_rcv + i + 3));
-                        }
-                }
+		{int *lst_rcv = (int *)(&lp->lasl_rcv[0]);
+			printk("Last recieved buffer: %d (len = %d)\n", lp->lasl_entry, lp->lasl_len);
+			for (i = 0; i < LAST_RCV_LEN / 4; i += 4) {
+				printk("0x%08x  0x%08x  0x%08x  0x%08x\n",
+				  *(lst_rcv + i), *(lst_rcv + i + 1), *(lst_rcv + i + 2), *(lst_rcv + i + 3));
+			}
+		}
 #endif
-                for (i = 0; i < RX_RING_SIZE; i++) {
-                        u16 *packet;
-                        packet = (u16 *)(ib->rx_buf[i]);
-                        if ((i - lp->rx_new) > 3) {
-                                if ((lp->rx_new + RX_RING_SIZE - i) > 3) {
-                                        continue;
-                                }
-                        }
-                        packet = (u16 *)(ib->rx_buf[i]);
-                        if ((lp->rx_new - i) > 3) {
-                                if ((i + RX_RING_SIZE - lp->rx_new) > 3) {
-                                      continue;
-                                }
-                        }
+		for (i = 0; i < RX_RING_SIZE; i++) {
+			u16 *packet;
+			packet = (u16 *)(ib->rx_buf[i]);
+			if ((i - lp->rx_new) > 3) {
+				if ((lp->rx_new + RX_RING_SIZE - i) > 3) {
+					continue;
+				}
+			}
+			packet = (u16 *)(ib->rx_buf[i]);
+			if ((lp->rx_new - i) > 3) {
+				if ((i + RX_RING_SIZE - lp->rx_new) > 3) {
+				      continue;
+				}
+			}
 
-                        printk("rxbuf %d(%p): 0x%04hx%04hx%04hx 0x%04hx%04hx%04hx 0x%04hx ",
-                                i, ib->rx_buf[i],
-                                 *packet, *(packet+1),
-                                *(packet+2), *(packet+3), *(packet+4), *(packet+5), *(packet+6));
-                        packet += 21;  // remove eth, ip, udp headers
-                        printk("0x%04x%hx 0x%04x%hx 0x%04x%hx 0x%04x%hx %d %d  0x%x\n",
-                                *packet, *(packet + 1), *(packet + 2), *(packet + 3),
-                                *(packet + 4), *(packet + 5), *(packet + 6), *(packet + 7),
-                                (int)(*(packet + 8)<<16 | *(packet + 9)),
-                                (int)(*(packet + 10)<<16 | *(packet + 11)),
-                                (int)(*(packet + 12)<<16 | *(packet + 13)));
-                        printk("    rmd0 = 0x%x; rmd1_hadr = 0x%x; rmd1_bits = 0x%x; "
-                                "length = 0x%x; mblength = 0x%x\n",
-                                flip_16(ib->brx_ring [i].rmd0), ib->brx_ring [i].rmd1_hadr,
-                                ib->brx_ring [i].rmd1_bits, flip_16(ib->brx_ring [i].length),
-                                flip_16(ib->brx_ring [i].mblength));
-                }
+			printk("rxbuf %d(%p): 0x%04hx%04hx%04hx 0x%04hx%04hx%04hx 0x%04hx ",
+				i, ib->rx_buf[i],
+				 *packet, *(packet+1),
+				*(packet+2), *(packet+3), *(packet+4), *(packet+5), *(packet+6));
+			packet += 21;  // remove eth, ip, udp headers
+			printk("0x%04x%hx 0x%04x%hx 0x%04x%hx 0x%04x%hx %d %d  0x%x\n",
+				*packet, *(packet + 1), *(packet + 2), *(packet + 3),
+				*(packet + 4), *(packet + 5), *(packet + 6), *(packet + 7),
+				(int)(*(packet + 8)<<16 | *(packet + 9)),
+				(int)(*(packet + 10)<<16 | *(packet + 11)),
+				(int)(*(packet + 12)<<16 | *(packet + 13)));
+			printk("    rmd0 = 0x%x; rmd1_hadr = 0x%x; rmd1_bits = 0x%x; "
+				"length = 0x%x; mblength = 0x%x\n",
+				flip_16(ib->brx_ring [i].rmd0), ib->brx_ring [i].rmd1_hadr,
+				ib->brx_ring [i].rmd1_bits, flip_16(ib->brx_ring [i].length),
+				flip_16(ib->brx_ring [i].mblength));
+		}
 
-                res = 0;
-                break;
-#if defined(CONFIG_MCST_RT) && defined(CONFIG_E90)
-        case SIOCDEVPRIVATE + 11 :
-                i = lp->t_max_loop;
-                lp->calculate_t_max_loop = rq->ifr_ifindex;
-                lp->t_max_loop = 0;
-                rq->ifr_ifindex = i;
 		res = 0;
-                break;
+		break;
+#if defined(CONFIG_MCST_RT) && defined(CONFIG_E90)
+	case SIOCDEVPRIVATE + 11 :
+		i = lp->t_max_loop;
+		lp->calculate_t_max_loop = rq->ifr_ifindex;
+		lp->t_max_loop = 0;
+		rq->ifr_ifindex = i;
+		res = 0;
+		break;
 #endif
 #ifdef CONFIG_MCST_RT
-        case SIOCDEV_RTND_OPEN :
-                res = sunlance_rt_open(dev, lp);
-                break;
-        case SIOCDEV_RTND_CLOSE :
-                sunlance_rt_close(dev, lp);
-                res = 0;
-                break;
-        case SIOCDEV_RTND_READ :
+	case SIOCDEV_RTND_OPEN :
+		res = sunlance_rt_open(dev, lp);
+		break;
+	case SIOCDEV_RTND_CLOSE :
+		sunlance_rt_close(dev, lp);
+		res = 0;
+		break;
+	case SIOCDEV_RTND_READ :
 #ifdef CONFIG_COMPAT
 		if (is_compat_task()) {
 			res = sunlance_rt_compat_read(lp, rq);
 			break;
 		}
 #endif
-                res = sunlance_rt_read(lp, rq);
-                break;
-        case SIOCDEV_RTND_WRITE :
+		res = sunlance_rt_read(lp, rq);
+		break;
+	case SIOCDEV_RTND_WRITE :
 #ifdef CONFIG_COMPAT
 		if (is_compat_task()) {
-                        res = sunlance_rt_compat_write(dev, rq);
-                        break;
+			res = sunlance_rt_compat_write(dev, rq);
+			break;
 		}
 #endif
-                res = sunlance_rt_write(dev, rq);
-                break;
+		res = sunlance_rt_write(dev, rq);
+		break;
 #endif
-        default:
+	default:
 #if defined(CONFIG_E90) && defined(SUNLANCE_BODY_FOR_SBUS)
-                res =  lance_ioctl(dev, rq, cmd);
+		res =  lance_ioctl(dev, rq, cmd);
 #endif
-               /* SIOC[GS]MIIxxx ioctls */
-                if (lp->mii) {
+	       /* SIOC[GS]MIIxxx ioctls */
+		if (lp->mii) {
 //		    unsigned long flags;
 //                    raw_spin_lock_irqsave(&lp->lock, flags);
-                    res = generic_mii_ioctl(&lp->mii_if, if_mii(rq), cmd, NULL);
+		    res = generic_mii_ioctl(&lp->mii_if, if_mii(rq), cmd, NULL);
 //                    raw_spin_unlock_irqrestore(&lp->lock, flags);
-                } else {
-                    res = -EOPNOTSUPP;
-                }
-                break;
-        }
-        return res;
+		} else {
+		    res = -EOPNOTSUPP;
+		}
+		break;
+	}
+	return res;
 }
 
 
@@ -1617,7 +1535,7 @@ static void load_csrs(struct lance_private *lp)
 	lance_writew(LE_CSR3,              lp->lregs.rap);
 	lance_writew(lp->busmaster_regval, lp->lregs.rdp);
 
-        /* Point back to csr0 */
+	/* Point back to csr0 */
 	lance_writew(LE_CSR0, lp->lregs.rap);
 }
 
@@ -1647,38 +1565,38 @@ static void lance_init_ring_dvma(struct net_device *dev)
 
 	/* Setup the Tx ring entries */
 	for (i = 0; i < TX_RING_SIZE; i++) {
-                leptr = LANCE_ADDR(aib + libbuff_offset(tx_buf, i));
-                ib->btx_ring [i].tmd0      = flip_16((u16)leptr);
-                ib->btx_ring [i].tmd1_hadr = (u8)(leptr >> 16);
+		leptr = LANCE_ADDR(aib + libbuff_offset(tx_buf, i));
+		ib->btx_ring [i].tmd0      = flip_16((u16)leptr);
+		ib->btx_ring [i].tmd1_hadr = (u8)(leptr >> 16);
 #ifdef SUNLANCE_CHECK_TMD
 		lp->saved_tmd0[i] = ib->btx_ring[i].tmd0;
-                lp->saved_tmdh[i] = ib->btx_ring[i].tmd1_hadr;
+		lp->saved_tmdh[i] = ib->btx_ring[i].tmd1_hadr;
 #endif
-                ib->btx_ring [i].tmd1_bits = 0;
-                ib->btx_ring [i].length    = flip_16(0xf000); /* The ones required by tmd2 */
-                ib->btx_ring [i].misc      = 0;
+		ib->btx_ring [i].tmd1_bits = 0;
+		ib->btx_ring [i].length    = flip_16(0xf000); /* The ones required by tmd2 */
+		ib->btx_ring [i].misc      = 0;
 	}
 
 	/* Setup the Rx ring entries */
 	for (i = 0; i < RX_RING_SIZE; i++) {
-                leptr = LANCE_ADDR(aib + libbuff_offset(rx_buf, i));
-                ib->brx_ring [i].rmd0      = flip_16((u16)leptr);
-                ib->brx_ring [i].rmd1_hadr = leptr >> 16;
-                ib->brx_ring [i].rmd1_bits = LE_R1_OWN;
-                ib->brx_ring [i].length    = flip_16(-RX_BUFF_SIZE | 0xf000);
-                ib->brx_ring [i].mblength  = 0;
+		leptr = LANCE_ADDR(aib + libbuff_offset(rx_buf, i));
+		ib->brx_ring [i].rmd0      = flip_16((u16)leptr);
+		ib->brx_ring [i].rmd1_hadr = leptr >> 16;
+		ib->brx_ring [i].rmd1_bits = LE_R1_OWN;
+		ib->brx_ring [i].length    = flip_16(-RX_BUFF_SIZE | 0xf000);
+		ib->brx_ring [i].mblength  = 0;
 	}
 
 	/* Setup the initialization block */
 
 	/* Setup rx descriptor pointer */
-        leptr = LANCE_ADDR(aib + libdesc_offset(brx_ring, 0));
-        ib->rx_len = flip_16((LANCE_LOG_RX_BUFFERS << 13) | (leptr >> 16));
-        ib->rx_ptr = flip_16(leptr);
-        /* Setup tx descriptor pointer */
-        leptr = LANCE_ADDR(aib + libdesc_offset(btx_ring, 0));
-        ib->tx_len = flip_16((LANCE_LOG_TX_BUFFERS << 13) | (leptr >> 16));
-        ib->tx_ptr = flip_16(leptr);
+	leptr = LANCE_ADDR(aib + libdesc_offset(brx_ring, 0));
+	ib->rx_len = flip_16((LANCE_LOG_RX_BUFFERS << 13) | (leptr >> 16));
+	ib->rx_ptr = flip_16(leptr);
+	/* Setup tx descriptor pointer */
+	leptr = LANCE_ADDR(aib + libdesc_offset(btx_ring, 0));
+	ib->tx_len = flip_16((LANCE_LOG_TX_BUFFERS << 13) | (leptr >> 16));
+	ib->tx_ptr = flip_16(leptr);
 }
 
 #if 0
@@ -1764,9 +1682,9 @@ static void init_restart_ledma(struct lance_private *lp)
 
 	csr |= (DMA_DSBL_RD_DRN | DMA_DSBL_WR_INV | DMA_FIFO_INV);
 
-        udelay(40);
+	udelay(40);
 	lance_writel(csr, lp->dregs + DMA_CSR);
-        udelay(400);
+	udelay(400);
 }
 
 static int init_restart_lance(struct lance_private *lp)
@@ -1849,27 +1767,27 @@ static int lance_rx_dvma(struct net_device *dev, int budget)
 	}
 
 #if defined(CONFIG_MCST_RT) && defined(CONFIG_E90)
-        if (lp->calculate_t_max_loop && lp->t_start) {
-                int t = (int)(get_cycles() - lp->t_start);
-                if (t > lp->t_max_loop) {
-                        lp->t_max_loop = t;
-                }
-                lp->t_start = 0;
-        }
+	if (lp->calculate_t_max_loop && lp->t_start) {
+		int t = (int)(get_cycles() - lp->t_start);
+		if (t > lp->t_max_loop) {
+			lp->t_max_loop = t;
+		}
+		lp->t_start = 0;
+	}
 #endif
 
-        entry = lp->rx_new;
-        rd = &ib->brx_ring [entry];
+	entry = lp->rx_new;
+	rd = &ib->brx_ring [entry];
 
 #ifdef CONFIG_SBUS
 	if (rd->rmd1_bits & LE_R1_OWN)
-                udelay(5);
+		udelay(5);
 #endif
 	for (rd = &ib->brx_ring [entry];
 	     !((bits = rd->rmd1_bits) & LE_R1_OWN);
 	     rd = &ib->brx_ring [entry]) {
 
-	        if (work_done >= budget)
+		if (work_done >= budget)
 			break;
 
 #ifdef CONFIG_SBUS
@@ -1880,11 +1798,11 @@ static int lance_rx_dvma(struct net_device *dev, int budget)
 		if (unlikely((bits & LE_R1_POK) != LE_R1_POK)) {
 			dev->stats.rx_over_errors++;
 			dev->stats.rx_errors++;
-                        printk("lance_rx: for %s, we got incompl frame, bits 0x%x\n", dev->name, bits);
+			printk("lance_rx: for %s, we got incompl frame, bits 0x%x\n", dev->name, bits);
 // WALKAROUND BEGIN
-                } else if (unlikely(rd->mblength == flip_16(0x5000))) {
-                        // When happens rx overflow card writes flags to invalid location (mblength)
-                        dev->stats.rx_over_errors++;
+		} else if (unlikely(rd->mblength == flip_16(0x5000))) {
+			// When happens rx overflow card writes flags to invalid location (mblength)
+			dev->stats.rx_over_errors++;
 // WALKAROUND END
 		} else if (bits & LE_R1_ERR) {
 			/* Count only the end frame as a rx error,
@@ -1895,14 +1813,14 @@ static int lance_rx_dvma(struct net_device *dev, int budget)
 			if (bits & LE_R1_OFL) dev->stats.rx_over_errors++;
 			if (bits & LE_R1_FRA) dev->stats.rx_frame_errors++;
 			if (bits & LE_R1_EOP) dev->stats.rx_errors++;
-                  //      printk("lance_rx: for %s, we got an err, bits 0x%x\n", dev->name, bits);
-                } else {
-                        len = (flip_16(rd->mblength) & 0xfff) - 4;
+		  //      printk("lance_rx: for %s, we got an err, bits 0x%x\n", dev->name, bits);
+		} else {
+			len = (flip_16(rd->mblength) & 0xfff) - 4;
 #ifdef CONFIG_MCST_RT
-                        if (unlikely(lp->rt_stuff)) {
-                                sunlance_rt_rx_complete(lp, ib->rx_buf [entry], len);
-                                goto complete;
-                        }
+			if (unlikely(lp->rt_stuff)) {
+				sunlance_rt_rx_complete(lp, ib->rx_buf [entry], len);
+				goto complete;
+			}
 #endif
 			skb = dev_alloc_skb(len + 2);
 
@@ -1916,14 +1834,14 @@ static int lance_rx_dvma(struct net_device *dev, int budget)
 				return work_done;
 			}
 
-                        skb->dev = dev;
+			skb->dev = dev;
 			skb_reserve(skb, 2);		/* 16 byte align */
 			skb_put(skb, len);		/* make room */
 
-                        // Just for debug and dump device
+			// Just for debug and dump device
 //                      memcpy(lp->lasl_rcv, (char *)&(ib->rx_buf [entry][0]), LAST_RCV_LEN);
-                        lp->lasl_entry = entry;
-                        lp->lasl_len = len;
+			lp->lasl_entry = entry;
+			lp->lasl_len = len;
 
 			skb_copy_to_linear_data(skb,
 					 (unsigned char *)&(ib->rx_buf [entry][0]),
@@ -1937,7 +1855,7 @@ static int lance_rx_dvma(struct net_device *dev, int budget)
 #ifdef CONFIG_MCST_RT
 complete :
 #endif
-                        dev->stats.rx_bytes += len;
+			dev->stats.rx_bytes += len;
 			dev->stats.rx_packets++;
 			work_done++;
 		}
@@ -1963,15 +1881,15 @@ static int lance_tx_dvma(struct net_device *dev, int fast)
 	struct lance_private *lp = netdev_priv(dev);
 	struct lance_init_block *ib = lp->init_block_mem;
 	int i, j;
-        unsigned long flags;
+	unsigned long flags;
 	struct lance_tx_desc *td;
 	u8 bits;
 	int ret = 0;
 #ifdef CONFIG_E90
 	dma_addr_t      bufaddr;
 #endif
-        j = lp->tx_old;
-        raw_spin_lock_irqsave(&lp->lock, flags);
+	j = lp->tx_old;
+	raw_spin_lock_irqsave(&lp->lock, flags);
 	for (i = j; i != lp->tx_new; i = j) {
 		td = &ib->btx_ring [i];
 		bits = td->tmd1_bits;
@@ -1984,23 +1902,23 @@ static int lance_tx_dvma(struct net_device *dev, int fast)
 		if (bits & LE_T1_OWN)
 			break;
 #ifdef CONFIG_E90   /* workaround hw bug */
-               bufaddr =  LANCE_ADDR(lp->init_block_dvma + libbuff_offset(tx_buf, i)); 
-               if (bufaddr!= ((td->tmd1_hadr << 16) | td->tmd0)) {
-                        // HW bug. Fortunately it can be fixed dy SW
-                        static int print = 10;
-                        if (print > 0) {
-                                printk("%s (lance_tx_dvma) : corrupted tx desk %d: 0x%x != 0x%x\n",
-                                         dev->name, i, (lp->saved_tmdh[i] << 16) | lp->saved_tmd0[i],
-                                         ((td->tmd1_hadr << 16) | td->tmd0));
-                                print--;
-                        }
-                        td->tmd0 = bufaddr & 0xffff;
-                        td->tmd1_hadr = (bufaddr & 0xff0000) >> 16;
-                }
+	       bufaddr =  LANCE_ADDR(lp->init_block_dvma + libbuff_offset(tx_buf, i)); 
+	       if (bufaddr!= ((td->tmd1_hadr << 16) | td->tmd0)) {
+			// HW bug. Fortunately it can be fixed dy SW
+			static int print = 10;
+			if (print > 0) {
+				printk("%s (lance_tx_dvma) : corrupted tx desk %d: 0x%x != 0x%x\n",
+					 dev->name, i, (lp->saved_tmdh[i] << 16) | lp->saved_tmd0[i],
+					 ((td->tmd1_hadr << 16) | td->tmd0));
+				print--;
+			}
+			td->tmd0 = bufaddr & 0xffff;
+			td->tmd1_hadr = (bufaddr & 0xff0000) >> 16;
+		}
 #endif
 
 		if (unlikely(bits & LE_T1_ERR)) {
-                        u16 status = flip_16(td->misc);
+			u16 status = flip_16(td->misc);
 
 			if (fast) {
 				ret = 1;
@@ -2054,7 +1972,7 @@ out:
 	if (netif_queue_stopped(dev) && TX_BUFFS_AVAIL > 0) {
 		netif_wake_queue(dev);
 	}
-        raw_spin_unlock_irqrestore(&lp->lock, flags);
+	raw_spin_unlock_irqrestore(&lp->lock, flags);
 	return ret;
 }
 
@@ -2112,8 +2030,8 @@ static void lance_rx_pio(struct net_device *dev)
 			dev->stats.rx_errors++;
 // WALKAROUND BEGIN
 		} else if (lance_readw(&rd->mblength) == 0x5000) {
-                        // When happens rx overflow card writes flags to invalid location (mblength)
-                        dev->stats.rx_over_errors++;
+			// When happens rx overflow card writes flags to invalid location (mblength)
+			dev->stats.rx_over_errors++;
 // WALKAROUND END
 		} else if (bits & LE_R1_ERR) {
 			/* Count only the end frame as a rx error,
@@ -2144,11 +2062,11 @@ static void lance_rx_pio(struct net_device *dev)
 			skb_put(skb, len);		/* make room */
 			lance_piocopy_to_skb(skb, &(ib->rx_buf[entry][0]), len);
 			skb->protocol = eth_type_trans(skb, dev);
-                        if (lp->using_poll) {
-                                netif_receive_skb(skb);
-                        } else {
-                                netif_rx(skb);
-                        }
+			if (lp->using_poll) {
+				netif_receive_skb(skb);
+			} else {
+				netif_rx(skb);
+			}
 			dev->stats.rx_packets++;
 		}
 
@@ -2294,9 +2212,9 @@ static int lance_poll(struct napi_struct *napi, int budget)
 
 static irqreturn_t lance_interrupt(int irq, void *dev_id)
 {
-        struct net_device *dev = dev_id;
-        struct lance_private *lp = netdev_priv(dev);
-        int csr0, csr0_orig;
+	struct net_device *dev = dev_id;
+	struct lance_private *lp = netdev_priv(dev);
+	int csr0, csr0_orig;
 
 //	lance_writew(LE_CSR0, lp->lregs.rap);
 	csr0 = lance_readw(lp->lregs.rdp);
@@ -2304,7 +2222,7 @@ static irqreturn_t lance_interrupt(int irq, void *dev_id)
 	csr0 &= (LE_C0_INTR | LE_C0_TINT | LE_C0_RINT | LE_C0_BABL |
 		 LE_C0_ERR | LE_C0_MISS | LE_C0_CERR | LE_C0_MERR);
 	
-        if (!csr0)
+	if (!csr0)
 		return IRQ_NONE;
 	
 	if (napi_scheduled(&lp->napi)) {
@@ -2323,15 +2241,15 @@ static irqreturn_t lance_interrupt(int irq, void *dev_id)
 
 	if (unlikely(csr0 & LE_C0_BABL)) {
 		dev->stats.tx_errors++;
-                csr0 &= ~LE_C0_BABL;
+		csr0 &= ~LE_C0_BABL;
 	}
 	if (unlikely(csr0 & LE_C0_MISS)) {
 		dev->stats.rx_errors++;
-                csr0 &= ~LE_C0_MISS;
+		csr0 &= ~LE_C0_MISS;
 	}
 	if (unlikely(csr0 & LE_C0_CERR)) {
 		dev->stats.collisions++;
-                csr0 &= ~LE_C0_CERR;
+		csr0 &= ~LE_C0_CERR;
 	}
 
 	if (csr0 & LE_C0_TINT) {
@@ -2367,9 +2285,9 @@ static void build_fake_packet(struct lance_private *lp)
 {
 	struct net_device *dev = lp->dev;
 	int i, entry;
-        unsigned long flags;
+	unsigned long flags;
 
-        raw_spin_lock_irqsave(&lp->lock, flags);
+	raw_spin_lock_irqsave(&lp->lock, flags);
 
 	entry = lp->tx_new & TX_RING_MOD_MASK;
 	if (lp->pio_buffer) {
@@ -2387,20 +2305,20 @@ static void build_fake_packet(struct lance_private *lp)
 		writeb(LE_T1_POK|LE_T1_OWN, &ib->btx_ring[entry].tmd1_bits);
 	} else {
 		struct lance_init_block *ib = lp->init_block_mem;
-                struct ethhdr *packet = (struct ethhdr *) &(ib->tx_buf[entry][0]);
-                struct ethhdr *eth = packet;
+		struct ethhdr *packet = (struct ethhdr *) &(ib->tx_buf[entry][0]);
+		struct ethhdr *eth = packet;
 		memset(packet, 0, ETH_ZLEN);
 		for (i = 0; i < 6; i++) {
 			eth->h_dest[i] = dev->dev_addr[i];
 			eth->h_source[i] = dev->dev_addr[i];
 		}
-                ib->btx_ring[entry].length = flip_16(((-ETH_ZLEN) | 0xf000));
+		ib->btx_ring[entry].length = flip_16(((-ETH_ZLEN) | 0xf000));
 		ib->btx_ring[entry].misc = 0;
 		ib->btx_ring[entry].tmd1_bits = (LE_T1_POK|LE_T1_OWN);
 	}
 	lp->tx_new = TX_NEXT(entry);
 
-        raw_spin_unlock_irqrestore(&lp->lock, flags);
+	raw_spin_unlock_irqrestore(&lp->lock, flags);
 }
 
 
@@ -2412,7 +2330,7 @@ static int lance_open(struct net_device *dev)
 {
 	struct lance_private *lp = netdev_priv(dev);
 	int status = 0;
-        u16     mode = 0;
+	u16     mode = 0;
 	unsigned long flags = 0;
 	int i;
 /*
@@ -2426,30 +2344,30 @@ static int lance_open(struct net_device *dev)
 #ifdef SUNLANCE_BODY_FOR_SBUS
 #if defined(CONFIG_SBUS)
 	if (lance_request_threaded_irq(dev->irq, &lance_interrupt, NULL,
-                        flags, dev->name, (void *) dev)) {
-                printk(KERN_ERR "Lance: Can't get irq %d\n", dev->irq);
+			flags, dev->name, (void *) dev)) {
+		printk(KERN_ERR "Lance: Can't get irq %d\n", dev->irq);
 		return -EAGAIN;
 	}
 #elif defined(CONFIG_PCI2SBUS) || defined(CONFIG_PCI2SBUS_MODULE)  
-        if (sbus_request_irq(dev->irq, &lance_interrupt, NULL,
-                        flags, dev->name, (void *) dev)) {
-                printk(KERN_ERR "Lance: Can't get irq %d\n", dev->irq);
+	if (sbus_request_irq(dev->irq, &lance_interrupt, NULL,
+			flags, dev->name, (void *) dev)) {
+		printk(KERN_ERR "Lance: Can't get irq %d\n", dev->irq);
 		return -EAGAIN;
 	}
 #else
-        printk("sbus_sunlance driver may be loaded only under SBUS || PCI2SBUS || PCI2SBUS_MODULE configs\n");
-        return -EAGAIN;
+	printk("sbus_sunlance driver may be loaded only under SBUS || PCI2SBUS || PCI2SBUS_MODULE configs\n");
+	return -EAGAIN;
 #endif
 #else /* Seems to be SUNLANCE_BODY_FOR_PCI */
-        if (request_irq(dev->irq, &lance_interrupt, flags, dev->name, (void *)dev)) {
-                printk(KERN_ERR "Lance: Can't get irq %u\n", dev->irq);
+	if (request_irq(dev->irq, &lance_interrupt, flags, dev->name, (void *)dev)) {
+		printk(KERN_ERR "Lance: Can't get irq %u\n", dev->irq);
 		return -EAGAIN;
 	}
 #endif        
 
-        raw_spin_lock_irq(&lp->init_lock);
+	raw_spin_lock_irq(&lp->init_lock);
 
-        STOP_LANCE(lp);
+	STOP_LANCE(lp);
 	/* On the 4m, setup the ledma to provide the upper bits for buffers */
 	if (lp->dregs) {
 		u32 regval = lp->init_block_dvma & 0xff000000;
@@ -2480,38 +2398,38 @@ static int lance_open(struct net_device *dev)
 		if (lance_tx_burst_size_128)
 			mode |= LE_MO_TR128;
 #endif
-                ib->mode = flip_16(mode);
+		ib->mode = flip_16(mode);
 		ib->filter [0] = 0;
 		ib->filter [1] = 0;
 	}
 	lp->init_ring(dev);
-        status = init_restart_lance(lp);
-        raw_spin_unlock_irq(&lp->init_lock);
+	status = init_restart_lance(lp);
+	raw_spin_unlock_irq(&lp->init_lock);
 
 	napi_enable(&lp->napi);
 	netif_start_queue(dev);
 
-        /* If we have mii, print the link status and start the watchdog */
+	/* If we have mii, print the link status and start the watchdog */
        if (lp->mii) {
-               mii_check_media (&lp->mii_if, netif_msg_link(lp), 1);
-               mod_timer(&(lp->watchdog_timer), LANCE_WATCHDOG_TIMEOUT);
+	       mii_check_media (&lp->mii_if, netif_msg_link(lp), 1);
+	       mod_timer(&(lp->watchdog_timer), LANCE_WATCHDOG_TIMEOUT);
        }
 
-        if (status) {
+	if (status) {
 		lance_free_irq(dev->irq, (void *)dev);
-                return status;
+		return status;
 	}
 	if (!status) {
 		build_fake_packet(lp);
 		lance_writew(LE_C0_INEA | LE_C0_TDMD, lp->lregs.rdp);
 	}
 
-        for (i=0; i < MAX_DSK_TX_WAIT; i++) {
-                lp->stat_tx_delay[i] = 0;
-        }
-        for (i=0; i < MAX_DSK_RX_WAIT; i++) {
-                lp->stat_rx_delay[i] = 0;
-        }
+	for (i=0; i < MAX_DSK_TX_WAIT; i++) {
+		lp->stat_tx_delay[i] = 0;
+	}
+	for (i=0; i < MAX_DSK_RX_WAIT; i++) {
+		lp->stat_rx_delay[i] = 0;
+	}
 	return status;
 }
 
@@ -2519,13 +2437,13 @@ static int lance_close(struct net_device *dev)
 {
 	struct lance_private *lp = netdev_priv(dev);
 
-        del_timer_sync(&lp->watchdog_timer);
+	del_timer_sync(&lp->watchdog_timer);
 	napi_disable(&lp->napi);
 	netif_stop_queue(dev);
 	del_timer_sync(&lp->multicast_timer);
 
 	STOP_LANCE(lp);
-        lance_free_irq(dev->irq, (void *)dev);
+	lance_free_irq(dev->irq, (void *)dev);
 	return 0;
 }
 
@@ -2534,7 +2452,7 @@ static int lance_reset(struct net_device *dev)
 	struct lance_private *lp = netdev_priv(dev);
 	int status;
 
-        raw_spin_lock_irq(&lp->init_lock);
+	raw_spin_lock_irq(&lp->init_lock);
 	STOP_LANCE(lp);
 
 	/* On the 4m, reset the dma too */
@@ -2553,7 +2471,7 @@ static int lance_reset(struct net_device *dev)
 	lp->init_ring(dev);
 	netif_trans_update(dev);
 	status = init_restart_lance(lp);
-        raw_spin_unlock_irq(&lp->init_lock);
+	raw_spin_unlock_irq(&lp->init_lock);
 	return status;
 }
 
@@ -2666,7 +2584,7 @@ static void lance_tx_timeout(struct net_device *dev, unsigned int txqueue)
 static  netdev_tx_t lance_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct lance_private *lp = netdev_priv(dev);
-        netdev_tx_t r = NETDEV_TX_BUSY;
+	netdev_tx_t r = NETDEV_TX_BUSY;
 
 	raw_spin_lock_irq(&lp->lock);
 #ifdef CONFIG_MCST_RT
@@ -2678,8 +2596,8 @@ static  netdev_tx_t lance_start_xmit(struct sk_buff *skb, struct net_device *dev
 #endif
 	r = lance_start_xmit_generic(skb, dev, lp);
 	raw_spin_unlock_irq(&lp->lock);
-        dev_kfree_skb(skb);
-        return r;
+	dev_kfree_skb(skb);
+	return r;
 }
 
 static void lance_kick_xmit(struct lance_private *lp)
@@ -2722,7 +2640,7 @@ netdev_tx_t lance_start_xmit_generic(struct sk_buff *skb, struct net_device *dev
 		writeb(LE_T1_POK | LE_T1_OWN, &ib->btx_ring[entry].tmd1_bits);
 	} else {
 		struct lance_init_block *ib = lp->init_block_mem;
-                ib->btx_ring [entry].length = flip_16(((-len) | 0xf000));
+		ib->btx_ring [entry].length = flip_16(((-len) | 0xf000));
 		ib->btx_ring [entry].misc = 0;
 		skb_copy_from_linear_data(skb, &ib->tx_buf [entry][0], skblen);
 		if (len != skblen)
@@ -2735,9 +2653,9 @@ netdev_tx_t lance_start_xmit_generic(struct sk_buff *skb, struct net_device *dev
 	if (TX_BUFFS_AVAIL <= 0)
 		netif_stop_queue(dev);
 #if defined(CONFIG_MCST_RT) && defined(CONFIG_E90)
-        if (lp->calculate_t_max_loop) {
-                lp->t_start = get_cycles();
-        }
+	if (lp->calculate_t_max_loop) {
+		lp->t_start = get_cycles();
+	}
 #endif
 
 	/* Kick the lance: transmit now */
@@ -2759,7 +2677,7 @@ netdev_tx_t lance_start_xmit_generic(struct sk_buff *skb, struct net_device *dev
 static struct net_device_stats *lance_get_stats(struct net_device *dev)
 {
 
-        return &dev->stats;
+	return &dev->stats;
 }
 
 
@@ -2813,39 +2731,39 @@ static void lance_load_multicast(struct net_device *dev)
 #ifdef CONFIG_MCST_RT
 static int lance_set_promuscuous(struct net_device *dev, int on)
 {
-        struct lance_private *lp = netdev_priv(dev);
-        struct lance_init_block *ib_mem = lp->init_block_mem;
-        struct lance_init_block __iomem *ib_iomem = lp->init_block_iomem;
-        u16 mode;
+	struct lance_private *lp = netdev_priv(dev);
+	struct lance_init_block *ib_mem = lp->init_block_mem;
+	struct lance_init_block __iomem *ib_iomem = lp->init_block_iomem;
+	u16 mode;
 
 	netif_trans_update(dev);
-        netif_stop_queue(dev);
+	netif_stop_queue(dev);
 
-        raw_spin_lock_irq(&lp->init_lock);
-        STOP_LANCE(lp);
-        lp->init_ring(dev);
+	raw_spin_lock_irq(&lp->init_lock);
+	STOP_LANCE(lp);
+	lp->init_ring(dev);
 
-        if (lp->pio_buffer)
+	if (lp->pio_buffer)
 		mode = lance_readw(&ib_iomem->mode);
-        else
-                mode = flip_16(ib_mem->mode);
-        if (on) {
-                mode |= LE_MO_PROM;
-                if (lp->pio_buffer)
+	else
+		mode = flip_16(ib_mem->mode);
+	if (on) {
+		mode |= LE_MO_PROM;
+		if (lp->pio_buffer)
 			lance_writew(mode, &ib_iomem->mode);
-                else
-                        ib_mem->mode = flip_16(mode);
-        } else {
-                mode &= ~LE_MO_PROM;
-                if (lp->pio_buffer)
+		else
+			ib_mem->mode = flip_16(mode);
+	} else {
+		mode &= ~LE_MO_PROM;
+		if (lp->pio_buffer)
 			lance_writew(mode, &ib_iomem->mode);
-                else
-                        ib_mem->mode = flip_16(mode);
-        }
-        init_restart_lance(lp);
-        raw_spin_unlock_irq(&lp->init_lock);
-        netif_wake_queue(dev);
-        return 0;
+		else
+			ib_mem->mode = flip_16(mode);
+	}
+	init_restart_lance(lp);
+	raw_spin_unlock_irq(&lp->init_lock);
+	netif_wake_queue(dev);
+	return 0;
 }
 #endif
 
@@ -2868,31 +2786,31 @@ static void lance_set_multicast(struct net_device *dev)
 
 	netif_stop_queue(dev);
 
-        raw_spin_lock_irq(&lp->init_lock);
+	raw_spin_lock_irq(&lp->init_lock);
 	STOP_LANCE(lp);
 	lp->init_ring(dev);
 
-        if (lp->pio_buffer)
+	if (lp->pio_buffer)
 		mode = lance_readw(&ib_iomem->mode);
-        else
-                mode = flip_16(ib_mem->mode);
+	else
+		mode = flip_16(ib_mem->mode);
 
 	if (dev->flags & IFF_PROMISC) {
 		mode |= LE_MO_PROM;
 		if (lp->pio_buffer)
 			lance_writew(mode, &ib_iomem->mode);
 		else
-                       ib_mem->mode = flip_16(mode);
+		       ib_mem->mode = flip_16(mode);
 	} else {
 		mode &= ~LE_MO_PROM;
 		if (lp->pio_buffer)
 			lance_writew(mode, &ib_iomem->mode);
 		else
-                       ib_mem->mode = flip_16(mode);
+		       ib_mem->mode = flip_16(mode);
 		lance_load_multicast(dev);
 	}
 	init_restart_lance(lp);
-        raw_spin_unlock_irq(&lp->init_lock);
+	raw_spin_unlock_irq(&lp->init_lock);
 	netif_wake_queue(dev);
 }
 
@@ -2923,16 +2841,16 @@ int lance_change_mtu(struct net_device *dev, int new_mtu)
 }
 
 static const struct net_device_ops lance_ops = {
-        .ndo_open               = lance_open,
-        .ndo_stop               = lance_close,
-        .ndo_start_xmit         = lance_start_xmit,
-        .ndo_set_rx_mode	= lance_set_multicast,
-        .ndo_tx_timeout         = lance_tx_timeout,
-        .ndo_change_mtu         = lance_change_mtu,
-        .ndo_set_mac_address    = eth_mac_addr,
-        .ndo_validate_addr      = eth_validate_addr,
-        .ndo_get_stats          = lance_get_stats,
-        .ndo_do_ioctl           = our_ioctl,
+	.ndo_open               = lance_open,
+	.ndo_stop               = lance_close,
+	.ndo_start_xmit         = lance_start_xmit,
+	.ndo_set_rx_mode	= lance_set_multicast,
+	.ndo_tx_timeout         = lance_tx_timeout,
+	.ndo_change_mtu         = lance_change_mtu,
+	.ndo_set_mac_address    = eth_mac_addr,
+	.ndo_validate_addr      = eth_validate_addr,
+	.ndo_get_stats          = lance_get_stats,
+	.ndo_do_ioctl           = our_ioctl,
 #ifdef CONFIG_MCST_RT
 	.ndo_unlocked_ioctl	= 1,
 #endif
@@ -2945,18 +2863,18 @@ static int lance_common_init(struct net_device *dev, struct lance_private *lp)
 	char buf[IFNAMSIZ];
 #endif
 	int phy_id, csr;
-        lp->mii_if.full_duplex = 1;
-        lp->mii_if.supports_gmii = 0;
-        lp->mii_if.phy_id_mask = 0x1f;
-        lp->mii_if.reg_num_mask = 0x1f;
-        lp->mii_if.dev = dev;
-        lp->mii_if.mdio_read = mdio_read;
-        lp->mii_if.mdio_write = mdio_write;
-        lp->mii = 1;
-        lp->msg_enable =  netif_msg_init(-1, LANCE_MSG_DEFAULT);
-        lp->a = &sunlance_io;
+	lp->mii_if.full_duplex = 1;
+	lp->mii_if.supports_gmii = 0;
+	lp->mii_if.phy_id_mask = 0x1f;
+	lp->mii_if.reg_num_mask = 0x1f;
+	lp->mii_if.dev = dev;
+	lp->mii_if.mdio_read = mdio_read;
+	lp->mii_if.mdio_write = mdio_write;
+	lp->mii = 1;
+	lp->msg_enable =  netif_msg_init(-1, LANCE_MSG_DEFAULT);
+	lp->a = &sunlance_io;
 
-        /* Set the mii phy_id so that we can query the link state */
+	/* Set the mii phy_id so that we can query the link state */
 	// Usualy phy_id = 1, but on some sbus MB it deffers.
 	// Try to determinate it in tricky way
 	for (phy_id = 0; phy_id < 32; phy_id++) {
@@ -2968,26 +2886,26 @@ static int lance_common_init(struct net_device *dev, struct lance_private *lp)
 	if (phy_id == 32) {
 		phy_id = 1;
 	}
-        lp->mii_if.phy_id = phy_id;
+	lp->mii_if.phy_id = phy_id;
 
-        dev->ethtool_ops = &lance_ethtool_ops;
-        timer_setup(&lp->watchdog_timer, sunlance_watchdog, 0);
-        dev->watchdog_timeo = 5*HZ;
+	dev->ethtool_ops = &lance_ethtool_ops;
+	timer_setup(&lp->watchdog_timer, sunlance_watchdog, 0);
+	dev->watchdog_timeo = 5*HZ;
 
 	netif_napi_add_weight(dev, &lp->napi, lance_poll, LANCE_NAPI_WEIGHT);
 
-        dev->netdev_ops = &lance_ops;
+	dev->netdev_ops = &lance_ops;
 
        /* We cannot sleep if the chip is busy during a 
-         * multicast list update event, because such events 
-         * can occur from interrupts (ex. IPv6).  So we 
-         * use a timer to try again later when necessary. -DaveM 
-         */ 
-        timer_setup(&lp->multicast_timer, lance_set_multicast_retry, 0);
-        if (register_netdev(dev)) {
-                printk(KERN_ERR "SunLance: Cannot register device.\n");
-                return 1;
-        }
+	 * multicast list update event, because such events 
+	 * can occur from interrupts (ex. IPv6).  So we 
+	 * use a timer to try again later when necessary. -DaveM 
+	 */ 
+	timer_setup(&lp->multicast_timer, lance_set_multicast_retry, 0);
+	if (register_netdev(dev)) {
+		printk(KERN_ERR "SunLance: Cannot register device.\n");
+		return 1;
+	}
 
 	lp->napi_cpu = -1;
 #ifdef CONFIG_SYSCTL

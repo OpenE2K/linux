@@ -603,7 +603,11 @@ void LinuxInitPhysmem(void)
 	if (g_psLinuxPagePoolCache)
 	{
 		/* Only create the shrinker if we created the cache OK */
+#if defined(CONFIG_MCST) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
+		register_shrinker(&g_sShrinker, "pvr-shr");
+#else
 		register_shrinker(&g_sShrinker);
+#endif
 	}
 	_PagePoolUnlock();
 

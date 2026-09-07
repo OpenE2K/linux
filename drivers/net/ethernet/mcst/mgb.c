@@ -327,6 +327,7 @@ static DEFINE_MUTEX(mgb_mutex);
 #define SH_R_MODE_PADDR0	(1 << 0)  /* RW1  */
 
 /* eldwcxpcs.ko */
+void eldwcxpcs_mpll_reinit(struct pci_dev *pdev, unsigned char *ioaddr);
 int eldwcxpcs_get_mpll_mode(struct pci_dev *pdev);
 /* PCS MPLL MODE */
 #define MPLL_MODE_10G		0
@@ -346,20 +347,16 @@ int eldwcxpcs_get_mpll_mode(struct pci_dev *pdev);
 #define RX_RING_SIZE		(1 << ep->log_rx_buffs)
 #define RX_RING_MOD_MASK	(RX_RING_SIZE - 1)
 
-/* The socket JUMBO buffer has to fit into PAGE_SIZE.
- * MGB supports max. 4KB JUMBO size.
- */
+/* MGB supports max. 4KB JUMBO packets. */
 #if defined(CONFIG_E90S)
-#define MGB_BUF_LEN			(4 * 1024)
+#define MGB_PP_ORDER		(0)
 #else
-#define MGB_SKB_HEADROOM	ALIGN(max(NET_SKB_PAD, XDP_PACKET_HEADROOM), 8)
-#define MGB_SKB_PAD			(SKB_DATA_ALIGN(sizeof(struct skb_shared_info) + \
-							MGB_SKB_HEADROOM))
-#define MGB_BUF_LEN			(PAGE_SIZE - MGB_SKB_PAD)
+#define MGB_PP_ORDER		(1)
 #endif
 
+#define MGB_BUF_LEN		(4 * 1024)
 #define MGB_MAX_DATA_LEN	(MGB_BUF_LEN - ETH_HLEN - ETH_FCS_LEN)
-#define PKT_BUF_SZ			MGB_BUF_LEN
+#define PKT_BUF_SZ		MGB_BUF_LEN
 
 /* Each packet consists of header 14 bytes(ETH_HLEN) +
  * [46 min - 1500 max] data + 4 bytes * crc(ETH_FCS_LEN). mgb adds
@@ -520,22 +517,16 @@ enum mgb_buff_type {
 #define MGB_XDP_TX              BIT(0)
 #define MGB_XDP_REDIR           BIT(1)
 
-struct mgb_tx_buff {
-	enum mgb_buff_type type;
+struct mgb_buff {
 	union {
 		struct sk_buff *skb;
 		struct xdp_frame *xdpf;
+		struct page *page;
 	};
 	DEFINE_DMA_UNMAP_ADDR(dma);
 	DEFINE_DMA_UNMAP_LEN(len);
 	unsigned int bytes;
-};
-
-struct mgb_rx_buff {
-	struct page *page;
-	DEFINE_DMA_UNMAP_ADDR(dma);
-	DEFINE_DMA_UNMAP_LEN(len);
-	unsigned int bytes;
+	enum mgb_buff_type type;
 };
 
 struct mgb_q {
@@ -545,7 +536,7 @@ struct mgb_q {
 
 	struct mgb_rx_head	*rx;
 	dma_addr_t		rx_dma;
-	struct mgb_rx_buff	*rx_buff;
+	struct mgb_buff		*rx_buff;
 	unsigned int		cur_rx;
 	unsigned int		refill_rx;
 	unsigned int		rx_bufsz;
@@ -557,13 +548,15 @@ struct mgb_q {
 
 	struct mgb_tx_head	*tx;
 	dma_addr_t		tx_dma;
-	struct mgb_tx_buff	*tx_buff;
+	struct mgb_buff		*tx_buff;
 	unsigned int		cur_tx;
 	unsigned int		dirty_tx;
 	unsigned int		full_tx;
 	char			tx_name[IFNAMSIZ + 6];
 
 	unsigned int		xdp_xmit;
+	unsigned int		pp_len;
+
 	struct mgb_rx_queue_stats rx_stats;
 	struct mgb_tx_queue_stats tx_stats;
 	atomic64_t		missed_errors;
@@ -619,6 +612,13 @@ typedef struct init_block {
  */
 #define default_psf_csr (0)
 
+/* Shift according to pci_dev->irq */
+#define MGB_T0_INTR	0	/* tx queue0 interrupt */
+#define MGB_T1_INTR	1	/* tx queue1 interrupt */
+#define MGB_R0_INTR	2	/* rx queue0 interrupt */
+#define MGB_R1_INTR	3	/* rx queue1 interrupt */
+#define MGB_Q_INTR_MAX	(MGB_R1_INTR + 1)
+#define MGB_SYS_INTR	4	/* system interrupt */
 
 struct mgb_stats {
 	unsigned long swint;
@@ -659,6 +659,7 @@ struct mgb_private {
 	int			pcsaddr;	/* Address of Internal PHY */
 	u32			pcs_dev_id;
 	struct device_node	*phy_node;	/* Connection to External PHY */
+	int			phy_reset;	/* External PHY may be reset */
 	int			mpll_mode;      /* Normal=1, 2G5=2, Bif=3 */
 	u32			e_cap;
 	u32			e_cap_sup;
@@ -669,6 +670,7 @@ struct mgb_private {
 	unsigned char		log_tx_buffs;
 	unsigned char		linkup;
 	int			nd_number;
+	struct cpumask		affinity_mask[MGB_Q_INTR_MAX];
 	/* For IEEE 1588 */
 	struct hwtstamp_config	hwtstamp_config;
 	struct ptp_clock	*ptp_clock;
@@ -749,14 +751,6 @@ enum mgb_state_t {
 	MGB_F_S_STOPPED,
 };
 
-/* Shift according to pci_dev->irq */
-#define MGB_T0_INTR	0	/* tx queue0 interrupt */
-#define MGB_T1_INTR	1	/* tx queue1 interrupt */
-#define MGB_R0_INTR	2	/* rx queue0 interrupt */
-#define MGB_R1_INTR	3	/* rx queue1 interrupt */
-#define MGB_SYS_INTR	4	/* system interrupt */
-
-
 #define mgb_nq(ep, q)		(!!(ep->mgb_qs[0] != q))
 
 static irqreturn_t mgb_sys_interrupt(int , void *);
@@ -780,7 +774,7 @@ static void mgb_monitor_auto_negotiation(struct net_device *dev);
 static int mgb_xdp_xmit_to_q(struct xdp_frame *xdpf, struct mgb_q *q, bool ndo);
 static int mgb_xdp_xmit_back(struct net_device *dev, struct xdp_buff *xdp);
 static int mgb_run_xdp(struct bpf_prog *prog, struct xdp_buff *xdp, struct mgb_q *q,
-		       struct mgb_rx_buff *rx_buff);
+		       struct mgb_buff *rx_buff);
 static void mgb_update_err_stats(struct mgb_private *ep);
 static void (*mgb_handle_rx_err)(struct mgb_q *, int, s16);
 static void mgb_handle_rx_err_v6(struct mgb_q *, int, s16);
@@ -1355,7 +1349,8 @@ static int mgio_read_clause_45(struct mgb_private *ep, int mii_id, int reg_num)
 	mgb_write_mgio_csr(ep,
 			   (mgb_read_mgio_csr(ep) & ~MG_W1C_MASK) | MG_RRDY);
 	rd = (0x2UL << MGIO_CS_OFF) |
-	     (reg_num & ((0x1fUL << MGIO_REG_AD_OFF) | 0xffff)) |
+	     (((reg_num >> MII_DEVADDR_C45_SHIFT) & 0x1fUL) << MGIO_REG_AD_OFF) |
+	     (reg_num & MII_REGADDR_C45_MASK) |
 	     ((mii_id & 0x1f) << MGIO_PHY_AD_OFF);
 	mgb_write_mgio_data(ep, rd);
 	if (mgb_wait_rrdy(ep))
@@ -1396,7 +1391,8 @@ static void mgio_write_clause_45(struct mgb_private *ep, int mii_id,
 	mgb_write_mgio_csr(ep,
 			   (mgb_read_mgio_csr(ep) & ~MG_W1C_MASK) | MG_RRDY);
 	wr = (0x2 << MGIO_CS_OFF) |
-	     (reg_num & ((0x1f << MGIO_REG_AD_OFF) | 0xffff)) |
+	     (((reg_num >> MII_DEVADDR_C45_SHIFT) & 0x1fUL) << MGIO_REG_AD_OFF) |
+	     (reg_num & MII_REGADDR_C45_MASK) |
 	     ((mii_id & 0x1f) << MGIO_PHY_AD_OFF);
 	mgb_write_mgio_data(ep, wr);
 	if (mgb_wait_rrdy(ep))
@@ -1449,11 +1445,11 @@ static void mgb_pcs_write(struct mgb_private *ep, int regnum, u16 value)
 #define PCS_DEV_ID_1G_2G5_10G	0x7996CED3
 #endif
 
-#define PMA_and_PMD_MMD	(0x1 << 18)
-#define PCS_MMD		(0x3 << 18)
-#define AN_MMD		(0x7 << 18)
-#define VS_MMD1		(0x1e << 18)
-#define VS_MII_MMD	(0x1f << 18)
+#define PMA_and_PMD_MMD	(0x1 << 16)
+#define PCS_MMD		(0x3 << 16)
+#define AN_MMD			(0x7 << 16)
+#define VS_MMD1		(0x1e << 16)
+#define VS_MII_MMD		(0x1f << 16)
 
 #define SR_XS_PCS_CTRL1		(0x0000 | PCS_MMD)
 #define SR_XS_PCS_DEV_ID1	(0x0002 | PCS_MMD)
@@ -2156,11 +2152,11 @@ static int mgb_mdio_register(struct mgb_private *ep,
 				return 0;
 			}
 		}
-		if (phydev->phy_id == 0) {
+		if (!phydev->is_c45 && !phydev->phy_id) {
 			if (netif_msg_link(ep))
 				dev_err(&pdev->dev,
 					"register mdiobus %s "
-					"(external phy with id=0 found, ignore it. "
+					"(external C22 PHY with id=0 found, ignore it. "
 					"Please, update DT!)\n",
 					new_bus->id);
 
@@ -2168,7 +2164,26 @@ static int mgb_mdio_register(struct mgb_private *ep,
 			ep->mii_bus = NULL;
 
 			return -ENODEV;
+		} else if (phydev->is_c45) {
+			const int num_ids = ARRAY_SIZE(phydev->c45_ids.device_ids);
+			int i;
+
+			for (i = 1; i < num_ids; i++) {
+				if (phydev->c45_ids.device_ids[i] == 0xffffffff)
+					continue;
+				goto done;
+			}
+			if (netif_msg_link(ep))
+				dev_err(&pdev->dev, "register mdiobus %s "
+					"(external C45 PHY found without valid ids.)\n",
+					new_bus->id);
+
+			mdiobus_unregister(ep->mii_bus);
+			ep->mii_bus = NULL;
+
+			return -ENODEV;
 		}
+done:
 		ep->extphyaddr = phydev->mdio.addr;
 		ep->an_sgmii = 1;
 		ep->an_clause_73 = 0;
@@ -2509,7 +2524,7 @@ static void mgb_unset_queue(struct mgb_q *q)
 	int i;
 
 	if (q->tx_buff) {
-		struct mgb_tx_buff *tx_buff;
+		struct mgb_buff *tx_buff;
 
 		for (i = 0; i < TX_RING_SIZE; i++) {
 			tx_buff = &q->tx_buff[i];
@@ -2552,7 +2567,7 @@ static void mgb_unset_queue(struct mgb_q *q)
 		q->tx_dma = 0;
 	}
 	if (q->rx_buff) {
-		struct mgb_rx_buff *rx_buff;
+		struct mgb_buff *rx_buff;
 
 		for (i = 0; i < RX_RING_SIZE; i++) {
 			rx_buff = &q->rx_buff[i];
@@ -2605,14 +2620,12 @@ static int mgb_rx_page_pool_create(struct mgb_q *q)
 	struct mgb_private *ep = q->ep;
 	struct page_pool_params pp = { 0 };
 
-	pp.order = 0;
+	pp.order = MGB_PP_ORDER;
 	pp.pool_size = RX_RING_SIZE;
 	pp.nid = dev_to_node(&ep->pci_dev->dev);
 	pp.dev = &ep->pci_dev->dev;
 	pp.dma_dir = DMA_BIDIRECTIONAL;
-	pp.max_len = PAGE_SIZE - SKB_DATA_ALIGN(sizeof(struct skb_shared_info) +
-				XDP_PACKET_HEADROOM);
-
+	q->pp_len = (PAGE_SIZE << MGB_PP_ORDER);
 	q->page_pool = page_pool_create(&pp);
 	if (IS_ERR(q->page_pool)) {
 		int err = PTR_ERR(q->page_pool);
@@ -2684,12 +2697,12 @@ static int mgb_set_queue(struct mgb_q *q)
 	memset(q->tx, 0, sizeof(struct mgb_tx_head) * TX_RING_SIZE);
 
 	node = dev_to_node(&ep->pci_dev->dev);
-	q->rx_buff = kzalloc_node(sizeof(struct mgb_rx_buff) * RX_RING_SIZE,
+	q->rx_buff = kzalloc_node(sizeof(*q->rx_buff) * RX_RING_SIZE,
 				  GFP_KERNEL, node);
 	if (!q->rx_buff)
 		goto nomem;
 
-	q->tx_buff = kzalloc_node(sizeof(struct mgb_tx_buff) * TX_RING_SIZE,
+	q->tx_buff = kzalloc_node(sizeof(*q->tx_buff) * TX_RING_SIZE,
 				  GFP_KERNEL, node);
 	if (!q->tx_buff)
 		goto nomem;
@@ -2764,9 +2777,9 @@ static int mgb_reset_queue(struct mgb_q *q)
 
 	for (i = 0; i < RX_RING_SIZE; i++) {
 		struct mgb_rx_head *rxr = q->rx + i;
-		struct mgb_rx_buff *rx_buff = &q->rx_buff[i];
+		struct mgb_buff *rx_buff = &q->rx_buff[i];
 		dma_addr_t dma;
-		unsigned int len = PAGE_SIZE;
+		unsigned int len = q->pp_len;
 		struct page *page;
 
 		/* Clear rx buffer first */
@@ -2813,7 +2826,7 @@ static int mgb_reset_queue(struct mgb_q *q)
 	 */
 	for (i = 0; i < TX_RING_SIZE; i++) {
 		struct mgb_tx_head *txr = q->tx + i;
-		struct mgb_tx_buff *tx_buff = &q->tx_buff[i];
+		struct mgb_buff *tx_buff = &q->tx_buff[i];
 
 		txr->status = 0;	/* CPU owns buffer */
 		wmb();
@@ -2994,46 +3007,49 @@ static void mgb_distribute_irqs(struct mgb_private *ep)
 {
 	int i;
 	int step = 0;
-	struct cpumask m;
 	struct cpumask dev_m;
 	int fc = PCI_FUNC(ep->pci_dev->devfn);
-	int irq;
+	int irq = ep->pci_dev->irq;
 
-	if (ep->mgb_qs[1] == NULL) {
+	if (!ep->mgb_qs[1])
 		return;
-	}
-	if (num_online_cpus() < 2) {
+
+	if (num_online_cpus() < 2)
 		return;
-	}
+
 	cpumask_copy(&dev_m, cpumask_of_node(dev_to_node(&ep->dev->dev)));
 	do {
 	for (i = 0; i < num_possible_cpus(); i++) {
-		if (!cpu_online(i)) {
+		struct cpumask m;
+		int vec;
+
+		if (!cpu_online(i))
 			continue;
-		}
+
 		cpumask_clear(&m);
 		cpumask_set_cpu(i, &m);
-		if (!cpumask_intersects(&m, &dev_m)) {
+		if (!cpumask_intersects(&m, &dev_m))
 			continue;
-		}
-		irq = ep->pci_dev->irq;
+
 		if (step == 0) {
-			irq += fc ? MGB_T0_INTR : MGB_R0_INTR;
+			vec = fc ? MGB_T0_INTR : MGB_R0_INTR;
 		} else if (step == 1) {
-			irq += fc ? MGB_T1_INTR : MGB_R1_INTR;
+			vec = fc ? MGB_T1_INTR : MGB_R1_INTR;
 		} else if (step == 2) {
-			irq += fc ? MGB_R1_INTR : MGB_T1_INTR;
+			vec = fc ? MGB_R1_INTR : MGB_T1_INTR;
 		} else if (step == 3) {
-			irq += fc ? MGB_R0_INTR : MGB_T0_INTR;
+			vec = fc ? MGB_R0_INTR : MGB_T0_INTR;
 		} else {
 			break;
 		}
-		if (irq_set_affinity_hint(irq, &m)) {
-				break;
-		}
+
+		ep->affinity_mask[vec] = m;
+
+		if (irq_set_affinity_hint(irq + vec, &ep->affinity_mask[vec]))
+			break;
 		step++;
 	}
-	} while (step < 4);
+	} while (step < MGB_Q_INTR_MAX);
 }
 
 static int mgb_assign_single_irq(struct net_device *dev)
@@ -3138,7 +3154,7 @@ static int mgb_open(struct net_device *dev)
 
 	rc = mgb_set_queues(ep);
 	if (rc)
-		goto err;
+		goto err_queues;
 
 	if (ep->e_cap_sup & SHARED_IRQ_SUP)
 		rc = mgb_assign_single_irq(dev);
@@ -3146,13 +3162,13 @@ static int mgb_open(struct net_device *dev)
 		rc = mgb_assign_irqs(dev);
 
 	if (rc)
-		goto err;
+		goto err_irq;
 
 	/* External PHY connect */
 	rc = mgb_extphy_connect(ep);
 	if (rc) {
 		dev_err(&dev->dev, "phy_connect error.\n");
-		goto err;
+		goto err_extphy;
 	}
 
 	napi_enable(&(ep->mgb_qs[0]->napi));
@@ -3178,22 +3194,22 @@ static int mgb_open(struct net_device *dev)
 	if (ep->mgb_qs[1]) {
 		napi_disable(&(ep->mgb_qs[1]->napi));
 	}
-
-err:
-	while (!test_and_set_bit(MGB_F_S_STOPPED, &ep->status)) {
-		;
-	}
-
+err_extphy:
 	if (ep->e_cap_sup & SHARED_IRQ_SUP)
 		free_irq(ep->pci_dev->irq, ep);
 	else
 		mgb_free_irqs(dev);
-
+err_irq:
+	mgb_unset_queues(dev);
+err_queues:
 	del_timer_sync(&ep->watchdog_timer);
 	del_timer_sync(&ep->an_link_timer);
 	if (an_monitor)
 		del_timer_sync(&ep->an_monitor_timer);
-	mgb_unset_queues(dev);
+
+	while (!test_and_set_bit(MGB_F_S_STOPPED, &ep->status)) {
+		;
+	}
 	rc = -EFAULT;
 	dev_err(&dev->dev, "mgb not opened, error %d\n", rc);
 ok:
@@ -3274,10 +3290,11 @@ static void mgb_dump_data(struct mgb_q *q, void *data, int len)
 		dev_info(&ep->dev->dev,
 			 "0x%04x:  %02x%02x %02x%02x %02x%02x %02x%02x "
 			 "%02x%02x %02x%02x %02x%02x %02x%02x\n", i,
-			 *packet++, *packet++, *packet++, *packet++,
-			 *packet++, *packet++, *packet++, *packet++,
-			 *packet++, *packet++, *packet++, *packet++,
-			 *packet++, *packet++, *packet++, *packet++);
+			 packet[0], packet[1], packet[2], packet[3],
+			 packet[4], packet[5], packet[6], packet[7],
+			 packet[8], packet[9], packet[10], packet[11],
+			 packet[12], packet[13], packet[14], packet[15]);
+		packet += 16;
 	}
 }
 
@@ -3354,7 +3371,7 @@ static int mgb_start_xmit_to_q(struct sk_buff *skb, struct mgb_q *q)
 	unsigned long flags;
 	unsigned long prp_flags;
 	int len = skb->len;
-	struct mgb_tx_buff *tx_buff;
+	struct mgb_buff *tx_buff;
 
 	status = TD_OWN | TD_ENP | TD_STP |
 		mgb_get_tx_csum_flags(ep, skb);
@@ -3573,7 +3590,7 @@ static int mgb_tx(struct mgb_q *q)
 		tx_ring->status = 0;
 
 		if (likely(&q->tx_buff[entry])) {
-			struct mgb_tx_buff *tx_buff = &q->tx_buff[entry];
+			struct mgb_buff *tx_buff = &q->tx_buff[entry];
 			struct sk_buff *skb = NULL;
 			struct xdp_frame *xdpf = NULL;
 			dma_addr_t dma = 0;
@@ -3712,11 +3729,11 @@ static void mgb_handle_rx_err_v6(struct mgb_q *q, int nq, s16 status)
 }
 
 static int mgb_rx_page_refill(struct mgb_q *q,
-			      struct mgb_rx_buff *rx_buff)
+			      struct mgb_buff *rx_buff)
 {
 	struct mgb_private *ep = q->ep;
 	dma_addr_t dma;
-	unsigned int len = PAGE_SIZE;
+	unsigned int len = q->pp_len;
 	struct page *page;
 
 	page = page_pool_dev_alloc_pages(q->page_pool);
@@ -3741,7 +3758,7 @@ static int mgb_rx_page_refill(struct mgb_q *q,
 }
 
 static void mgb_put_rx_buff(struct mgb_q *q,
-			    struct mgb_rx_buff *rx_buff)
+			    struct mgb_buff *rx_buff)
 {
 	struct mgb_private *ep = q->ep;
 
@@ -3760,11 +3777,11 @@ static void mgb_put_rx_buff(struct mgb_q *q,
 }
 
 static struct sk_buff *mgb_build_skb(struct mgb_q *q,
-				     struct mgb_rx_buff *rx_buff)
+				     struct mgb_buff *rx_buff)
 {
 	struct sk_buff *skb;
 
-	skb = build_skb(page_address(rx_buff->page), PAGE_SIZE);
+	skb = build_skb(page_address(rx_buff->page), q->pp_len);
 	if (!skb)
 		return NULL;
 
@@ -3780,7 +3797,7 @@ static struct sk_buff *mgb_build_skb(struct mgb_q *q,
 }
 
 static struct sk_buff *mgb_process_pkt(struct mgb_q *q,
-				       struct mgb_rx_buff *rx_buff)
+				       struct mgb_buff *rx_buff)
 {
 	struct mgb_private *ep = q->ep;
 	struct bpf_prog *xdp_prog = READ_ONCE(ep->xdp_prog);
@@ -3834,7 +3851,7 @@ static void	mgb_rx_q_refill(struct mgb_q *q)
 	int entry = q->refill_rx;
 
 	while (((entry + 1) & RX_RING_MOD_MASK) != q->cur_rx) {
-		struct mgb_rx_buff *rx_buff = &q->rx_buff[entry];
+		struct mgb_buff *rx_buff = &q->rx_buff[entry];
 
 		if (rx_buff->page)
 			break;
@@ -3846,7 +3863,7 @@ static void	mgb_rx_q_refill(struct mgb_q *q)
 		wmb(); /* sync all before status */
 		q->rx[entry].status = cpu_to_le16(RD_OWN);
 
-		entry = (++entry) & RX_RING_MOD_MASK;
+		entry = (entry + 1) & RX_RING_MOD_MASK;
 	}
 	q->refill_rx = entry;
 }
@@ -3867,7 +3884,7 @@ static int mgb_rx(struct mgb_q *q, int budget)
 		int status = (short)le16_to_cpu(q->rx[entry].status);
 		short pkt_len;
 		struct sk_buff *skb = NULL;
-		struct mgb_rx_buff *rx_buff;
+		struct mgb_buff *rx_buff;
 
 		if (work_done == budget)
 			break;
@@ -3935,7 +3952,7 @@ static int mgb_rx(struct mgb_q *q, int budget)
 		work_done++;
 next_pkt:
 
-		entry = (++entry) & RX_RING_MOD_MASK;
+		entry = (entry + 1) & RX_RING_MOD_MASK;
 		if (--boguscnt <= 0)
 			break;
 	}
@@ -4117,7 +4134,8 @@ static void mgb_phy_reset(struct mgb_private *ep)
 {
 	struct phy_device *phydev = ep->dev->phydev;
 
-	if (ep->extphyaddr == -1)
+	if ((ep->extphyaddr == -1) ||
+	    !ep->phy_reset)
 		return;
 
 	if (phydev && (phydev->phy_id == RTL8211F_PHY_ID)) {
@@ -4151,6 +4169,14 @@ static void mgb_phy_reset(struct mgb_private *ep)
 
 			reg |= (1 << 1); /* BYP_PWRUP=1 */
 			mgb_pcs_write(ep, VR_MII_DIG_CTRL1, reg);
+		}
+		if (ep->mpll_mode > MPLL_MODE_1G) {
+			/* Reinit mplls only if
+			 * mpll_mode = MPLL_MODE_2G5/MPLL_MODE_1G_BIF(MPLL_B)
+			 */
+			raw_spin_lock_irqsave(&ep->mgio_lock, flags);
+			eldwcxpcs_mpll_reinit(ep->pci_dev, ep->base_ioaddr);
+			raw_spin_unlock_irqrestore(&ep->mgio_lock, flags);
 		}
 	}
 }
@@ -4354,7 +4380,20 @@ static int mgb_board_up(struct mgb_private *ep)
 
 static irqreturn_t mgb_restart_card(int irq, void *dev_id)
 {
-	mgb_board_up((struct mgb_private *)dev_id);
+	struct mgb_private *ep = (struct mgb_private *)dev_id;
+
+	mutex_lock(&ep->mx);
+
+	if (test_bit(MGB_F_S_RESETTING, &ep->status) ||
+	    test_bit(MGB_F_S_STOPPED, &ep->status)) {
+		mutex_unlock(&ep->mx);
+
+		return IRQ_HANDLED;
+	}
+
+	mgb_board_up(ep);
+
+	mutex_unlock(&ep->mx);
 
 	return IRQ_HANDLED;
 }
@@ -4887,11 +4926,11 @@ static int mgb_change_mtu(struct net_device *dev, int new_mtu)
 	if (new_mtu < dev->min_mtu || new_mtu > max_mtu)
 		return -EINVAL;
 
-	dev->mtu = new_mtu;
-	netdev_update_features(dev);
-
 	dev_info(&dev->dev, "changing MTU from %d to %d\n",
 		 dev->mtu, new_mtu);
+
+	dev->mtu = new_mtu;
+	netdev_update_features(dev);
 
 	return 0;
 }
@@ -5035,26 +5074,36 @@ static int mgb_set_features(struct net_device *dev,
 	return 0;
 }
 
-static void mgb_adjust_feature(struct net_device *dev,
-			       netdev_features_t *features, netdev_features_t feature)
+static int mgb_adjust_feature(struct net_device *dev,
+			      netdev_features_t *features, netdev_features_t feature)
 {
 	struct mgb_private *ep = netdev_priv(dev);
+	int fixed = 0;
 
-	if (ep->hw_features & feature)
+	if (ep->hw_features & feature) {
+		if (!(*features & feature))
+			fixed = 1;
 		*features |= feature;
-	else
+	} else {
+		if (*features & feature)
+			fixed = 1;
 		*features &= ~feature;
+	}
+
+	return fixed;
 }
 
 static netdev_features_t mgb_fix_features(struct net_device *dev,
 					  netdev_features_t features)
 {
 	netdev_features_t nd_features = features;
+	int fixed = 0;
 
 	if (netif_running(dev)) {
-		mgb_adjust_feature(dev, &nd_features, (netdev_features_t)NETIF_F_HW_HSR_DUP);
-		mgb_adjust_feature(dev, &nd_features, (netdev_features_t)NETIF_F_RXALL);
-		dev_warn(&dev->dev, "First, stop an interface to adjust the feature!\n");
+		fixed += mgb_adjust_feature(dev, &nd_features, (netdev_features_t)NETIF_F_HW_HSR_DUP);
+		fixed += mgb_adjust_feature(dev, &nd_features, (netdev_features_t)NETIF_F_RXALL);
+		if (fixed)
+			dev_warn(&dev->dev, "First, stop an interface to adjust the feature!\n");
 	}
 
 	return nd_features;
@@ -5068,7 +5117,7 @@ static netdev_features_t mgb_fix_features(struct net_device *dev,
  */
 static int mgb_run_xdp(struct bpf_prog *prog,
 		       struct xdp_buff *xdp, struct mgb_q *q,
-		       struct mgb_rx_buff *rx_buff)
+		       struct mgb_buff *rx_buff)
 {
 	struct mgb_private *ep = q->ep;
 	int act = bpf_prog_run_xdp(prog, xdp);
@@ -5143,7 +5192,7 @@ static int mgb_xdp_setup(struct net_device *dev, struct netdev_bpf *bpf)
 	bool running = netif_running(dev);
 	bool need_update;
 	int frame_size = dev->mtu + (ETH_HLEN + ETH_FCS_LEN);
-	int max_xdp_bufsz = (3 * 1024);
+	int max_xdp_bufsz = MGB_BUF_LEN;
 
 	if (frame_size > max_xdp_bufsz) {
 		netdev_warn(dev, "XDP RX buffer size %d is too small for the frame size %d\n",
@@ -5223,7 +5272,7 @@ static int mgb_xdp_xmit_to_q(struct xdp_frame *xdpf,
 	struct mgb_private	*ep = q->ep;
 	struct net_device	*dev = ep->dev;
 	int		entry = q->cur_tx;
-	struct mgb_tx_buff	*tx_buff = &q->tx_buff[entry];
+	struct mgb_buff	*tx_buff = &q->tx_buff[entry];
 	int		nq = mgb_nq(ep, q);
 	u32		len = xdpf->len;
 	void	*data;
@@ -5251,7 +5300,7 @@ static int mgb_xdp_xmit_to_q(struct xdp_frame *xdpf,
 			return 1;
 
 		page_pool_set_dma_addr(page, 0);
-		dma_unmap_len_set(tx_buff, len, PAGE_SIZE);
+		dma_unmap_len_set(tx_buff, len, q->pp_len);
 		dma_unmap_addr_set(tx_buff, dma, dma);
 		offset = sizeof(*xdpf) + xdpf->headroom;
 		dma += offset;
@@ -5377,7 +5426,8 @@ static const struct net_device_ops mgb_netdev_ops = {
 	.ndo_get_stats64	= mgb_get_stats64,
 	.ndo_change_mtu		= mgb_change_mtu,
 	.ndo_set_mac_address	= mgb_set_mac_addr,
-	.ndo_bpf			= mgb_bpf,
+	.ndo_validate_addr	= eth_validate_addr,
+	.ndo_bpf		= mgb_bpf,
 	.ndo_xdp_xmit		= mgb_xdp_xmit,
 #ifdef CONFIG_NET_POLL_CONTROLLER
 	.ndo_poll_controller	= mgb_poll_controller,
@@ -6991,6 +7041,19 @@ static int mgb_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 			} else {
 				dev_info(&pdev->dev,
 					"running automatic interface detection\n");
+			}
+		}
+	}
+
+	ep->phy_reset = 0;
+	if (np) {
+		const char *of_phyreset_prop;
+
+		of_phyreset_prop = of_get_property(np, "phy-reset", NULL);
+		if (of_phyreset_prop) {
+			if (!strcmp(of_phyreset_prop, "on")) {
+				ep->phy_reset = 1;
+				dev_info(&pdev->dev, "External PHY RESET# enabled\n");
 			}
 		}
 	}

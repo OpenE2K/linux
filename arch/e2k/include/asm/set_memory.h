@@ -9,6 +9,7 @@
 #include <asm/page.h>
 #include <asm-generic/set_memory.h>
 
+extern int set_memory_4k(unsigned long addr, int numpages);
 extern int set_memory_ro(unsigned long addr, int numpages);
 extern int set_memory_rw(unsigned long addr, int numpages);
 extern int set_memory_x(unsigned long addr, int numpages);
@@ -29,6 +30,10 @@ extern int set_pages_array_wb(struct page **pages, int addrinarray);
 int set_pages_uc(struct page *page, int numpages);
 int set_pages_wc(struct page *page, int numpages);
 int set_pages_wb(struct page *page, int numpages);
+
+int set_direct_map_invalid_noflush(struct page *page);
+int set_direct_map_default_noflush(struct page *page);
+bool kernel_page_present(struct page *page);
 
 #ifdef CONFIG_DEBUG_PAGEALLOC
 void __init init_sma_page_pool(void);

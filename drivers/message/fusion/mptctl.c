@@ -120,6 +120,9 @@ static void mptctl_remove(struct pci_dev *);
 #ifdef CONFIG_COMPAT
 static long compat_mpctl_ioctl(struct file *f, unsigned cmd, unsigned long arg);
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+static long ptr128_mpctl_ioctl(struct file *f, unsigned cmd, unsigned long arg);
+#endif
 /*
  * Private function calls.
  */
@@ -2698,6 +2701,9 @@ static const struct file_operations mptctl_fops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = compat_mpctl_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl = ptr128_mpctl_ioctl,
+#endif
 };
 
 static struct miscdevice mptctl_miscdev = {
@@ -2839,6 +2845,205 @@ static long compat_mpctl_ioctl(struct file *f, unsigned int cmd, unsigned long a
 #endif
 
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#include <asm/e2k_ptypes.h>
+
+
+struct mpt_fw_xfer128 {
+	unsigned int	 iocnum;	/* IOC unit number */
+	unsigned int	 fwlen;
+	e2k_ap_t	 bufp;	/* Pointer to firmware buffer */
+};
+#define MPTFWDOWNLOAD128		_IOWR(MPT_MAGIC_NUMBER, 15, struct mpt_fw_xfer128)
+
+static int
+ptr128_mptfwxfer_ioctl(struct file *filp, unsigned int cmd,
+			unsigned long arg)
+{
+	struct mpt_fw_xfer128 kfw128;
+	struct mpt_fw_xfer128 __user *kfw128p = (struct mpt_fw_xfer128 __user *)arg;
+	MPT_ADAPTER *iocp = NULL;
+	int iocnum, iocnumX;
+	int nonblock = (filp->f_flags & O_NONBLOCK);
+	e2k_ap_t ap;
+	int tag;
+	int ret;
+
+
+	if (copy_from_user(&kfw128, kfw128p, sizeof(kfw128)))
+		return -EFAULT;
+
+	/* Verify intended MPT adapter */
+	iocnumX = kfw128.iocnum & 0xFF;
+	if (((iocnum = mpt_verify_adapter(iocnumX, &iocp)) < 0) ||
+	    (iocp == NULL)) {
+		printk(KERN_DEBUG MYNAM "::ptr128_mptfwxfer_ioctl @%d - ioc%d not found!\n",
+			__LINE__, iocnumX);
+		return -ENODEV;
+	}
+
+	if ((ret = mptctl_syscall_down(iocp, nonblock)) != 0)
+		return ret;
+
+	if (get_user_tagged_16(ap.qword, tag, &kfw128p->bufp) || !IS_AP(ap, tag))
+		return -EFAULT;
+	set_ap_u_border(ap);
+	dctlprintk(iocp, printk(MYIOC_s_DEBUG_FMT "ptr128_mptfwxfer_ioctl() called\n",
+	    iocp->name));
+
+	ret = mptctl_do_fw_download(iocp, (char __user *)AP_PTR(ap), kfw128.fwlen);
+
+	mutex_unlock(&iocp->ioctl_cmds.mutex);
+
+	return ret;
+}
+
+struct mpt_ioctl_command128 {
+	mpt_ioctl_header hdr;
+	int		timeout;	/* optional (seconds) */
+	e2k_ap_t	replyFrameBufPtr;
+	e2k_ap_t	dataInBufPtr;
+	e2k_ap_t	dataOutBufPtr;
+	e2k_ap_t	senseDataPtr;
+	int		maxReplyBytes;
+	int		dataInSize;
+	int		dataOutSize;
+	int		maxSenseBytes;
+	int		dataSgeOffset;
+	char		MF[1];
+};
+#define MPTCOMMAND128            _IOWR(MPT_MAGIC_NUMBER, 20, struct mpt_ioctl_command128)
+static int
+ptr128_mpt_command(struct file *filp, unsigned int cmd,
+			unsigned long arg)
+{
+	struct mpt_ioctl_command128 karg128;
+	struct mpt_ioctl_command128 __user *uarg = (struct mpt_ioctl_command128 __user *) arg;
+	struct mpt_ioctl_command karg;
+	MPT_ADAPTER *iocp = NULL;
+	int iocnum, iocnumX;
+	int nonblock = (filp->f_flags & O_NONBLOCK);
+	e2k_ap_t ap;
+	int tag;
+	int ret;
+
+	if (copy_from_user(&karg128, uarg, sizeof(karg128)))
+		return -EFAULT;
+
+	/* Verify intended MPT adapter */
+	iocnumX = karg128.hdr.iocnum & 0xFF;
+	if (((iocnum = mpt_verify_adapter(iocnumX, &iocp)) < 0) ||
+	    (iocp == NULL)) {
+		printk(KERN_DEBUG MYNAM "::%s @%d - ioc%d not found!\n", __func__,
+			__LINE__, iocnumX);
+		return -ENODEV;
+	}
+
+	if ((ret = mptctl_syscall_down(iocp, nonblock)) != 0)
+		return ret;
+
+	dctlprintk(iocp, printk(MYIOC_s_DEBUG_FMT "compat_mpt_command() called\n",
+	    iocp->name));
+	/* Copy data to karg */
+	karg.hdr.iocnum = karg128.hdr.iocnum;
+	karg.hdr.port = karg128.hdr.port;
+	karg.timeout = karg128.timeout;
+
+	if ((u64)(&uarg->MF) + karg128.dataSgeOffset * 4 > get_u_border())
+		return -EFAULT;
+	karg.dataSgeOffset = karg128.dataSgeOffset;
+
+	if (karg128.maxReplyBytes > 0) {
+		if (get_user_tagged_16(ap.qword, tag, &uarg->replyFrameBufPtr) || !IS_AP(ap, tag))
+			return -EFAULT;
+		if (AP_OBJ_SIZE(ap) < karg128.maxReplyBytes)
+			return -EFAULT;
+		karg.maxReplyBytes = karg128.maxReplyBytes;
+		karg.replyFrameBufPtr = (void __user *)AP_PTR(ap);
+	} else {
+		karg.maxReplyBytes = 0;
+		karg.replyFrameBufPtr = NULL;
+	}
+
+	if (karg128.dataInSize > 0) {
+		if (get_user_tagged_16(ap.qword, tag, &uarg->dataInBufPtr) || !IS_AP(ap, tag))
+			return -EFAULT;
+		if (AP_OBJ_SIZE(ap) < karg128.dataInSize)
+			return -EFAULT;
+		karg.dataInSize = karg128.dataInSize;
+		karg.dataInBufPtr = (void __user *)AP_PTR(ap);
+	} else {
+		karg.dataInSize = 0;
+		karg.dataInBufPtr = NULL;
+	}
+
+	if (karg128.dataOutSize > 0) {
+		if (get_user_tagged_16(ap.qword, tag, &uarg->dataOutBufPtr) || !IS_AP(ap, tag))
+			return -EFAULT;
+		if (AP_OBJ_SIZE(ap) < karg128.dataOutSize)
+			return -EFAULT;
+		karg.dataOutSize = karg128.dataOutSize;
+		karg.dataOutBufPtr = (void __user *)AP_PTR(ap);
+	} else {
+		karg.dataOutSize = 0;
+		karg.dataOutBufPtr = NULL;
+	}
+
+	if (karg128.maxSenseBytes > 0) {
+		if (get_user_tagged_16(ap.qword, tag, &uarg->senseDataPtr) || !IS_AP(ap, tag))
+			return -EFAULT;
+		if (AP_OBJ_SIZE(ap) < karg128.maxSenseBytes)
+			return -EFAULT;
+		karg.maxSenseBytes = karg128.maxSenseBytes;
+		karg.senseDataPtr = (void __user *)AP_PTR(ap);
+	} else {
+		karg.maxSenseBytes = 0;
+		karg.senseDataPtr = NULL;
+	}
+
+	set_u_border(MAX_U_BORDER);
+	/* Pass new structure to do_mpt_command
+	 */
+	ret = mptctl_do_mpt_command(iocp, karg, &uarg->MF);
+
+	mutex_unlock(&iocp->ioctl_cmds.mutex);
+
+	return ret;
+}
+
+static long ptr128_mpctl_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
+{
+	long ret;
+	mutex_lock(&mpctl_mutex);
+	switch (cmd) {
+	case MPTIOCINFO:
+	case MPTIOCINFO1:
+	case MPTIOCINFO2:
+	case MPTTARGETINFO:
+	case MPTEVENTQUERY:
+	case MPTEVENTENABLE:
+	case MPTEVENTREPORT:
+	case MPTHARDRESET:
+	case HP_GETHOSTINFO:
+	case HP_GETTARGETINFO:
+	case MPTTEST:
+		ret = __mptctl_ioctl(f, cmd, arg);
+		break;
+	case MPTCOMMAND128:
+		ret = ptr128_mpt_command(f, cmd, arg);
+		break;
+	case MPTFWDOWNLOAD128:
+		ret = ptr128_mptfwxfer_ioctl(f, cmd, arg);
+		break;
+	default:
+		ret = -ENOIOCTLCMD;
+		break;
+	}
+	mutex_unlock(&mpctl_mutex);
+	return ret;
+}
+
+#endif
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
 /*
  *	mptctl_probe - Installs ioctl devices per bus.

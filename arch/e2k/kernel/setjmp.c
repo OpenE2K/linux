@@ -8,7 +8,7 @@
 #include <asm/setjmp.h>
 
 /* Use __interrupt to make sure that parent's values of USD are read */
-__interrupt noinline
+__interrupt noinline __attribute__((returns_twice))
 int e2k_setjmp(struct jump_buf_e2k *jb)
 {
 	unsigned long flags;
@@ -60,10 +60,10 @@ void e2k_longjmp(const struct jump_buf_e2k *jb, int value)
 	e2k_cr0_t cr0 = jb->crs.cr0;
 	e2k_cr1_t cr1 = jb->crs.cr1;
 
+	raw_all_irq_save(flags);
 	/* Sanity check that source and destination are from same stack */
 	BUG_ON(PCSP_BASE(pcsp) != PCSP_BASE(read_PCSP_reg()));
 
-	raw_all_irq_save(flags);
 	E2K_FLUSHCPU;
 	native_write_stacks_cr(psp, pcsp, usd, sbr, cr0, cr1);
 	raw_all_irq_restore(flags);

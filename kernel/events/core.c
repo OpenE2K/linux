@@ -429,7 +429,12 @@ int sysctl_perf_event_mlock __read_mostly = 512 + (PAGE_SIZE / 1024); /* 'free' 
 /*
  * max perf event sample rate
  */
+#if defined CONFIG_E2K && CONFIG_HZ <= 20
+/* Lower defaults for slow boards */
+#define DEFAULT_MAX_SAMPLE_RATE		400
+#else
 #define DEFAULT_MAX_SAMPLE_RATE		100000
+#endif
 #define DEFAULT_SAMPLE_PERIOD_NS	(NSEC_PER_SEC / DEFAULT_MAX_SAMPLE_RATE)
 #define DEFAULT_CPU_TIME_MAX_PERCENT	25
 
@@ -5890,6 +5895,27 @@ static long perf_compat_ioctl(struct file *file, unsigned int cmd,
 # define perf_compat_ioctl NULL
 #endif
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#include <asm/e2k_ptypes.h>
+static long perf_ptr128_ioctl(struct file *file, unsigned int cmd,
+				unsigned long arg)
+{
+	switch (_IOC_NR(cmd)) {
+	case _IOC_NR(PERF_EVENT_IOC_SET_FILTER):
+	case _IOC_NR(PERF_EVENT_IOC_ID):
+	case _IOC_NR(PERF_EVENT_IOC_QUERY_BPF):
+	case _IOC_NR(PERF_EVENT_IOC_MODIFY_ATTRIBUTES):
+		/* Fix up pointer size 16-> 8 in 128-on-64-bit case */
+		if (_IOC_SIZE(cmd) == sizeof(e2k_ap_t)) {
+			cmd &= ~IOCSIZE_MASK;
+			cmd |= sizeof(void *) << IOCSIZE_SHIFT;
+		}
+		break;
+	}
+	return perf_ioctl(file, cmd, arg);
+}
+#endif
+
 int perf_event_task_enable(void)
 {
 	struct perf_event_context *ctx;
@@ -6558,6 +6584,9 @@ static const struct file_operations perf_fops = {
 	.poll			= perf_poll,
 	.unlocked_ioctl		= perf_ioctl,
 	.compat_ioctl		= perf_compat_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl		= perf_ptr128_ioctl,
+#endif
 	.mmap			= perf_mmap,
 	.fasync			= perf_fasync,
 };

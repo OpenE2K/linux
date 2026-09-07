@@ -2191,7 +2191,7 @@ struct file_operations {
 	long (*unlocked_ioctl) (struct file *, unsigned int, unsigned long);
 	long (*compat_ioctl) (struct file *, unsigned int, unsigned long);
 #if defined CONFIG_E2K && defined CONFIG_PROTECTED_MODE
-	long (*ptr128_ioctl) (struct file *, unsigned long, unsigned long);
+	long (*ptr128_ioctl) (struct file *, unsigned int, unsigned long);
 #endif
 	int (*mmap) (struct file *, struct vm_area_struct *);
 	unsigned long mmap_supported_flags;

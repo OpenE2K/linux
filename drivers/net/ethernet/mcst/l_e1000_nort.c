@@ -78,18 +78,20 @@ MODULE_LICENSE("GPL v2");
 
 /*
  * Set the number of Tx and Rx buffers, using Log_2(# buffers).
- * Reasonable default values are 16 Tx buffers, and 256 Rx buffers.
- * That translates to 4 (16 == 2^^4) and 8 (256 == 2^^8).
+ * Maximum Tx buffers - 512 (9)
+ * Maximum Rx buffers - 512 (9)
  */
-#ifndef E1000_LOG_TX_BUFFERS
-#define E1000_LOG_TX_BUFFERS	8 /*4*/
-#define E1000_LOG_RX_BUFFERS	9 /*8*/
-#endif /* E1000_LOG_TX_BUFFERS */
+#define E1000_MAX_LOG_TX_BUFFERS	9
+#define E1000_LOG_TX_BUFFERS		9
+#define E1000_MAX_LOG_RX_BUFFERS	9
+#define E1000_LOG_RX_BUFFERS		9
 
+#define MAX_TX_RING_SIZE	(1 << (E1000_MAX_LOG_TX_BUFFERS))
 #define TX_RING_SIZE		(1 << (E1000_LOG_TX_BUFFERS))
 #define TX_RING_MOD_MASK	(TX_RING_SIZE - 1)
 
 #define TX_HISTERESIS		4
+#define MAX_RX_RING_SIZE	(1 << (E1000_MAX_LOG_RX_BUFFERS))
 #define RX_RING_SIZE		(1 << (E1000_LOG_RX_BUFFERS))
 #define RX_RING_MOD_MASK	(RX_RING_SIZE - 1)
 
@@ -2160,7 +2162,7 @@ static void e1000_kick_xmit(struct e1000_private *ep)
 static int e1000_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct e1000_private *ep = netdev_priv(dev);
-	s16 status;
+	u16 status;
 	int entry;
 	unsigned long flags;
 	void *packet;
@@ -2589,8 +2591,6 @@ static int e1000_open(struct net_device *dev)
 		goto err_free_ring;
 	}
 
-	netif_carrier_on(dev);
-
 	if (netif_msg_ifup(ep))
 		dev_info(&dev->dev, "%s: ok\n", __func__);
 
@@ -2795,12 +2795,10 @@ static void e1000_get_ringparam(struct net_device *dev,
 				struct kernel_ethtool_ringparam *kernel_ering,
 				struct netlink_ext_ack *extack)
 {
-	struct e1000_private *ep = netdev_priv(dev);
-
-	ering->tx_max_pending = TX_RING_SIZE - 1;
-	ering->tx_pending = (ep->cur_tx - ep->dirty_tx) & TX_RING_MOD_MASK;
-	ering->rx_max_pending = RX_RING_SIZE - 1;
-	ering->rx_pending = ep->cur_rx & RX_RING_MOD_MASK;
+	ering->tx_max_pending = MAX_TX_RING_SIZE;
+	ering->tx_pending = TX_RING_SIZE;
+	ering->rx_max_pending = MAX_RX_RING_SIZE;
+	ering->rx_pending = RX_RING_SIZE;
 }
 
 static void e1000_get_strings(struct net_device *dev, u32 stringset, u8 *data)
@@ -3306,7 +3304,7 @@ static int e1000_init_dma_ba(struct e1000_private *ep)
 
 	/* low 32 bits DMA addr*/
 	init_block_addr_part = (ep->dma_addr + offsetof(struct e1000_dma_area,
-		    		init_block)) & 0xffffffff;
+				init_block)) & 0xffffffff;
 	e1000_write_e_base_address(ep, init_block_addr_part);
 	if (e1000_debug & NETIF_MSG_PROBE)
 		dev_dbg(&ep->pci_dev->dev,
@@ -3947,7 +3945,7 @@ static void e1000_shutdown(struct pci_dev *pdev)
 	int i;
 	unsigned long flags;
 
-	if (netif_running(dev)) {
+	if (!(dev->priv_flags & IFF_NO_QUEUE) && netif_running(dev)) {
 		napi_disable(&ep->napi);
 		netif_stop_queue(dev);
 
@@ -4066,7 +4064,7 @@ static void l_e1000_sysctl_register(void)
 	if (l_e1000_sysctl_header) {
 	    return;
 	}
-        l_e1000_sysctl_header = register_sysctl_table(l_e1000_root_table);
+	l_e1000_sysctl_header = register_sysctl_table(l_e1000_root_table);
 }
 
 static void l_e1000_sysctl_unregister(void)

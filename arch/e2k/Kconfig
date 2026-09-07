@@ -12,7 +12,9 @@ config E2K
 	select ARCH_BINFMT_ELF_EXTRA_PHDRS
 	select ARCH_CACHES
 	select ARCH_ENABLE_HUGEPAGE_MIGRATION if HUGETLB_PAGE && MIGRATION
-	select ARCH_ENABLE_SPLIT_PMD_PTLOCK
+	# Turn off ARCH_ENABLE_SPLIT_PMD_PTLOCK when sizeof(spinlock_t) > 8,
+	# see sma_alloc_page__pool().
+	select ARCH_ENABLE_SPLIT_PMD_PTLOCK if !DEBUG_SPINLOCK && !DEBUG_LOCK_ALLOC && !PREEMPT_RT
 	select ARCH_ENABLE_THP_MIGRATION if TRANSPARENT_HUGEPAGE
 	select ARCH_HAVE_NMI_SAFE_CMPXCHG
 	select ARCH_HAS_CURRENT_STACK_POINTER
@@ -26,6 +28,7 @@ config E2K
 	select ARCH_HAS_PHYS_TO_DMA
 	select ARCH_HAS_PTE_DEVMAP
 	select ARCH_HAS_PTE_SPECIAL
+	select ARCH_HAS_SET_DIRECT_MAP
 	select ARCH_HAS_SET_MEMORY
 	select ARCH_HAS_SG_CHAIN
 	select ARCH_HAS_STRICT_KERNEL_RWX
@@ -60,7 +63,6 @@ config E2K
 	select ARCH_INLINE_WRITE_UNLOCK_IRQRESTORE if !PREEMPTION
 	select ARCH_KEEP_MEMBLOCK
 	select ARCH_SUPPORTS_ATOMIC_RMW
-	select ARCH_SUPPORTS_DEFERRED_STRUCT_PAGE_INIT
 	select ARCH_SUPPORTS_HUGETLBFS
 	select ARCH_SUPPORTS_INT128
 	select ARCH_SUPPORTS_MSI
@@ -89,6 +91,7 @@ config E2K
 	select COMMON_CLK
 	select DCACHE_WORD_ACCESS
 	select DMA_REMAP
+	select ARCH_HAS_DMA_WRITE_COMBINE
 	select EDAC_SUPPORT
 	select EXT3_FS
 	select EXT3_FS_POSIX_ACL
@@ -114,6 +117,7 @@ config E2K
 	select HAVE_ARCH_AUDITSYSCALL
 	select HAVE_ARCH_BITREVERSE
 	select HAVE_ARCH_COMPILER_H
+	select HAVE_ARCH_HUGE_VMALLOC if HAVE_ARCH_HUGE_VMAP
 	select HAVE_ARCH_HUGE_VMAP if !KVM_GUEST_KERNEL
 	select HAVE_ARCH_KASAN
 	select HAVE_ARCH_KASAN_VMALLOC
@@ -188,7 +192,6 @@ config E2K
 	select NEED_PER_CPU_PAGE_FIRST_CHUNK
 	select NO_HZ
 	select NO_HZ_COMMON
-	select NUMA if !(E2K_E1CP || E2K_E2C3 || E2K_E8V7)
 	select OF
 	select PANIC_ON_OOPS
 	select PARTITION_ADVANCED
@@ -208,7 +211,6 @@ config E2K
 	select SERIAL_L_ZILOG
 	select SERIAL_L_ZILOG_CONSOLE
 	select SERIAL_BOOT_PRINTK
-	select SMP if !E2K_E1CP
 	select SPARSE_IRQ
 	select SPARSEMEM_VMEMMAP_ENABLE
 	select SPARSEMEM_VMEMMAP
@@ -230,10 +232,9 @@ config E2K
 	select BUG
 	select DEBUG_BUGVERBOSE
 
-
-
 	help
 	  This is a port of Linux on Elbrus microprocessor architecture.
+
 
 config SWIOTLB
 	def_bool y
@@ -325,10 +326,6 @@ config ARCH_ENABLE_MEMORY_HOTPLUG
 config ARCH_ENABLE_MEMORY_HOTREMOVE
         def_bool y
 
-config DEFERRED_STRUCT_PAGE_INIT
-	def_bool y
-	depends on SMP
-
 config HOLES_IN_ZONE
 	def_bool y
 
@@ -409,6 +406,7 @@ config E2K_E8C
 
 config E2K_E1CP
 	bool "Elbrus 1C+ (1 core + GC, IOHUB-2, Legacy SIC)"
+	imply WQ_POWER_EFFICIENT_DEFAULT
 	help
 	  Support for Elbrus 1C+ systems.  Say 'Y' here if this kernel is
 	  supposed to run on an Elbrus 1C+ system.
@@ -445,6 +443,7 @@ config E2K_E16C
 
 config E2K_E2C3
 	bool "Elbrus 2C3 (NUMA, 2 cores + GPU, IOHUB-2 , SOC)"
+	imply WQ_POWER_EFFICIENT_DEFAULT
 	help
 	  Support for Elbrus 2C3 systems.  Say 'Y' here if this kernel is
 	  supposed to run on an Elbrus 2C + embeded GPU, System On Chip
@@ -528,6 +527,11 @@ config CPU_ISET_MIN
 	default 6 if E2K_E16C || E2K_E12C || E2K_E2C3
 	default 7 if E2K_E48C || E2K_E8V7
 
+config CPU_ISET_MAX
+	int
+	default 7 if !E2K_MACHINE
+	default CPU_ISET_MIN if E2K_MACHINE
+
 # These show whether particular CPU is supported by current
 # configuration regardless of whether any other CPUs are supported.
 
@@ -554,9 +558,13 @@ config CPU_E2C3
 
 config CPU_E48C
 	def_bool E2K_E48C || !E2K_MACHINE && CPU_ISET_MIN <= 7
+	select RAS
+	select EDAC
 
 config CPU_E8V7
 	def_bool E2K_E8V7 || !E2K_MACHINE && CPU_ISET_MIN <= 7
+	select RAS
+	select EDAC
 
 config MIGHT_HAVE_CPU_HWBUG_L1I_STOPS_WORKING
 	def_bool CPU_ISET_MIN <= 6
@@ -593,40 +601,29 @@ config MMU_SEP_VIRT_SPACE
 	  The feature should be enabled to support hardware virtualization mode
 
 config MMU_SEP_VIRT_SPACE_ONLY
-	def_bool E2K_MACHINE && MMU_SEP_VIRT_SPACE
+	def_bool MMU_SEP_VIRT_SPACE && CPU_ISET_MIN >= 6
 	help
 	  Enabled if this kernel does not support execution
 	  without enabled MMU Separate Page Tables mode.
 
-config HALF_SPECULATIVE_KERNEL
-	bool "Enable half-speculative loads in kernel code"
+config SEMI_SPECULATIVE_KERNEL
+	bool "Enable semi-speculative loads in kernel code"
 	depends on !PREEMPT_RT && !KVM_GUEST_KERNEL
 	default n
 	help
 	  This kernel feature will enable compilation of kernel with
-	  half-speculative loads.  The kernel will run faster with
+	  semi-speculative loads.  The kernel will run faster with
 	  them but at the cost of more IPIs: every kernel mapping
 	  function (vmap()/ioremap()) will now trigger whole-system
 	  IPIs to flush so-called "empty" entries from DTLB.  Thus
 	  this mode might degrade performance on very large NUMA
 	  systems.
-	  
+
 	  This should not be enabled on PREEMPT_RT as IPIs will be
 	  a constant source of non-deterministic delays. Also this
 	  would lead to too much overhead for virtualized guests
 	  since every get_user()/put_user() would issue two
 	  hypercalls (for enabling and disabling user access).
-
-# Whether to use AAU in kernel
-config AAU_IN_KERNEL
-	bool "Enable AAU in kernel code"
-	depends on HALF_SPECULATIVE_KERNEL
-	default y
-	help
-	  Whether to use AAU for accelerating loads in long loops
-	  in kernel.  This will require inserting additional barriers
-	  around different operations so may degrade performance in
-	  some cases.
 
 endmenu
 
@@ -742,6 +739,15 @@ config NUMA
 	select USE_PERCPU_NUMA_NODE_ID
 	select GENERIC_ARCH_NUMA
 	select OF_NUMA if OF
+
+config E2K_MODULES_DUPLICATION
+	bool "Duplication of modules code and data across NUMA nodes"
+	default y
+	depends on NUMA && MODULES
+	help
+		With this option enabled, module's memory is duplicated across
+		all possible NUMA nodes of the system.
+
 
 config KTHREAD_ON_CPU
 	bool "Create kernel threads on specified CPU"
@@ -922,6 +928,11 @@ config PROTECTED_MODE
 	tristate "Security mode"
 	default y
 
+config SOFT_PM
+	tristate "Software corrector for security mode incompatibilities"
+	default n
+	depends on PROTECTED_MODE
+
 config DBG_RTL_TRACE
 	bool "Enable printing rtl messages in security mode"
 	depends on PROTECTED_MODE
@@ -931,14 +942,6 @@ config CLW_ENABLE
 	bool "Enable clean of user stack window"
         depends on PROTECTED_MODE
         default y
-
-config TC_STORAGE
-	bool "Store Table Cache default line"
-	depends on SECONDARY_SPACE_SUPPORT
-	help
-	   Flushing Table Cashe and storing default string of TC
-	   when tasks switch
-	default y
 
 config IGNORE_MEM_LOCK_AS
 	bool "Ignore exc_mem_lock_as"
@@ -958,6 +961,28 @@ config E2K_KEXEC
 	default y
 	help
 	  Say Y here to enable support of kexec implementation for E2K.
+
+config KEXEC
+	bool "kexec_load syscall-based kexec implementation for e2k"
+	select KEXEC_CORE
+	default y
+	help
+		Say Y here to enable support of kexec_load
+		syscall-based kexec implementation for e2k.
+
+		Supports jumping on linux and lintel both.
+
+config CRASH_DUMP
+	bool "Build kdump crash kernel"
+	default y
+	help
+	  Generate crash dump after being started by kexec. This should
+	  be normally only set in special crash dump kernels which are
+	  loaded in the main kernel with kexec-tools into a specially
+	  reserved region and then later executed after a crash by
+	  kdump/kexec.
+
+	  For more details see Documentation/admin-guide/kdump/kdump.rst
 
 config DUMP_ALL_STACKS
 	bool "Enable dump of all stacks"
@@ -998,15 +1023,14 @@ endchoice
 config CMDLINE
 	string "Kernel command line arguments string"
 	depends on CMDLINE_OVERWRITE || CMDLINE_EXTEND
-	default "root=/dev/sda3 console=ttyS0,115200 init=/root/init.sh ipv6.disable=1 usbcore.nousb raid=noautodetect force_C3"
+	default "root=/dev/sda3 console=ttyS0,115200 init=/root/init.sh ipv6.disable=1 usbcore.nousb scsi_mod.scan=sync raid=noautodetect force_C3"
 
 #
 # Define implied options from the CPU selection here
 #
 
 config SMP
-	bool "Symmetric multi-processing support"
-	default n
+	def_bool !E2K_E1CP
 	help
 	  This enables support for systems with more than one CPU. If you have
 	  a system with only one CPU, like most personal computers, say N. If
@@ -1077,9 +1101,6 @@ config GENERIC_TIME
 config GENERIC_TIME_VSYSCALL
 	def_bool y
 
-config GENERIC_CMOS_UPDATE
-	def_bool y
-
 config GENERIC_CLOCKEVENTS
 	def_bool y
 
@@ -1091,6 +1112,9 @@ config ESCLKR_CLOCKSOURCE
 
 config CPU_HAS_OSR1
 	def_bool CPU_ISET_MIN >= 8 || E2K_E8V7
+
+config E2K_HAS_I3C
+	def_bool CPU_ISET_MAX >= 7
 
 config BIOS
 	bool "Enable bios chipset settings"
@@ -1123,60 +1147,10 @@ config ENABLE_ELBRUS_PCIBIOS
 	help
 	  Enable pci initialization in bios.
 
-config ENABLE_IDE
-	bool "Enable hard drive"
-	depends on BIOS
-	default y
-	help
-	  Enable ide in southbridge chip.
-
-config ENABLE_KEYBOARD
-	bool "Enable keyboard"
-	depends on BIOS
-	default y
-	help
-	  Enable keyboard in superio chip.
-	  
-config ENABLE_MOUSE
-	bool "Enable mouse"
-	depends on BIOS
-	default y
-	help
-	  Enable mouse in superio chip.
-	  
-config ENABLE_FLOPPY
-	bool "Enable floppy"
-	depends on BIOS
-	default y
-	help
-	  Enable fdc in superio chip.
-
 config ENABLE_MGA
 	bool "Enable MGA"
 	depends on BIOS
 	default y
-	  
-  
-config ENABLE_RTC
-	bool "Enable rtc"
-	depends on BIOS
-	default y
-	help
-	  Enable rtc in southbridge chip.
-	  
-config ENABLE_SERIAL
-	bool "Enable serial ports"
-	depends on BIOS
-	default y
-	help
-	  Enable com1 com2 in superio chip.
-	  
-config ENABLE_PARALLEL_PORT
-	bool "Enable parallel port"
-	depends on BIOS
-	default y
-	help
-	  Enable lpt in superio chip.
 
 config ENABLE_IOAPIC
 	bool "Enable IO APIC"
@@ -1196,6 +1170,7 @@ config HAVE_FUNCTION_GRAPH_FP_TEST
 
 config EPROF_KERNEL
 	bool "Enable libeprof-based kernel profiling"
+	select CONSTRUCTORS
 	default n
 	help
 	This option enables libeprof-based branch profiling in kernel.
@@ -1204,6 +1179,10 @@ config EPROF_KERNEL
 
 config USE_PGO
 	bool "Mark kernel as built with Profile Guided Optimization"
+	# To use profile generated with EPROF_KERNEL the kernel
+	# configuration must be the same, so enable CONSTRUCTORS
+	# even though it might be unused.
+	select CONSTRUCTORS
 	default n
 	help
 	  Profile should be specified manually by adding
@@ -1229,6 +1208,13 @@ config TEST_KERNEL_PT_SYNC
 	help
 		This option enables testing for a synchronization provided
 		via 'kernel_pt_lock' spinlock.
+
+config TEST_POOL
+	tristate "Run test on memory pool"
+	depends on FAULT_INJECTION && FAULT_INJECTION_DEBUG_FS && FAILSLAB && FAIL_PAGE_ALLOC
+	default n
+	help
+		This option enables testing of e2k memory pool.
 endmenu
 
 source "arch/l/Kconfig"

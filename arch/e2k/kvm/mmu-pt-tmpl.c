@@ -33,7 +33,7 @@
 #include "cpu.h"
 #include "mmu.h"
 #include "mman.h"
-#include "gaccess.h"
+#include "paravirt_sw/gaccess.h"
 #include "intercepts.h"
 #include "io.h"
 
@@ -445,9 +445,11 @@ static void mmu_spte_set(struct kvm *kvm, pgprot_t *sptep, pgprot_t spte);
 static void pv_mmu_drop_copied_parent_pte(struct kvm *kvm,
 			struct kvm_mmu_page *child,
 			struct kvm_mmu_page *parent, pgprot_t *parent_pte);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static void sync_dropped_guest_shadow_root_range(struct kvm *kvm,
 			pgprot_t *dst_root, pgprot_t *src_root,
 			int start_index, int end_index);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 static int kvm_mmu_prepare_zap_page(struct kvm *kvm, struct kvm_mmu_page *sp,
 				    struct list_head *invalid_list);
 
@@ -1975,6 +1977,7 @@ static void shadow_walk_next(struct kvm_shadow_walk_iterator *iterator)
 	return __shadow_walk_next(iterator, *iterator->sptep);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static void pv_mmu_make_sync_request(struct kvm_vcpu *vcpu,
 			struct kvm_mmu_page *sp, gmm_struct_t *gmm)
 {
@@ -1991,6 +1994,12 @@ static void pv_mmu_make_sync_request(struct kvm_vcpu *vcpu,
 		kvm_make_request(KVM_REQ_SYNC_GMM_SPT_ROOT, vcpu);
 	}
 }
+#else
+static void pv_mmu_make_sync_request(struct kvm_vcpu *vcpu,
+			struct kvm_mmu_page *sp, gmm_struct_t *gmm)
+{
+}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static void pv_mmu_spte_make_sync_request(struct kvm_vcpu *vcpu, pgprot_t *spte)
 {
@@ -2081,6 +2090,7 @@ static void copy_guest_shadow_root_range(struct kvm_vcpu *vcpu, gmm_struct_t *gm
 	}
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static void pv_mmu_drop_copied_parent_pte(struct kvm *kvm,
 			struct kvm_mmu_page *child,
 			struct kvm_mmu_page *parent, pgprot_t *parent_pte)
@@ -2125,6 +2135,13 @@ static void pv_mmu_drop_copied_parent_pte(struct kvm *kvm,
 
 	drop_parent_pte(kvm, child, gk_spte);
 }
+#else
+static void pv_mmu_drop_copied_parent_pte(struct kvm *kvm,
+			struct kvm_mmu_page *child,
+			struct kvm_mmu_page *parent, pgprot_t *parent_pte)
+{
+}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static void drop_copied_root_spte(struct kvm *kvm, pgprot_t *sptep)
 {
@@ -2140,6 +2157,7 @@ static void drop_copied_root_spte(struct kvm *kvm, pgprot_t *sptep)
 	drop_parent_pte(kvm, child, sptep);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static void sync_dropped_guest_shadow_root_range(struct kvm *kvm,
 			pgprot_t *dst_root, pgprot_t *src_root,
 			int start_index, int end_index)
@@ -2161,6 +2179,7 @@ static void sync_dropped_guest_shadow_root_range(struct kvm *kvm,
 		}
 	}
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static void sync_guest_shadow_root_range(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 					 pgprot_t *dst_root, pgprot_t *src_root,
@@ -2368,6 +2387,7 @@ static void check_and_sync_guest_user_root(struct kvm_vcpu *vcpu,
 	sync_guest_user_root_range(vcpu, gmm, gk_root, u_root);
 }
 
+//TODO
 static void check_and_sync_guest_kernel_root(struct kvm_vcpu *vcpu)
 {
 	gmm_struct_t *init_gmm, *gmm;
@@ -2995,9 +3015,11 @@ static pf_res_t __direct_map(struct kvm_vcpu *vcpu, int write, int map_writable,
 	if (!VALID_PAGE(kvm_get_gp_phys_root(vcpu)))
 		return 0;
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (unlikely(!vcpu->arch.is_hv)) {
 		init_gmm = pv_vcpu_get_init_gmm(vcpu);
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	for_each_shadow_entry(vcpu, (u64)gfn << PAGE_SHIFT, iterator) {
 		pgprotval_t old_spte;
@@ -3081,7 +3103,7 @@ static pgprot_t nonpaging_gpa_to_pte(struct kvm_vcpu *vcpu, gva_t addr)
 	return spte;
 }
 
-static void kvm_get_pfn(kvm_pfn_t pfn)                                                                                                 
+static void kvm_get_pfn(kvm_pfn_t pfn)
 {
 	struct page *page = kvm_pfn_to_refcounted_page(pfn);
 
@@ -5027,15 +5049,6 @@ static void setup_shadow_pt_structs(struct kvm_vcpu *vcpu)
 	mmu_set_vcpu_pt_struct_func(kvm, &kvm_mmu_get_vcpu_pt_struct);
 }
 
-static void setup_tdp_pt_structs(struct kvm_vcpu *vcpu)
-{
-	struct kvm *kvm = vcpu->kvm;
-
-	/* setup page table structures type to properly manage PTs */
-	mmu_set_vcpu_pt_struct(kvm, kvm_get_mmu_guest_pt_struct(vcpu));
-	mmu_set_vcpu_pt_struct_func(kvm, &kvm_mmu_get_vcpu_pt_struct);
-}
-
 static void kvm_init_mmu_spt_context(struct kvm_vcpu *vcpu,
 					struct kvm_mmu *context)
 {
@@ -5083,7 +5096,9 @@ void PTNAME(mmu_init_pt_interface)(struct kvm *kvm)
 	pt_ops->mmu_slot_gfn_write_protect = &mmu_slot_gfn_write_protect;
 	pt_ops->account_shadowed = &account_shadowed;
 	pt_ops->unaccount_shadowed = &unaccount_shadowed;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	pt_ops->walk_shadow_pts = &walk_shadow_pts;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	pt_ops->nonpaging_page_fault = &nonpaging_page_fault;
 	pt_ops->nonpaging_gpa_to_pte = &nonpaging_gpa_to_pte;
 	pt_ops->kvm_hv_mmu_page_fault = &kvm_hv_mmu_page_fault;
@@ -5122,7 +5137,6 @@ void PTNAME(mmu_init_pt_interface)(struct kvm *kvm)
 	pt_ops->kvm_init_mmu_pt_structs = &kvm_init_mmu_pt_structs;
 	pt_ops->kvm_init_nonpaging_pt_structs = &kvm_init_nonpaging_pt_structs;
 	pt_ops->setup_shadow_pt_structs = &setup_shadow_pt_structs;
-	pt_ops->setup_tdp_pt_structs = &setup_tdp_pt_structs;
 	pt_ops->kvm_init_mmu_spt_context = &kvm_init_mmu_spt_context;
 	pt_ops->kvm_init_mmu_tdp_context = &kvm_init_mmu_tdp_context;
 	pt_ops->kvm_init_mmu_nonpaging_context = &kvm_init_mmu_nonpaging_context;

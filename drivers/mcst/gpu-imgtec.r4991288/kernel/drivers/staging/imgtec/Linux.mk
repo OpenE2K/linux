@@ -61,7 +61,7 @@ adf_sunxi_target := adf_sunxi.ko
 adf_sunxi_makefile := $(THIS_DIR)/Kbuild.mk
 
 e2c3_gpu_type := kernel_module
-e2c3_gpu_target := e2c3_gpu.ko
+e2c3_gpu_target := e2c3_gpu_drv_4991288.ko
 e2c3_gpu_makefile := $(THIS_DIR)/Kbuild.mk
 
 drm_nulldisp_type := kernel_module

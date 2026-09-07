@@ -44,6 +44,63 @@ native_copy_from_user_with_tags(void *to, const void __user *from,
 
 #ifdef	CONFIG_KVM_HOST_MODE
 /* it is host kernel with virtualization support */
+#define	__e2k_kvm_get_guest(__slot, gfn, __hk_ptr, offset,		\
+					gk_ptrp, __writable)		\
+({									\
+	__typeof__(__hk_ptr) __user *gk_ptr;				\
+	unsigned long addr;						\
+	int r;								\
+									\
+	addr = gfn_to_hva_memslot_prot(__slot, gfn, __writable);	\
+	if (unlikely(kvm_is_error_hva(addr))) {				\
+		gk_ptrp = NULL;						\
+		r = -EFAULT;						\
+	} else {							\
+		gk_ptr = (__typeof__((__hk_ptr)) *)(addr + offset);	\
+		gk_ptrp = gk_ptr;					\
+		r = __get_user((__hk_ptr), gk_ptr);			\
+	}								\
+	r;								\
+})
+
+#define	kvm_vcpu_get_guest_ptr(vcpu, gpa, _hk_ptr, _gk_ptrp, _writable)	\
+({									\
+	gfn_t gfn = (gpa) >> PAGE_SHIFT;				\
+	struct kvm_memory_slot *slot;					\
+	int offset = offset_in_page(gpa);				\
+	int r;								\
+									\
+	slot = kvm_vcpu_gfn_to_memslot(vcpu, gfn);			\
+	r = __e2k_kvm_get_guest(slot, gfn, (_hk_ptr), offset,		\
+					_gk_ptrp, _writable);		\
+	r;								\
+})
+
+#define	kvm_get_guest_atomic(kvm, gpa, __hk_ptr)			\
+({									\
+	__typeof__(__hk_ptr) __user *gk_ptr;				\
+	gfn_t gfn = (gpa) >> PAGE_SHIFT;				\
+	struct kvm_memory_slot *slot = gfn_to_memslot(kvm, gfn);	\
+	int offset = offset_in_page(gpa);				\
+	bool writable;							\
+	unsigned long addr;						\
+	int r;								\
+									\
+	addr = gfn_to_hva_memslot_prot(slot, gfn, &writable);		\
+	if (unlikely(kvm_is_error_hva(addr))) {				\
+		r = -EFAULT;						\
+	} else {							\
+		gk_ptr = (__typeof__((__hk_ptr)) __user *)(addr + offset);	\
+		pagefault_disable();					\
+		r = native_get_user((__hk_ptr), gk_ptr);		\
+		pagefault_enable();					\
+	}								\
+	r;								\
+})
+#endif
+
+#ifdef	CONFIG_KVM_PARAVIRTUALIZATION
+/* it is host kernel with paravirtualization support */
 
 #define	host_get_guest_kernel(kval, gk_ptr)				\
 ({									\
@@ -106,66 +163,6 @@ native_copy_from_user_with_tags(void *to, const void __user *from,
 			:						\
 			host_put_guest_kernel(kval, __pu_ptr);		\
 	(res);								\
-})
-
-#define	__e2k_kvm_get_guest(__slot, gfn, __hk_ptr, offset,		\
-					gk_ptrp, __writable)		\
-({									\
-	__typeof__(__hk_ptr) __user *gk_ptr;				\
-	unsigned long addr;						\
-	int r;								\
-									\
-	addr = gfn_to_hva_memslot_prot(__slot, gfn, __writable);	\
-	if (unlikely(kvm_is_error_hva(addr))) {				\
-		gk_ptrp = NULL;						\
-		r = -EFAULT;						\
-	} else {							\
-		gk_ptr = (__typeof__((__hk_ptr)) *)(addr + offset);	\
-		gk_ptrp = gk_ptr;					\
-		r = __get_user((__hk_ptr), gk_ptr);			\
-	}								\
-	r;								\
-})
-
-#define	kvm_vcpu_get_guest_ptr(vcpu, gpa, _hk_ptr, _gk_ptrp, _writable)	\
-({									\
-	gfn_t gfn = (gpa) >> PAGE_SHIFT;				\
-	struct kvm_memory_slot *slot;					\
-	int offset = offset_in_page(gpa);				\
-	int r;								\
-									\
-	slot = kvm_vcpu_gfn_to_memslot(vcpu, gfn);			\
-	r = __e2k_kvm_get_guest(slot, gfn, (_hk_ptr), offset,		\
-					_gk_ptrp, _writable);		\
-	r;								\
-})
-#define	kvm_vcpu_get_guest(vcpu, gpa, ___hk_ptr)			\
-({									\
-	__typeof__(___hk_ptr) __user *unused;				\
-									\
-	kvm_vcpu_get_guest_ptr(vcpu, gpa, ___hk_ptr, unused, NULL);	\
-})
-
-#define	kvm_get_guest_atomic(kvm, gpa, __hk_ptr)			\
-({									\
-	__typeof__(__hk_ptr) __user *gk_ptr;				\
-	gfn_t gfn = (gpa) >> PAGE_SHIFT;				\
-	struct kvm_memory_slot *slot = gfn_to_memslot(kvm, gfn);	\
-	int offset = offset_in_page(gpa);				\
-	bool writable;							\
-	unsigned long addr;						\
-	int r;								\
-									\
-	addr = gfn_to_hva_memslot_prot(slot, gfn, &writable);		\
-	if (unlikely(kvm_is_error_hva(addr))) {				\
-		r = -EFAULT;						\
-	} else {							\
-		gk_ptr = (__typeof__((__hk_ptr)) __user *)(addr + offset);	\
-		pagefault_disable();					\
-		r = native_get_user((__hk_ptr), gk_ptr);		\
-		pagefault_enable();					\
-	}								\
-	r;								\
 })
 
 extern unsigned long kvm_copy_in_user_with_tags(struct kvm_vcpu *vcpu,
@@ -255,8 +252,9 @@ static inline size_t fast_tagged_memory_copy_from_user_gva(void *dst,
 	return kvm_vcpu_copy_host_from_guest(vcpu, dst, src, len,
 				AW(strd_opcode), AW(ldrd_opcode), prefetch);
 }
-#else	/* !CONFIG_KVM_HOST_MODE */
-/* it is not host kernel, it is native kernel without virtualization */
+#else	/* !CONFIG_KVM_PARAVIRTUALIZATION */
+/* it is host kernel without paravirtualization
+ * or native kernel without virtualization */
 
 #define	host_get_user(kval, uptr, hregs)	native_get_user(kval, uptr)
 #define	host_put_user(kval, uptr, hregs)	native_put_user(kval, uptr)

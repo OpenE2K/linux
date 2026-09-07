@@ -37,6 +37,9 @@ static LIST_HEAD(snd_control_ioctls);
 #ifdef CONFIG_COMPAT
 static LIST_HEAD(snd_control_compat_ioctls);
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+static LIST_HEAD(snd_control_ptr128_ioctls);
+#endif
 static struct snd_ctl_layer_ops *snd_ctl_layer;
 
 static int snd_ctl_open(struct inode *inode, struct file *file)
@@ -2163,6 +2166,32 @@ int snd_ctl_unregister_ioctl_compat(snd_kctl_ioctl_func_t fcn)
 EXPORT_SYMBOL(snd_ctl_unregister_ioctl_compat);
 #endif
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+/**
+ * snd_ctl_register_ioctl_ptr128 - register the device-specific ptr128
+ * control-ioctls
+ * @fcn: ioctl callback function
+ *
+ * Return: zero if successful, or a negative error code
+ */
+int snd_ctl_register_ioctl_ptr128(snd_kctl_ioctl_func_t fcn)
+{
+	return _snd_ctl_register_ioctl(fcn, &snd_control_ptr128_ioctls);
+}
+EXPORT_SYMBOL(snd_ctl_register_ioctl_ptr128);
+/**
+ * snd_ctl_unregister_ioctl_compat - de-register the device-specific ptr128 control-ioctls
+ * @fcn: ioctl callback function to unregister
+ *
+ * Return: zero if successful, or a negative error code
+ */
+int snd_ctl_unregister_ioctl_ptr128(snd_kctl_ioctl_func_t fcn)
+{
+	return _snd_ctl_unregister_ioctl(fcn, &snd_control_ptr128_ioctls);
+}
+EXPORT_SYMBOL(snd_ctl_unregister_ioctl_ptr128);
+#endif
+
 static int snd_ctl_fasync(int fd, struct file * file, int on)
 {
 	struct snd_ctl_file *ctl;
@@ -2201,7 +2230,9 @@ EXPORT_SYMBOL_GPL(snd_ctl_get_preferred_subdevice);
 #else
 #define snd_ctl_ioctl_compat	NULL
 #endif
-
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#include "control_ptr128.c"
+#endif
 /*
  * control layers (audio LED etc.)
  */

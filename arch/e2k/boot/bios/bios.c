@@ -1,3 +1,7 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
 
 #include "bios.h"
 #include <linux/pci_ids.h>
@@ -148,11 +152,11 @@ static void test_rdma(void)
 
 static void error(char *x)
 {
-        rom_puts("\n\n");
-        rom_puts(x);
-        rom_puts("\n\n -- System halted");
+	rom_puts("\n\n");
+	rom_puts(x);
+	rom_puts("\n\n -- System halted");
 
-        E2K_LMS_HALT_ERROR(0xdead); /* Halt */
+	E2K_LMS_HALT_ERROR(0xdead); /* Halt */
 }
 
 struct i2c_spi {
@@ -172,36 +176,36 @@ struct i2c_spi i2c_spi;
 
 int spi_read(unsigned int cmos_addr)
 {
-        unsigned long i2c_spi_cntrl = i2c_spi.cntrl_base;
+	unsigned long i2c_spi_cntrl = i2c_spi.cntrl_base;
 	unsigned long i2c_spi_data = i2c_spi.data_base;
 	unsigned char data;
 	unsigned int cmd = 0;
 
-        /* Set READ operation code */
+	/* Set READ operation code */
 	E2K_WRITE_MAS_W(i2c_spi_cntrl + SPI_OPCODE, SPI_RDPC_CMD, MAS_IOADDR);
 
-        /* Set addr offset */
+	/* Set addr offset */
 	E2K_WRITE_MAS_W(i2c_spi_cntrl + SPI_ADDRESS, cmos_addr, MAS_IOADDR);
 
-        /* Set Device number, Address size, Data size offset */
+	/* Set Device number, Address size, Data size offset */
 	cmd = i2c_spi.dev_number << SPI_DEVICE_SHIFT |
 		   SPI_ADDRESS_SIZE_16 << SPI_ADDRESS_SIZE_SHIFT |
-		   		     1 << SPI_DATA_SIZE_SHIFT |
+				     1 << SPI_DATA_SIZE_SHIFT |
 					SPI_ADDRESS_PHASE_ENABLE |
 					SPI_DATA_PHASE_ENABLE |
 					SPI_TRANS_READ |
 					SPI_START;
-				     				
+								
 	E2K_WRITE_MAS_W(i2c_spi_cntrl + SPI_CONTROL, cmd, MAS_IOADDR);
 
-        while((E2K_READ_MAS_W(i2c_spi_cntrl + SPI_STATUS, MAS_IOADDR) & 
+	while((E2K_READ_MAS_W(i2c_spi_cntrl + SPI_STATUS, MAS_IOADDR) & 
 				(SPI_STATUS_INTR | SPI_STATUS_FAIL)) == 0)
-        if (E2K_READ_MAS_W(i2c_spi_cntrl + SPI_STATUS, MAS_IOADDR) & SPI_STATUS_FAIL) {
-                rom_printk("spi_read: Error - Transfer Failed");
-                return -1;
-        }
+	if (E2K_READ_MAS_W(i2c_spi_cntrl + SPI_STATUS, MAS_IOADDR) & SPI_STATUS_FAIL) {
+		rom_printk("spi_read: Error - Transfer Failed");
+		return -1;
+	}
 	data = E2K_READ_MAS_B(i2c_spi_data, MAS_IOADDR);
-        return (int)data;
+	return (int)data;
 }
 
 int spi_ops(unsigned int dev_number, unsigned char cmd_code)
@@ -209,20 +213,20 @@ int spi_ops(unsigned int dev_number, unsigned char cmd_code)
 	unsigned int cmd;
 	unsigned long i2c_spi_cntrl = i2c_spi.cntrl_base;
 
-        if (dev_number > MAX_SPI_DEVICE_NR) {
-                rom_printk("spi_ops: Error - Device number is to large: %d (Max: %d)", dev_number, MAX_SPI_DEVICE_NR);
-                return -1;
-        }
-        switch(cmd_code) {
-                case SPI_READ_CMD:
-                case SPI_WRITE_CMD:
+	if (dev_number > MAX_SPI_DEVICE_NR) {
+		rom_printk("spi_ops: Error - Device number is to large: %d (Max: %d)", dev_number, MAX_SPI_DEVICE_NR);
+		return -1;
+	}
+	switch(cmd_code) {
+		case SPI_READ_CMD:
+		case SPI_WRITE_CMD:
 		case SPI_RDPC_CMD:
-                case SPI_WRPC_CMD:
-                        rom_printk("spi_ops: Error - Wrong command code: %d", cmd_code);
-                        return -1;
-                default:
-                        break;
-        }
+		case SPI_WRPC_CMD:
+			rom_printk("spi_ops: Error - Wrong command code: %d", cmd_code);
+			return -1;
+		default:
+			break;
+	}
 
 	E2K_WRITE_MAS_W(i2c_spi_cntrl + SPI_OPCODE, cmd_code, MAS_IOADDR);
 
@@ -235,10 +239,10 @@ int spi_ops(unsigned int dev_number, unsigned char cmd_code)
    
 	while((E2K_READ_MAS_W(i2c_spi_cntrl + SPI_STATUS, MAS_IOADDR) & 
 				(SPI_STATUS_INTR | SPI_STATUS_FAIL)) == 0)
-        if (E2K_READ_MAS_W(i2c_spi_cntrl + SPI_STATUS, MAS_IOADDR) & SPI_STATUS_FAIL) {
-                rom_printk("spi_ops: Error - Operation Failed");
-                return -1;
-        }
+	if (E2K_READ_MAS_W(i2c_spi_cntrl + SPI_STATUS, MAS_IOADDR) & SPI_STATUS_FAIL) {
+		rom_printk("spi_ops: Error - Operation Failed");
+		return -1;
+	}
 	return 1;
 }
 
@@ -250,23 +254,23 @@ int spi_write(unsigned char val, unsigned int cmos_addr)
 	unsigned long i2c_spi_data = i2c_spi.data_base;
 
 
-        if(spi_ops(i2c_spi.dev_number, SPI_WREN_CMD) == -1) {
-                rom_printk("%s: Error - Failed to enable write operation", __FUNCTION__);
-                return -1;
-        }
+	if(spi_ops(i2c_spi.dev_number, SPI_WREN_CMD) == -1) {
+		rom_printk("%s: Error - Failed to enable write operation", __FUNCTION__);
+		return -1;
+	}
 
-        E2K_WRITE_MAS_B(i2c_spi_data, val, MAS_IOADDR);
+	E2K_WRITE_MAS_B(i2c_spi_data, val, MAS_IOADDR);
 
-        /* Set WRITE operation code */
+	/* Set WRITE operation code */
 	E2K_WRITE_MAS_W(i2c_spi_cntrl + SPI_OPCODE, SPI_WRPC_CMD, MAS_IOADDR);
 
-        /* Set addr offset */
+	/* Set addr offset */
 	E2K_WRITE_MAS_W(i2c_spi_cntrl + SPI_ADDRESS, cmos_addr, MAS_IOADDR);
 
 	/* Set Device number, Address size, Data size offset */
 	cmd = i2c_spi.dev_number << SPI_DEVICE_SHIFT |
 		   SPI_ADDRESS_SIZE_16 << SPI_ADDRESS_SIZE_SHIFT |
-		   		     1 << SPI_DATA_SIZE_SHIFT |
+				     1 << SPI_DATA_SIZE_SHIFT |
 					SPI_ADDRESS_PHASE_ENABLE |
 					SPI_DATA_PHASE_ENABLE |
 					SPI_TRANS_READ |
@@ -276,11 +280,11 @@ int spi_write(unsigned char val, unsigned int cmos_addr)
 
 	while((E2K_READ_MAS_W(i2c_spi_cntrl + SPI_STATUS, MAS_IOADDR) & 
 				(SPI_STATUS_INTR | SPI_STATUS_FAIL)) == 0)
-        if (E2K_READ_MAS_W(i2c_spi_cntrl + SPI_STATUS, MAS_IOADDR) & SPI_STATUS_FAIL) {
-                rom_printk("spi_read: Error - Transfer Failed");
-                return -1;
-        }
-        return 1;
+	if (E2K_READ_MAS_W(i2c_spi_cntrl + SPI_STATUS, MAS_IOADDR) & SPI_STATUS_FAIL) {
+		rom_printk("spi_read: Error - Transfer Failed");
+		return -1;
+	}
+	return 1;
 }
 
 
@@ -301,7 +305,7 @@ int cmos_write(unsigned char val, unsigned int cmos_addr)
 		rom_printk("%s: write operation failed", __FUNCTION__);
 		return -1;
 	}
-        return 1;
+	return 1;
 }
 
 void test_fm33256(void){

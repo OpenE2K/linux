@@ -270,9 +270,6 @@ static __always_inline void kvm_clear_aau_context(void)
 #ifdef	CONFIG_KVM_GUEST_KERNEL
 /* It is pure kvm kernel without paravirtualization */
 
-#define	SAVE_AAU_MASK_REGS(aau_context, aasr)	\
-		KVM_SAVE_AAU_MASK_REGS(aau_context, aasr)
-
 #define	RESTORE_AAU_MASK_REGS(aaldm, aaldv, aau_context) \
 		KVM_RESTORE_AAU_MASK_REGS(aaldm, aaldv, aau_context)
 

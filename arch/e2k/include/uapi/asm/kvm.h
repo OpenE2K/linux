@@ -22,7 +22,7 @@
  * refinement of the interface in format yymmdd so that the version
  * number always monotonously increased
  */
-#define KVM_ARCH_API_VERSION	230221
+#define KVM_ARCH_API_VERSION	251114
 
 #define KVM_COALESCED_MMIO_PAGE_OFFSET 1
 
@@ -75,6 +75,10 @@
 #define	KVM_CAP_E2K_SHADOW_PT_MMU	310	/* is shadow PT enabled */
 #define	KVM_CAP_E2K_TDP_MMU		311	/* is Two Dimensial Paging */
 						/* mode enabled */
+
+/* KVM SIC NBSR capabilities */
+#define	KVM_CAP_E2K_SIC_NBSR_ISET	320	/* is iset dependent version of */
+							/* SIC NBSR model */
 
 /* Architectural interrupt line count. */
 #define KVM_NR_INTERRUPTS 256
@@ -288,20 +292,7 @@ typedef struct kvm_guest_area_reserve {
 } kvm_guest_area_reserve_t;
 
 /* guest area allocation flags */
-#define	KVM_ALLOC_AREA_PRESENT		0x00000001ULL
-#define	KVM_ALLOC_AREA_LOCKED		0x00000002ULL
-#define	KVM_ALLOC_AREA_ZEROED		0x00000004ULL
-/* protections as part of flags */
-#define	KVM_ALLOC_AREA_PROT_READ	0x00010000ULL
-#define	KVM_ALLOC_AREA_PROT_WRITE	0x00020000ULL
-#define	KVM_ALLOC_AREA_PROT_EXEC	0x00040000ULL
-/* some additional features */
-#define	KVM_ALLOC_AREA_HUGE		0x00100000ULL	/* prefered mapping */
-							/* to huge pages */
-#define	KVM_ALLOC_AREA_MAP_FLAGS	\
-		(KVM_ALLOC_AREA_PROT_READ | KVM_ALLOC_AREA_PROT_WRITE | \
-			KVM_ALLOC_AREA_PROT_EXEC | \
-				KVM_ALLOC_AREA_HUGE)
+#define KVM_ALLOC_AREA_LOW		0x00000008ULL
 
 /* guest addresses map */
 #define	KVM_GUEST_PAGE_OFFSET		0x00000010
@@ -352,6 +343,7 @@ typedef struct kvm_pci_region {
 } kvm_pci_region_t;
 
 typedef struct kvm_guest_nbsr_state {
+	unsigned long cpu_iset;
 	unsigned int rt_pcim0;
 	unsigned int rt_pcim1;
 	unsigned int rt_pcim2;
@@ -432,6 +424,7 @@ typedef struct kvm_guest_nbsr_state {
 						kvm_guest_nbsr_state_t)
 #define	KVM_CREATE_SIC_NBSR		_IO(KVMIO, 0xef)
 #define	KVM_SET_PCI_REGION		_IOW(KVMIO, 0xf0, kvm_pci_region_t)
+#define	KVM_CREATE_SIC_NBSR_ISET	_IOW(KVMIO, 0xf1, unsigned long)
 
 /* e2k-specific exit reasons from KVM to userspace assistance */
 #define KVM_EXIT_E2K_NOTIFY_IO		33

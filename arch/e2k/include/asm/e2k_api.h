@@ -10,11 +10,12 @@
 #include <linux/typecheck.h>
 
 #include <asm/alternative.h>
-#include <asm/base_regs_types.h>
+#include <asm/cpu_regs_types_defs.h>
 #include <asm/compiler.h>
 #include <asm/cpu_feature_values.h>
 #include <asm/instr_regs_types.h>	/* For instr_cs1_t */
 #include <asm/mas.h>
+#include <asm/tags.h>
 #ifndef __ASSEMBLY__
 #include <asm/mmu_types.h>
 #include <asm/mmu_regs_types.h>
@@ -24,97 +25,7 @@
 #include <uapi/asm/e2k_api.h>
 
 
-/*
- * Ugly macro magic to calculate argument for _Pragma("asm_length")
- */
-#define __CONCAT(a, b) a ## b
-#define CONCATENATE(a, b) __CONCAT(a, b)
-#define ADD_1_0		1
-#define ADD_1_1		2
-#define ADD_1_2		3
-#define ADD_1_3		4
-#define ADD_1_4		5
-#define ADD_1_5		6
-#define ADD_1_6		7
-#define ADD_1_7		8
-#define ADD_1_8		9
-#define ADD_1_9		10
-#define ADD_1_10	11
-#define ADD_2_0		2
-#define ADD_2_1		3
-#define ADD_2_2		4
-#define ADD_2_3		5
-#define ADD_2_4		6
-#define ADD_2_5		7
-#define ADD_2_6		8
-#define ADD_2_7		9
-#define ADD_2_8		10
-#define ADD_2_9		11
-#define ADD_2_10	12
-
-#define ASM_LENGTH_0	_Pragma("asm_length(0)")
-#define ASM_LENGTH_1	_Pragma("asm_length(1)")
-#define ASM_LENGTH_2	_Pragma("asm_length(2)")
-#define ASM_LENGTH_3	_Pragma("asm_length(3)")
-#define ASM_LENGTH_4	_Pragma("asm_length(4)")
-#define ASM_LENGTH_5	_Pragma("asm_length(5)")
-#define ASM_LENGTH_6	_Pragma("asm_length(6)")
-#define ASM_LENGTH_7	_Pragma("asm_length(7)")
-#define ASM_LENGTH_8	_Pragma("asm_length(8)")
-#define ASM_LENGTH_9	_Pragma("asm_length(9)")
-#define ASM_LENGTH_10	_Pragma("asm_length(10)")
-#define ASM_LENGTH_11	_Pragma("asm_length(11)")
-#define ASM_LENGTH_12	_Pragma("asm_length(12)")
-#define ASM_LENGTH_13	_Pragma("asm_length(13)")
-#define ASM_LENGTH_14	_Pragma("asm_length(14)")
-/* 14 is the maximum supported value */
-#define ASM_LENGTH_15	_Pragma("asm_length(14)")
-#define ASM_LENGTH_16	_Pragma("asm_length(14)")
-#define ASM_LENGTH_17	_Pragma("asm_length(14)")
-
-#ifndef CONFIG_E2K_MACHINE
-/* For generic kernels we cannot choose */
-# define ASM_LENGTH_V4_V5(len_v4, len_v5)
-# define ASM_LENGTH_ADD_V4_V5(len_v4, len_v5, add)
-#elif CONFIG_CPU_ISET_MIN < 5
-# define ASM_LENGTH_V4_V5(len_v4, len_v5) CONCATENATE(ASM_LENGTH_, len_v4)
-# define ASM_LENGTH_ADD_V4_V5(len_v4, len_v5, add) CONCATENATE(ASM_LENGTH_, ADD_##add##_##len_v4)
-#else /* CONFIG_CPU_ISET_MIN >= 5 */
-# define ASM_LENGTH_V4_V5(len_v4, len_v5) CONCATENATE(ASM_LENGTH_, len_v5)
-# define ASM_LENGTH_ADD_V4_V5(len_v4, len_v5, add) CONCATENATE(ASM_LENGTH_, ADD_##add##_##len_v5)
-#endif
-
-#ifndef CONFIG_E2K_MACHINE
-/* For generic kernels we cannot choose */
-# define ASM_LENGTH_V5_V6(len_v5, len_v6)
-# define ASM_LENGTH_ADD_V5_V6(len_v5, len_v6, add)
-#elif CONFIG_CPU_ISET_MIN < 6
-# define ASM_LENGTH_V5_V6(len_v5, len_v6) CONCATENATE(ASM_LENGTH_, len_v5)
-# define ASM_LENGTH_ADD_V5_V6(len_v5, len_v6, add) CONCATENATE(ASM_LENGTH_, ADD_##add##_##len_v5)
-#else /* CONFIG_CPU_ISET_MIN >= 6 */
-# define ASM_LENGTH_V5_V6(len_v5, len_v6) CONCATENATE(ASM_LENGTH_, len_v6)
-# define ASM_LENGTH_ADD_V5_V6(len_v5, len_v6, add) CONCATENATE(ASM_LENGTH_, ADD_##add##_##len_v6)
-#endif
-
-#ifndef CONFIG_E2K_MACHINE
-/* For generic kernels we cannot choose */
-# define ASM_LENGTH_V6_V7(len_v6, len_v7)
-# define ASM_LENGTH_ADD_V6_V7(len_v6, len_v7, add)
-#elif CONFIG_CPU_ISET_MIN < 7
-# define ASM_LENGTH_V6_V7(len_v6, len_v7) CONCATENATE(ASM_LENGTH_, len_v6)
-# define ASM_LENGTH_ADD_V6_V7(len_v6, len_v7, add) CONCATENATE(ASM_LENGTH_, ADD_##add##_##len_v6)
-#else /* CONFIG_CPU_ISET_MIN >= 7 */
-# define ASM_LENGTH_V6_V7(len_v6, len_v7) CONCATENATE(ASM_LENGTH_, len_v7)
-# define ASM_LENGTH_ADD_V6_V7(len_v6, len_v7, add) CONCATENATE(ASM_LENGTH_, ADD_##add##_##len_v7)
-#endif
-
-
 #ifndef __ASSEMBLY__
-typedef unsigned char __e2k_u8_t;
-typedef unsigned short int __e2k_u16_t;
-typedef unsigned int __e2k_u32_t;
-typedef unsigned long long __e2k_u64_t;
-typedef void *__e2k_ptr_t;
 
 /* CPU_HWBUG_JUMP: mark labels that are not targets of a call or jump */
 #if __iset__ <= 6
@@ -139,7 +50,7 @@ typedef void *__e2k_ptr_t;
  */
 #define E2K_LMS_HALT_OK				\
 ({						\
-	_Pragma("no_asm_inline")		\
+	__no_asm_inline(1)		\
 	asm volatile (".word \t0x00008001\n\t"	\
 			".word \t0x60000000");	\
 })
@@ -149,65 +60,32 @@ typedef void *__e2k_ptr_t;
  */
 #define E2K_LMS_HALT_ERROR(err_no)		\
 ({						\
-	_Pragma("no_asm_inline")		\
+	__no_asm_inline(1)		\
 	asm volatile (".word \t0x00008001\n\t"	\
 		".word \t0x60000000 | %0"	\
 		:				\
 		: "i" (err_no));		\
 })
 
-#define	ASM_GET_GREG_MEMONIC(greg_no)	 __asm__("%g" #greg_no)
-#define	DO_ASM_GET_GREG_MEMONIC(greg_no) ASM_GET_GREG_MEMONIC(greg_no)
-
-#define E2K_GET_REG(reg_no) \
-({ \
-    register __e2k_u32_t res; \
-    asm volatile ("adds \t0x0, %%r" #reg_no ", %0"  \
-                  : "=r" (res)); \
-    res; \
-})
-
-#define E2K_GET_DREG(reg_no) \
-({ \
-    register __e2k_u64_t res; \
-    asm volatile ("addd \t0x0, %%dr" #reg_no ", %0"  \
-                  : "=r" (res)); \
-    res; \
-})
-
-#define ASM_GET_DGREG(reg_no) \
-({ \
-    register __e2k_u64_t res; \
-    asm volatile ("addd \t0x0, %%dg" #reg_no ", %0"  \
-                  : "=r" (res)); \
-    res; \
-})
-#define	DO_ASM_GET_DGREG(greg_no) \
-		ASM_GET_DGREG(greg_no)
-#define E2K_GET_DGREG(greg_no)	\
-		DO_ASM_GET_DGREG(greg_no)
-#define NATIVE_GET_DGREG(greg_no) \
-		DO_ASM_GET_DGREG(greg_no)
-
+#define	ASM_GET_GREG_MNEMONIC(greg_no)	 __asm__("%g" #greg_no)
+#define	ASM_GREG(greg_no) ASM_GET_GREG_MNEMONIC(greg_no)
 
 #define ASM_GET_UNTEGGED_DGREG(reg_no) \
 ({ \
-	register __e2k_u64_t res; \
+	register u64 res; \
 	asm volatile ("addd,s \t0x0, %%dg" #reg_no ", %0\n"  \
 		"puttagd,s \t%0, 0, %0"	\
 		: "=r" (res)); \
 	res; \
 })
-#define	DO_ASM_GET_UNTEGGED_DGREG(greg_no) \
-		ASM_GET_UNTEGGED_DGREG(greg_no)
 #define NATIVE_GET_UNTEGGED_DGREG(greg_no) \
-		DO_ASM_GET_UNTEGGED_DGREG(greg_no)
+		ASM_GET_UNTEGGED_DGREG(greg_no)
 
 #define ASM_SET_DGREG(reg_no, val) \
 ({ \
 	asm volatile ("addd \t0x0, %0, %%dg" #reg_no \
 		: \
-		: "ri" ((__e2k_u64_t) (val))); \
+		: "ri" ((u64) (val))); \
 })
 #define	DO_ASM_SET_DGREG(greg_no, val) \
 		ASM_SET_DGREG(greg_no, val)
@@ -220,8 +98,8 @@ typedef void *__e2k_ptr_t;
 ({ \
 	register u64 _greg asm("g" #greg_no); \
 	asm ("addd 0, %[val], %[greg]" \
-                  : [greg] "=r" (_greg) \
-                  : [val] "ri" ((__e2k_u64_t) (_val))); \
+		  : [greg] "=r" (_greg) \
+		  : [val] "ri" ((u64) (_val))); \
 })
 #define	DO_ASM_SET_DGREG_NV(greg_no, val) \
 		ASM_SET_DGREG_NV(greg_no, val)
@@ -279,7 +157,7 @@ do {									\
 #define _E2K_GET_DGREG_VAL_AND_TAG(greg_no, dst_reg, tag)	\
 ({								\
 	u32 __dtag;						\
-	_Pragma("asm_length(1)")				\
+	__no_asm_inline(1)				\
 	asm volatile ("{gettagd %%dg" #greg_no ", %0\n\t"	\
 		      "puttagd %%dg" #greg_no ", 0, %1}"	\
 		      : "=r" (__dtag), "=r" (dst_reg)		\
@@ -375,7 +253,7 @@ do {								  \
 #define _E2K_GET_GREG_VAL_AND_TAG(greg_no, dst_reg, tag)	\
 ({								\
 	u32 __tag;						\
-	_Pragma("asm_length(1)")				\
+	__no_asm_inline(1)				\
 	asm volatile ("{gettags %%g" #greg_no ", %0\n\t"	\
 		      " puttags %%g" #greg_no ", 0, %1}"	\
 		      : "=r" (__tag), "=r" (dst_reg)		\
@@ -422,31 +300,26 @@ do {								  \
 	}								\
 })
 
-#define ASM_SAVE_GREG_V3(__addr_lo, __addr_hi, numlo, numhi, iset)	\
+#define ASM_SAVE_GREG_V3(__addr_lo, __addr_hi, numlo, numhi)	\
 ({									\
 	u64 reg0, reg1;							\
-	BUILD_BUG_ON(iset != E2K_ISET_V3);				\
-									\
-	asm (								\
-		"strd,2 [ %[addr_lo] + %[opc_0] ], %%dg" #numlo "\n"	\
+	asm (	"strd,2 [ %[addr_lo] + %[opc_0] ], %%dg" #numlo "\n"	\
 		"strd,5 [ %[addr_hi] + %[opc_0] ], %%dg" #numhi "\n"	\
 		"movfi %%dg" #numlo ", %[reg0]\n"			\
 		"movfi %%dg" #numhi ", %[reg1]\n"			\
 		"sth [ %[addr_lo] + 8 ], %[reg0]\n"			\
 		"sth [ %[addr_hi] + 8 ], %[reg1]\n"			\
-		: [reg0] "=&r" (reg0), [reg1] "=&r" (reg1)		\
-		: [addr_lo] "r" (__addr_lo), [addr_hi] "r" (__addr_hi),	\
-		  [opc_0] "i" (TAGGED_MEM_STORE_REC_OPC)		\
+		: [reg0] "=r" (reg0), [reg1] "=&r" (reg1),		\
+		  [addr_lo] "=m" (*(__uint128_t *) (__addr_lo)), \
+		  [addr_hi] "=m" (*(__uint128_t *) (__addr_hi)) \
+		: [opc_0] "i" (TAGGED_MEM_STORE_REC_OPC)		\
 		: "memory");						\
 })
 
-#define ASM_RESTORE_GREG_V3(__addr, __off_lo, __off_hi, numlo, numhi, iset) \
+#define ASM_RESTORE_GREG_V3(__addr, __off_lo, __off_hi, numlo, numhi) \
 do { \
 	u64 reg0, reg1, reg2, reg3; \
-	BUILD_BUG_ON(iset != E2K_ISET_V3); \
- \
-	asm ( \
-		"ldrd,2 [ %[addr] + %[opc_lo] ], %%dg" #numlo "\n" \
+	asm (	"ldrd,2 [ %[addr] + %[opc_lo] ], %%dg" #numlo "\n" \
 		"ldrd,5 [ %[addr] + %[opc_hi] ], %%dg" #numhi "\n" \
 		"ldh [ %[addr] + %[off_lo_8] ], %[reg0]\n" \
 		"ldh [ %[addr] + %[off_hi_8] ], %[reg1]\n" \
@@ -466,243 +339,609 @@ do { \
 		: "%g" #numlo, "%g" #numhi, "%pred2", "%pred3"); \
 } while (0)
 
-#define ASM_SAVE_GREG_V5(__addr_lo, __addr_hi, numlo, numhi, iset)	\
-({									\
-	u64 unused;							\
-	BUILD_BUG_ON(iset != E2K_ISET_V5);				\
-									\
-	_Pragma("asm_length(1)")					\
-	asm (								\
-		/* Bug 116851 - all strqp must be speculative		\
-		 * if dealing with tags */				\
-		"{\n" /* Close this asm because 'sm' for 'strqp'	\
-			 is not supported by lcc */			\
-		"strqp,2,sm [ %[addr_lo] + %[opc_0] ], %%dg" #numlo "\n" \
-		"strqp,5,sm [ %[addr_hi] + %[opc_0] ], %%dg" #numhi "\n" \
-		"}\n"							\
-		: [unused] "=r" (unused)				\
-		: [addr_lo] "r" (__addr_lo), [addr_hi] "r" (__addr_hi),	\
-		  [opc_0] "i" (TAGGED_MEM_STORE_REC_OPC)		\
-		: "memory");						\
-})
-
-#define ASM_RESTORE_GREG_V5(__addr, __off_lo, __off_hi, numlo, numhi, iset) \
+#if __iset__ >= 5
+# define ASM_SAVE_GREG_V5(__addr_lo, __addr_hi, numlo, numhi) \
 do { \
-	u64 reg0, reg1; \
-	BUILD_BUG_ON(iset != E2K_ISET_V5); \
- \
-	asm ( \
-		"ldrqp,2 [ %[addr] + %[opc_lo] ], %%dg" #numlo "\n" \
-		"ldrqp,5 [ %[addr] + %[opc_hi] ], %%dg" #numhi "\n" \
-		: [reg0] "=&r" (reg0),	[reg1] "=&r" (reg1) \
-		: [addr] "r" (__addr), \
-		[opc_lo] "i" (TAGGED_MEM_LOAD_REC_OPC | (__off_lo)), \
-		[opc_hi] "i" (TAGGED_MEM_LOAD_REC_OPC | (__off_hi)) \
-		: "%g" #numlo, "%g" #numhi); \
+	register u64 __g_lo __asm__("%g" #numlo); \
+	register u64 __g_hi __asm__("%g" #numhi); \
+	/* CPU_HWBUG_TAGGED_STRQP: close this asm because \
+	 * 'sm' for 'strqp' is not supported by lcc */ \
+	__asm_length(1) \
+	asm (	"{strqp,2,sm [ %[addr_lo] + %[opc] ], %[g_lo]\n" \
+		" strqp,5,sm [ %[addr_hi] + %[opc] ], %[g_hi]}\n" \
+		: [addr_lo] "=m" (*(__uint128_t *) (__addr_lo)), \
+		  [addr_hi] "=m" (*(__uint128_t *) (__addr_hi)) \
+		: [g_lo] "r" (__g_lo), [g_hi] "r" (__g_hi), \
+		  [opc] "i" (TAGGED_MEM_STORE_REC_OPC)); \
 } while (0)
 
-#if __iset__ == 3
-
-#define ASM_SAVE_GREG(__addr_lo, __addr_hi, numlo, numhi, iset)		\
-		ASM_SAVE_GREG_V3(__addr_lo, __addr_hi, numlo, numhi, iset)
-
-#define ASM_RESTORE_GREG(__addr, __off_lo, __off_hi, numlo, numhi, iset)	\
-		ASM_RESTORE_GREG_V3(__addr, __off_lo, __off_hi, numlo, numhi, iset)
-
-#elif __iset__ == 5
-
-#define ASM_SAVE_GREG(__addr_lo, __addr_hi, numlo, numhi, iset)		\
-		ASM_SAVE_GREG_V5(__addr_lo, __addr_hi, numlo, numhi, iset)
-
-#define ASM_RESTORE_GREG(__addr, __off_lo, __off_hi, numlo, numhi, iset)	\
-		ASM_RESTORE_GREG_V5(__addr, __off_lo, __off_hi, numlo, numhi, iset)
-
+# define ASM_RESTORE_GREG_V5(__addr, __off_lo, __off_hi, numlo, numhi) \
+do { \
+	register u64 __g_lo __asm__("%g" #numlo); \
+	register u64 __g_hi __asm__("%g" #numhi); \
+	asm (	"ldrqp [ %[addr] + %[opc_lo] ], %[g_lo]\n" \
+		"ldrqp [ %[addr] + %[opc_hi] ], %[g_hi]\n" \
+		: [g_lo] "=&r" (__g_lo), [g_hi] "=&r" (__g_hi) \
+		: [addr] "r" (__addr), \
+		  [opc_lo] "i" (TAGGED_MEM_LOAD_REC_OPC | (__off_lo)), \
+		  [opc_hi] "i" (TAGGED_MEM_LOAD_REC_OPC | (__off_hi))); \
+} while (0)
 #else
-/* IMPORTANT: Do NOT use these macros directly, use
- * machine.save_gregs()/machine.restore_gregs() instead */
+# define ASM_SAVE_GREG_V5(__addr_lo, __addr_hi, numlo, numhi)	\
+do { \
+	__no_asm_inline(1) \
+	asm (	".push_iset 5\n" \
+		/* CPU_HWBUG_TAGGED_STRQP */ \
+		"{strqp,2,sm [ %[addr_lo] + %[opc] ], %%dg" #numlo "\n" \
+		" strqp,5,sm [ %[addr_hi] + %[opc] ], %%dg" #numhi "}\n" \
+		".pop_iset\n" \
+		: [addr_lo] "=m" (*(__uint128_t *) (__addr_lo)), \
+		  [addr_hi] "=m" (*(__uint128_t *) (__addr_hi)) \
+		: [opc] "i" (TAGGED_MEM_STORE_REC_OPC)); \
+} while (0)
+
+# define ASM_RESTORE_GREG_V5(__addr, __off_lo, __off_hi, numlo, numhi) \
+do { \
+	u64 reg0, reg1; \
+	__no_asm_inline(1) \
+	asm (	".push_iset 5\n" \
+		"{ldrqp,2 [ %[addr] + %[opc_lo] ], %%dg" #numlo "\n" \
+		" ldrqp,5 [ %[addr] + %[opc_hi] ], %%dg" #numhi "}\n" \
+		".pop_iset\n" \
+		: [reg0] "=&r" (reg0),	[reg1] "=&r" (reg1) \
+		: [addr] "r" (__addr), \
+		  [opc_lo] "i" (TAGGED_MEM_LOAD_REC_OPC | (__off_lo)), \
+		  [opc_hi] "i" (TAGGED_MEM_LOAD_REC_OPC | (__off_hi)) \
+		: "%g" #numlo, "%g" #numhi); \
+} while (0)
 #endif
 
-#define NATIVE_SAVE_GREG(__addr_lo, __addr_hi, numlo, numhi, iset)	\
+#define ASM_SAVE_GREG(__addr_lo, __addr_hi, numlo, numhi, iset) \
+do { \
+	switch (iset) { \
+	case E2K_ISET_V3: \
+		ASM_SAVE_GREG_V3(__addr_lo, __addr_hi, numlo, numhi); \
+		break; \
+	case E2K_ISET_V5: \
+		ASM_SAVE_GREG_V5(__addr_lo, __addr_hi, numlo, numhi); \
+		break; \
+	default: \
+		BUILD_BUG_ON(1); \
+	} \
+} while (0)
+
+#define ASM_RESTORE_GREG(__addr, __off_lo, __off_hi, numlo, numhi, iset) \
+do { \
+	switch (iset) { \
+	case E2K_ISET_V3: \
+		ASM_RESTORE_GREG_V3(__addr, __off_lo, __off_hi, numlo, numhi); \
+		break; \
+	case E2K_ISET_V5: \
+		ASM_RESTORE_GREG_V5(__addr, __off_lo, __off_hi, numlo, numhi); \
+		break; \
+	default: \
+		BUILD_BUG_ON(1); \
+	} \
+} while (0)
+
+#define NATIVE_SAVE_GREG(__addr_lo, __addr_hi, numlo, numhi, iset) \
 	ASM_SAVE_GREG(__addr_lo, __addr_hi, numlo, numhi, iset)
-#define NATIVE_SAVE_GREG_V3(__addr_lo, __addr_hi, numlo, numhi)		\
-	ASM_SAVE_GREG_V3(__addr_lo, __addr_hi, numlo, numhi, E2K_ISET_V3)
-#define NATIVE_SAVE_GREG_V5(__addr_lo, __addr_hi, numlo, numhi)		\
-	ASM_SAVE_GREG_V5(__addr_lo, __addr_hi, numlo, numhi, E2K_ISET_V5)
 #define NATIVE_RESTORE_GREG(__addr, __off_lo, __off_hi, numlo, numhi, iset) \
 	ASM_RESTORE_GREG(__addr, __off_lo, __off_hi, numlo, numhi, iset)
-#define NATIVE_RESTORE_GREG_V3(__addr, __off_lo, __off_hi, numlo, numhi)	\
-	ASM_RESTORE_GREG_V3(__addr, __off_lo, __off_hi, numlo, numhi, E2K_ISET_V3)
-#define NATIVE_RESTORE_GREG_V5(__addr, __off_lo, __off_hi, numlo, numhi)	\
-	ASM_RESTORE_GREG_V5(__addr, __off_lo, __off_hi, numlo, numhi, E2K_ISET_V5)
 
-#define ASM_SAVE_THE_KERNEL_GREG(greg_no, _base, ind)			\
-({									\
-	u64 reg0, reg1;							\
-	BUILD_BUG_ON(iset != E2K_ISET_V3);				\
-									\
-	asm (								\
-		"strd [ %[base] + %[opc] ], %%dg" #greg_no "\n"		\
-		:							\
-		: [base] "r" (_base),					\
-		  [opc] "i" (TAGGED_MEM_STORE_REC_OPC | ind * 16UL)	\
-		: "%g" #greg_no, "memory");				\
-})
-#define NATIVE_SAVE_THE_KERNEL_GREG(greg_no, _base, ind)		\
-		ASM_SAVE_THE_KERNEL_GREG(greg_no, _base, ind)
+/* API to save/restore single gregs (words to qpwords). Used by soft_pm. */
 
-#define ASM_RESTORE_THE_KERNEL_GREG(greg_no, _base, ind)		\
-do {									\
-	asm (								\
-		"ldrd [ %[base] + %[opc] ], %%dg" #greg_no "\n"		\
-		:							\
-		: [base] "r" (_base),					\
-		  [opc] "i" (TAGGED_MEM_LOAD_REC_OPC | ind * 16UL)	\
-		: "%g" #greg_no, "memory");				\
-} while (false)
-#define NATIVE_RESTORE_THE_KERNEL_GREG(greg_no, _base, ind)		\
-		ASM_RESTORE_THE_KERNEL_GREG(greg_no, _base, ind)
+#define ASM_SAVE_SINGLE_GREG_V3(__addr, num)                                \
+	({                                                                  \
+		u64 reg0;                                                   \
+		asm("strd,2 [ %[addr] + %[opc_0] ], %%dg" #num "\n"         \
+		    "movfi %%dg" #num ", %[reg0]\n"                         \
+		    "sth [ %[addr] + 8 ], %[reg0]\n"                        \
+		    : [reg0] "=&r"(reg0)                                    \
+		    : [addr] "r"(__addr), [opc_0] "i"(                      \
+						  TAGGED_MEM_STORE_REC_OPC) \
+		    : "memory");                                            \
+	})
 
-#define ASM_RESTORE_KERNEL_GREG(__base,					\
-				indlo1, indhi1, indlo2, indhi2,		\
-				numlo1, numhi1, numlo2, numhi2)		\
-do {									\
-	u64 _base = (u64) (__base);					\
-	register u64 g##numlo1 asm("g" #numlo1);			\
-	register u64 g##numhi1 asm("g" #numhi1);			\
-	register u64 g##numlo2 asm("g" #numlo2);			\
-	register u64 g##numhi2 asm("g" #numhi2);			\
-	asm (	"ldrd [ %[base] + %[opc_lo1] ], %[g_lo1]\n"		\
-		"ldrd [ %[base] + %[opc_hi1] ], %[g_hi1]\n"		\
-		"ldrd [ %[base] + %[opc_lo2] ], %[g_lo2]\n"		\
-		"ldrd [ %[base] + %[opc_hi2] ], %[g_hi2]\n"		\
-		: [g_lo1] "=r" (g##numlo1), [g_hi1] "=r" (g##numhi1),	\
-		  [g_lo2] "=r" (g##numlo2), [g_hi2] "=r" (g##numhi2)	\
-		: [base] "r" (_base),					\
-		  [opc_lo1] "i" (TAGGED_MEM_LOAD_REC_OPC | indlo1 * 16UL), \
-		  [opc_hi1] "i" (TAGGED_MEM_LOAD_REC_OPC | indhi1 * 16UL), \
-		  [opc_lo2] "i" (TAGGED_MEM_LOAD_REC_OPC | indlo2 * 16UL), \
-		  [opc_hi2] "i" (TAGGED_MEM_LOAD_REC_OPC | indhi2 * 16UL)); \
-} while (false)
-#define NATIVE_RESTORE_KERNEL_GREG(base,				\
-			indlo1, indhi1, indlo2, indhi2,			\
-			numlo1, numhi1, numlo2, numhi2)			\
-		ASM_RESTORE_KERNEL_GREG(base,				\
-				indlo1, indhi1, indlo2, indhi2,		\
-				numlo1, numhi1, numlo2, numhi2)
+#if __iset__ >= 5
 
-#define E2K_ALL_GREGS_SET_EMPTY()				\
-({								\
-	register char tag;					\
-	tag = ETAGEWD;						\
-	asm ("puttagd 0, %0, %%dg0\n"				\
-	     "puttagd 0, %0, %%dg1\n"				\
-	     "puttagd 0, %0, %%dg2\n"				\
-	     "puttagd 0, %0, %%dg3\n"				\
-	     "puttagd 0, %0, %%dg4\n"				\
-	     "puttagd 0, %0, %%dg5\n"				\
-	     "puttagd 0, %0, %%dg6\n"				\
-	     "puttagd 0, %0, %%dg7\n"				\
-	     "puttagd 0, %0, %%dg8\n"				\
-	     "puttagd 0, %0, %%dg9\n"				\
-	     "puttagd 0, %0, %%dg10\n"				\
-	     "puttagd 0, %0, %%dg11\n"				\
-	     "puttagd 0, %0, %%dg12\n"				\
-	     "puttagd 0, %0, %%dg13\n"				\
-	     "puttagd 0, %0, %%dg14\n"				\
-	     "puttagd 0, %0, %%dg15\n"				\
-	     "puttagd 0, %0, %%dg16\n"				\
-	     "puttagd 0, %0, %%dg17\n"				\
-	     "puttagd 0, %0, %%dg18\n"				\
-	     "puttagd 0, %0, %%dg19\n"				\
-	     "puttagd 0, %0, %%dg20\n"				\
-	     "puttagd 0, %0, %%dg21\n"				\
-	     "puttagd 0, %0, %%dg22\n"				\
-	     "puttagd 0, %0, %%dg23\n"				\
-	     "puttagd 0, %0, %%dg24\n"				\
-	     "puttagd 0, %0, %%dg25\n"				\
-	     "puttagd 0, %0, %%dg26\n"				\
-	     "puttagd 0, %0, %%dg27\n"				\
-	     "puttagd 0, %0, %%dg28\n"				\
-	     "puttagd 0, %0, %%dg29\n"				\
-	     "puttagd 0, %0, %%dg30\n"				\
-	     "puttagd 0, %0, %%dg31\n"				\
-	     :							\
-	     : "ri" ((char) (tag))				\
-	     : "%g0", "%g1", "%g2", "%g3", "%g4", "%g5",	\
-	       "%g6", "%g7", "%g8", "%g9", "%g10", "%g11",	\
-	       "%g12", "%g13", "%g14", "%g15", "%g16",		\
-	       "%g17", "%g18", "%g19", "%g20", "%g21",		\
-	       "%g22", "%g23", "%g24", "%g25", "%g26",		\
-	       "%g27", "%g28", "%g29", "%g30", "%g31");		\
-})
-
-#define	NATIVE_GREGS_SET_EMPTY(user_only)			\
-({								\
-	u32 tag = ETAGEWD;					\
-	asm ("puttagd 0, %0, %%dg0\n"				\
-	     "puttagd 0, %0, %%dg1\n"				\
-	     "puttagd 0, %0, %%dg2\n"				\
-	     "puttagd 0, %0, %%dg3\n"				\
-	     "puttagd 0, %0, %%dg4\n"				\
-	     "puttagd 0, %0, %%dg5\n"				\
-	     "puttagd 0, %0, %%dg6\n"				\
-	     "puttagd 0, %0, %%dg7\n"				\
-	     "puttagd 0, %0, %%dg8\n"				\
-	     "puttagd 0, %0, %%dg9\n"				\
-	     "puttagd 0, %0, %%dg10\n"				\
-	     "puttagd 0, %0, %%dg11\n"				\
-	     "puttagd 0, %0, %%dg12\n"				\
-	     "puttagd 0, %0, %%dg13\n"				\
-	     "puttagd 0, %0, %%dg14\n"				\
-	     "puttagd 0, %0, %%dg15\n"				\
-	     /* g16-g19 are used by kernel */			\
-	     /*"puttagd 0, %0, %%dg16\n"*/			\
-	     /*"puttagd 0, %0, %%dg17\n"*/			\
-	     /*"puttagd 0, %0, %%dg18\n"*/			\
-	     /*"puttagd 0, %0, %%dg19\n"*/			\
-	     "puttagd 0, %0, %%dg20\n"				\
-	     "puttagd 0, %0, %%dg21\n"				\
-	     "puttagd 0, %0, %%dg22\n"				\
-	     "puttagd 0, %0, %%dg23\n"				\
-	     "puttagd 0, %0, %%dg24\n"				\
-	     "puttagd 0, %0, %%dg25\n"				\
-	     "puttagd 0, %0, %%dg26\n"				\
-	     "puttagd 0, %0, %%dg27\n"				\
-	     "puttagd 0, %0, %%dg28\n"				\
-	     "puttagd 0, %0, %%dg29\n"				\
-	     "puttagd 0, %0, %%dg30\n"				\
-	     "puttagd 0, %0, %%dg31\n"				\
-	     :							\
-	     : "ri" ((u32) (tag))				\
-	     : "%g0", "%g1", "%g2", "%g3", "%g4", "%g5",	\
-	       "%g6", "%g7", "%g8", "%g9", "%g10", "%g11",	\
-	       "%g12", "%g13", "%g14", "%g15", /*"%g16",*/	\
-	       /*"%g17", "%g18", "%g19",*/ "%g20", "%g21",	\
-	       "%g22", "%g23", "%g24", "%g25", "%g26",		\
-	       "%g27", "%g28", "%g29", "%g30", "%g31");		\
-	if (!user_only) {					\
-		asm (/* g16-g19 are used by kernel */		\
-			"puttagd 0, %0, %%dg16\n"		\
-			"puttagd 0, %0, %%dg17\n"		\
-			"puttagd 0, %0, %%dg18\n"		\
-			"puttagd 0, %0, %%dg19\n"		\
-		:						\
-		: "ri" ((u32) (tag))				\
-		: "%g16", "%g17", "%g18", "%g19");		\
-	}							\
-})
-
-#define	NATIVE_K_GREGS_SET_DIAG() \
+#define ASM_SAVE_SINGLE_GREG_V5(__addr, num) \
 do { \
-	asm (/* g16-g19 are used by kernel */ \
-	     "puttagd %[value], %[tag], %%dg16\n" \
-	     "puttagd %[value], %[tag], %%dg17\n" \
-	     "puttagd %[value], %[tag], %%dg18\n" \
-	     "puttagd %[value], %[tag], %%dg19\n" \
-	     : \
-	     : [value] "ri" (0ull), \
-	       [tag] "ri" ((u32) ETAGEWD) \
-	     : "%g16", "%g17", "%g18", "%g19"); \
+	register u64 __g __asm__("%g" #num); \
+	/* CPU_HWBUG_TAGGED_STRQP: close this asm because \
+	 * 'sm' for 'strqp' is not supported by lcc */ \
+	__asm_length(1) \
+	asm(	"{strqp,2,sm [ %[addr] + %[opc] ], %[g]}" \
+		: [addr] "=m" (*(__uint128_t *) (__addr)) \
+		: [g] "r" (__g) \
+		: [opc] "i"(TAGGED_MEM_STORE_REC_OPC)); \
+} while (0)
+
+#else
+
+#define ASM_SAVE_SINGLE_GREG_V5(__addr, num)                                \
+	do {                                                                \
+		__no_asm_inline(1) asm(                                     \
+			".push_iset 5\n" /* CPU_HWBUG_TAGGED_STRQP */       \
+			"{strqp,2,sm [ %[addr] + %[opc] ], %%dg" #num "}\n" \
+			".pop_iset\n"                                       \
+			: [addr] "=m"(*(__uint128_t *)(__addr))             \
+			: [opc] "i"(TAGGED_MEM_STORE_REC_OPC));             \
+	} while (0)
+
+#endif
+
+#define ASM_RESTORE_SINGLE_GREG_V3(__addr, num)                               \
+	do {                                                                  \
+		u64 reg0, reg2;                                               \
+		asm("ldrd,2 [ %[addr] + %[opc] ], %%dg" #num "\n"             \
+		    "ldh [ %[addr] + %[off_8] ], %[reg0]\n"                   \
+		    "gettagd %%dg" #num ", %[reg2]\n"                         \
+		    "cmpesb 0, %[reg2], %%pred2\n"                            \
+		    "movif %%dg" #num ", %[reg0], %%dg" #num " ? %%pred2\n"   \
+		    : [reg0] "=&r"(reg0), [reg2] "=&r"(reg2)                  \
+		    : [addr] "r"(__addr), [opc] "i"(TAGGED_MEM_LOAD_REC_OPC), \
+		      [off_8] "i"(8)                                          \
+		    : "%g" #num, "%pred2");                                   \
+	} while (0)
+
+#if __iset__ >= 5
+
+#define ASM_RESTORE_SINGLE_GREG_V5(__addr, num)                              \
+	do {                                                                 \
+		asm("ldrqp,2 [ %[addr] + %[opc] ], %%dg" #num "\n"           \
+		    :                                                        \
+		    : [addr] "r"(__addr), [opc] "i"(TAGGED_MEM_LOAD_REC_OPC) \
+		    : "%g" #num);                                            \
+	} while (0)
+
+#else
+
+#define ASM_RESTORE_SINGLE_GREG_V5(__addr, num)                          \
+	do {                                                             \
+		__no_asm_inline(1) asm(                                  \
+			".push_iset 5\n"                                 \
+			"{ldrqp,2 [ %[addr] + %[opc] ], %%dg" #num "}\n" \
+			".pop_iset\n"                                    \
+			:                                                \
+			: [addr] "r"(__addr),                            \
+			  [opc] "i"(TAGGED_MEM_LOAD_REC_OPC)             \
+			: "%g" #num);                                    \
+	} while (0)
+
+#endif
+
+#define ASM_SAVE_SINGLE_GREG(__addr, num, iset)               \
+	do {                                                  \
+		switch (iset) {                               \
+		case E2K_ISET_V3:                             \
+		case E2K_ISET_V4:                             \
+			ASM_SAVE_SINGLE_GREG_V3(__addr, num); \
+			break;                                \
+		case E2K_ISET_V5:                             \
+		case E2K_ISET_V6:                             \
+			ASM_SAVE_SINGLE_GREG_V5(__addr, num); \
+			break;                                \
+		default:                                      \
+			BUG();                                \
+		}                                             \
+	} while (0)
+
+#define NATIVE_SAVE_SINGLE_GREG(__addr, num, iset) \
+	ASM_SAVE_SINGLE_GREG(__addr, num, iset)
+
+#define ASM_RESTORE_SINGLE_GREG(__addr, num, iset)               \
+	do {                                                     \
+		switch (iset) {                                  \
+		case E2K_ISET_V3:                                \
+		case E2K_ISET_V4:                                \
+			ASM_RESTORE_SINGLE_GREG_V3(__addr, num); \
+			break;                                   \
+		case E2K_ISET_V5:                                \
+		case E2K_ISET_V6:                                \
+			ASM_RESTORE_SINGLE_GREG_V5(__addr, num); \
+			break;                                   \
+		default:                                         \
+			BUG();                                   \
+		}                                                \
+	} while (0)
+
+#define NATIVE_RESTORE_SINGLE_GREG(__addr, num, iset) \
+	ASM_RESTORE_SINGLE_GREG(__addr, num, iset)
+
+#define ASM_SAVE_SINGLE_GREG_VAR(__addr, greg_num, iset)                   \
+	({                                                                 \
+		switch (greg_num) {                                        \
+		case 0:                                                    \
+			ASM_SAVE_SINGLE_GREG(__addr, 0, iset);             \
+			break;                                             \
+		case 1:                                                    \
+			ASM_SAVE_SINGLE_GREG(__addr, 1, iset);             \
+			break;                                             \
+		case 2:                                                    \
+			ASM_SAVE_SINGLE_GREG(__addr, 2, iset);             \
+			break;                                             \
+		case 3:                                                    \
+			ASM_SAVE_SINGLE_GREG(__addr, 3, iset);             \
+			break;                                             \
+		case 4:                                                    \
+			ASM_SAVE_SINGLE_GREG(__addr, 4, iset);             \
+			break;                                             \
+		case 5:                                                    \
+			ASM_SAVE_SINGLE_GREG(__addr, 5, iset);             \
+			break;                                             \
+		case 6:                                                    \
+			ASM_SAVE_SINGLE_GREG(__addr, 6, iset);             \
+			break;                                             \
+		case 7:                                                    \
+			ASM_SAVE_SINGLE_GREG(__addr, 7, iset);             \
+			break;                                             \
+		case 8:                                                    \
+			ASM_SAVE_SINGLE_GREG(__addr, 8, iset);             \
+			break;                                             \
+		case 9:                                                    \
+			ASM_SAVE_SINGLE_GREG(__addr, 9, iset);             \
+			break;                                             \
+		case 10:                                                   \
+			ASM_SAVE_SINGLE_GREG(__addr, 10, iset);            \
+			break;                                             \
+		case 11:                                                   \
+			ASM_SAVE_SINGLE_GREG(__addr, 11, iset);            \
+			break;                                             \
+		case 12:                                                   \
+			ASM_SAVE_SINGLE_GREG(__addr, 12, iset);            \
+			break;                                             \
+		case 13:                                                   \
+			ASM_SAVE_SINGLE_GREG(__addr, 13, iset);            \
+			break;                                             \
+		case 14:                                                   \
+			ASM_SAVE_SINGLE_GREG(__addr, 14, iset);            \
+			break;                                             \
+		case 15:                                                   \
+			ASM_SAVE_SINGLE_GREG(__addr, 15, iset);            \
+			break;                                             \
+		case 16:                                                   \
+			ASM_SAVE_SINGLE_GREG(__addr, 16, iset);            \
+			break;                                             \
+		case 17:                                                   \
+			ASM_SAVE_SINGLE_GREG(__addr, 17, iset);            \
+			break;                                             \
+		case 18:                                                   \
+			ASM_SAVE_SINGLE_GREG(__addr, 18, iset);            \
+			break;                                             \
+		case 19:                                                   \
+			ASM_SAVE_SINGLE_GREG(__addr, 19, iset);            \
+			break;                                             \
+		case 20:                                                   \
+			ASM_SAVE_SINGLE_GREG(__addr, 20, iset);            \
+			break;                                             \
+		case 21:                                                   \
+			ASM_SAVE_SINGLE_GREG(__addr, 21, iset);            \
+			break;                                             \
+		case 22:                                                   \
+			ASM_SAVE_SINGLE_GREG(__addr, 22, iset);            \
+			break;                                             \
+		case 23:                                                   \
+			ASM_SAVE_SINGLE_GREG(__addr, 23, iset);            \
+			break;                                             \
+		case 24:                                                   \
+			ASM_SAVE_SINGLE_GREG(__addr, 24, iset);            \
+			break;                                             \
+		case 25:                                                   \
+			ASM_SAVE_SINGLE_GREG(__addr, 25, iset);            \
+			break;                                             \
+		case 26:                                                   \
+			ASM_SAVE_SINGLE_GREG(__addr, 26, iset);            \
+			break;                                             \
+		case 27:                                                   \
+			ASM_SAVE_SINGLE_GREG(__addr, 27, iset);            \
+			break;                                             \
+		case 28:                                                   \
+			ASM_SAVE_SINGLE_GREG(__addr, 28, iset);            \
+			break;                                             \
+		case 29:                                                   \
+			ASM_SAVE_SINGLE_GREG(__addr, 29, iset);            \
+			break;                                             \
+		case 30:                                                   \
+			ASM_SAVE_SINGLE_GREG(__addr, 30, iset);            \
+			break;                                             \
+		case 31:                                                   \
+			ASM_SAVE_SINGLE_GREG(__addr, 31, iset);            \
+			break;                                             \
+		default:                                                   \
+			panic("Invalid global register # %d\n", greg_num); \
+		}                                                          \
+	})
+
+#define ASM_RESTORE_SINGLE_GREG_VAR(__addr, greg_num, iset)                \
+	({                                                                 \
+		switch (greg_num) {                                        \
+		case 0:                                                    \
+			ASM_RESTORE_SINGLE_GREG(__addr, 0, iset);          \
+			break;                                             \
+		case 1:                                                    \
+			ASM_RESTORE_SINGLE_GREG(__addr, 1, iset);          \
+			break;                                             \
+		case 2:                                                    \
+			ASM_RESTORE_SINGLE_GREG(__addr, 2, iset);          \
+			break;                                             \
+		case 3:                                                    \
+			ASM_RESTORE_SINGLE_GREG(__addr, 3, iset);          \
+			break;                                             \
+		case 4:                                                    \
+			ASM_RESTORE_SINGLE_GREG(__addr, 4, iset);          \
+			break;                                             \
+		case 5:                                                    \
+			ASM_RESTORE_SINGLE_GREG(__addr, 5, iset);          \
+			break;                                             \
+		case 6:                                                    \
+			ASM_RESTORE_SINGLE_GREG(__addr, 6, iset);          \
+			break;                                             \
+		case 7:                                                    \
+			ASM_RESTORE_SINGLE_GREG(__addr, 7, iset);          \
+			break;                                             \
+		case 8:                                                    \
+			ASM_RESTORE_SINGLE_GREG(__addr, 8, iset);          \
+			break;                                             \
+		case 9:                                                    \
+			ASM_RESTORE_SINGLE_GREG(__addr, 9, iset);          \
+			break;                                             \
+		case 10:                                                   \
+			ASM_RESTORE_SINGLE_GREG(__addr, 10, iset);         \
+			break;                                             \
+		case 11:                                                   \
+			ASM_RESTORE_SINGLE_GREG(__addr, 11, iset);         \
+			break;                                             \
+		case 12:                                                   \
+			ASM_RESTORE_SINGLE_GREG(__addr, 12, iset);         \
+			break;                                             \
+		case 13:                                                   \
+			ASM_RESTORE_SINGLE_GREG(__addr, 13, iset);         \
+			break;                                             \
+		case 14:                                                   \
+			ASM_RESTORE_SINGLE_GREG(__addr, 14, iset);         \
+			break;                                             \
+		case 15:                                                   \
+			ASM_RESTORE_SINGLE_GREG(__addr, 15, iset);         \
+			break;                                             \
+		case 16:                                                   \
+			ASM_RESTORE_SINGLE_GREG(__addr, 16, iset);         \
+			break;                                             \
+		case 17:                                                   \
+			ASM_RESTORE_SINGLE_GREG(__addr, 17, iset);         \
+			break;                                             \
+		case 18:                                                   \
+			ASM_RESTORE_SINGLE_GREG(__addr, 18, iset);         \
+			break;                                             \
+		case 19:                                                   \
+			ASM_RESTORE_SINGLE_GREG(__addr, 19, iset);         \
+			break;                                             \
+		case 20:                                                   \
+			ASM_RESTORE_SINGLE_GREG(__addr, 20, iset);         \
+			break;                                             \
+		case 21:                                                   \
+			ASM_RESTORE_SINGLE_GREG(__addr, 21, iset);         \
+			break;                                             \
+		case 22:                                                   \
+			ASM_RESTORE_SINGLE_GREG(__addr, 22, iset);         \
+			break;                                             \
+		case 23:                                                   \
+			ASM_RESTORE_SINGLE_GREG(__addr, 23, iset);         \
+			break;                                             \
+		case 24:                                                   \
+			ASM_RESTORE_SINGLE_GREG(__addr, 24, iset);         \
+			break;                                             \
+		case 25:                                                   \
+			ASM_RESTORE_SINGLE_GREG(__addr, 25, iset);         \
+			break;                                             \
+		case 26:                                                   \
+			ASM_RESTORE_SINGLE_GREG(__addr, 26, iset);         \
+			break;                                             \
+		case 27:                                                   \
+			ASM_RESTORE_SINGLE_GREG(__addr, 27, iset);         \
+			break;                                             \
+		case 28:                                                   \
+			ASM_RESTORE_SINGLE_GREG(__addr, 28, iset);         \
+			break;                                             \
+		case 29:                                                   \
+			ASM_RESTORE_SINGLE_GREG(__addr, 29, iset);         \
+			break;                                             \
+		case 30:                                                   \
+			ASM_RESTORE_SINGLE_GREG(__addr, 30, iset);         \
+			break;                                             \
+		case 31:                                                   \
+			ASM_RESTORE_SINGLE_GREG(__addr, 31, iset);         \
+			break;                                             \
+		default:                                                   \
+			panic("Invalid global register # %d\n", greg_num); \
+		}                                                          \
+	})
+
+#define NATIVE_SAVE_SINGLE_GREG_VAR(__addr, num, iset) \
+	ASM_SAVE_SINGLE_GREG_VAR(__addr, num, iset)
+
+#define NATIVE_RESTORE_SINGLE_GREG_VAR(__addr, num, iset) \
+	ASM_RESTORE_SINGLE_GREG_VAR(__addr, num, iset)
+
+/* end of API to save/restore single gregs */
+
+#if __iset__ >= 5
+# define CLEAR_GLOBAL_QP_GREGS() \
+do { \
+	u64 __cl_qp_value; \
+	asm (	"qppackdl 0, 0, %[value]\n" \
+		"puttagqp %[value], %[tag], %%dg0\n" \
+		"puttagqp %[value], %[tag], %%dg1\n" \
+		"puttagqp %[value], %[tag], %%dg2\n" \
+		"puttagqp %[value], %[tag], %%dg3\n" \
+		"puttagqp %[value], %[tag], %%dg4\n" \
+		"puttagqp %[value], %[tag], %%dg5\n" \
+		"puttagqp %[value], %[tag], %%dg6\n" \
+		"puttagqp %[value], %[tag], %%dg7\n" \
+		"puttagqp %[value], %[tag], %%dg8\n" \
+		"puttagqp %[value], %[tag], %%dg9\n" \
+		"puttagqp %[value], %[tag], %%dg10\n" \
+		"puttagqp %[value], %[tag], %%dg11\n" \
+		"puttagqp %[value], %[tag], %%dg12\n" \
+		"puttagqp %[value], %[tag], %%dg13\n" \
+		"puttagqp %[value], %[tag], %%dg14\n" \
+		"puttagqp %[value], %[tag], %%dg15\n" \
+		: [value] "=&r" (__cl_qp_value) \
+		: [tag] "ri" ((u32) ETAGEWQP) \
+		: "%g0", "%g1", "%g2", "%g3", "%g4", "%g5", "%g6", "%g7", \
+		  "%g8", "%g9", "%g10", "%g11", "%g12", "%g13", "%g14", "%g15"); \
+} while (0)
+
+# define CLEAR_LOCAL_QP_GREGS() \
+do { \
+	u64 __cl_qp_value; \
+	asm (	"qppackdl 0, 0, %[value]\n" \
+		"puttagqp %[value], %[tag], %%qpg16\n" \
+		"puttagqp %[value], %[tag], %%qpg17\n" \
+		"puttagqp %[value], %[tag], %%qpg18\n" \
+		"puttagqp %[value], %[tag], %%qpg19\n" \
+		"puttagqp %[value], %[tag], %%qpg20\n" \
+		"puttagqp %[value], %[tag], %%qpg21\n" \
+		"puttagqp %[value], %[tag], %%qpg22\n" \
+		"puttagqp %[value], %[tag], %%qpg23\n" \
+		"puttagqp %[value], %[tag], %%qpg24\n" \
+		"puttagqp %[value], %[tag], %%qpg25\n" \
+		"puttagqp %[value], %[tag], %%qpg26\n" \
+		"puttagqp %[value], %[tag], %%qpg27\n" \
+		"puttagqp %[value], %[tag], %%qpg28\n" \
+		"puttagqp %[value], %[tag], %%qpg29\n" \
+		"puttagqp %[value], %[tag], %%qpg30\n" \
+		"puttagqp %[value], %[tag], %%qpg31\n" \
+		: [value] "=&r" (__cl_qp_value) \
+		: [tag] "ri" ((u32) ETAGEWQP) \
+		: "%g16", "%g17", "%g18", "%g19", "%g20", "%g21", "%g22", "%g23", \
+		  "%g24", "%g25", "%g26", "%g27", "%g28", "%g29", "%g30", "%g31"); \
+} while (0)
+#else
+# define CLEAR_GLOBAL_QP_GREGS() \
+do { \
+	u64 __cl_qp_value; \
+	__no_asm_inline(8) \
+	asm (	".push_iset 5\n" \
+		"{nop 3\n" \
+		" qppackdl,sm 0, 0, %[value]}\n" \
+		"{puttagqp %[value], %[tag], %%dg0\n" \
+		" puttagqp %[value], %[tag], %%dg1\n" \
+		" puttagqp %[value], %[tag], %%dg2\n" \
+		" puttagqp %[value], %[tag], %%dg3}\n" \
+		"{puttagqp %[value], %[tag], %%dg4\n" \
+		" puttagqp %[value], %[tag], %%dg5\n" \
+		" puttagqp %[value], %[tag], %%dg6\n" \
+		" puttagqp %[value], %[tag], %%dg7}\n" \
+		"{puttagqp %[value], %[tag], %%dg8\n" \
+		" puttagqp %[value], %[tag], %%dg9\n" \
+		" puttagqp %[value], %[tag], %%dg10\n" \
+		" puttagqp %[value], %[tag], %%dg11}\n" \
+		"{puttagqp %[value], %[tag], %%dg12\n" \
+		" puttagqp %[value], %[tag], %%dg13\n" \
+		" puttagqp %[value], %[tag], %%dg14\n" \
+		" puttagqp %[value], %[tag], %%dg15}\n" \
+		".pop_iset\n" \
+		: [value] "=&r" (__cl_qp_value) \
+		: [tag] "ri" ((u32) ETAGEWQP) \
+		: "%g0", "%g1", "%g2", "%g3", "%g4", "%g5", "%g6", "%g7", \
+		  "%g8", "%g9", "%g10", "%g11", "%g12", "%g13", "%g14", "%g15"); \
+} while (0)
+
+# define CLEAR_LOCAL_QP_GREGS() \
+do { \
+	u64 __cl_qp_value; \
+	__no_asm_inline(8) \
+	asm (	".push_iset 5\n" \
+		"{nop 3\n" \
+		" qppackdl,sm 0, 0, %[value]}\n" \
+		"{puttagqp %[value], %[tag], %%dg16\n" \
+		" puttagqp %[value], %[tag], %%dg17\n" \
+		" puttagqp %[value], %[tag], %%dg18\n" \
+		" puttagqp %[value], %[tag], %%dg19}\n" \
+		"{puttagqp %[value], %[tag], %%dg20\n" \
+		" puttagqp %[value], %[tag], %%dg21\n " \
+		" puttagqp %[value], %[tag], %%dg22\n" \
+		" puttagqp %[value], %[tag], %%dg23}\n" \
+		"{puttagqp %[value], %[tag], %%dg24\n" \
+		" puttagqp %[value], %[tag], %%dg25\n" \
+		" puttagqp %[value], %[tag], %%dg26\n" \
+		" puttagqp %[value], %[tag], %%dg27}\n" \
+		"{puttagqp %[value], %[tag], %%dg28\n" \
+		" puttagqp %[value], %[tag], %%dg29\n" \
+		" puttagqp %[value], %[tag], %%dg30\n" \
+		" puttagqp %[value], %[tag], %%dg31}\n" \
+		".pop_iset\n" \
+		: [value] "=&r" (__cl_qp_value) \
+		: [tag] "ri" ((u32) ETAGEWQP) \
+		: "%g16", "%g17", "%g18", "%g19", "%g20", "%g21", "%g22", "%g23", \
+		  "%g24", "%g25", "%g26", "%g27", "%g28", "%g29", "%g30", "%g31"); \
+} while (0)
+#endif
+
+#define CLEAR_GLOBAL_Q_GREGS() \
+do { \
+	u64 __cl_q_unused; \
+	asm (	"puttagd 0, %[tag], %%dg0\n" \
+		"puttagd 0, %[tag], %%dg1\n" \
+		"puttagd 0, %[tag], %%dg2\n" \
+		"puttagd 0, %[tag], %%dg3\n" \
+		"puttagd 0, %[tag], %%dg4\n" \
+		"puttagd 0, %[tag], %%dg5\n" \
+		"puttagd 0, %[tag], %%dg6\n" \
+		"puttagd 0, %[tag], %%dg7\n" \
+		"puttagd 0, %[tag], %%dg8\n" \
+		"puttagd 0, %[tag], %%dg9\n" \
+		"puttagd 0, %[tag], %%dg10\n" \
+		"puttagd 0, %[tag], %%dg11\n" \
+		"puttagd 0, %[tag], %%dg12\n" \
+		"puttagd 0, %[tag], %%dg13\n" \
+		"puttagd 0, %[tag], %%dg14\n" \
+		"puttagd 0, %[tag], %%dg15\n" \
+		: "=r" (__cl_q_unused) \
+		: [tag] "ri" ((u32) ETAGEWD) \
+		: "%g0", "%g1", "%g2", "%g3", "%g4", "%g5", "%g6", "%g7", \
+		  "%g8", "%g9", "%g10", "%g11", "%g12", "%g13", "%g14", "%g15"); \
+} while (0)
+
+#define CLEAR_LOCAL_Q_GREGS() \
+do { \
+	u64 __cl_q_unused; \
+	asm (	"puttagd 0, %[tag], %%dg16\n" \
+		"puttagd 0, %[tag], %%dg17\n" \
+		"puttagd 0, %[tag], %%dg18\n" \
+		"puttagd 0, %[tag], %%dg19\n" \
+		"puttagd 0, %[tag], %%dg20\n" \
+		"puttagd 0, %[tag], %%dg21\n" \
+		"puttagd 0, %[tag], %%dg22\n" \
+		"puttagd 0, %[tag], %%dg23\n" \
+		"puttagd 0, %[tag], %%dg24\n" \
+		"puttagd 0, %[tag], %%dg25\n" \
+		"puttagd 0, %[tag], %%dg26\n" \
+		"puttagd 0, %[tag], %%dg27\n" \
+		"puttagd 0, %[tag], %%dg28\n" \
+		"puttagd 0, %[tag], %%dg29\n" \
+		"puttagd 0, %[tag], %%dg30\n" \
+		"puttagd 0, %[tag], %%dg31\n" \
+		: "=r" (__cl_q_unused) \
+		: [tag] "ri" ((u32) ETAGEWD) \
+		: "%g16", "%g17", "%g18", "%g19", "%g20", "%g21", "%g22", "%g23", \
+		  "%g24", "%g25", "%g26", "%g27", "%g28", "%g29", "%g30", "%g31"); \
+} while (0)
+
+#define NATIVE_SET_GREGS_EMPTY(global, local) \
+do { \
+	if (cpu_has(CPU_FEAT_QPREG)) { \
+		if (global) \
+			CLEAR_GLOBAL_QP_GREGS(); \
+		if (local) \
+			CLEAR_LOCAL_QP_GREGS(); \
+	} else { \
+		if (global) \
+			CLEAR_GLOBAL_Q_GREGS(); \
+		if (local) \
+			CLEAR_LOCAL_Q_GREGS(); \
+	} \
 } while (0)
 
 /*
@@ -792,433 +1031,514 @@ do { \
 		: "%ctpr3", "%pred2", "memory");			\
 })
 
+#define	E2K_GET_GREG_FROM_THREAD(_g_u, _gt_u, _base) \
+do { \
+	u64 reg0, reg1, reg2, reg3; \
+ \
+	asm ( \
+		"ldrd,2 [%[base] + %[opc_0]], %[val_lo]\n" \
+		"ldrd,5 [%[base] + %[opc_16]], %[val_hi]\n" \
+ \
+		"gettagd,2 %[val_lo], %[tag_lo]\n" \
+		"gettagd,5 %[val_hi], %[tag_hi]\n" \
+		"shls %[tag_hi], 8, %[tag_hi]\n" \
+		"ors %[tag_lo], %[tag_hi], %[tag_lo]\n" \
+		"sth [%[gt_u], 0], %[tag_lo]\n" \
+ \
+		"puttagd,2 %[val_lo], 0, %[val_lo]\n" \
+		"puttagd,5 %[val_hi], 0, %[val_hi]\n" \
+ \
+		"std [%[g_u], 0], %[val_lo]\n" \
+		"std [%[g_u], 8], %[val_hi]\n" \
+		: [val_lo] "=&r"(reg0), [val_hi] "=&r"(reg1), \
+		  [tag_lo] "=&r"(reg2), [tag_hi] "=&r"(reg3) \
+		: [g_u] "r"(_g_u), [gt_u] "r"(_gt_u), [base] "r"(_base), \
+		  [opc_0] "i" (TAGGED_MEM_LOAD_REC_OPC), \
+		  [opc_16] "i" (TAGGED_MEM_LOAD_REC_OPC | 16UL) \
+		: "%ctpr3", "memory"); \
+} while (0)
+
+#define	E2K_SET_GREGS_TO_THREAD(_base, _g_u, _gt_u)			\
+({									\
+	u64 reg0, reg1, reg2, reg3, reg6, reg7, reg8;			\
+									\
+	asm (								\
+		"addd 0, 0x0, %[r6]\n"					\
+		"addd 0, 0x0, %[r7]\n"					\
+		"addd %[base], 0x0, %[r8]\n"				\
+									\
+		"2:\n"							\
+		"ldd [%[g_u], %[r6]], %[val_lo]\n"			\
+		"addd %[r6], 8, %[r6]\n"				\
+		"ldd [%[g_u], %[r6]], %[val_hi]\n"			\
+		"addd %[r6], 8, %[r6]\n"				\
+									\
+		"ldb [%[gt_u], %[r7]], %[tag_lo]\n"			\
+		"addd %[r7], 1, %[r7]\n"				\
+		"ldb [%[gt_u], %[r7]], %[tag_hi]\n"			\
+		"addd %[r7], 1, %[r7]\n"				\
+									\
+		"puttagd,2 %[val_lo], %[tag_lo], %[val_lo]\n"		\
+		"puttagd,5 %[val_hi], %[tag_hi], %[val_hi]\n"		\
+									\
+		"strd,2 [%[r8] + %[opc_0]], %[val_lo]\n"		\
+		"strd,5 [%[r8] + %[opc_16]], %[val_hi]\n"		\
+		"addd %[r8], 32, %[r8]\n"				\
+									\
+		"disp %%ctpr3, 2b\n"					\
+									\
+		"cmpedb %[r7], 32, %%pred2\n"				\
+		"ct %%ctpr3 ? ~ %%pred2\n"				\
+									\
+		: [val_lo] "=&r"(reg0), [val_hi] "=&r"(reg1),		\
+		  [tag_lo] "=&r"(reg2), [tag_hi] "=&r"(reg3),		\
+		  [r6] "=&r"(reg6), [r7] "=&r"(reg7), [r8] "=&r"(reg8)	\
+		: [base] "r"(_base), [g_u] "r"(_g_u), [gt_u] "r"(_gt_u),\
+		  [opc_0] "i" (TAGGED_MEM_STORE_REC_OPC),		\
+		  [opc_16] "i" (TAGGED_MEM_STORE_REC_OPC | 16UL)	\
+		: "%ctpr3", "%pred2", "memory");			\
+})
+
 #define	E2K_MOVE_DGREG_TO_DREG(greg_no, local_reg)			\
 do {									\
-	_Pragma("no_asm_inline") _Pragma("asm_length(1)")		\
+	__no_asm_inline(1) \
 	asm volatile ("movtd \t%%dg" #greg_no ", %0"			\
 			: "=&r" (local_reg));				\
 } while (0)
 
 #define	E2K_MOVE_DREG_TO_DGREG(greg_no, local_reg)			\
 do {									\
-	_Pragma("no_asm_inline") _Pragma("asm_length(1)")		\
+	__no_asm_inline(1) \
 	asm volatile ("movtd \t%0, %%dg" #greg_no			\
 			:						\
-			: "r" ((__e2k_u64_t) (local_reg)));		\
+			: "r" ((u64) (local_reg)));		\
 } while (0)
 
 /*
- * bug #97048
+ * We have following macros for registers reading/writing:
  *
- * We have following macros for registers reading/writing
- * depending on whether lcc supports the register in question:
+ * NATIVE_GET_[DS]REG_OPEN() - read register supported by compiler
+ * NATIVE_GET_[DS]REG_CLOSED() - read register
  *
- * NATIVE_GET_[D]SREG_OPEN() - read supported register
- * NATIVE_GET_[D]SREG_CLOSED() - read unsupported register
- *
- * NATIVE_SET_[D]SREG_OPEN() - write supported register
- * NATIVE_SET_[D]SREG_OPEN_NOIRQ() - write supported register when
- *     it must be done under closed interrupts (for psp.hi/pcsp.hi/cr/cutd)
- * NATIVE_SET_[D]SREG_CLOSED_NOEXC() - write unsupported register when
- *     it is _not_ listed in exceptions list in 1.1.1 1) of "Scheduling"
- * NATIVE_SET_[D]SREG_CLOSED_EXC() - write unsupported register when
- *     it _is_ listed in exceptions list in 1.1.1 1) of "Scheduling"
+ * NATIVE_SET_[DS]REG_NOEXC() - write register when it is
+ *	_not_ listed in exceptions list in 1.1.1 1) of "Scheduling"
+ * NATIVE_SET_[DS]REG_EXC() - write register when it _is_
+ *	listed in exceptions list in 1.1.1 1) of "Scheduling"
  */
 
-
-# define NATIVE_GET_SREG_OPEN(reg_mnemonic) \
+#define NATIVE_GET_REG_OPEN(reg, type, size_letter) \
 ({ \
-	register __e2k_u32_t res; \
-	asm ( \
-		"rrs %%" #reg_mnemonic ", %0" \
-		: "=r" (res)); \
-	res; \
+	type _res; \
+	asm ("rr" #size_letter " %%" #reg ", %0" : "=r" (_res)); \
+	_res; \
 })
+/* Read register supported by compiler (see -masm-inline) */
+#define NATIVE_GET_SREG_OPEN(reg) NATIVE_GET_REG_OPEN(reg, u32, s)
+/* Read register supported by compiler (see -masm-inline) */
+#define NATIVE_GET_DREG_OPEN(reg) NATIVE_GET_REG_OPEN(reg, u64, d)
 
-
-# define NATIVE_GET_DSREG_OPEN(reg_mnemonic) \
-({ \
-	register __e2k_u64_t res; \
-	asm ( \
-		"rrd %%" #reg_mnemonic ", %0" \
-		: "=r" (res)); \
-	res; \
-})
-
-# define NATIVE_SET_SREG_OPEN(reg_mnemonic, val) \
-({ \
-	/* Fake return value is needed for lcc to optimize inline asm... */ \
-	register __e2k_u32_t res; \
-	asm ( \
-		"rws %1, %%" #reg_mnemonic \
-		: "=r" (res) \
-		: "ri" ((__e2k_u32_t) (val))); \
-})
-
-# define NATIVE_SET_DSREG_OPEN(reg_mnemonic, val) \
-({ \
-	/* Fake return value is needed for lcc to optimize inline asm... */ \
-	register __e2k_u64_t res; \
-	asm ( \
-		"rwd %1, %%" #reg_mnemonic \
-		: "=r" (res) \
-		: "ri" ((__e2k_u64_t) (val))); \
-})
-
-# define NATIVE_SET_SREG_WAIT(reg_mnemonic, _val, clobbers...) \
-do { \
-	asm volatile (	"{rws %[val], %%" #reg_mnemonic "}" \
-			"{wait all_e=1}" \
-			: \
-			: [val] "ri" ((u32) (_val)) \
-			: clobbers); \
-} while (0)
-
-# define NATIVE_SET_DSREG_WAIT(reg_mnemonic, _val, clobbers...) \
-do { \
-	asm volatile (	"{rwd %[val], %%" #reg_mnemonic "}" \
-			"{wait all_e=1}" \
-			: \
-			: [val] "ri" ((u64) (_val)) \
-			: clobbers); \
-} while (0)
-
-# define NATIVE_SET_DSREGS_WAIT(reg1, reg2, _val1, _val2, clobbers...) \
-do { \
-	asm volatile (	"{rwd %[val1], %%" #reg1 "}" \
-			"{rwd %[val2], %%" #reg2 "}" \
-			"{wait all_e=1}" \
-			: \
-			: [val1] "ri" ((u64) (_val1)), \
-			[val2] "ri" ((u64) (_val2)) \
-			: clobbers); \
-} while (0)
 
 /*
- * *_NOIRQ version is for psp.hi/pcsp.hi/cr/cutd
- *
- * Rules for writing:
- * 1) There must be NO exceptions and interrupts
- * 2) As a consequence of 1), instructions that are placed _later_
- * than "rw" should not generate exceptions too because compiler
- * can reorder them before the "rw" instruction.
- *
- * IOW in the whole area covered by all_irq_save()/all_irq_restore()
- * there must not be any exception-generating instructions.
- */
-
-#define NATIVE_SET_DSREG_OPEN_NOIRQ(reg_mnemonic, val) \
-({ \
-	register __e2k_u64_t res; \
-	asm ( \
-		"rwd %1, %%" #reg_mnemonic \
-		: "=r" (res) \
-		: "ri" ((__e2k_u64_t) (val))); \
-})
-
-
-/* Here to avoid include hell */
-#define NATIVE_NV_READ_UPSR_REG_VALUE() NATIVE_GET_DSREG_OPEN(upsr)
-
-/*
- * bug #97048
- * Closed GNU asm is used for rarely read registers.
  * Keep "volatile" since some of those registers can have side effects
  * (for example, see %dibsr reading in arch/e2k/kernel/perf_event.c -
  * it must be done before reading %dimar; or look at %clkr).
  */
-#define NATIVE_GET_SREG_CLOSED_ISET(iset, reg_mnemonic) \
+#define NATIVE_GET_REG_CLOSED(iset, reg, type, size_letter, clobbers...) \
 ({ \
-	register __e2k_u32_t res; \
-	_Pragma("no_asm_inline") _Pragma("asm_length(1)") \
-	asm volatile (	\
-		".push_iset " #iset "\n" \
-		"rrs %%" #reg_mnemonic ", %0 \n" \
-		".pop_iset\n"	\
-	     : "=r" (res)); \
-	res; \
-})
-#define NATIVE_GET_SREG_CLOSED(reg_mnemonic)	\
-	NATIVE_GET_SREG_CLOSED_ISET(3, reg_mnemonic)
-
-
-#define NATIVE_GET_DSREG_CLOSED_ISET(iset, reg_mnemonic) \
-({ \
-	register __e2k_u64_t res; \
-	_Pragma("no_asm_inline") _Pragma("asm_length(1)") \
+	register type _res; \
+	__no_asm_inline(1) \
 	asm volatile ( \
 		".push_iset " #iset "\n" \
-		"rrd %%" #reg_mnemonic ", %0 \n" \
-		".pop_iset\n"	\
-	     : "=r" (res)); \
-	res; \
-})
-#define NATIVE_GET_DSREG_CLOSED(reg_mnemonic) \
-	NATIVE_GET_DSREG_CLOSED_ISET(3, reg_mnemonic)
-
-#define NATIVE_GET_DSREG_CLOSED_CLOBBERS_ISET(iset, reg_mnemonic, clobbers) \
-({ \
-	register __e2k_u64_t res; \
-	_Pragma("no_asm_inline") _Pragma("asm_length(1)") \
-	asm volatile ( \
-		".push_iset " #iset "\n" \
-		"rrd %%" #reg_mnemonic ", %0 \n" \
-		".pop_iset\n"	\
-	     : "=r" (res) :: clobbers); \
-	res; \
-})
-#define NATIVE_GET_DSREG_CLOSED_CLOBBERS(reg_mnemonic, clobbers) \
-	NATIVE_GET_DSREG_CLOSED_CLOBBERS_ISET(3, reg_mnemonic, clobbers)
-
-#define NATIVE_RRSH_DSREG_CLOSED_ISET(iset, reg_mnemonic) \
-({ \
-	register __e2k_u64_t res; \
-	_Pragma("no_asm_inline") _Pragma("asm_length(1)") \
-	asm volatile ( \
-		".push_iset " #iset "\n" \
-		"rrshd %%" #reg_mnemonic ", %0\n" \
+		"rr" #size_letter " %%" #reg ", %[res]\n" \
 		".pop_iset\n" \
-		: "=r" (res)); \
-	res; \
-})
-#define NATIVE_RRSH_DSREG_CLOSED(reg_mnemonic) \
-	NATIVE_RRSH_DSREG_CLOSED_ISET(7, reg_mnemonic)
-
-#define NATIVE_RWSH_DSREG_CLOSED_ISET(iset, reg_mnemonic, val) \
-do { \
-	_Pragma("no_asm_inline") _Pragma("asm_length(1)") \
-	asm volatile ( \
-		".push_iset " #iset "\n" \
-		"rwshd %0, %%" #reg_mnemonic "\n" \
-		".pop_iset\n" \
+		: [res] "=r" (_res) \
 		: \
-		: "ri" ((u64) (val))); \
-} while (0)
-#define NATIVE_RWSH_DSREG_CLOSED(reg_mnemonic) \
-	NATIVE_RWSH_DSREG_CLOSED_ISET(7, reg_mnemonic)
+		: clobbers); \
+	_res; \
+})
+#define NATIVE_GET_SREG_CLOSED_ISET(iset, reg, clobbers...) \
+	NATIVE_GET_REG_CLOSED(iset, reg, u32, s ,##clobbers)
+#define NATIVE_GET_DREG_CLOSED_ISET(iset, reg, clobbers...) \
+	NATIVE_GET_REG_CLOSED(iset, reg, u64, d ,##clobbers)
+#define NATIVE_GET_SREG_CLOSED(reg, clobbers...) \
+	NATIVE_GET_SREG_CLOSED_ISET(3, reg ,##clobbers)
+#define NATIVE_GET_DREG_CLOSED(reg, clobbers...) \
+	NATIVE_GET_DREG_CLOSED_ISET(3, reg ,##clobbers)
+
 
 /*
- * These macros will insert real wide instructions
- * instead of doing all nops with "nop x" field in HS.
- * This is needed, for example, when writing %wd.
- */
-#define NOP_0_MINUS_4 0
-#define NOP_1_MINUS_4 0
-#define NOP_2_MINUS_4 0
-#define NOP_3_MINUS_4 0
-#define NOP_4_MINUS_4 0
-#define NOP_5_MINUS_4 1
-#define NOP_6_MINUS_4 2
-#define NOP_7_MINUS_4 3
-#define NOP_8_MINUS_4 4
-
-/*
- * bugs #97048, #146751
- *
- * For closed writes we have to manually check how many NOPs are needed
- * for this register. If we try to use _Pragma("no_asm_inline"), then
- * lcc will use its default value of 5 nops which is not always enough.
- *
- * Also, according to "Scheduling 1.1.1", the next 3 long instructions
+ * According to "Scheduling 1.1.1", the next 3 long instructions
  * after the write must not generate delayed exceptions, and the next
- * 4 long instruction must not generate exact exceptions. So add 4 nops
+ * 4 long instruction must not generate exact exceptions. So add nops
  * after the write.
  *
  * This is slow but this version is used only for rarely written registers.
  * %usd/%psp/etc registers are supported by lcc and are written with an
  * open GNU asm.
  */
-#define NATIVE_SET_SREG_CLOSED_NOEXC_ISET(iset, reg_mnemonic, val, nop_before_v7, nop_since_v7) \
+
+#define NATIVE_SET_REG_NOEXC(iset, reg, _val, type, size_letter, clobbers...) \
 do { \
-	ASM_LENGTH_ADD_V6_V7(nop_before_v7, nop_since_v7, 1) \
-	asm volatile (ALTERNATIVE_1_ALTINSTR \
-		      /* CPU_FEAT_ISET_NOT_V7 version */ \
-			".push_iset " #iset "\n" \
-			"{nop " __stringify(NOP_##nop_before_v7##_MINUS_4) "\n" \
-			" rws %0, %%" #reg_mnemonic "}\n" \
-			".pop_iset \n"	\
-		      ALTERNATIVE_2_OLDINSTR \
-		      /* Default version */ \
-			".push_iset " #iset "\n" \
-			"{nop " __stringify(NOP_##nop_since_v7##_MINUS_4) "\n" \
-			" rws %0, %%" #reg_mnemonic "}\n" \
-			".pop_iset \n"	\
-		      ALTERNATIVE_3_FEATURE(%[cpu_feat_iset_not_v7]) \
-		      "{nop} {nop} {nop} {nop}" \
+	__no_asm_inline(5) \
+	asm volatile (".push_iset " #iset "\n" \
+		      "{rw" #size_letter " %[val], %%" #reg "}\n" \
+		      ".pop_iset\n" \
+		      "{nop} {nop} {nop}" \
+		      "{wait all_e=1}" \
 		      : \
-		      : "ri" ((u32) (val)), \
-			[cpu_feat_iset_not_v7] "i" (CPU_FEAT_ISET_NOT_V7)); \
-} while (0)
-#define NATIVE_SET_SREG_CLOSED_NOEXC(reg_mnemonic, val, nop_before_v7, nop_since_v7) \
-	NATIVE_SET_SREG_CLOSED_NOEXC_ISET(3, reg_mnemonic, val, nop_before_v7, nop_since_v7)
-
-#define NATIVE_SET_DSREG_CLOSED_NOEXC_ISET(iset, reg_mnemonic, val, nop_before_v7, nop_since_v7) \
-do { \
-	ASM_LENGTH_ADD_V6_V7(nop_before_v7, nop_since_v7, 1) \
-	asm volatile (ALTERNATIVE_1_ALTINSTR \
-		      /* CPU_FEAT_ISET_NOT_V7 version */ \
-			".push_iset " #iset "\n" \
-			"{nop " __stringify(NOP_##nop_before_v7##_MINUS_4) "\n" \
-			" rwd %0, %%" #reg_mnemonic "}\n" \
-			".pop_iset \n"	\
-		      ALTERNATIVE_2_OLDINSTR \
-		      /* Default version */ \
-			".push_iset " #iset "\n" \
-			"{nop " __stringify(NOP_##nop_since_v7##_MINUS_4) "\n" \
-			" rwd %0, %%" #reg_mnemonic "}\n" \
-			".pop_iset \n"	\
-		      ALTERNATIVE_3_FEATURE(%[cpu_feat_iset_not_v7]) \
-		      "{nop} {nop} {nop} {nop}" \
-		      : \
-		      : "ri" ((u64) (val)), \
-			[cpu_feat_iset_not_v7] "i" (CPU_FEAT_ISET_NOT_V7)); \
-} while (0)
-
-#define NATIVE_SET_DSREG_CLOSED_NOEXC(reg_mnemonic, val, nop_before_v7, nop_since_v7) \
-	NATIVE_SET_DSREG_CLOSED_NOEXC_ISET(3, reg_mnemonic, val, nop_before_v7, nop_since_v7)
-
-
-#ifdef CONFIG_KVM_GUEST_KERNEL
-/* Work around header dependency hell since paravirt guest
- * is not run under hardware hypervisor. */
-# define HAS_HWBUG_INTC_CR_WRITE() false
-#elif defined E2K_P2V
-# define HAS_HWBUG_INTC_CR_WRITE() (!boot_cpu_has(CPU_NO_HWBUG_INTC_CR_WRITE))
-#else
-# define HAS_HWBUG_INTC_CR_WRITE() (!cpu_has(CPU_NO_HWBUG_INTC_CR_WRITE))
-#endif
-#define NATIVE_SET_CR_CLOSED_NOEXC(reg_mnemonic, val) \
-do { \
-	if (HAS_HWBUG_INTC_CR_WRITE()) { \
-		/* Add ctpr3 clobber to avoid writing \
-		 * CRs between `return` and `ct` */ \
-		_Pragma("asm_length(8)") \
-		asm volatile ("{wait ma_c=1\n" \
-			      " rwd %0, %%" #reg_mnemonic "}" \
-			      "{wait all_e=1}" \
-			      : \
-			      : "ri" ((__e2k_u64_t) (val)) \
-			      : "ctpr3"); \
-	} else { \
-		NATIVE_SET_DSREG_OPEN_NOIRQ(reg_mnemonic, val); \
-	} \
-} while (0)
-
-#define NATIVE_SET_DSREGS_CLOSED_NOEXC_ISET(iset, reg_mnemonic_lo, reg_mnemonic_hi, \
-				       _val_lo, _val_hi, nop_before_v7, nop_since_v7) \
-do { \
-	ASM_LENGTH_ADD_V6_V7(nop_before_v7, nop_since_v7, 2) \
-	asm volatile (	\
-			".push_iset " #iset "\n" \
-			"rwd %[val_lo], %%" #reg_mnemonic_lo  "\n"\
-			".pop_iset \n"	\
-		      ALTERNATIVE_1_ALTINSTR \
-		      /* CPU_FEAT_ISET_NOT_V7 version */ \
-			".push_iset " #iset "\n" \
-			"{nop " __stringify(NOP_##nop_before_v7##_MINUS_4) "\n" \
-			" rwd %[val_hi], %%" #reg_mnemonic_hi "}\n" \
-			".pop_iset \n"  \
-		      ALTERNATIVE_2_OLDINSTR \
-		      /* Default version */ \
-			".push_iset " #iset "\n" \
-			"{nop " __stringify(NOP_##nop_since_v7##_MINUS_4) "\n" \
-			" rwd %[val_hi], %%" #reg_mnemonic_hi "}\n" \
-			".pop_iset \n"  \
-		      ALTERNATIVE_3_FEATURE(%[cpu_feat_iset_not_v7]) \
-		      "{nop} {nop} {nop} {nop}" \
-		      : \
-		      : [val_lo] "ri" ((u64) (_val_lo)), \
-			[val_hi] "ri" ((u64) (_val_hi)), \
-			[cpu_feat_iset_not_v7] "i" (CPU_FEAT_ISET_NOT_V7)); \
-} while (0)
-#define NATIVE_SET_DSREGS_CLOSED_NOEXC(reg_mnemonic_lo, reg_mnemonic_hi, \
-				       _val_lo, _val_hi, nop_before_v7, nop_since_v7) \
-	NATIVE_SET_DSREGS_CLOSED_NOEXC_ISET(3, reg_mnemonic_lo, reg_mnemonic_hi, \
-				       _val_lo, _val_hi, nop_before_v7, nop_since_v7)
-
-/*
- * For some registers (see "Scheduling 1.1.1") there is no requirement
- * of avoiding deferred and exact exception after the long instruction.
- * But some registers (e.g. %wd, %bgr) still require at least 1 real
- * instruction after the write.
- */
-#define NATIVE_SET_SREG_CLOSED_EXC_ISET(iset, reg_mnemonic, val, nop_before_v7, nop_since_v7) \
-do { \
-	ASM_LENGTH_ADD_V6_V7(nop_before_v7, nop_since_v7, 1) \
-	asm volatile (ALTERNATIVE_1_ALTINSTR \
-		      /* CPU_FEAT_ISET_NOT_V7 version */ \
-			".push_iset " #iset "\n" \
-			"{nop " __stringify(nop_before_v7) "\n" \
-			" rws %0, %%" #reg_mnemonic "}\n" \
-			".pop_iset \n"  \
-		      ALTERNATIVE_2_OLDINSTR \
-		      /* Default version */ \
-			".push_iset " #iset "\n" \
-			"{nop " __stringify(nop_since_v7) "\n" \
-			" rws %0, %%" #reg_mnemonic "}\n" \
-			".pop_iset \n"  \
-		      ALTERNATIVE_3_FEATURE(%[cpu_feat_iset_not_v7]) \
-		      : \
-		      : "ri" ((u32) (val)), \
-			[cpu_feat_iset_not_v7] "i" (CPU_FEAT_ISET_NOT_V7)); \
-} while (0)
-#define NATIVE_SET_SREG_CLOSED_EXC(reg_mnemonic, val, nop_before_v7, nop_since_v7) \
-	NATIVE_SET_SREG_CLOSED_EXC_ISET(3, reg_mnemonic, val, nop_before_v7, nop_since_v7)
-
-#define NATIVE_SET_DSREG_CLOSED_EXC_ISET(iset, reg_mnemonic, val, nop_before_v7, nop_since_v7) \
-do { \
-	ASM_LENGTH_ADD_V6_V7(nop_before_v7, nop_since_v7, 1) \
-	asm volatile (ALTERNATIVE_1_ALTINSTR \
-		      /* CPU_FEAT_ISET_NOT_V7 version */ \
-			".push_iset " #iset "\n" \
-			"{nop " __stringify(nop_before_v7) "\n" \
-			" rwd %0, %%" #reg_mnemonic "}\n" \
-			".pop_iset \n"  \
-		      ALTERNATIVE_2_OLDINSTR \
-		      /* Default version */ \
-			".push_iset " #iset "\n" \
-			"{nop " __stringify(nop_since_v7) "\n" \
-			" rwd %0, %%" #reg_mnemonic "}\n" \
-			".pop_iset \n"  \
-		      ALTERNATIVE_3_FEATURE(%[cpu_feat_iset_not_v7]) \
-		      : \
-		      : "ri" ((u64) (val)), \
-			[cpu_feat_iset_not_v7] "i" (CPU_FEAT_ISET_NOT_V7)); \
-} while (0)
-#define NATIVE_SET_DSREG_CLOSED_EXC(reg_mnemonic, val, nop_before_v7, nop_since_v7) \
-	NATIVE_SET_DSREG_CLOSED_EXC_ISET(3, reg_mnemonic, val, nop_before_v7, nop_since_v7)
-
-#define NATIVE_SET_DSREG_CLOSED_EXC_CLOBBERS_ISET(iset, reg_mnemonic, val, clobbers, \
-					     nop_before_v7, nop_since_v7) \
-do { \
-	ASM_LENGTH_ADD_V6_V7(nop_before_v7, nop_since_v7, 1) \
-	asm volatile (ALTERNATIVE_1_ALTINSTR \
-		      /* CPU_FEAT_ISET_NOT_V7 version */ \
-			".push_iset " #iset "\n" \
-			"{nop " __stringify(nop_before_v7) "\n" \
-			" rwd %0, %%" #reg_mnemonic "}\n" \
-			".pop_iset \n"  \
-		      ALTERNATIVE_2_OLDINSTR \
-		      /* Default version */ \
-			".push_iset " #iset "\n" \
-			"{nop " __stringify(nop_since_v7) "\n" \
-			" rwd %0, %%" #reg_mnemonic "}\n" \
-			".pop_iset \n"  \
-		      ALTERNATIVE_3_FEATURE(%[cpu_feat_iset_not_v7]) \
-		      : \
-		      : "ri" ((u64) (val)), \
-			[cpu_feat_iset_not_v7] "i" (CPU_FEAT_ISET_NOT_V7) \
+		      : [val] "ri" ((type) (_val)) \
 		      : clobbers); \
 } while (0)
-#define NATIVE_SET_DSREG_CLOSED_EXC_CLOBBERS(reg_mnemonic, val, clobbers, \
-					     nop_before_v7, nop_since_v7) \
-NATIVE_SET_DSREG_CLOSED_EXC_CLOBBERS_ISET(3, reg_mnemonic, val, clobbers,\
-					  nop_before_v7, nop_since_v7)
+/* Write register under "Scheduling 1.1.1.1" rules */
+#define NATIVE_SET_SREG_NOEXC(iset, reg, val, clobbers...) \
+	NATIVE_SET_REG_NOEXC(iset, reg, (val), u32, s ,##clobbers)
+/* Write register under "Scheduling 1.1.1.1" rules */
+#define NATIVE_SET_DREG_NOEXC(iset, reg, val, clobbers...) \
+	NATIVE_SET_REG_NOEXC(iset, reg, (val), u64, d ,##clobbers)
+
+#define NATIVE_SET_VIRT_CTRL_CU(_val) \
+do { \
+	__no_asm_inline(5) \
+	asm volatile (".push_iset 6\n" \
+		      ALTERNATIVE( \
+		      /* Default version */ \
+			"{rwd %[val], %%virt_ctrl_cu}\n", \
+		      /* CPU_HWBUG_RW_VIRT_CTRL_CU version */ \
+			"{nop 1;" \
+			" rwd %[val], %%virt_ctrl_cu}\n", \
+		      %[cpu_hwbug_rw_virt_ctrl_cu]) \
+		      ".pop_iset\n" \
+		      "{nop} {nop} {nop}" \
+		      "{wait all_e=1}" \
+		      : \
+		      : [val] "ri" ((u64) (_val)), \
+			[cpu_hwbug_rw_virt_ctrl_cu] "i" (CPU_HWBUG_RW_VIRT_CTRL_CU)); \
+} while (0)
+
+#define NATIVE_SET_REGS_NOEXC(iset, reg1, reg2, _val1, _val2, type, size_letter) \
+do { \
+	__asm_length(6) \
+	asm volatile (".push_iset " #iset "\n" \
+		      "{rw" #size_letter " %[val1], %%" #reg1 "}\n"\
+		      "{rw" #size_letter " %[val2], %%" #reg2 "}\n"\
+		      ".pop_iset \n" \
+		      "{nop} {nop} {nop}" \
+		      "{wait all_e=1}\n" \
+		      : \
+		      : [val1] "ri" ((type) (_val1)), \
+			[val2] "ri" ((type) (_val2))); \
+} while (0)
+
+/* Write registers under "Scheduling 1.1.1.1" rules */
+#define NATIVE_SET_SREGS_NOEXC(iset, reg1, reg2, val1, val2) \
+	NATIVE_SET_REGS_NOEXC(iset, reg1, reg2, (val1), (val2), u32, s)
+
+/* Write registers under "Scheduling 1.1.1.1" rules */
+#define NATIVE_SET_DREGS_NOEXC(iset, reg1, reg2, val1, val2) \
+	NATIVE_SET_REGS_NOEXC(iset, reg1, reg2, (val1), (val2), u64, d)
+
+
+#define NATIVE_SET_REG_EXC(iset, reg, val, type, size_letter, clobbers...) \
+do { \
+	__asm_length(2) \
+	asm volatile (".push_iset " #iset "\n" \
+		      "{rw" #size_letter " %0, %%" #reg "}\n" \
+		      ".pop_iset \n"  \
+		      "{wait all_e=1}" \
+		      : \
+		      : "ri" ((type) (val)) \
+		      : clobbers); \
+} while (0)
+/* Write register without "Scheduling 1.1.1.1" rules */
+#define NATIVE_SET_SREG_EXC(iset, reg, val, clobbers...) \
+	NATIVE_SET_REG_EXC(iset, reg, (val), u32, s ,##clobbers)
+/* Write register without "Scheduling 1.1.1.1" rules */
+#define NATIVE_SET_DREG_EXC(iset, reg, val, clobbers...) \
+	NATIVE_SET_REG_EXC(iset, reg, (val), u64, d ,##clobbers)
+
+#define NATIVE_SET_REGS_EXC(iset, reg1, reg2, _val1, _val2, type, size_letter, clobbers...) \
+do { \
+	__asm_length(3) \
+	asm volatile (".push_iset " #iset "\n" \
+		      "{rw" #size_letter " %[val1], %%" #reg1 "}\n"\
+		      "{rw" #size_letter " %[val2], %%" #reg2 "}\n"\
+		      ".pop_iset \n" \
+		      "{wait all_e=1}\n" \
+		      : \
+		      : [val1] "ri" ((type) (_val1)), \
+			[val2] "ri" ((type) (_val2)) \
+		      : clobbers); \
+} while (0)
+/* Write registers without "Scheduling 1.1.1.1" rules */
+#define NATIVE_SET_SREGS_EXC(iset, reg1, reg2, val1, val2, clobbers...) \
+	NATIVE_SET_REGS_EXC(iset, reg1, reg2, (val1), (val2), u32, s ,##clobbers)
+/* Write registers without "Scheduling 1.1.1.1" rules */
+#define NATIVE_SET_DREGS_EXC(iset, reg1, reg2, val1, val2, clobbers...) \
+	NATIVE_SET_REGS_EXC(iset, reg1, reg2, (val1), (val2), u64, d ,##clobbers)
+
+#define NATIVE_SET_3_REGS_EXC(iset, reg1, reg2, reg3, _val1, _val2, _val3, \
+			      type, size_letter, clobbers...) \
+do { \
+	__asm_length(4) \
+	asm volatile (".push_iset " #iset "\n" \
+		      "{rw" #size_letter " %[val1], %%" #reg1 "}\n"\
+		      "{rw" #size_letter " %[val2], %%" #reg2 "}\n"\
+		      "{rw" #size_letter " %[val3], %%" #reg3 "}\n"\
+		      ".pop_iset \n"	\
+		      "{wait all_e=1}\n" \
+		      : \
+		      : [val1] "ri" ((type) (_val1)), \
+			[val2] "ri" ((type) (_val2)), \
+			[val3] "ri" ((type) (_val3)) \
+		      : clobbers); \
+} while (0)
+/* Write registers without "Scheduling 1.1.1.1" rules */
+#define NATIVE_SET_3_SREGS_EXC(iset, reg1, reg2, reg3, val1, val2, val3, clobbers...) \
+	NATIVE_SET_3_REGS_EXC(iset, reg1, reg2, reg3, (val1), (val2), (val3), u32, s ,##clobbers)
+/* Write registers without "Scheduling 1.1.1.1" rules */
+#define NATIVE_SET_3_DREGS_EXC(iset, reg1, reg2, reg3, val1, val2, val3, clobbers...) \
+	NATIVE_SET_3_REGS_EXC(iset, reg1, reg2, reg3, (val1), (val2), (val3), u64, d ,##clobbers)
+
+
+/* Here to avoid include hell */
+#define NATIVE_NV_READ_UPSR_REG_VALUE() NATIVE_GET_DREG_OPEN(upsr)
+
+
+/*
+ * Chain stack registers (%cr) require special handling
+ */
+
+#define NATIVE_SET_CR_CLOSED_NOEXC(reg, val) \
+do { \
+	/* Add ctpr3 clobber to avoid writing \
+	 * CRs between `return` and `ct` */ \
+	__no_asm_inline(6) \
+	asm volatile (	ALTERNATIVE( \
+			/* Default version */ \
+				"", \
+			/* CPU_HWBUG_CR_BEFORE_WRITES version */ \
+				"{wait ma_c=1}", \
+			%[cpu_hwbug_cr_before_writes]) \
+			ALTERNATIVE_2( \
+			/* Default version */ \
+				"{rwd %[value], %%" #reg "}", \
+			/* CPU_HWBUG_CR_EVERY_WRITE version */ \
+				"{wait ma_c=1;" \
+				" rwd %[value], %%" #reg "}", \
+			%[cpu_hwbug_cr_every_write], \
+			/* CPU_HWBUG_CR_FIRST_WRITE version */ \
+				"{wait ma_c=1;" \
+				" rwd %[value], %%" #reg "}", \
+			%[cpu_hwbug_cr_first_write]) \
+			"{nop} {nop} {nop}" \
+			"{wait all_e=1}" \
+			: \
+			: [value] "ri" ((u64) (val)), \
+			  [cpu_hwbug_cr_before_writes] "i" (CPU_HWBUG_CR_BEFORE_WRITES), \
+			  [cpu_hwbug_cr_every_write] "i" (CPU_HWBUG_CR_EVERY_WRITE), \
+			  [cpu_hwbug_cr_first_write] "i" (CPU_HWBUG_CR_FIRST_WRITE) \
+			: "ctpr3"); \
+} while (0)
+
+#define NATIVE_SET_Q_CR_CLOSED_NOEXC(reg_lo, reg_hi, val_lo, val_hi) \
+do { \
+	/* Add ctpr3 clobber to avoid writing \
+	 * CRs between `return` and `ct` */ \
+	__no_asm_inline(7) \
+	asm volatile (	ALTERNATIVE( \
+			/* Default version */ \
+				"", \
+			/* CPU_HWBUG_CR_BEFORE_WRITES version */ \
+				"{wait ma_c=1}", \
+			%[cpu_hwbug_cr_before_writes]) \
+			ALTERNATIVE_2( \
+			/* Default version */ \
+				"{rwd %[value_lo], %%" #reg_lo "}" \
+				"{rwd %[value_hi], %%" #reg_hi "}", \
+			/* CPU_HWBUG_CR_EVERY_WRITE version */ \
+				"{wait ma_c=1;" \
+				" rwd %[value_lo], %%" #reg_lo "}" \
+				"{wait ma_c=1;" \
+				" rwd %[value_hi], %%" #reg_hi "}", \
+			%[cpu_hwbug_cr_every_write], \
+			/* CPU_HWBUG_CR_FIRST_WRITE version */ \
+				"{wait ma_c=1;" \
+				" rwd %[value_lo], %%" #reg_lo "}" \
+				"{rwd %[value_hi], %%" #reg_hi "}", \
+			%[cpu_hwbug_cr_first_write]) \
+			"{nop} {nop} {nop}" \
+			"{wait all_e=1}" \
+			: \
+			: [value_lo] "ri" ((u64) (val_lo)), \
+			  [value_hi] "ri" ((u64) (val_hi)), \
+			  [cpu_hwbug_cr_before_writes] "i" (CPU_HWBUG_CR_BEFORE_WRITES), \
+			  [cpu_hwbug_cr_every_write] "i" (CPU_HWBUG_CR_EVERY_WRITE), \
+			  [cpu_hwbug_cr_first_write] "i" (CPU_HWBUG_CR_FIRST_WRITE) \
+			: "ctpr3"); \
+} while (0)
+
+
+/*
+ * RRSH/RWSH macros are for hypervisor saving and restoring of
+ * guest's registers that do have shadow
+ */
+
+#define RRSH_DREG(reg) \
+({ \
+	unsigned long __rd_flags; \
+	u64 __rd_res; \
+	u32 __rd_core_mode, __rd_tmp32; \
+	bool cpu_hwbug_rrsh_descr_v7 = cpu_has(CPU_HWBUG_RRSH_DESCR_V7); \
+ \
+	if (cpu_hwbug_rrsh_descr_v7) { \
+		/* Interrupt might access stack registers which \
+		 * won't work with temporary %core_mode value */ \
+		raw_all_irq_save(__rd_flags); \
+	} \
+ \
+	__no_asm_inline(1) \
+	asm volatile ( \
+		ALTERNATIVE( \
+		/* Default version */ \
+			"", \
+		/* CPU_HWBUG_RRSH_DESCR_V7 version */ \
+			".push_iset 7\n" \
+			"rrs %%sh_core_mode, %[tmp32]\n" \
+			".pop_iset\n" \
+			"rrs %%core_mode, %[core_mode]\n" \
+			/* Get %sh_core_mode.descr_v7 */ \
+			"getfs %[tmp32], 0x47, %[tmp32]\n" \
+			"insfs %[core_mode], 0x47, %[tmp32], %[tmp32]\n" \
+			"scls %[tmp32], 0x7, %[tmp32]\n" \
+			"rws %[tmp32], %%core_mode\n" \
+			"wait all_e=1\n", \
+		%[cpu_hwbug_rrsh_descr_v7]) \
+		ALTERNATIVE( \
+		/* Default version */ \
+			".push_iset 6\n" \
+			"rrd %%" #reg ", %[res]\n" \
+			".pop_iset\n", \
+		/* CPU_FEAT_V7_CPU_REGS version */ \
+			".push_iset 7\n" \
+			"rrshd %%" #reg ", %[res]\n" \
+			".pop_iset\n", \
+		%[cpu_feat_v7_cpu_regs]) \
+		ALTERNATIVE( \
+		/* Default version */ \
+			"", \
+		/* CPU_HWBUG_RRSH_DESCR_V7 version */ \
+			"rws %[core_mode], %%core_mode\n" \
+			"wait all_e=1\n", \
+		%[cpu_hwbug_rrsh_descr_v7]) \
+		: [res] "=&r" (__rd_res), [tmp32] "=&r" (__rd_tmp32), \
+		  [core_mode] "=&r" (__rd_core_mode) \
+		: [cpu_hwbug_rrsh_descr_v7] "i" (CPU_HWBUG_RRSH_DESCR_V7), \
+		  [cpu_feat_v7_cpu_regs] "i" (CPU_FEAT_V7_CPU_REGS)); \
+ \
+	if (cpu_hwbug_rrsh_descr_v7) { \
+		 raw_all_irq_restore(__rd_flags); \
+	} \
+ \
+	__rd_res; \
+})
+
+#define RWSH_DREG(reg, _val) \
+do { \
+	__no_asm_inline(2) \
+	asm volatile ( \
+		ALTERNATIVE( \
+		/* Default version */ \
+			".push_iset 6\n" \
+			"rwd %[val], %%" #reg "\n" \
+			".pop_iset\n", \
+		/* CPU_FEAT_V7_CPU_REGS version */ \
+			".push_iset 7\n" \
+			"rwshd %[val], %%" #reg "\n" \
+			".pop_iset\n", \
+		%[cpu_feat_v7_cpu_regs]) \
+		"wait all_e=1\n" \
+		: \
+		: [val] "ir" ((u64) (_val)), \
+		  [cpu_feat_v7_cpu_regs] "i" (CPU_FEAT_V7_CPU_REGS)); \
+} while (0)
+
+#define RWSH_DREGS(reg1, reg2, _val1, _val2) \
+do { \
+	__no_asm_inline(3) \
+	asm volatile ( \
+		ALTERNATIVE( \
+		/* Default version */ \
+			".push_iset 6\n" \
+			"rwd %[val1], %%" #reg1 "\n" \
+			"rwd %[val2], %%" #reg2 "\n" \
+			".pop_iset\n", \
+		/* CPU_FEAT_V7_CPU_REGS version */ \
+			".push_iset 7\n" \
+			"rwshd %[val1], %%" #reg1 "\n" \
+			"rwshd %[val2], %%" #reg2 "\n" \
+			".pop_iset\n", \
+		%[cpu_feat_v7_cpu_regs]) \
+		"wait all_e=1\n" \
+		: \
+		: [val1] "ir" ((u64) (_val1)), [val2] "ir" ((u64) (_val2)), \
+		  [cpu_feat_v7_cpu_regs] "i" (CPU_FEAT_V7_CPU_REGS)); \
+} while (0)
+
+#define RWSH_CTPR_NOIRQ(reg, ctpr) \
+do { \
+	u32 __rc_core_mode; \
+	u64 __rc_tmp1, __rc_tmp2; \
+	e2k_ctpr_t __rc_val = (ctpr); \
+ \
+	__no_asm_inline(3) \
+	asm volatile ( \
+		ALTERNATIVE( \
+		/* Default version */ \
+			"", \
+		/* CPU_HWBUG_RRSH_RWSH_CTPR version */ \
+			".push_iset 7\n" \
+			"rrs %%sh_core_mode, %[tmp1]\n" \
+			".pop_iset\n" \
+			"rrs %%core_mode, %[core_mode]\n" \
+			/* Get %sh_core_mode.descr_v7 */ \
+			"{ands %[core_mode], ~0x80, %[tmp2]\n" \
+			" getfzs %[tmp1], 0xe200, %[tmp1]}\n" \
+			"ors %[tmp1], %[tmp2], %[tmp1]\n" \
+			"rws %[tmp1], %%core_mode\n" \
+			"wait all_e=1\n", \
+		%[cpu_hwbug_rrsh_rwsh_ctpr]) \
+		ALTERNATIVE( \
+		/* Default version */ \
+			"rwd %[val_lo], %%" #reg "\n" \
+			"rwd %[val_hi], %%" #reg ".hi\n", \
+		/* CPU_FEAT_V7_CPU_REGS version */ \
+			".push_iset 7\n" \
+			"rwshd %[val_lo], %%" #reg "\n" \
+			"rwshd %[val_hi], %%" #reg ".hi\n" \
+			".pop_iset\n", \
+		%[cpu_feat_v7_cpu_regs]) \
+		"wait all_e=1\n" \
+		ALTERNATIVE( \
+		/* Default version */ \
+			"", \
+		/* CPU_HWBUG_RRSH_RWSH_CTPR version */ \
+			"rws %[core_mode], %%core_mode\n" \
+			"wait all_e=1\n", \
+		%[cpu_hwbug_rrsh_rwsh_ctpr]) \
+		"wait all_e=1\n" \
+		: [tmp1] "=&r" (__rc_tmp1), [tmp2] "=&r" (__rc_tmp2), \
+		  [core_mode] "=&r" (__rc_core_mode) \
+		: [val_lo] "ir" (__rc_val.lo), [val_hi] "ir" (__rc_val.hi), \
+		  [cpu_feat_v7_cpu_regs] "i" (CPU_FEAT_V7_CPU_REGS), \
+		  [cpu_hwbug_rrsh_rwsh_ctpr] "i" (CPU_HWBUG_RRSH_RWSH_CTPR) \
+		: #reg); \
+} while (0)
+
 
 #define NATIVE_GET_USFS() \
 ({ \
 	u64 __ngu_val; \
-	_Pragma("no_asm_inline") _Pragma("asm_length(2)") \
+	__no_asm_inline(2) \
 	asm (".push_iset 7\n" \
 	     "{ nop }\n" \
 	     "{ rrd %%usfs, %0 }\n" \
@@ -1234,16 +1554,28 @@ do { \
 	e2k_cr0_t __ehs_cr0 = (_cr0); \
 	e2k_cr1_t __ehs_cr1 = (_cr1); \
 	u64 __ehs_wd; \
-	_Pragma("asm_length(11)") \
+	__asm_length(11) \
 	asm volatile ("{rwd %[sbr], %%sbr}" \
 		      /* Must read %wd in asm (i.e. after `setwd`). \
 		       * Also serves as workaround for CPU_HWBUG_USD_ALIGNMENT */ \
 		      "{rrd %%wd, %[wd]}" \
 		      "{rwd %[usd_lo], %%usd.lo}" \
-		      "{rwd %[usd_hi], %%usd.hi;" \
-		      " insfd %[wd], %[insf_params], %[psize], %[wd]}" \
 		      ALTERNATIVE( \
 		      /* Default version */ \
+			"{rwd %[usd_hi], %%usd.hi;" \
+			" insfd %[wd], %[insf_params], %[psize], %[wd]}", \
+		      /* CPU_HWBUG_CR_BEFORE_WRITES version */ \
+			"{wait ma_c=1;" \
+			" rwd %[usd_hi], %%usd.hi;" \
+			" insfd %[wd], %[insf_params], %[psize], %[wd]}", \
+		      %[cpu_hwbug_cr_before_writes]) \
+		      ALTERNATIVE_2( \
+		      /* Default version */ \
+			"{rwd %[cr0_lo], %%cr0.lo}" \
+			"{rwd %[cr0_hi], %%cr0.hi}" \
+			"{rwd %[cr1_lo], %%cr1.lo}" \
+			"{rwd %[cr1_hi], %%cr1.hi}", \
+		      /* CPU_HWBUG_CR_EVERY_WRITE version */ \
 			"{wait ma_c=1;" \
 			" rwd %[cr0_lo], %%cr0.lo}" \
 			"{wait ma_c=1;" \
@@ -1252,12 +1584,14 @@ do { \
 			" rwd %[cr1_lo], %%cr1.lo}" \
 			"{wait ma_c=1;" \
 			" rwd %[cr1_hi], %%cr1.hi}", \
-		      /* CPU_NO_HWBUG_INTC_CR_WRITE version */ \
-			"{rwd %[cr0_lo], %%cr0.lo}" \
+		      %[cpu_hwbug_cr_every_write], \
+		      /* CPU_HWBUG_CR_FIRST_WRITE version */ \
+			"{wait ma_c=1;" \
+			" rwd %[cr0_lo], %%cr0.lo}" \
 			"{rwd %[cr0_hi], %%cr0.hi}" \
 			"{rwd %[cr1_lo], %%cr1.lo}" \
 			"{rwd %[cr1_hi], %%cr1.hi}", \
-		      %[cpu_no_hwbug_intc_cr_write]) \
+		      %[cpu_hwbug_cr_first_write]) \
 		      "{rws %[upsr], %%upsr;" \
 		      " scld %[wd], 32, %[wd]}" \
 		      /* %wd write must be last since RF is not \
@@ -1276,7 +1610,85 @@ do { \
 			[psize] "ri" ((u64) (_psize)), \
 			[insf_params] "i" (32 /*shift*/ | (11 /*size*/ << 6) | \
 					   (1 /*me3hi*/ << 15)), \
-			[cpu_no_hwbug_intc_cr_write] "i" (CPU_NO_HWBUG_INTC_CR_WRITE)); \
+			[cpu_hwbug_cr_before_writes] "i" (CPU_HWBUG_CR_BEFORE_WRITES), \
+			[cpu_hwbug_cr_every_write] "i" (CPU_HWBUG_CR_EVERY_WRITE), \
+			[cpu_hwbug_cr_first_write] "i" (CPU_HWBUG_CR_FIRST_WRITE)); \
+} while (0)
+
+#ifndef __ASSEMBLY__
+static __always_inline void native_set_binco_regs(e2k_qreg_t cs, e2k_qreg_t ds,
+		e2k_qreg_t es, e2k_qreg_t fs, e2k_qreg_t gs, e2k_qreg_t ss,
+		e2k_rpr_t rpr, u64 tcd)
+{
+	__asm_length(16)
+	asm volatile ("{flushts;"
+		      " rwd %[cs_lo], %%cs.lo}"
+		      "{rwd %[cs_hi], %%cs.hi}"
+		      "{rwd %[ds_lo], %%ds.lo}"
+		      "{rwd %[ds_hi], %%ds.hi}"
+		      "{rwd %[es_lo], %%es.lo}"
+		      "{rwd %[es_hi], %%es.hi}"
+		      "{rwd %[fs_lo], %%fs.lo}"
+		      "{rwd %[fs_hi], %%fs.hi}"
+		      "{rwd %[gs_lo], %%gs.lo}"
+		      "{rwd %[gs_hi], %%gs.hi}"
+		      "{rwd %[ss_lo], %%ss.lo}"
+		      "{rwd %[ss_hi], %%ss.hi}"
+		      "{rwd %[rpr_lo], %%rpr.lo}"
+		      "{rwd %[rpr_hi], %%rpr.hi}"
+		      "{puttc %[tcd], 0, %%tcd}"
+		      "{wait all_e=1}"
+		      :
+		      : [cs_lo] "ri" (cs.lo), [cs_hi] "ri" (cs.hi),
+			[ds_lo] "ri" (ds.lo), [ds_hi] "ri" (ds.hi),
+			[es_lo] "ri" (es.lo), [es_hi] "ri" (es.hi),
+			[fs_lo] "ri" (fs.lo), [fs_hi] "ri" (fs.hi),
+			[gs_lo] "ri" (gs.lo), [gs_hi] "ri" (gs.hi),
+			[ss_lo] "ri" (ss.lo), [ss_hi] "ri" (ss.hi),
+			[rpr_lo] "ri" (rpr.lo), [rpr_hi] "ri" (rpr.hi),
+			[tcd] "ri" (tcd));
+}
+#endif /* !__ASSEMBLY__ */
+
+#define NATIVE_SET_DATA_STACK_HOST_REGS(_usd, _sbr) \
+do { \
+	e2k_usd_t __sr_usd = (_usd); \
+	__asm_length(5) \
+	asm volatile ("{rwd %[sbr], %%sbr}" \
+		      /* Workaround for CPU_HWBUG_USD_ALIGNMENT */ \
+		      "{nop}" \
+		      "{rwd %[usd_lo], %%usd.lo}" \
+		      "{rwd %[usd_hi], %%usd.hi};" \
+		      "{wait all_e=1}" \
+		      : \
+		      : [usd_lo] "ri" ((u64) (__sr_usd.lo)), \
+			[usd_hi] "ri" ((u64) (__sr_usd.hi)), \
+			[sbr] "ri" ((u64) ((_sbr).word))); \
+} while (0)
+
+#define NATIVE_SET_DATA_STACK_GUEST_REGS(_usd, _sbr) \
+do { \
+	e2k_usd_t __sr_usd = (_usd); \
+	_Pragma("asm_length(5)") \
+	asm volatile ("{rwd %[sbr], %%sbr}" \
+		      /* Workaround for CPU_HWBUG_USD_ALIGNMENT */ \
+		      "{nop}" \
+		      ALTERNATIVE( \
+		      /* Default version */ \
+			"{rwd %[usd_lo], %%usd.lo}" \
+			"{rwd %[usd_hi], %%usd.hi}", \
+		      /* CPU_FEAT_V7_CPU_REGS version */ \
+			".push_iset 7\n" \
+			"{rwshd %[usd_lo], %%usd.lo}" \
+			"{rwshd %[usd_hi], %%usd.hi}" \
+			".pop_iset\n", \
+		      %[cpu_feat_v7_cpu_regs]) \
+		      "{wait all_e=1}" \
+		      : \
+		      : [usd_lo] "ri" ((u64) (__sr_usd.lo)), \
+			[usd_hi] "ri" ((u64) (__sr_usd.hi)), \
+			[sbr] "ri" ((u64) ((_sbr).word)), \
+			[cpu_feat_v7_cpu_regs] "i" (CPU_FEAT_V7_CPU_REGS)); \
 } while (0)
 
 #define NATIVE_SET_STACK_REGS(_psp, _pcsp, _usd, _sbr) \
@@ -1284,7 +1696,7 @@ do { \
 	e2k_psp_t __sr_psp = (_psp); \
 	e2k_pcsp_t __sr_pcsp = (_pcsp); \
 	e2k_usd_t __sr_usd = (_usd); \
-	_Pragma("asm_length(8)") \
+	__asm_length(8) \
 	asm volatile ("{rwd %[psp_lo], %%psp.lo}" \
 		      "{rwd %[psp_hi], %%psp.hi}" \
 		      "{rwd %[pcsp_lo], %%pcsp.lo}" \
@@ -1313,7 +1725,7 @@ do { \
 	e2k_cr1_t __sr_cr1 = (_cr1); \
  \
 	/* Add ctpr3 clobber to avoid writing CRs between `return` and `ct` */ \
-	_Pragma("asm_length(12)") \
+	__asm_length(12) \
 	asm volatile ("{rwd %[psp_lo], %%psp.lo}" \
 		      "{rwd %[psp_hi], %%psp.hi}" \
 		      "{rwd %[pcsp_lo], %%pcsp.lo}" \
@@ -1321,9 +1733,20 @@ do { \
 		      /* This also serves as workaround for CPU_HWBUG_USD_ALIGNMENT */ \
 		      "{rwd %[pcsp_hi], %%pcsp.hi}" \
 		      "{rwd %[usd_lo], %%usd.lo}" \
-		      "{rwd %[usd_hi], %%usd.hi};" \
 		      ALTERNATIVE( \
 		      /* Default version */ \
+			"{rwd %[usd_hi], %%usd.hi}", \
+		      /* CPU_HWBUG_CR_BEFORE_WRITES version */ \
+			"{wait ma_c=1;" \
+			" rwd %[usd_hi], %%usd.hi}", \
+		      %[cpu_hwbug_cr_before_writes]) \
+		      ALTERNATIVE_2( \
+		      /* Default version */ \
+			"{rwd %[cr0_lo], %%cr0.lo}" \
+			"{rwd %[cr0_hi], %%cr0.hi}" \
+			"{rwd %[cr1_lo], %%cr1.lo}" \
+			"{rwd %[cr1_hi], %%cr1.hi}", \
+		      /* CPU_HWBUG_CR_EVERY_WRITE version */ \
 			"{wait ma_c=1;" \
 			" rwd %[cr0_lo], %%cr0.lo}" \
 			"{wait ma_c=1;" \
@@ -1332,12 +1755,14 @@ do { \
 			" rwd %[cr1_lo], %%cr1.lo}" \
 			"{wait ma_c=1;" \
 			" rwd %[cr1_hi], %%cr1.hi}", \
-		      /* CPU_NO_HWBUG_INTC_CR_WRITE version */ \
-			"{rwd %[cr0_lo], %%cr0.lo}" \
+		      %[cpu_hwbug_cr_every_write], \
+		      /* CPU_HWBUG_CR_FIRST_WRITE version */ \
+			"{wait ma_c=1;" \
+			" rwd %[cr0_lo], %%cr0.lo}" \
 			"{rwd %[cr0_hi], %%cr0.hi}" \
 			"{rwd %[cr1_lo], %%cr1.lo}" \
 			"{rwd %[cr1_hi], %%cr1.hi}", \
-		      %[cpu_no_hwbug_intc_cr_write]) \
+		      %[cpu_hwbug_cr_first_write]) \
 		      "{wait all_e=1}" \
 		      : \
 		      : [cr0_lo] "ri" ((u64) (__sr_cr0.lo)), \
@@ -1351,7 +1776,9 @@ do { \
 			[usd_lo] "ri" ((u64) (__sr_usd.lo)), \
 			[usd_hi] "ri" ((u64) (__sr_usd.hi)), \
 			[sbr] "ri" ((u64) ((_sbr).word)), \
-			[cpu_no_hwbug_intc_cr_write] "i" (CPU_NO_HWBUG_INTC_CR_WRITE) \
+			[cpu_hwbug_cr_before_writes] "i" (CPU_HWBUG_CR_BEFORE_WRITES), \
+			[cpu_hwbug_cr_every_write] "i" (CPU_HWBUG_CR_EVERY_WRITE), \
+			[cpu_hwbug_cr_first_write] "i" (CPU_HWBUG_CR_FIRST_WRITE) \
 		      : "ctpr3"); \
 } while (0)
 
@@ -1359,7 +1786,7 @@ do { \
 do { \
 	e2k_psp_t __sr_psp = (_psp); \
 	e2k_pcsp_t __sr_pcsp = (_pcsp); \
-	_Pragma("asm_length(5)") \
+	__asm_length(5) \
 	asm volatile ("{rwd %[psp_lo], %%psp.lo}" \
 		      "{rwd %[psp_hi], %%psp.hi}" \
 		      "{rwd %[pcsp_lo], %%pcsp.lo}" \
@@ -1380,13 +1807,24 @@ do { \
 	e2k_cr1_t __sr_cr1 = (_cr1); \
  \
 	/* Add ctpr3 clobber to avoid writing CRs between `return` and `ct` */ \
-	_Pragma("asm_length(9)") \
+	__asm_length(9) \
 	asm volatile ("{rwd %[psp_lo], %%psp.lo}" \
 		      "{rwd %[psp_hi], %%psp.hi}" \
 		      "{rwd %[pcsp_lo], %%pcsp.lo}" \
-		      "{rwd %[pcsp_hi], %%pcsp.hi}" \
 		      ALTERNATIVE( \
 		      /* Default version */ \
+			"{rwd %[pcsp_hi], %%pcsp.hi}", \
+		      /* CPU_HWBUG_CR_BEFORE_WRITES version */ \
+			"{wait ma_c=1;" \
+			" rwd %[pcsp_hi], %%pcsp.hi}", \
+		      %[cpu_hwbug_cr_before_writes]) \
+		      ALTERNATIVE_2( \
+		      /* Default version */ \
+			"{rwd %[cr0_lo], %%cr0.lo}" \
+			"{rwd %[cr0_hi], %%cr0.hi}" \
+			"{rwd %[cr1_lo], %%cr1.lo}" \
+			"{rwd %[cr1_hi], %%cr1.hi}", \
+		      /* CPU_HWBUG_CR_EVERY_WRITE version */ \
 			"{wait ma_c=1;" \
 			" rwd %[cr0_lo], %%cr0.lo}" \
 			"{wait ma_c=1;" \
@@ -1395,12 +1833,14 @@ do { \
 			" rwd %[cr1_lo], %%cr1.lo}" \
 			"{wait ma_c=1;" \
 			" rwd %[cr1_hi], %%cr1.hi}", \
-		      /* CPU_NO_HWBUG_INTC_CR_WRITE version */ \
-			"{rwd %[cr0_lo], %%cr0.lo}" \
+		      %[cpu_hwbug_cr_every_write], \
+		      /* CPU_HWBUG_CR_FIRST_WRITE version */ \
+			"{wait ma_c=1;" \
+			" rwd %[cr0_lo], %%cr0.lo}" \
 			"{rwd %[cr0_hi], %%cr0.hi}" \
 			"{rwd %[cr1_lo], %%cr1.lo}" \
 			"{rwd %[cr1_hi], %%cr1.hi}", \
-		      %[cpu_no_hwbug_intc_cr_write]) \
+		      %[cpu_hwbug_cr_first_write]) \
 		      "{wait all_e=1}" \
 		      : \
 		      : [cr0_lo] "ri" ((u64) (__sr_cr0.lo)), \
@@ -1411,7 +1851,40 @@ do { \
 			[psp_hi] "ri" ((u64) (__sr_psp.hi)), \
 			[pcsp_lo] "ri" ((u64) (__sr_pcsp.lo)), \
 			[pcsp_hi] "ri" ((u64) (__sr_pcsp.hi)), \
-			[cpu_no_hwbug_intc_cr_write] "i" (CPU_NO_HWBUG_INTC_CR_WRITE) \
+			[cpu_hwbug_cr_before_writes] "i" (CPU_HWBUG_CR_BEFORE_WRITES), \
+			[cpu_hwbug_cr_every_write] "i" (CPU_HWBUG_CR_EVERY_WRITE), \
+			[cpu_hwbug_cr_first_write] "i" (CPU_HWBUG_CR_FIRST_WRITE) \
+		      : "ctpr3"); \
+} while (0)
+
+/* Useful for skipping CPU_HWBUG_CR_FIRST_WRITE/... workaround if it can be done later */
+#define NATIVE_SET_HW_STACK_CR_REGS__NO_WAIT(_psp, _pcsp, _cr0, _cr1) \
+do { \
+	e2k_psp_t __sr_psp = (_psp); \
+	e2k_pcsp_t __sr_pcsp = (_pcsp); \
+	e2k_cr0_t __sr_cr0 = (_cr0); \
+	e2k_cr1_t __sr_cr1 = (_cr1); \
+ \
+	/* Add ctpr3 clobber to avoid writing CRs between `return` and `ct` */ \
+	__no_asm_inline(9) \
+	asm volatile ("{rwd %[psp_lo], %%psp.lo}" \
+		      "{rwd %[psp_hi], %%psp.hi}" \
+		      "{rwd %[pcsp_lo], %%pcsp.lo}" \
+		      "{rwd %[pcsp_hi], %%pcsp.hi}" \
+		      "{rwd %[cr0_lo], %%cr0.lo}" \
+		      "{rwd %[cr0_hi], %%cr0.hi}" \
+		      "{rwd %[cr1_lo], %%cr1.lo}" \
+		      "{rwd %[cr1_hi], %%cr1.hi}" \
+		      "{wait all_e=1}" \
+		      : \
+		      : [cr0_lo] "ri" ((u64) (__sr_cr0.lo)), \
+			[cr0_hi] "ri" ((u64) (__sr_cr0.hi)), \
+			[cr1_lo] "ri" ((u64) (__sr_cr1.lo)), \
+			[cr1_hi] "ri" ((u64) (__sr_cr1.hi)), \
+			[psp_lo] "ri" ((u64) (__sr_psp.lo)), \
+			[psp_hi] "ri" ((u64) (__sr_psp.hi)), \
+			[pcsp_lo] "ri" ((u64) (__sr_pcsp.lo)), \
+			[pcsp_hi] "ri" ((u64) (__sr_pcsp.hi)) \
 		      : "ctpr3"); \
 } while (0)
 
@@ -1421,9 +1894,20 @@ do { \
 	e2k_cr1_t __sr_cr1 = (_cr1); \
  \
 	/* Add ctpr3 clobber to avoid writing CRs between `return` and `ct` */ \
-	_Pragma("asm_length(5)") \
+	__asm_length(5) \
 	asm volatile (ALTERNATIVE( \
 		      /* Default version */ \
+			"", \
+		      /* CPU_HWBUG_CR_BEFORE_WRITES version */ \
+			"{wait ma_c=1}", \
+		      %[cpu_hwbug_cr_before_writes]) \
+		      ALTERNATIVE_2( \
+		      /* Default version */ \
+			"{rwd %[cr0_lo], %%cr0.lo}" \
+			"{rwd %[cr0_hi], %%cr0.hi}" \
+			"{rwd %[cr1_lo], %%cr1.lo}" \
+			"{rwd %[cr1_hi], %%cr1.hi}", \
+		      /* CPU_HWBUG_CR_EVERY_WRITE version */ \
 			"{wait ma_c=1;" \
 			" rwd %[cr0_lo], %%cr0.lo}" \
 			"{wait ma_c=1;" \
@@ -1432,24 +1916,49 @@ do { \
 			" rwd %[cr1_lo], %%cr1.lo}" \
 			"{wait ma_c=1;" \
 			" rwd %[cr1_hi], %%cr1.hi}", \
-		      /* CPU_NO_HWBUG_INTC_CR_WRITE version */ \
-			"{rwd %[cr0_lo], %%cr0.lo}" \
+		      %[cpu_hwbug_cr_every_write], \
+		      /* CPU_HWBUG_CR_FIRST_WRITE version */ \
+			"{wait ma_c=1;" \
+			" rwd %[cr0_lo], %%cr0.lo}" \
 			"{rwd %[cr0_hi], %%cr0.hi}" \
 			"{rwd %[cr1_lo], %%cr1.lo}" \
 			"{rwd %[cr1_hi], %%cr1.hi}", \
-		      %[cpu_no_hwbug_intc_cr_write]) \
+		      %[cpu_hwbug_cr_first_write]) \
 		      "{wait all_e=1}" \
 		      : \
 		      : [cr0_lo] "ri" ((u64) (__sr_cr0.lo)), \
 			[cr0_hi] "ri" ((u64) (__sr_cr0.hi)), \
 			[cr1_lo] "ri" ((u64) (__sr_cr1.lo)), \
 			[cr1_hi] "ri" ((u64) (__sr_cr1.hi)), \
-			[cpu_no_hwbug_intc_cr_write] "i" (CPU_NO_HWBUG_INTC_CR_WRITE) \
+			[cpu_hwbug_cr_before_writes] "i" (CPU_HWBUG_CR_BEFORE_WRITES), \
+			[cpu_hwbug_cr_every_write] "i" (CPU_HWBUG_CR_EVERY_WRITE), \
+			[cpu_hwbug_cr_first_write] "i" (CPU_HWBUG_CR_FIRST_WRITE) \
+		      : "ctpr3"); \
+} while (0)
+
+/* Useful for skipping CPU_HWBUG_CR_FIRST_WRITE/... workaround if it can be done later */
+#define NATIVE_SET_CR_REGS__NO_WAIT(_cr0, _cr1) \
+do { \
+	e2k_cr0_t __sr_cr0 = (_cr0); \
+	e2k_cr1_t __sr_cr1 = (_cr1); \
+ \
+	/* Add ctpr3 clobber to avoid writing CRs between `return` and `ct` */ \
+	__no_asm_inline(5) \
+	asm volatile ("{rwd %[cr0_lo], %%cr0.lo}" \
+		      "{rwd %[cr0_hi], %%cr0.hi}" \
+		      "{rwd %[cr1_lo], %%cr1.lo}" \
+		      "{rwd %[cr1_hi], %%cr1.hi}" \
+		      "{wait all_e=1}" \
+		      : \
+		      : [cr0_lo] "ri" ((u64) (__sr_cr0.lo)), \
+			[cr0_hi] "ri" ((u64) (__sr_cr0.hi)), \
+			[cr1_lo] "ri" ((u64) (__sr_cr1.lo)), \
+			[cr1_hi] "ri" ((u64) (__sr_cr1.hi)) \
 		      : "ctpr3"); \
 } while (0)
 
 /*
- * A workaround to restore inner clw register us_cl_low on v6,
+ * A workaround to restore inner clw register us_cl_low on v6 and e48c.rev0,
  * as it isn't directly available for read-write there.
  * 1) fictive set us_cl_b = us_cl_up;
  * 2) restore usd.lo by actual value;
@@ -1458,129 +1967,63 @@ do { \
 #define RESTORE_US_CL_LOW(_us_cl_up, _usd_lo) \
 do { \
 	if (cpu_has(CPU_FEAT_ISET_V7)) { \
-		_Pragma("asm_length(4)") \
+		__asm_length(4) \
 		asm volatile ( \
 			"{wait all_c=1\n" \
-			" addd %[us_cl_up], 0, %%db[0]\n" \
-			" addd %[usd_lo], 0, %%db[1]\n" \
 			" ibranch 1f}\n" \
 			".align 0x100\n" \
 			"1:\n" \
-			/* rwd,0 %db[1], %usd.lo */ \
-			".word 0x04100011; .word 0x3dc0012d\n" \
-			".word 0x01c00000; .word 0x00000000\n" \
-			"{ nop }" \
-			/* mmurw,2 %db[0], %us_cl_b */ \
-			".word 0x10008012; .word 0x27c0d400\n" \
-			".word 0x601bc000; .word 0x00240000\n" \
+			"{rwd,0 %[usd_lo], %%usd.lo}" \
+			"{nop}" \
+			".push_iset 6\n" \
+			"{mmurw,2 %[us_cl_up], %%us_cl_b}" \
+			".pop_iset\n" \
 			: \
 			: [us_cl_up] "r" ((u64) (_us_cl_up)), \
-			  [usd_lo] "r" ((u64) (_usd_lo)) \
-			: "b[0]", "b[1]"); \
+			  [usd_lo] "r" ((u64) (_usd_lo))); \
 	} else { \
-		_Pragma("asm_length(3)") \
+		__asm_length(3) \
 		asm volatile ( \
 			"{wait all_c=1\n" \
-			" addd %[us_cl_up], 0, %%db[0]\n" \
-			" addd %[usd_lo], 0, %%db[1]\n" \
 			" ibranch 1f}\n" \
 			".align 0x100\n" \
 			"1:\n" \
-			/* mmurw,2 %db[0], %us_cl_b */ \
-			".word 0x10008012; .word 0x27c0d400\n" \
-			".word 0x601bc000; .word 0x00240000\n" \
-			/* rwd,0 %db[1], %usd.lo */ \
-			".word 0x04100011; .word 0x3dc0012d\n" \
-			".word 0x01c00000; .word 0x00000000\n" \
+			".push_iset 6\n" \
+			"{ mmurw,2 %[us_cl_up], %%us_cl_b }" \
+			".pop_iset\n" \
+			"{ rwd,0 %[usd_lo], %%usd.lo }" \
 			: \
 			: [us_cl_up] "r" ((u64) (_us_cl_up)), \
-			  [usd_lo] "r" ((u64) (_usd_lo)) \
-			: "b[0]", "b[1]"); \
+			  [usd_lo] "r" ((u64) (_usd_lo))); \
 	} \
 } while (0)
 
-/* restore %us_cl on host v7 for guest v6 */
-#define RESTORE_US_CL_LOW_V7_FOR_V6(_us_cl_up, _usd_lo) \
-do { \
-	asm volatile ( \
-		"{wait all_c=1\n" \
-		" addd %[us_cl_up], 0, %%db[0]\n" \
-		" addd %[usd_lo], 0, %%db[1]\n" \
-		" ibranch 1f}\n" \
-		".align 0x100\n" \
-		"1:\n" \
-		".push_iset 7\n" \
-		"rwshd,0 %%db[1], %%usd.lo\n" \
-		".pop_iset\n"	\
-		"{ nop }\n" \
-		"{ nop }\n" \
-		".push_iset 7\n" \
-		"mmurw,2 %%db[0], %%us_cl_b\n" \
-		".pop_iset\n"	\
-		: \
-		: [us_cl_up] "r" ((u64) (_us_cl_up)), \
-		  [usd_lo] "r" ((u64) (_usd_lo)) \
-		: "b[0]", "b[1]"); \
-} while (0)
 
-
-/* lcc ignores manually specified clobbers for opened GNU asm,
- * so use closed version (bug #69565, bug #60599) */
 #define NATIVE_SET_PSR_IRQ_BARRIER(val) \
 ({ \
-	_Pragma("asm_length(6)") \
-	asm volatile (ALTERNATIVE_1_ALTINSTR \
-		      /* CPU_FEAT_ISET_NOT_V7 version */ \
-			"{nop 5\n" \
-			" rws %0, %%psr}" \
-		      ALTERNATIVE_2_OLDINSTR \
-		      /* Default version */ \
-			"{nop 7\n" \
-			" rws %0, %%psr}" \
-		      ALTERNATIVE_3_FEATURE(%[cpu_feat_iset_not_v7]) \
+	/* Use closed GNU asm to make sure compiler sees custom clobbers */ \
+	__no_asm_inline(2) \
+	asm volatile ("{rws %0, %%psr}" \
+		      "{wait all_e=1}" \
 		      : \
-		      : "ri" ((u32) (val)), \
-			[cpu_feat_iset_not_v7] "i" (CPU_FEAT_ISET_NOT_V7) \
+		      : "ri" ((u32) (val)) \
 		      : "memory", PREEMPTION_CLOBBERS); \
 })
 #define NATIVE_SET_UPSR_IRQ_BARRIER(val) \
 ({ \
-	_Pragma("asm_length(5)") \
-	asm volatile (ALTERNATIVE_1_ALTINSTR \
-		      /* CPU_FEAT_ISET_NOT_V7 version */ \
-			"{nop 4\n" \
-			" rws %0, %%upsr}" \
-		      ALTERNATIVE_2_OLDINSTR \
-		      /* Default version */ \
-			"{nop 6\n" \
-			" rws %0, %%upsr}" \
-		      ALTERNATIVE_3_FEATURE(%[cpu_feat_iset_not_v7]) \
+	/* Use closed GNU asm to make sure compiler sees custom clobbers */ \
+	__no_asm_inline(2) \
+	asm volatile ("{rws %0, %%upsr}" \
+		      "{wait all_e=1}" \
 		      : \
-		      : "ri" ((u32) (val)), \
-			[cpu_feat_iset_not_v7] "i" (CPU_FEAT_ISET_NOT_V7) \
+		      : "ri" ((u32) (val)) \
 		      : "memory", PREEMPTION_CLOBBERS); \
 })
 
-/*
- * AAU loads are cached in 6-entries buffer in TLB. So even if AAU
- * is stopped we might be in a middle of TLB translation, so before
- * modifying any MMU registers or flushing TLB first make sure that
- * the buffer is empty.
- *
- * Note that barriers are necessary only in presence of AAU, so when
- * CONFIG_AAU_IN_KERNEL=y.  Userspace usage of AAU does not affect
- * us thanks to special barrier in KERNEL_ENTRY().
- */
-#ifdef CONFIG_AAU_IN_KERNEL
-# define MMURW_WAIT_ASYNC_TLB "{nop 1} {wait all_e=1}"
-#else
-# define MMURW_WAIT_ASYNC_TLB ""
-#endif
-
-#define NATIVE_GET_MMUREG(reg_mnemonic) \
+#define NATIVE_GET_MMUREG(reg) \
 ({ \
 	u64 res; \
-	asm volatile ("mmurr %%" #reg_mnemonic ", %0" \
+	asm volatile ("mmurr %%" #reg ", %0" \
 		: "=r" (res)); \
 	res; \
 })
@@ -1591,13 +2034,13 @@ do { \
 # define MMURW_NOPS 3
 #endif
 
-#define NATIVE_GET_MMUREG_CLOSED_ISET(iset, reg_mnemonic) \
+#define NATIVE_GET_MMUREG_ISET(iset, reg) \
 ({ \
 	u64 res; \
-	_Pragma("no_asm_inline") _Pragma("asm_length(1)") \
+	__no_asm_inline(1) \
 	asm volatile ( \
 		".push_iset " #iset "\n" \
-		"mmurr %%" #reg_mnemonic ", %0\n" \
+		"mmurr %%" #reg ", %0\n" \
 		".pop_iset\n"	\
 		: "=r" (res) \
 		: \
@@ -1605,93 +2048,201 @@ do { \
 	res; \
 })
 
-#define NATIVE_SET_MMUREG(reg_mnemonic, val) \
+#define NATIVE_SET_MMUREG(reg, val) \
 ({ \
-	_Pragma("asm_length(3)") \
+	__asm_length(3) \
 	asm volatile ( \
-		MMURW_WAIT_ASYNC_TLB \
 		ALTERNATIVE( \
 		/* Default version */ \
-			"{mmurw %0, %%" #reg_mnemonic "}\n" \
+			"{mmurw %0, %%" #reg "}\n" \
 			"{wait all_c=1\n" \
 			" nop 3}\n", \
-		/* CPU_FEAT_ISET_NOT_V7 version */ \
+		/* CPU_FEAT_ISET_NOT_V6 version */ \
 			"{nop 2\n" \
-			" mmurw %0, %%" #reg_mnemonic "}\n", \
-		%[cpu_feat_iset_not_v7]) \
+			" mmurw %0, %%" #reg "}\n", \
+		%[cpu_feat_iset_not_v6]) \
 		: \
 		: "r" ((u64) (val)), \
-		  [cpu_feat_iset_not_v7] "i" (CPU_FEAT_ISET_NOT_V7) \
+		  [cpu_feat_iset_not_v6] "i" (CPU_FEAT_ISET_NOT_V6) \
 		: "memory"); \
 })
 
-#define WRITE_UACCESS_REGS(_cont, _root_ptb) \
-do { \
-	u64 __tmp; \
-	_Pragma("asm_length(4)") \
-	asm NOT_VOLATILE ( \
-		MMURW_WAIT_ASYNC_TLB \
-		"{andd,0 %[cont], %[ctx_hw_mask], %[tmp]\n" \
-		" mmurw %[root_ptb], %%root_ptb}\n" \
-		ALTERNATIVE_1_ALTINSTR \
-		/* CPU_FEAT_ISET_NOT_V7 version */ \
-			"{nop 2\n" \
-			" mmurw %[tmp], %%cont}\n" \
-		ALTERNATIVE_2_OLDINSTR \
+#define NATIVE_SET_MMUREG_ISET(iset, reg, val) \
+({ \
+	__asm_length(3) \
+	asm volatile ( \
+		ALTERNATIVE( \
 		/* Default version */ \
-			"{mmurw %[tmp], %%cont}\n" \
+			".push_iset " #iset "\n" \
+			"{mmurw %0, %%" #reg "}\n" \
 			"{wait all_c=1\n" \
 			" nop 3}\n" \
-		ALTERNATIVE_3_FEATURE(%[cpu_feat_iset_not_v7]) \
-		: [tmp] "=r" (__tmp) \
+			".pop_iset\n", \
+		/* CPU_FEAT_ISET_NOT_V6 version */ \
+			".push_iset " #iset "\n" \
+			"{nop 2\n" \
+			" mmurw %0, %%" #reg "}\n" \
+			".pop_iset\n", \
+			%[cpu_feat_iset_not_v6]) \
+		: \
+		: "r" ((u64) (val)), \
+		  [cpu_feat_iset_not_v6] "i" (CPU_FEAT_ISET_NOT_V6) \
+		: "memory"); \
+})
+
+#ifndef __ASSEMBLY__
+__attribute__((__always_inline__))
+static inline void native_get_clw(u64 *us_cl_b, u64 *us_cl_up, u64 *us_cl_m0,
+				  u64 *us_cl_m1, u64 *us_cl_m2, u64 *us_cl_m3)
+{
+	_Pragma("asm_length(3)")
+	asm volatile (
+		"{mmurr %%us_cl_b, %[us_cl_b]}\n"
+		"{mmurr %%us_cl_up, %[us_cl_up]}\n"
+		"{mmurr %%us_cl_m0, %[us_cl_m0]}\n"
+		"{mmurr %%us_cl_m1, %[us_cl_m1]}\n"
+		"{mmurr %%us_cl_m2, %[us_cl_m2]}\n"
+		"{mmurr %%us_cl_m3, %[us_cl_m3]}\n"
+		: [us_cl_b] "=r" (*us_cl_b), [us_cl_up] "=r" (*us_cl_up),
+		  [us_cl_m0] "=r" (*us_cl_m0), [us_cl_m1] "=r" (*us_cl_m1),
+		  [us_cl_m2] "=r" (*us_cl_m2), [us_cl_m3] "=r" (*us_cl_m3)
+		:
+		: "memory");
+}
+
+__attribute__((__always_inline__))
+static inline void native_set_clw_v6(u64 us_cl_b, u64 us_cl_up, u64 us_cl_m0,
+				     u64 us_cl_m1, u64 us_cl_m2, u64 us_cl_m3)
+{
+	_Pragma("asm_length(3)")
+	asm volatile (
+		".push_iset 6\n"
+		"{mmurw %[us_cl_b], %%us_cl_b}\n"
+		"{mmurw %[us_cl_up], %%us_cl_up}\n"
+		"{mmurw %[us_cl_m0], %%us_cl_m0}\n"
+		"{mmurw %[us_cl_m1], %%us_cl_m1}\n"
+		"{mmurw %[us_cl_m2], %%us_cl_m2}\n"
+		"{mmurw %[us_cl_m3], %%us_cl_m3}\n"
+		".pop_iset\n"
+		"{wait all_c=1\n"
+		" nop 3}\n"
+		:
+		: [us_cl_b] "r" (us_cl_b), [us_cl_up] "r" (us_cl_up),
+		  [us_cl_m0] "r" (us_cl_m0), [us_cl_m1] "r" (us_cl_m1),
+		  [us_cl_m2] "r" (us_cl_m2), [us_cl_m3] "r" (us_cl_m3)
+		: "memory");
+}
+#endif /* !__ASSEMBLY__ */
+
+/*
+ * Write user's context (%cont) and page table root (%root_ptb which was
+ * renamed to %u_pptb in iset v6).
+ *
+ * Note that context version is not masked before writing.  This works OK
+ * because %cont has only one field, and even if that field is expanded
+ * in the future it'll still be a backwards compatible change (kernel
+ * will flush TLB more often than expected by hardware but that does not
+ * break correctness).
+ */
+#define WRITE_UACCESS_REGS(_cont, _root_ptb) \
+do { \
+	u64 unused; \
+	__asm_length(4) \
+	asm NOT_VOLATILE ( \
+		"{mmurw %[root_ptb], %%root_ptb}\n" \
+		ALTERNATIVE( \
+		/* Default version */ \
+			"{mmurw %[cont], %%cont}\n" \
+			"{wait all_c=1\n" \
+			" nop 3}\n", \
+		/* CPU_FEAT_ISET_NOT_V6 version */ \
+			"{nop 2\n" \
+			" mmurw %[cont], %%cont}\n", \
+		%[cpu_feat_iset_not_v6]) \
+		: "=r" (unused) \
 		: [root_ptb] "r" ((u64) (_root_ptb)), \
-		  [cont] "r" ((u64) (_cont)), [mas_mmu_reg] "i" (MAS_MMU_REG), \
-		  [ctx_hw_mask] "i" (CTX_HARDWARE_MASK), \
-		  [cpu_feat_iset_not_v7] "i" (CPU_FEAT_ISET_NOT_V7) \
+		  [cont] "r" ((u64) (_cont)), \
+		  [cpu_feat_iset_not_v6] "i" (CPU_FEAT_ISET_NOT_V6) \
 		: "memory"); \
 } while (0)
 
-#define NATIVE_SET_MMUREG_CLOSED_ISET(iset, reg_mnemonic, val, nop_before_v7, nop_since_v7) \
+/*
+ * This version of `WRITE_UACCESS_REGS()` can be called under open
+ * interrupts when writing user's values but there are some rules
+ * to follow.
+ *
+ * Each value must be loaded and written into register atomically,
+ * otherwise an interrupt in the middle might update context after
+ * we have loaded it.  Atomic operation is possible here because
+ * values are cached in %g registers which can be directly accessed
+ * by `mmurw` instruction.
+ *
+ * This also means that to write arbitrary values you still have to
+ * use `WRITE_UACCESS_REGS()` and possibly close interrupts depending
+ * on values written.
+ */
+#define WRITE_UACCESS_REGS_CACHED() \
+do { \
+	u64 unused; \
+	__asm_length(4) \
+	asm NOT_VOLATILE ( \
+		"{mmurw %%g" __stringify(U_ROOT_PTB_GREG) ", %%root_ptb}\n" \
+		ALTERNATIVE( \
+		/* Default version */ \
+			"{mmurw %%g" __stringify(CURRENT_MMU_CONTEXT_GREG) ", %%cont}\n" \
+			"{wait all_c=1\n" \
+			" nop 3}\n", \
+		/* CPU_FEAT_ISET_NOT_V6 version */ \
+			"{nop 2\n" \
+			" mmurw %%g" __stringify(CURRENT_MMU_CONTEXT_GREG) ", %%cont}\n", \
+		%[cpu_feat_iset_not_v6]) \
+		: "=r" (unused) \
+		: [cpu_feat_iset_not_v6] "i" (CPU_FEAT_ISET_NOT_V6) \
+		: "memory", "g" __stringify(U_ROOT_PTB_GREG), \
+		  "g" __stringify(CURRENT_MMU_CONTEXT_GREG)); \
+} while (0)
+
+#define NATIVE_SET_MMUREG_ISET_V5_V6(iset, reg, val, nop_before_v6, nop_since_v6) \
 ({ \
-	_Pragma("asm_length(1)") \
+	__no_asm_inline(1) \
 	asm volatile ( \
-		MMURW_WAIT_ASYNC_TLB \
 		ALTERNATIVE( \
 		/* Default version */ \
 			".push_iset " #iset "\n" \
-			"{mmurw %0, %%" #reg_mnemonic "}\n" \
+			"{mmurw %0, %%" #reg "}\n" \
 			"{wait all_c=1\n" \
-			" nop " __stringify(nop_since_v7) "}\n" \
+			" nop " __stringify(nop_since_v6) "}\n" \
 			".pop_iset\n", \
-		/* CPU_FEAT_ISET_NOT_V7 version */ \
+		/* CPU_FEAT_ISET_NOT_V6 version */ \
 			".push_iset " #iset "\n" \
-			"{nop " __stringify(nop_before_v7) "\n" \
-			" mmurw %0, %%" #reg_mnemonic "}\n" \
+			"{nop " __stringify(nop_before_v6) "\n" \
+			" mmurw %0, %%" #reg "}\n" \
 			".pop_iset\n", \
-		%[cpu_feat_iset_not_v7]) \
+		%[cpu_feat_iset_not_v6]) \
 		: \
 		: "r" ((u64) (val)), \
-		  [cpu_feat_iset_not_v7] "i" (CPU_FEAT_ISET_NOT_V7) \
+		  [cpu_feat_iset_not_v6] "i" (CPU_FEAT_ISET_NOT_V6) \
 		: "memory"); \
 })
 
-#define NATIVE_TAGGED_LOAD_TO_MMUREG(reg_mnemonic, _addr) \
+#define NATIVE_TAGGED_LOAD_TO_MMUREG(reg, _addr) \
 do { \
 	unsigned long long _tmp; \
-	_Pragma("asm_length(6)") \
+	__no_asm_inline(6) \
 	asm volatile ("{ldrd [ %[addr] + %[opc] ], %[tmp]\n" \
 		      " nop 3}\n" \
 		      "{wait all_e=1}\n" \
-		      "{mmurw,s %[tmp], %%" #reg_mnemonic "}\n" \
+		      "{mmurw,s %[tmp], %%" #reg "}\n" \
 		      : [tmp] "=r" (_tmp) \
 		      : [addr] "m" (*((unsigned long long *) (_addr))),	\
 			[opc] "i" (TAGGED_MEM_LOAD_REC_OPC)); \
 } while (0)
 
-#define NATIVE_STORE_TAGGED_MMUREG(_addr, reg_mnemonic) \
+#define NATIVE_STORE_TAGGED_MMUREG(_addr, reg) \
 do { \
 	unsigned long long _tmp; \
-	asm volatile ("mmurr %%" #reg_mnemonic ", %[tmp]\n" \
+	__no_asm_inline(2) \
+	asm volatile ("mmurr %%" #reg ", %[tmp]\n" \
 		      "strd [ %[addr] + %[opc] ], %[tmp]\n" \
 		      : [tmp] "=r" (_tmp) \
 		      : [addr] "m" (*((unsigned long long *) (_addr))), \
@@ -1700,10 +2251,10 @@ do { \
 
 #define NATIVE_GET_MMU_DEBUG_REG(reg_no) \
 ({ \
-	register __e2k_u64_t res; \
+	register u64 res; \
 	asm volatile ("ldd,5 \t[%1 + 0] %2, %0" \
 		: "=r" (res) \
-		: "ri" ((__e2k_ptr_t) _DEBUG_REG_NO_TO_MMU_ADDR(reg_no)), \
+		: "ri" ((u64) _DEBUG_REG_NO_TO_MMU_ADDR(reg_no)), \
 		  "i" MAS_MMU_DEBUG_REG); \
 	res; \
 })
@@ -1711,33 +2262,33 @@ do { \
 ({ \
 	asm volatile ("std,2 \t[%0 + 0] %1, %2" \
 		: \
-		: "ri" ((__e2k_ptr_t) _DEBUG_REG_NO_TO_MMU_ADDR(reg_no)), \
+		: "ri" ((u64) _DEBUG_REG_NO_TO_MMU_ADDR(reg_no)), \
 		  "i" MAS_MMU_DEBUG_REG, \
-		  "ri" ((__e2k_u64_t) (val))); \
+		  "ri" ((u64) (val))); \
 })
 
-#define NATIVE_GET_AAUREG(reg_mnemonic, chan_letter) \
+#define NATIVE_GET_AAUREG(reg, chan_letter) \
 ({ \
-    register __e2k_u32_t res; \
-    asm ("aaurr," #chan_letter " \t%%" #reg_mnemonic ", %0" \
-                  : "=r" (res)); \
-    res; \
+	u32 res; \
+	asm ("aaurr," #chan_letter " \t%%" #reg ", %0" \
+		: "=r" (res)); \
+	res; \
 })
 
 /* This macro is used to pack two 'aaurr' into one long instruction */
 #define NATIVE_GET_AAUREGS(l_reg, r_reg, lval, rval) \
 ({ \
     asm ("aaurr,2 \t%%" #l_reg ", %0\n" \
-         "aaurr,5 \t%%" #r_reg ", %1" \
-         : "=r" (lval), "=r" (rval)); \
+	 "aaurr,5 \t%%" #r_reg ", %1" \
+	 : "=r" (lval), "=r" (rval)); \
 })
 
-#define NATIVE_SET_AAUREG(reg_mnemonic, val, chan_letter) \
+#define NATIVE_SET_AAUREG(reg, val, chan_letter) \
 ({ \
 	int unused; \
-	asm ("aaurw," #chan_letter " %1, %%" #reg_mnemonic \
+	asm ("aaurw," #chan_letter " %1, %%" #reg \
 	     : "=r" (unused) \
-	     : "r" ((__e2k_u32_t) (val))); \
+	     : "r" ((u32) (val))); \
 })
 
 /* This macro is used to pack two 'aaurr' into one long instruction */
@@ -1747,29 +2298,29 @@ do { \
 	asm ("aaurw,2 %1, %%" #l_reg "\n" \
 	     "aaurw,5 %2, %%" #r_reg \
 	     : "=r" (unused) \
-	     : "r" ((__e2k_u32_t) (lval)), "r" ((__e2k_u32_t) (rval))); \
+	     : "r" ((u32) (lval)), "r" ((u32) (rval))); \
 } while (0)
 
-#define NATIVE_GET_AAUDREG(reg_mnemonic, chan_letter) \
+#define NATIVE_GET_AAUDREG(reg, chan_letter) \
 ({ \
-    register __e2k_u64_t res; \
-    asm ("aaurrd," #chan_letter " %%" #reg_mnemonic ", %0" \
-                  : "=r" (res)); \
-    res; \
+	u64 res; \
+	asm ("aaurrd," #chan_letter " %%" #reg ", %0" \
+		: "=r" (res)); \
+	res; \
 })
 
 #define NATIVE_GET_AAUDREGS(l_reg, r_reg, lval, rval) \
 ({ \
     asm ("aaurrd,2 %%" #l_reg ", %0\n" \
-         "aaurrd,5 %%" #r_reg ", %1" \
-         : "=r" (lval), "=r" (rval)); \
+	 "aaurrd,5 %%" #r_reg ", %1" \
+	 : "=r" (lval), "=r" (rval)); \
 })
 
 
-#define NATIVE_SET_AAUDREG(reg_mnemonic, val, chan_letter) \
+#define NATIVE_SET_AAUDREG(reg, val, chan_letter) \
 do { \
 	int unused; \
-	asm ("aaurwd," #chan_letter " %1, %%" #reg_mnemonic \
+	asm ("aaurwd," #chan_letter " %1, %%" #reg \
 	     : "=r" (unused) \
 	     : "r" (val)); \
 } while (0)
@@ -1786,7 +2337,7 @@ do { \
 
 #define NATIVE_GET_AAUQREGS(mem_p, reg1, reg2, reg3, reg4) \
 do { \
-	_Pragma("asm_length(6)") \
+	__asm_length(6) \
 	asm volatile ("aaurrq \t%%" #reg1 ", %%qb[0]\n" \
 		      "aaurrq \t%%" #reg2 ", %%qb[2]\n" \
 		      "aaurrq \t%%" #reg3 ", %%qb[4]\n" \
@@ -1810,7 +2361,7 @@ do { \
 
 #define NATIVE_SET_AAUQREGS(mem_p, reg1, reg2, reg3, reg4) \
 do { \
-	_Pragma("asm_length(7)") \
+	__asm_length(7) \
 	asm volatile ("{ldd,0 [ %0 + 0x0 ], %%db[0]\n" \
 		      " ldd,2 [ %0 + 0x8 ], %%db[1]\n" \
 		      " ldd,3 [ %0 + 0x10 ], %%db[2]\n" \
@@ -1884,7 +2435,7 @@ do { \
 /* Clear AAU to prepare it for restoring */
 #define NATIVE_CLEAR_APB() \
 do { \
-	_Pragma("asm_length(1)") \
+	__asm_length(1) \
 	asm volatile ("1:\n" \
 		      "{ipd 0; disp %%ctpr2, 1b}" \
 		      : \
@@ -1895,7 +2446,7 @@ do { \
 /* Do "disp" for all %ctpr's */
 #define E2K_DISP_CTPRS() \
 do { \
-	_Pragma("asm_length(3)") \
+	__asm_length(3) \
 	asm volatile ("1:\n" \
 		      "{ipd 0; disp %%ctpr1, 1b}" \
 		      "{ipd 0; disp %%ctpr2, 1b}" \
@@ -1907,7 +2458,7 @@ do { \
 
 #define LOAD_NV_MAS(_addr, _val, _mas, size_letter, clobber) \
 do { \
-	_Pragma("no_asm_inline") _Pragma("asm_length(1)") \
+	__no_asm_inline(1) \
 	asm NOT_VOLATILE ("ld" #size_letter" %[addr], %[val], mas=%[mas]" \
 		: [val] "=r" (_val) \
 		: [addr] "m" (*(_addr)), \
@@ -1919,22 +2470,22 @@ do { \
 do { \
 	if ((_mas) == MAS_STORE_RELEASE_V6(MAS_MT_0) || \
 	    (_mas) == MAS_STORE_RELEASE_V6(MAS_MT_1)) { \
-		_Pragma("no_asm_inline") _Pragma("asm_length(1)") \
+		__no_asm_inline(1) \
 		asm NOT_VOLATILE ( \
 			ALTERNATIVE( \
 			/* Default version */ \
 				"{wait st_c=1, ld_c=1\n" \
 				" st" #size_letter" %[addr], %[val]}", \
-			/* CPU_NO_HWBUG_SOFT_WAIT version */ \
+			/* CPU_NO_HWBUG_STORE_RELEASE version */ \
 				"{st" #size_letter" %[addr], %[val], mas=%[mas]}", \
-			%[facility]) \
+			%[cpu_no_hwbug_store_release]) \
 			: [addr] "=m" (*(_addr)) \
 			: [val] "r" (_val), \
 			  [mas] "i" (_mas), \
-			  [facility] "i" (CPU_NO_HWBUG_SOFT_WAIT) \
+			  [cpu_no_hwbug_store_release] "i" (CPU_NO_HWBUG_STORE_RELEASE) \
 			: clobber); \
 	} else { \
-		_Pragma("no_asm_inline") _Pragma("asm_length(1)") \
+		__no_asm_inline(1) \
 		asm NOT_VOLATILE ("st" #size_letter" %[addr], %[val], mas=%[mas]" \
 			: [addr] "=m" (*(_addr)) \
 			: [val] "r" (_val), \
@@ -1953,7 +2504,7 @@ do { \
  */
 #define IO_LOAD_NV_MAS(_addr, _val, _mas, size_letter, clobber) \
 do { \
-	_Pragma("no_asm_inline") _Pragma("asm_length(1)") \
+	__no_asm_inline(1) \
 	asm NOT_VOLATILE ("{ld" #size_letter" %[addr], %[val], mas=%[mas]}" \
 		: [val] "=r" (_val) \
 		: [addr] "m" (*(_addr)), \
@@ -1963,12 +2514,30 @@ do { \
 
 #define IO_STORE_NV_MAS(_addr, _val, _mas, size_letter, clobber) \
 do { \
-	_Pragma("no_asm_inline") _Pragma("asm_length(1)") \
-	asm NOT_VOLATILE ("{st" #size_letter" %[addr], %[val], mas=%[mas]}" \
-		: [addr] "=m" (*(_addr)) \
-		: [val] "r" (_val), \
-		  [mas] "i" (_mas) \
-		: clobber); \
+	if ((_mas) == MAS_STORE_RELEASE_V6(MAS_MT_0) || \
+	    (_mas) == MAS_STORE_RELEASE_V6(MAS_MT_1)) { \
+		__no_asm_inline(1) \
+		asm NOT_VOLATILE ( \
+			ALTERNATIVE( \
+			/* Default version */ \
+				"{wait st_c=1, ld_c=1\n" \
+				" st" #size_letter" %[addr], %[val]}", \
+			/* CPU_NO_HWBUG_STORE_RELEASE version */ \
+				"{st" #size_letter" %[addr], %[val], mas=%[mas]}", \
+			%[cpu_no_hwbug_store_release]) \
+			: [addr] "=m" (*(_addr)) \
+			: [val] "r" (_val), \
+			  [mas] "i" (_mas), \
+			  [cpu_no_hwbug_store_release] "i" (CPU_NO_HWBUG_STORE_RELEASE) \
+			: clobber); \
+	} else { \
+		__no_asm_inline(1) \
+		asm NOT_VOLATILE ("{st" #size_letter" %[addr], %[val], mas=%[mas]}" \
+			: [addr] "=m" (*(_addr)) \
+			: [val] "r" (_val), \
+			  [mas] "i" (_mas) \
+			: clobber); \
+	} \
 } while (0)
 
 /*
@@ -2049,7 +2618,7 @@ do { \
 	WRITE_MAS_BARRIER_BEFORE(__mas); \
 	asm volatile ("st" #size_letter "," #chan_letter " \t0x0, [%0] %2, %1" \
 		: \
-		: "r" ((__e2k_ptr_t) (addr)), \
+		: "r" ((u64) (addr)), \
 		  "r" ((type) (val)), \
 		  "i" (__mas) \
 		: "memory"); \
@@ -2060,24 +2629,24 @@ do { \
 ({ \
 	asm volatile ("st" #size_letter ",sm," #chan_letter " \t0x0, [%0], %1" \
 		: \
-		: "r" ((__e2k_ptr_t) (addr)), \
+		: "r" ((u64) (addr)), \
 		  "r" ((type) (val))); \
 })
 
 #define NATIVE_READ_MAS_B_CH(addr, mas, chan_letter) \
-		NATIVE_DO_READ_MAS((addr), (mas), __e2k_u8_t, b, chan_letter)
+		NATIVE_DO_READ_MAS((addr), (mas), u8, b, chan_letter)
 #define NATIVE_READ_MAS_H_CH(addr, mas, chan_letter) \
-		NATIVE_DO_READ_MAS((addr), (mas), __e2k_u16_t, h, chan_letter)
+		NATIVE_DO_READ_MAS((addr), (mas), u16, h, chan_letter)
 #define NATIVE_READ_MAS_W_CH(addr, mas, chan_letter) \
-		NATIVE_DO_READ_MAS((addr), (mas), __e2k_u32_t, w, chan_letter)
+		NATIVE_DO_READ_MAS((addr), (mas), u32, w, chan_letter)
 #define NATIVE_READ_MAS_D_CH(addr, mas, chan_letter) \
-		NATIVE_DO_READ_MAS((addr), (mas), __e2k_u64_t, d, chan_letter)
+		NATIVE_DO_READ_MAS((addr), (mas), u64, d, chan_letter)
 
 /* Stops CPU until required flags are set in 64-bit value */
 #define E2K_WATCH_FOR_MODIFICATION_64(_addr, _flags) \
 ({ \
 	u64 _res; \
-	_Pragma("asm_length(10)") \
+	__asm_length(10) \
 	asm volatile (\
 		"{nop 4\n" \
 		" disp %%ctpr1, 1f\n" \
@@ -2100,7 +2669,7 @@ do { \
 ({ \
 	u64 _res; \
 	u8 _cond; \
-	_Pragma("asm_length(10)") \
+	__asm_length(10) \
 	asm volatile (\
 		"{\n" \
 		" nop 4\n" \
@@ -2149,28 +2718,28 @@ do { \
 #define NATIVE_READ_MAS_D_5(addr, mas)  NATIVE_READ_MAS_D_CH((addr), (mas), 5)
 
 #define NATIVE_WRITE_MAS_B_CH(addr, val, mas, chan_letter) \
-		NATIVE_DO_WRITE_MAS((addr), (val), (mas), __e2k_u8_t, b, \
+		NATIVE_DO_WRITE_MAS((addr), (val), (mas), u8, b, \
 					chan_letter)
 #define NATIVE_WRITE_MAS_H_CH(addr, val, mas, chan_letter) \
-		NATIVE_DO_WRITE_MAS((addr), (val), (mas), __e2k_u16_t, h, \
+		NATIVE_DO_WRITE_MAS((addr), (val), (mas), u16, h, \
 					chan_letter)
 #define NATIVE_WRITE_MAS_W_CH(addr, val, mas, chan_letter) \
-		NATIVE_DO_WRITE_MAS((addr), (val), (mas), __e2k_u32_t, w, \
+		NATIVE_DO_WRITE_MAS((addr), (val), (mas), u32, w, \
 					chan_letter)
 #define NATIVE_WRITE_MAS_D_CH(addr, val, mas, chan_letter) \
-		NATIVE_DO_WRITE_MAS((addr), (val), (mas), __e2k_u64_t, d, \
+		NATIVE_DO_WRITE_MAS((addr), (val), (mas), u64, d, \
 					chan_letter)
 #define	NATIVE_WRITE_TAGGED_D_CH(addr, val, chan_letter) \
-		NATIVE_DO_WRITE_TAGGED((addr), (val), __e2k_u64_t, d, \
+		NATIVE_DO_WRITE_TAGGED((addr), (val), u64, d, \
 					chan_letter)
 #define NATIVE_WRITE_MAS_B(addr, val, mas)				\
-		NATIVE_DO_WRITE_MAS(addr, val, mas, __e2k_u8_t, b, 2)
+		NATIVE_DO_WRITE_MAS(addr, val, mas, u8, b, 2)
 #define NATIVE_WRITE_MAS_H(addr, val, mas)				\
-		NATIVE_DO_WRITE_MAS(addr, val, mas, __e2k_u16_t, h, 2)
+		NATIVE_DO_WRITE_MAS(addr, val, mas, u16, h, 2)
 #define NATIVE_WRITE_MAS_W(addr, val, mas)				\
-		NATIVE_DO_WRITE_MAS(addr, val, mas, __e2k_u32_t, w, 2)
+		NATIVE_DO_WRITE_MAS(addr, val, mas, u32, w, 2)
 #define NATIVE_WRITE_MAS_D(addr, val, mas)				\
-		NATIVE_DO_WRITE_MAS(addr, val, mas, __e2k_u64_t, d, 2)
+		NATIVE_DO_WRITE_MAS(addr, val, mas, u64, d, 2)
 
 /*
  * Read from and write to system configuration registers SIC
@@ -2178,46 +2747,46 @@ do { \
  */
 #define native_set_sicreg(reg_off, val, cln, pln) \
 ({ \
-	register __e2k_u64_t addr; \
-	register __e2k_u64_t node_id = (cln) << 2; \
+	register u64 addr; \
+	register u64 node_id = (cln) << 2; \
 	node_id = node_id + ((pln)&0x3); \
-	addr = (__e2k_u64_t) THE_NODE_NBSR_PHYS_BASE(node_id); \
+	addr = (u64) THE_NODE_NBSR_PHYS_BASE(node_id); \
 	addr = addr + reg_off; \
 	NATIVE_WRITE_MAS_W(addr, val, MAS_IOADDR); \
 })
 #define native_get_sicreg(reg_off, cln, pln) \
 ({ \
-	register __e2k_u32_t res; \
-	register __e2k_u64_t addr; \
-	register __e2k_u64_t node_id = (cln) << 2; \
+	register u32 res; \
+	register u64 addr; \
+	register u64 node_id = (cln) << 2; \
 	node_id = node_id + ((pln)&0x3); \
-	addr = (__e2k_u64_t) THE_NODE_NBSR_PHYS_BASE(node_id); \
+	addr = (u64) THE_NODE_NBSR_PHYS_BASE(node_id); \
 	addr = addr + reg_off; \
 	res = NATIVE_READ_MAS_W(addr, MAS_IOADDR); \
 	res; \
 })
 
-#define NATIVE_SET_SICREG(reg_mnemonic, val, cln, pln) \
-		native_set_sicreg(SIC_##reg_mnemonic, val, cln, pln)
-#define NATIVE_GET_SICREG(reg_mnemonic, cln, pln) \
-		native_get_sicreg(SIC_##reg_mnemonic, cln, pln)
+#define NATIVE_SET_SICREG(reg, val, cln, pln) \
+		native_set_sicreg(SIC_##reg, val, cln, pln)
+#define NATIVE_GET_SICREG(reg, cln, pln) \
+		native_get_sicreg(SIC_##reg, cln, pln)
 
 
 #if !defined(CONFIG_BOOT_E2K) && !defined(E2K_P2V)
 
 # define MIGHT_HAVE_CPU_HWBUG_PREFETCH_EMPTY() \
 		(IS_ENABLED(CONFIG_CPU_E16C) || IS_ENABLED(CONFIG_CPU_E2C3))
-/* Use half-spec. prefetches on kernels with enabled support
+/* Use semi-spec. prefetches on kernels with enabled support
  * and fallback to fully speculative prefetches otherwise.
  *
  * CPU_HWBUG_PREFETCH_EMPTY - to avoid expensive dynamic checks,
  * just check the model without checking revision */
 # if defined(__LCC__)
-#  define __MAS_LOAD_HALF_SPEC() \
-		((IS_ENABLED(CONFIG_HALF_SPECULATIVE_KERNEL) ? 0 : MAS_LOAD_SPEC) | \
+#  define __MAS_LOAD_SEMI_SPEC() \
+		((IS_ENABLED(CONFIG_SEMI_SPECULATIVE_KERNEL) ? 0 : MAS_LOAD_SPEC) | \
 		 (MIGHT_HAVE_CPU_HWBUG_PREFETCH_EMPTY() ? MAS_BYPASS_L1_CACHE : 0))
 # else
-#  define __MAS_LOAD_HALF_SPEC() (MAS_LOAD_SPEC | \
+#  define __MAS_LOAD_SEMI_SPEC() (MAS_LOAD_SPEC | \
 		 (MIGHT_HAVE_CPU_HWBUG_PREFETCH_EMPTY() ? MAS_BYPASS_L1_CACHE : 0))
 # endif
 
@@ -2227,7 +2796,7 @@ do { \
 	asm ("ldb,sm %1, 0, %%empty, mas=%2\n" \
 		: "=r" (unused) \
 		: "r" (addr), \
-		  "i" (__MAS_LOAD_HALF_SPEC() | MAS_BYPASS_L1_CACHE)); \
+		  "i" (__MAS_LOAD_SEMI_SPEC() | MAS_BYPASS_L1_CACHE)); \
 } while (0)
 
 # define E2K_PREFETCH_L2_NOSPEC_OFFSET(addr, offset) \
@@ -2248,10 +2817,10 @@ do { \
 		      __pref_addr2 = __pref_addr + 2 * PREFETCH_STRIDE; \
 	lsr.vlc = 1; \
 	lsr.lcnt = _lcnt; \
-	_Pragma("asm_length(5)") \
-	asm (	"{nop 3\n" \
-		" rwd %[lsr], %%lsr\n" \
+	__asm_length(5) \
+	asm (	"{rwd %[lsr], %%lsr\n" \
 		" disp %%ctpr1, 0f}\n" \
+		"{nop} {nop} {nop} {nop}" /* lsr->ct delay; also CPU_HWBUG_RWD_LSR */ \
 		"0:\n" \
 		"{loop_mode\n" \
 		" ct %%ctpr1 ? %%NOT_LOOP_END\n" \
@@ -2265,7 +2834,7 @@ do { \
 		: [addr1] "+r" (__pref_addr1), [addr2] "+r" (__pref_addr2) \
 		: [lsr] "ir" (AW(lsr)), \
 		  [mas] "i" (MIGHT_HAVE_CPU_HWBUG_PREFETCH_EMPTY() ? \
-		  			MAS_BYPASS_L1_CACHE : (_mas)), \
+					MAS_BYPASS_L1_CACHE : (_mas)), \
 		  [prefetch_stride] "i" (PREFETCH_STRIDE), \
 		  [iteration_stride] "i" (4 * PREFETCH_STRIDE) \
 		: /* "lsr" cannot be specified so clobber all ctpr instead */ \
@@ -2278,7 +2847,7 @@ do { \
 	asm ("ldb,sm %1, 0, %%empty, mas=%2\n" \
 		: "=r" (unused) \
 		: "r" (addr), \
-		  "i" (__MAS_LOAD_HALF_SPEC())); \
+		  "i" (__MAS_LOAD_SEMI_SPEC())); \
 } while (0)
 
 # define E2K_PREFETCH_L1_NOSPEC(addr) \
@@ -2288,7 +2857,7 @@ do { \
 		: "=r" (unused) \
 		: "r" (addr), \
 		  "i" (MIGHT_HAVE_CPU_HWBUG_PREFETCH_EMPTY() ? \
-		  		MAS_BYPASS_L1_CACHE : 0)); \
+				MAS_BYPASS_L1_CACHE : 0)); \
 } while (0)
 
 # define E2K_PREFETCH_L1_SPEC_OFFSET(addr, offset) \
@@ -2298,7 +2867,7 @@ do { \
 		: "=r" (unused) \
 		: "r" (addr), \
 		  "i" (offset), \
-		  "i" (__MAS_LOAD_HALF_SPEC())); \
+		  "i" (__MAS_LOAD_SEMI_SPEC())); \
 } while (0)
 #else
 # define E2K_PREFETCH_L2_SPEC(addr)		do { (void) (addr); } while (0)
@@ -2318,7 +2887,7 @@ do { \
  */
 #define NATIVE_RECOVERY_TAGGED_LOAD_TO(_addr, _opc, _val, _tag, _chan) \
 do { \
-	_Pragma("asm_length(8)") \
+	__no_asm_inline(8) \
 	asm (	"{nop 1\n" \
 		" cmpesb,0 %[chan], 0, %%pred20\n" \
 		" cmpesb,1 %[chan], 1, %%pred21\n" \
@@ -2344,7 +2913,7 @@ do { \
  */
 #define TRY_RECOVERY_TAGGED_LOAD_TO(_addr, _opc, _val, _tag, _chan, _ret) \
 do { \
-	_Pragma("asm_length(8)") \
+	__no_asm_inline(8) \
 	asm (	"{nop 1\n" \
 		" cmpesb,0 %[chan], 0, %%pred20\n" \
 		" cmpesb,1 %[chan], 1, %%pred21\n" \
@@ -2367,10 +2936,10 @@ do { \
 
 #define NATIVE_RECOVERY_LOAD_TO(addr, opc, val, chan_letter) \
 ({ \
- 	asm volatile ("ldrd," #chan_letter "\t[%1 + %2], %0" \
- 			: "=r"(val) \
- 			: "r" ((__e2k_ptr_t) (addr)), \
- 			  "r" ((__e2k_u64_t) (opc))); \
+	asm volatile ("ldrd," #chan_letter "\t[%1 + %2], %0" \
+			: "=r"(val) \
+			: "r" ((u64) (addr)), \
+			  "r" ((u64) (opc))); \
 })
 
 #define NATIVE_LOAD_TAGGED_DGREGS(addr, numlo, numhi)	\
@@ -2403,7 +2972,7 @@ do { \
 	u32 __chan = (u32) (_chan); \
 	u32 __quadro = (u32) (_quadro); \
 	u32 __chan_q = (__quadro) ? __chan : 4; /* Not existent channel - skip */ \
-	_Pragma("asm_length(10)") \
+	__no_asm_inline(10) \
 	asm volatile ( \
 		"{disp %%ctpr1, qpswitchd_sm\n" \
 		" cmpesb,0 %[chan], 0, %%pred20\n" \
@@ -2452,7 +3021,7 @@ do { \
 	u32 __chan = (u32) (_chan); \
 	u32 __quadro = (u32) (_quadro); \
 	u32 __chan_q = (__quadro) ? __chan : 4; /* Not existent channel - skip */ \
-	_Pragma("asm_length(10)") \
+	__no_asm_inline(10) \
 	asm volatile ( \
 		"{disp %%ctpr1, qpswitchd_sm\n" \
 		" cmpesb,0 %[chan], 0, %%pred20\n" \
@@ -2511,7 +3080,7 @@ do { \
 do { \
 	u64 tmp; \
 	/* #133760 Use a real quadro register when repeating atomic load */ \
-	_Pragma("asm_length(9)") \
+	__no_asm_inline(9) \
 	asm (	"{disp %%ctpr1, qpswitchd_sm\n" \
 		" nop 4\n" \
 		" ldrd,0 [ %[addr] + %[opc_lo] ], %%db[0]\n" \
@@ -2540,7 +3109,7 @@ do { \
 do { \
 	u64 tmp; \
 	/* #133760 Use a real quadro register when repeating atomic load */ \
-	_Pragma("asm_length(9)") \
+	__no_asm_inline(9) \
 	asm (	"{disp %%ctpr1, qpswitchd_sm\n" \
 		" nop 4\n" \
 		" ldrd,0 [ %[addr] + %[opc_lo] ], %%db[0]\n" \
@@ -2579,7 +3148,7 @@ do { \
 	u64 tmp; \
 	/* #133760 Use a real quadro register when repeating atomic load */ \
 	if (_qp_load) { \
-		_Pragma("asm_length(9)") \
+		__no_asm_inline(9) \
 		asm (	"{disp %%ctpr1, qpswitchd_sm\n" \
 			" nop 4\n" \
 			" ldrd,0 [ %[addr] + %[opc_lo] ], %%db[0]\n" \
@@ -2597,7 +3166,7 @@ do { \
 			  [greg] "i" ((u64) (greg_no_lo)) \
 			: "call", "memory", "pred19", "g" #greg_no_lo); \
 	} else { \
-		_Pragma("asm_length(6)") \
+		__no_asm_inline(6) \
 		asm (	"{nop 4\n" \
 			" ldrd,0 [ %[addr] + %[opc_lo] ], %%g" #greg_no_lo "\n" \
 			" ldrd,2 [ %[addr] + %[opc_hi] ], %%g" #greg_no_hi "\n" \
@@ -2623,7 +3192,7 @@ do { \
 	u64 tmp; \
 	/* #133760 Use a real quadro register when repeating atomic load */ \
 	if (_qp_load) { \
-		_Pragma("asm_length(9)") \
+		__no_asm_inline(9) \
 		asm (	"{disp %%ctpr1, qpswitchd_sm\n" \
 			" nop 4\n" \
 			" ldrd,0 [ %[addr] + %[opc_lo] ], %%db[0]\n" \
@@ -2643,7 +3212,7 @@ do { \
 			  [greg] "i" ((u64) (greg_no_lo)) \
 			: "call", "memory", "pred19", "g" #greg_no_lo); \
 	} else { \
-		_Pragma("asm_length(6)") \
+		__no_asm_inline(6) \
 		asm (	"{nop 4\n" \
 			" ldrd,0 [ %[addr] + %[opc_lo] ], %%g" #greg_no_lo "\n" \
 			" ldrd,2 [ %[addr] + %[opc_hi] ], %%g" #greg_no_hi "\n" \
@@ -2740,63 +3309,10 @@ do { \
 		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 15, \
 					chan_opc, vr, quadro, _try, _ret); \
 		break; \
-	/* Do not load g16-g19 as they are used by kernel */ \
-	case 16: \
-	case 17: \
-	case 18: \
-	case 19: \
-		break; \
-	case 20: \
-		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 20, \
-					chan_opc, vr, quadro, _try, _ret); \
-		break; \
-	case 21: \
-		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 21, \
-					chan_opc, vr, quadro, _try, _ret); \
-		break; \
-	case 22: \
-		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 22, \
-					chan_opc, vr, quadro, _try, _ret); \
-		break; \
-	case 23: \
-		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 23, \
-					chan_opc, vr, quadro, _try, _ret); \
-		break; \
-	case 24: \
-		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 24, \
-					chan_opc, vr, quadro, _try, _ret); \
-		break; \
-	case 25: \
-		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 25, \
-					chan_opc, vr, quadro, _try, _ret); \
-		break; \
-	case 26: \
-		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 26, \
-					chan_opc, vr, quadro, _try, _ret); \
-		break; \
-	case 27: \
-		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 27, \
-					chan_opc, vr, quadro, _try, _ret); \
-		break; \
-	case 28: \
-		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 28, \
-					chan_opc, vr, quadro, _try, _ret); \
-		break; \
-	case 29: \
-		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 29, \
-					chan_opc, vr, quadro, _try, _ret); \
-		break; \
-	case 30: \
-		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 30, \
-					chan_opc, vr, quadro, _try, _ret); \
-		break; \
-	case 31: \
-		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 31, \
-					chan_opc, vr, quadro, _try, _ret); \
-		break; \
+	/* Do not load to g16-g31 directly as they are used by kernel */ \
+	case 16 ... 31: \
 	default: \
-		/* panic("Invalid global register # %d\n", greg_num); */ \
-		BUG_ON(true); \
+		BUG(); \
 	} \
 } while (0)
 
@@ -2886,63 +3402,10 @@ do { \
 		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(addr, opc_lo, opc_hi, 15, \
 				vr, _try, _ret); \
 		break; \
-	/* Do not load g16-g19 as they are used by kernel */ \
-	case 16: \
-	case 17: \
-	case 18: \
-	case 19: \
-		break; \
-	case 20: \
-		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(addr, opc_lo, opc_hi, \
-				20, 21, vr, qp_load, _try, _ret); \
-		break; \
-	case 21: \
-		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(addr, opc_lo, opc_hi, 21, \
-				vr, _try, _ret); \
-		break; \
-	case 22: \
-		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(addr, opc_lo, opc_hi, \
-				22, 23, vr, qp_load, _try, _ret); \
-		break; \
-	case 23: \
-		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(addr, opc_lo, opc_hi, 23, \
-				vr, _try, _ret); \
-		break; \
-	case 24: \
-		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(addr, opc_lo, opc_hi, \
-				24, 25, vr, qp_load, _try, _ret); \
-		break; \
-	case 25: \
-		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(addr, opc_lo, opc_hi, 25, \
-				vr, _try, _ret); \
-		break; \
-	case 26: \
-		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(addr, opc_lo, opc_hi, \
-				26, 27, vr, qp_load, _try, _ret); \
-		break; \
-	case 27: \
-		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(addr, opc_lo, opc_hi, 27, \
-				vr, _try, _ret); \
-		break; \
-	case 28: \
-		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(addr, opc_lo, opc_hi, \
-				28, 29, vr, qp_load, _try, _ret); \
-		break; \
-	case 29: \
-		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(addr, opc_lo, opc_hi, 29, \
-				vr, _try, _ret); \
-		break; \
-	case 30: \
-		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(addr, opc_lo, opc_hi, \
-				30, 31, vr, qp_load, _try, _ret); \
-		break; \
-	case 31: \
-		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(addr, opc_lo, opc_hi, 31, \
-				vr, _try, _ret); \
-		break; \
+	/* Do not load g16-g31 as they are used by kernel */ \
+	case 16 ... 31: \
 	default: \
-		/* panic("Invalid global register # %d\n", greg_num); */ \
-		BUG_ON(true); \
+		BUG(); \
 	} \
 } while (0)
 
@@ -2974,16 +3437,24 @@ do { \
 		_val_ext, _tag_ext, _opc_ext) \
 ({ \
 	u64 tmp, tmp_ext; \
-	_Pragma("asm_length(2)") \
+	__no_asm_inline(2) \
 	asm (	"{puttagd,2 %[val], %[tag], %[tmp]\n" \
 		" puttagd,5 %[val_ext], %[tag_ext], %[tmp_ext]}\n" \
 		"{strd,2 [ %[addr] + %[opc] ], %[tmp]\n" \
 		" strd,5 [ %[addr] + %[opc_ext] ], %[tmp_ext]}\n" \
+		ALTERNATIVE( \
+			"", \
+			"{nop}\n" \
+			"{nop}\n" \
+			"{nop}\n" \
+			"{nop}\n", \
+		%[cpu_hwbug_store_mas]) \
 		: [tmp] "=&r" (tmp), [tmp_ext] "=&r" (tmp_ext) \
 		: [addr] "r" (_addr), \
 		  [val] "r" ((u64) (_val)), [val_ext] "r" ((u64) (_val_ext)), \
 		  [tag] "r" ((u32) (_tag)), [tag_ext] "r" ((u32) (_tag_ext)), \
-		  [opc] "ir" (_opc), [opc_ext] "ir" (_opc_ext) \
+		  [opc] "ir" (_opc), [opc_ext] "ir" (_opc_ext), \
+		  [cpu_hwbug_store_mas] "i" (CPU_HWBUG_STORE_MAS) \
 		: "memory"); \
 })
 
@@ -2993,7 +3464,7 @@ do { \
 	u64 tmp, tmp_ext; \
 	u32 __chan = (u32) (_chan); \
 	u32 __chan_q = (_quadro) ? __chan : 4; /* Not existent channel - skip */ \
-	_Pragma("asm_length(4)") \
+	__no_asm_inline(4) \
 	asm (	"{nop 1\n" \
 		" puttagd,2 %[val], %[tag], %[tmp]\n" \
 		" puttagd,5,sm %[val_ext], %[tag_ext], %[tmp_ext]\n" \
@@ -3005,12 +3476,20 @@ do { \
 		" strd,5 [ %[addr] + %[opc] ], %[tmp] ? %%pred21}\n" \
 		"{strd,2 [ %[addr] + %[opc_ext] ], %[tmp_ext] ? %%pred22\n" \
 		" strd,5 [ %[addr] + %[opc_ext] ], %[tmp_ext] ? %%pred23}\n" \
+		ALTERNATIVE( \
+			"", \
+			"{nop}\n" \
+			"{nop}\n" \
+			"{nop}\n" \
+			"{nop}\n", \
+		%[cpu_hwbug_store_mas]) \
 		: [tmp] "=&r" (tmp), [tmp_ext] "=&r" (tmp_ext) \
 		: [addr] "r" (_addr), \
 		  [val] "r" ((u64) (_val)), [val_ext] "r" ((u64) (_val_ext)), \
 		  [tag] "r" ((u32) (_tag)), [tag_ext] "r" ((u32) (_tag_ext)), \
 		  [opc] "ir" (_opc), [opc_ext] "ir" (_opc_ext), \
-		  [chan] "ir" ((u32) (__chan)), [chan_q] "ir" ((u32) (__chan_q)) \
+		  [chan] "ir" ((u32) (__chan)), [chan_q] "ir" ((u32) (__chan_q)), \
+		  [cpu_hwbug_store_mas] "i" (CPU_HWBUG_STORE_MAS) \
 		: "memory", "pred20", "pred21", "pred22", "pred23"); \
 })
 
@@ -3023,18 +3502,25 @@ do { \
 		_val_ext, _tag_ext, _opc_ext, _ret) \
 ({ \
 	u64 tmp, tmp_ext; \
-	_Pragma("asm_length(3)") \
+	__no_asm_inline(3) \
 	asm (	"{puttagd,2 %[val], %[tag], %[tmp]\n" \
 		" puttagd,5 %[val_ext], %[tag_ext], %[tmp_ext]}\n" \
 		"{strd,2 [ %[addr] + %[opc] ], %[tmp]\n" \
 		" strd,5 [ %[addr] + %[opc_ext] ], %[tmp_ext]}\n" \
+		ALTERNATIVE( \
+			"", \
+			"{nop}\n" \
+			"{nop}\n" \
+			"{nop}\n", \
+		%[cpu_hwbug_store_mas]) \
 		"{addd,0 0, 0, %[ret]}\n" \
 		: [tmp] "=&r" (tmp), [tmp_ext] "=&r" (tmp_ext), \
 		  [ret] "=r" (_ret) \
 		: [addr] "r" (_addr), \
 		  [val] "r" ((u64) (_val)), [val_ext] "r" ((u64) (_val_ext)), \
 		  [tag] "r" ((u32) (_tag)), [tag_ext] "r" ((u32) (_tag_ext)), \
-		  [opc] "ir" (_opc), [opc_ext] "ir" (_opc_ext) \
+		  [opc] "ir" (_opc), [opc_ext] "ir" (_opc_ext), \
+		  [cpu_hwbug_store_mas] "i" (CPU_HWBUG_STORE_MAS) \
 		: "memory"); \
 })
 
@@ -3049,7 +3535,7 @@ do { \
 	u64 tmp, tmp_ext; \
 	u32 __chan = (u32) (_chan); \
 	u32 __chan_q = (_quadro) ? __chan : 4; /* Not existent channel - skip */ \
-	_Pragma("asm_length(5)") \
+	__no_asm_inline(5) \
 	asm (	"{nop 1\n" \
 		" puttagd,2 %[val], %[tag], %[tmp]\n" \
 		" puttagd,5,sm %[val_ext], %[tag_ext], %[tmp_ext]\n" \
@@ -3061,6 +3547,12 @@ do { \
 		" strd,5 [ %[addr] + %[opc] ], %[tmp] ? %%pred21}\n" \
 		"{strd,2 [ %[addr] + %[opc_ext] ], %[tmp_ext] ? %%pred22\n" \
 		" strd,5 [ %[addr] + %[opc_ext] ], %[tmp_ext] ? %%pred23}\n" \
+		ALTERNATIVE( \
+			"", \
+			"{nop}\n" \
+			"{nop}\n" \
+			"{nop}\n", \
+		%[cpu_hwbug_store_mas]) \
 		"{addd,0 0, 0, %[ret]}\n" \
 		: [tmp] "=&r" (tmp), [tmp_ext] "=&r" (tmp_ext), \
 		  [ret] "=r" (_ret) \
@@ -3068,7 +3560,8 @@ do { \
 		  [val] "r" ((u64) (_val)), [val_ext] "r" ((u64) (_val_ext)), \
 		  [tag] "r" ((u32) (_tag)), [tag_ext] "r" ((u32) (_tag_ext)), \
 		  [opc] "ir" (_opc), [opc_ext] "ir" (_opc_ext), \
-		  [chan] "ir" ((u32) (__chan)), [chan_q] "ir" ((u32) (__chan_q)) \
+		  [chan] "ir" ((u32) (__chan)), [chan_q] "ir" ((u32) (__chan_q)), \
+		  [cpu_hwbug_store_mas] "i" (CPU_HWBUG_STORE_MAS) \
 		: "memory", "pred20", "pred21", "pred22", "pred23"); \
 })
 
@@ -3085,12 +3578,12 @@ do { \
 do { \
 	u64 __tmp_reg = val; \
 	E2K_BUILD_BUG_ON(sizeof(val) != 8); \
-	_Pragma("asm_length(2)") \
+	__no_asm_inline(2) \
 	asm volatile ("{puttagd %0, %2, %0\n}" \
 		      "{strd," #chan_letter " [%1 + %3], %0}\n" \
 		      : "+r" (__tmp_reg) \
-		      : "r" ((__e2k_ptr_t) (addr)), \
-			"ri" ((__e2k_u32_t) (tag)), \
+		      : "r" ((u64) (addr)), \
+			"ri" ((u32) (tag)), \
 			"ri" ((opc)) \
 		      : "memory"); \
 } while (0)
@@ -3108,35 +3601,32 @@ do { \
 } while (0)
 
 
-#define	__NATIVE_STORE_TAGGED_QWORD(addr, val_lo, val_hi, \
-				    tag_lo, tag_hi, offset) \
-({                                                                      \
-	u64 reg1, reg2;							\
-	E2K_BUILD_BUG_ON(sizeof(val_hi) != 8);                          \
-	E2K_BUILD_BUG_ON(sizeof(val_lo) != 8);                          \
-	_Pragma("asm_length(2)")					\
-	asm volatile (	"{puttagd %3, %5, %0\n"                         \
-			" puttagd %4, %6, %1}\n"                        \
-			"{strd,2 [%2 + %7], %0\n"                       \
-			" strd,5 [%2 + %8], %1}\n"                      \
-			: "=&r" (reg1), "=&r" (reg2)                    \
-			: "r" (addr),                                   \
-			  "r" (val_lo),                                 \
-			  "r" (val_hi),                                 \
-			  "ri" (tag_lo),                                \
-			  "ri" (tag_hi),                                \
-			  "i" (TAGGED_MEM_STORE_REC_OPC),               \
-			  "ri" (TAGGED_MEM_STORE_REC_OPC | offset)      \
-			: "memory");                                    \
-})
-#define	NATIVE_STORE_TAGGED_QWORD(addr, val_lo, val_hi, tag_lo, tag_hi) \
-	__NATIVE_STORE_TAGGED_QWORD((addr), (val_lo), (val_hi), \
-				    (tag_lo), (tag_hi), 8UL)
+#define	NATIVE_STORE_TAGGED_QWORD(_addr, _val_lo, _val_hi, _tag_lo, _tag_hi, _offset) \
+do { \
+	u64 __reg1_stq, __reg2_stq; \
+	E2K_BUILD_BUG_ON(sizeof(_val_hi) != 8); \
+	E2K_BUILD_BUG_ON(sizeof(_val_lo) != 8); \
+	__no_asm_inline(2) \
+	asm volatile (	"{puttagd,2 %[val_lo], %[tag_lo], %[reg1]\n" \
+			" puttagd,5 %[val_hi], %[tag_hi], %[reg2]}\n" \
+			"{strd,2 [ %[addr] + %[opc_lo] ], %[reg1]\n" \
+			" strd,5 [ %[addr] + %[opc_hi] ], %[reg2]}\n" \
+			: [reg1] "=&r" (__reg1_stq), \
+			  [reg2] "=&r" (__reg2_stq) \
+			: [addr] "r" ((u64) (unsigned long) (_addr)), \
+			  [val_lo] "r" ((u64) (_val_lo)), \
+			  [val_hi] "r" ((u64) (_val_hi)), \
+			  [tag_lo] "ri" ((u32) (_tag_lo)), \
+			  [tag_hi] "ri" ((u32) (_tag_hi)), \
+			  [opc_lo] "i" (TAGGED_MEM_STORE_REC_OPC), \
+			  [opc_hi] "ri" (TAGGED_MEM_STORE_REC_OPC | (_offset)) \
+			: "memory"); \
+} while (0)
 
 #define NATIVE_MOVE_TAGGED_QWORD(_from_lo, _from_hi, _to_lo, _to_hi)	\
 ({									\
 	u64 __val_lo, __val_hi;						\
-	_Pragma("asm_length(6)")					\
+	__no_asm_inline(6)					\
 	asm ("{nop 4\n"							\
 	     " ldrd,2 [ %[from_lo] + %[opc_ld] ], %[val_lo]\n"		\
 	     " ldrd,5 [ %[from_hi] + %[opc_ld] ], %[val_hi]}\n"		\
@@ -3193,7 +3683,7 @@ do { \
 	u32 __chan = (u32) (_chan); \
 	u32 __quadro = (u32) (_quadro); \
 	u32 __chan_q = (__quadro) ? __chan : 4; /* Not existent channel - skip */ \
-	_Pragma("asm_length(11)") \
+	__no_asm_inline(11) \
 	asm (	"{cmpesb %[quadro], 0, %%pred18\n" \
 		" cmpesb %[vr], 0, %%pred19\n" \
 		" cmpesb %[not_single_byte], 0, %%pred28}\n" \
@@ -3219,6 +3709,13 @@ do { \
 		"{strd,2 [ %[to] + %[opc_st_byte] ], %[val_lo] ? %%pred28}\n" \
 		"{strd,2 [ %[to] + %[opc_st] ], %[val_lo] ? ~%%pred28\n" \
 		" strd,5 [ %[to_hi] + %[opc_st] ], %[val_hi] ? ~ %%pred18}\n" \
+		ALTERNATIVE( \
+			"", \
+			"{nop}\n" \
+			"{nop}\n" \
+			"{nop}\n" \
+			"{nop}\n", \
+		%[cpu_hwbug_store_mas]) \
 		: [prev] "=&r" (prev), \
 		  [val_lo] "=&r" (val_lo), [val_hi] "=&r" (val_hi) \
 		: [from] "r" (_from), [to] "r" (_to), [to_hi] "r" (_to_hi), \
@@ -3228,7 +3725,8 @@ do { \
 		  [not_single_byte] "ir" (_not_single_byte), \
 		  [opc_ld] "i" (TAGGED_MEM_LOAD_REC_OPC), \
 		  [opc_st_byte] "i" (MEM_STORE_REC_OPC_B), \
-		  [opc_st] "i" (TAGGED_MEM_STORE_REC_OPC) \
+		  [opc_st] "i" (TAGGED_MEM_STORE_REC_OPC), \
+		  [cpu_hwbug_store_mas] "i" (CPU_HWBUG_STORE_MAS) \
 		: "memory", "pred18", "pred19", "pred20", "pred21", \
 		  "pred22", "pred23", "pred24", "pred25", "pred26", \
 		  "pred27", "pred28"); \
@@ -3247,7 +3745,7 @@ do { \
 	u32 __quadro = (u32) (_quadro); \
 	u32 __chan_q = (__quadro) ? __chan : 4; /* Not existent channel - skip */ \
 	u64 __opc = (_opc); \
-	_Pragma("asm_length(12)") \
+	__no_asm_inline(12) \
 	asm (	"{cmpesb %[quadro], 0, %%pred18\n" \
 		" cmpesb %[vr], 0, %%pred19\n" \
 		" cmpesb %[not_single_byte], 0, %%pred28}\n" \
@@ -3273,6 +3771,12 @@ do { \
 		"{strd,2 [ %[to] + %[opc_st_byte] ], %[val] ? %%pred28}\n" \
 		"{strd,2 [ %[to] + %[opc_st] ], %[val] ? ~%%pred28\n" \
 		" strd,5 [ %[to_hi] + %[opc_st] ], %[val_8] ? ~ %%pred18}\n" \
+		ALTERNATIVE( \
+			"", \
+			"{nop}\n" \
+			"{nop}\n" \
+			"{nop}\n", \
+		%[cpu_hwbug_store_mas]) \
 		"{addd,0 0, 0, %[ret]}\n" \
 		: [prev] "=&r" (prev), [val] "=&r" (val), \
 		  [val_8] "=&r" (val_8), \
@@ -3284,7 +3788,8 @@ do { \
 		  [not_single_byte] "ir" (_not_single_byte), \
 		  [opc_ld] "i" (TAGGED_MEM_LOAD_REC_OPC), \
 		  [opc_st_byte] "i" (MEM_STORE_REC_OPC_B), \
-		  [opc_st] "i" (TAGGED_MEM_STORE_REC_OPC) \
+		  [opc_st] "i" (TAGGED_MEM_STORE_REC_OPC), \
+		  [cpu_hwbug_store_mas] "i" (CPU_HWBUG_STORE_MAS) \
 		: "memory", "pred18", "pred19", "pred20", "pred21", \
 		  "pred22", "pred23", "pred24", "pred25", "pred26", \
 		  "pred27", "pred28"); \
@@ -3299,7 +3804,7 @@ do { \
 	u64 prev; \
 	/* #133760 Use a real quadro register when repeating atomic load */ \
 	e2k_qreg_t __qvalue; \
-	_Pragma("asm_length(9)") \
+	__no_asm_inline(9) \
 	asm (	"{cmpesb %[vr], 0, %%pred19}\n" \
 		"{ldrd,0 [ %[from] + %[opc_lo] ], %L[qvalue]\n" \
 		" ldrd,2 [ %[from] + %[opc_hi] ], %H[qvalue]}\n" \
@@ -3308,12 +3813,20 @@ do { \
 		"{movts,1 %[prev], %L[qvalue] ? %%pred19}\n" \
 		"{strd,2 [ %[to] + %[opc_st] ], %L[qvalue]\n" \
 		" strd,5 [ %[to_hi] + %[opc_st] ], %H[qvalue]}\n" \
+		ALTERNATIVE( \
+			"", \
+			"{nop}\n" \
+			"{nop}\n" \
+			"{nop}\n" \
+			"{nop}\n", \
+		%[cpu_hwbug_store_mas]) \
 		: [prev] "=&r" (prev), [qvalue] "=&r" (__qvalue) \
 		: [from] "r" (_from), [to] "r" (_to), [to_hi] "r" (_to_hi), \
 		  [vr] "ir" ((u32) (_vr)), \
 		  [opc_lo] "r" ((u64) (_opc_lo)), [opc_hi] "r" ((u64) (_opc_hi)), \
 		  [opc_ld] "i" (TAGGED_MEM_LOAD_REC_OPC), \
-		  [opc_st] "i" (TAGGED_MEM_STORE_REC_OPC) \
+		  [opc_st] "i" (TAGGED_MEM_STORE_REC_OPC), \
+		  [cpu_hwbug_store_mas] "i" (CPU_HWBUG_STORE_MAS) \
 		: "memory", "pred19"); \
 } while (false)
 
@@ -3329,7 +3842,7 @@ do { \
 	/* #133760 Use a real quadro register when repeating atomic load */ \
 	e2k_qreg_t __qvalue; \
 	u64 __opc = (_opc); \
-	_Pragma("asm_length(10)") \
+	__no_asm_inline(10) \
 	asm (	"{cmpesb %[vr], 0, %%pred19}\n" \
 		"{ldrd,0 [ %[from] + %[opc] ], %L[qvalue]\n" \
 		" ldrd,2 [ %[from] + %[opc_8] ], %H[qvalue]}\n" \
@@ -3338,6 +3851,12 @@ do { \
 		"{movts,1 %[prev], %L[qvalue] ? %%pred19}\n" \
 		"{strd,2 [ %[to] + %[opc_st] ], %L[qvalue]\n" \
 		" strd,5 [ %[to_hi] + %[opc_st] ], %H[qvalue]}\n" \
+		ALTERNATIVE( \
+			"", \
+			"{nop}\n" \
+			"{nop}\n" \
+			"{nop}\n", \
+		%[cpu_hwbug_store_mas]) \
 		"{addd,0 0, 0, %[ret]}\n" \
 		: [prev] "=&r" (prev), [qvalue] "=&r" (__qvalue), \
 		  [ret] "=r" (_ret) \
@@ -3345,14 +3864,17 @@ do { \
 		  [vr] "ir" ((u32) (_vr)), \
 		  [opc] "r" (__opc), [opc_8] "r" (__opc | 8ull), \
 		  [opc_ld] "i" (TAGGED_MEM_LOAD_REC_OPC), \
-		  [opc_st] "i" (TAGGED_MEM_STORE_REC_OPC) \
+		  [opc_st] "i" (TAGGED_MEM_STORE_REC_OPC), \
+		  [cpu_hwbug_store_mas] "i" (CPU_HWBUG_STORE_MAS) \
 		: "memory", "pred19"); \
 } while (false)
 
-#define E2K_TAGGED_MEMMOVE_8(__dst, __src)				\
+#define E2K_TAGGED_MEMMOVE_8(___dst, ___src)				\
 ({									\
+	volatile void * __dst = (___dst);				\
+	const volatile void * __src = (___src);				\
 	u64 __tmp1;							\
-	_Pragma("asm_length(6)")					\
+	__no_asm_inline(6)					\
 	asm (								\
 		"{\n"							\
 		"nop 4\n"						\
@@ -3368,10 +3890,12 @@ do { \
 		: "memory");						\
 })
 
-#define E2K_TAGGED_MEMMOVE_16(__dst, __src)				\
+#define E2K_TAGGED_MEMMOVE_16(___dst, ___src)				\
 ({									\
+	volatile void * __dst = (___dst);				\
+	const volatile void * __src = (___src);				\
 	u64 __tmp1, __tmp2;						\
-	_Pragma("asm_length(6)")					\
+	__no_asm_inline(6)					\
 	asm (								\
 		"{\n"							\
 		"nop 4\n"						\
@@ -3391,10 +3915,12 @@ do { \
 		: "memory");						\
 })
 
-#define E2K_TAGGED_MEMMOVE_24(__dst, __src)				\
+#define E2K_TAGGED_MEMMOVE_24(___dst, ___src)				\
 ({									\
+	volatile void * __dst = (___dst);				\
+	const volatile void * __src = (___src);				\
 	u64 __tmp1, __tmp2, __tmp3;					\
-	_Pragma("asm_length(7)")					\
+	__no_asm_inline(7)					\
 	asm (								\
 		"{\n"							\
 		"ldrd,2 [ %[src] + %[ld_opc_0] ], %[tmp1]\n"		\
@@ -3423,10 +3949,12 @@ do { \
 		: "memory");						\
 })
 
-#define E2K_TAGGED_MEMMOVE_32(__dst, __src)				\
+#define E2K_TAGGED_MEMMOVE_32(___dst, ___src)				\
 ({									\
+	volatile void * __dst = (___dst);				\
+	const volatile void * __src = (___src);				\
 	u64 __tmp1, __tmp2, __tmp3, __tmp4;				\
-	_Pragma("asm_length(7)")					\
+	__no_asm_inline(7)					\
 	asm (								\
 		"{\n"							\
 		"ldrd,2 [ %[src] + %[ld_opc_0] ], %[tmp1]\n"		\
@@ -3459,10 +3987,12 @@ do { \
 		: "memory");						\
 })
 
-#define E2K_TAGGED_MEMMOVE_40(__dst, __src)				\
+#define E2K_TAGGED_MEMMOVE_40(___dst, ___src)				\
 ({									\
+	volatile void * __dst = (___dst);				\
+	const volatile void * __src = (___src);				\
 	u64 __tmp1, __tmp2, __tmp3, __tmp4, __tmp5;			\
-	_Pragma("asm_length(8)")					\
+	__no_asm_inline(8)					\
 	asm (								\
 		"{\n"							\
 		"ldrd,2 [ %[src] + %[ld_opc_0] ], %[tmp1]\n"		\
@@ -3504,10 +4034,12 @@ do { \
 		: "memory");						\
 })
 
-#define E2K_TAGGED_MEMMOVE_48(__dst, __src)				\
+#define E2K_TAGGED_MEMMOVE_48(___dst, ___src)				\
 ({									\
+	volatile void * __dst = (___dst);				\
+	const volatile void * __src = (___src);				\
 	u64 __tmp1, __tmp2, __tmp3, __tmp4, __tmp5, __tmp6;		\
-	_Pragma("asm_length(8)")					\
+	__no_asm_inline(8)					\
 	asm (								\
 		"{\n"							\
 		"ldrd,2 [ %[src] + %[ld_opc_0] ], %[tmp1]\n"		\
@@ -3553,10 +4085,12 @@ do { \
 		: "memory");						\
 })
 
-#define E2K_TAGGED_MEMMOVE_56(__dst, __src)				\
+#define E2K_TAGGED_MEMMOVE_56(___dst, ___src)				\
 ({									\
+	volatile void * __dst = (___dst);				\
+	const volatile void * __src = (___src);				\
 	u64 __tmp1, __tmp2, __tmp3, __tmp4, __tmp5, __tmp6, __tmp7;	\
-	_Pragma("asm_length(9)")					\
+	__no_asm_inline(9)					\
 	asm (								\
 		"{\n"							\
 		"ldrd,2 [ %[src] + %[ld_opc_0] ], %[tmp1]\n"		\
@@ -3611,10 +4145,12 @@ do { \
 		: "memory");						\
 })
 
-#define E2K_TAGGED_MEMMOVE_64(__dst, __src)				\
+#define E2K_TAGGED_MEMMOVE_64(___dst, ___src)				\
 ({									\
+	volatile void * __dst = (___dst);				\
+	const volatile void * __src = (___src);				\
 	u64 __tmp1, __tmp2, __tmp3, __tmp4, __tmp5, __tmp6, __tmp7, __tmp8; \
-	_Pragma("asm_length(9)")					\
+	__no_asm_inline(9)					\
 	asm (								\
 		"{\n"							\
 		"ldrd,2 [ %[src] + %[ld_opc_0] ], %[tmp1]\n"		\
@@ -3684,7 +4220,7 @@ do { \
 	register u64 __opc24 = TAGGED_MEM_LOAD_REC_OPC | 24; \
 	register u64 __tmp0, __tmp8, __tmp16, __tmp24; \
  \
-	_Pragma("asm_length(9)") \
+	__no_asm_inline(9) \
 	asm volatile (	"{\n" \
 			"nop 4\n" \
 			"ldrd,0 [%5 + %6], %0\n" \
@@ -3720,6 +4256,7 @@ do { \
 #define NATIVE_LOAD_TAGD(_addr) \
 ({ \
 	u32 __dtag; \
+	ASM_LENGTH_V5_V6(4, 6) \
 	asm (ALTERNATIVE( \
 	     /* Default version */ \
 		"{ldrd [ %[addr] + %[opc] ], %[dtag]\n" \
@@ -3739,6 +4276,7 @@ do { \
 #define NATIVE_LOAD_VAL_AND_TAGD(_addr, _val, _tag) \
 do { \
 	BUILD_BUG_ON(sizeof(_tag) > 4); \
+	ASM_LENGTH_V5_V6(5, 6) \
 	asm (ALTERNATIVE( \
 	     /* Default version */ \
 		"{ldrd [ %[addr] + %[opc] ], %[val]\n" \
@@ -3761,6 +4299,7 @@ do { \
 #define NATIVE_LOAD_VAL_AND_TAGW(_addr, _val, _tag) \
 do { \
 	BUILD_BUG_ON(sizeof(_tag) > 4); \
+	ASM_LENGTH_V5_V6(5, 6) \
 	asm (ALTERNATIVE( \
 	     /* Default version */ \
 		"{ldrd [ %[addr] + %[opc] ], %[val]\n" \
@@ -3783,6 +4322,7 @@ do { \
 #define	NATIVE_LOAD_VAL_AND_TAGQ(_addr, _lo, _hi, _tag, _offset) \
 do { \
 	u32 __tag_lo_lvt, __tag_hi_lvt; \
+	ASM_LENGTH_V5_V6(5, 7) \
 	asm (ALTERNATIVE( \
 	     /* Default version */ \
 		"{ldrd,2 [ %[addr] + %[opc_lo] ], %[lo]\n" \
@@ -3815,7 +4355,7 @@ do { \
 	register unsigned long res; \
 	asm volatile ("ldb," #chan_letter "\t%%dg" #greg_no ", [%1], %0" \
 			: "=r"(res) \
-			: "ri" ((__e2k_u64_t) (offset))); \
+			: "ri" ((u64) (offset))); \
 	res; \
 })
 #define E2K_LD_GREG_BASED_H(greg_no, offset, chan_letter) \
@@ -3823,7 +4363,7 @@ do { \
 	register unsigned long res; \
 	asm volatile ("ldh," #chan_letter "\t%%dg" #greg_no ", [%1], %0" \
 			: "=r"(res) \
-			: "ri" ((__e2k_u64_t) (offset))); \
+			: "ri" ((u64) (offset))); \
 	res; \
 })
 #define E2K_LD_GREG_BASED_W(greg_no, offset, chan_letter) \
@@ -3831,7 +4371,7 @@ do { \
 	register unsigned long res; \
 	asm volatile ("ldw," #chan_letter "\t%%dg" #greg_no ", [%1], %0" \
 			: "=r"(res) \
-			: "ri" ((__e2k_u64_t) (offset))); \
+			: "ri" ((u64) (offset))); \
 	res; \
 })
 #define E2K_LD_GREG_BASED_D(greg_no, offset, chan_letter) \
@@ -3839,36 +4379,36 @@ do { \
 	register unsigned long long res; \
 	asm volatile ("ldd," #chan_letter "\t%%dg" #greg_no ", [%1], %0" \
 			: "=r"(res) \
-			: "ri" ((__e2k_u64_t) (offset))); \
+			: "ri" ((u64) (offset))); \
 	res; \
 })
 #define E2K_ST_GREG_BASED_B(greg_no, offset, value, chan_letter) \
 ({ \
 	asm volatile ("stb," #chan_letter "\t%%dg" #greg_no ", [%0], %1" \
 			: \
-			: "ri" ((__e2k_u64_t) (offset)), \
-			  "r" ((__e2k_u8_t) (value))); \
+			: "ri" ((u64) (offset)), \
+			  "r" ((u8) (value))); \
 })
 #define E2K_ST_GREG_BASED_H(greg_no, offset, value, chan_letter) \
 ({ \
 	asm volatile ("sth," #chan_letter "\t%%dg" #greg_no ", [%0], %1" \
 			: \
-			: "ri" ((__e2k_u64_t) (offset)), \
-			  "r" ((__e2k_u16_t) (value))); \
+			: "ri" ((u64) (offset)), \
+			  "r" ((u16) (value))); \
 })
 #define E2K_ST_GREG_BASED_W(greg_no, offset, value, chan_letter) \
 ({ \
 	asm volatile ("stw," #chan_letter "\t%%dg" #greg_no ", [%0], %1" \
 			: \
-			: "ri" ((__e2k_u64_t) (offset)), \
-			  "r" ((__e2k_u32_t) (value))); \
+			: "ri" ((u64) (offset)), \
+			  "r" ((u32) (value))); \
 })
 #define E2K_ST_GREG_BASED_D(greg_no, offset, value, chan_letter) \
 ({ \
 	asm volatile ("std," #chan_letter "\t%%dg" #greg_no ", [%0], %1" \
 			: \
-			: "ri" ((__e2k_u64_t) (offset)), \
-			  "r" ((__e2k_u64_t) (value))); \
+			: "ri" ((u64) (offset)), \
+			  "r" ((u64) (value))); \
 })
 
 #define E2K_LOAD_GREG_BASED_B(greg_no, offset)				\
@@ -3918,7 +4458,7 @@ do { \
 		: "=&r" (psp.lo),					\
 		  "=&r" (psp.hi),					\
 		  "=&r" (pshtp)						\
-		: "r" ((__e2k_ptr_t) (&lock_addr))			\
+		: "r" ((u64) (&lock_addr))			\
 		: "memory");						\
 })
 #define ATOMIC_READ_PC_STACK_REGS(pcsp, pcshtp)				\
@@ -3940,13 +4480,13 @@ do { \
 		: "=&r" (pcsp.lo),					\
 		  "=&r" (pcsp.hi),					\
 		  "=&r" (pcshtp)					\
-		: "r" ((__e2k_ptr_t) (&lock_addr))			\
+		: "r" ((u64) (&lock_addr))			\
 		: "memory");						\
 })
 #define ATOMIC_READ_HW_PS_SIZES(psp_hi, pshtp)				\
 ({									\
 	unsigned long lock_addr;					\
-	_Pragma("asm_length(4)")					\
+	__asm_length(4)					\
 	asm volatile (							\
 		"\n"							\
 		"1:\n"							\
@@ -3961,13 +4501,13 @@ do { \
 		"}\n"							\
 		: "=&r" (psp_hi),					\
 		  "=&r" (pshtp)						\
-		: "r" ((__e2k_ptr_t) (&lock_addr))			\
+		: "r" ((u64) (&lock_addr))			\
 		: "memory");						\
 })
 #define ATOMIC_READ_HW_PCS_SIZES(pcsp_hi, pcshtp)			\
 ({									\
 	unsigned long lock_addr;					\
-	_Pragma("asm_length(4)")					\
+	__asm_length(4)					\
 	asm volatile (							\
 		"\n"							\
 		"1:\n"							\
@@ -3982,13 +4522,13 @@ do { \
 		"}\n"							\
 		: "=&r" (pcsp_hi),					\
 		  "=&r" (pcshtp)					\
-		: "r" ((__e2k_ptr_t) (&lock_addr))			\
+		: "r" ((u64) (&lock_addr))			\
 		: "memory");						\
 })
 #define ATOMIC_READ_HW_STACKS_SIZES(psp_hi, pshtp, pcsp_hi, pcshtp)	\
 ({									\
 	unsigned long lock_addr;					\
-	_Pragma("asm_length(6)")					\
+	__asm_length(6)					\
 	asm volatile (							\
 		"\n"							\
 		"1:\n"							\
@@ -4007,7 +4547,7 @@ do { \
 		  "=&r" (pshtp),					\
 		  "=&r" (pcsp_hi),					\
 		  "=&r" (pcshtp)					\
-		: "r" ((__e2k_ptr_t) (&lock_addr))			\
+		: "r" ((u64) (&lock_addr))			\
 		: "memory");						\
 })
 #define ATOMIC_READ_HW_STACKS_REGS(psp, pshtp, pcsp, pcshtp)		\
@@ -4035,7 +4575,7 @@ do { \
 		  "=&r" (pcsp.lo),					\
 		  "=&r" (pcsp.hi),					\
 		  "=&r" (pcshtp.word)					\
-		: "r" ((__e2k_ptr_t) (&lock_addr))			\
+		: "r" ((u64) (&lock_addr))			\
 		: "memory");						\
 })
 /*
@@ -4075,13 +4615,13 @@ do { \
 		  "=&r" (usd.hi),					\
 		  "=&r" (cr1.lo),					\
 		  "=&r" (cr1.hi)					\
-		: "r" ((__e2k_ptr_t) (&lock_addr))			\
+		: "r" ((u64) (&lock_addr))			\
 		: "memory");						\
 })
 
 #define NATIVE_CLEAN_LD_ACQ_ADDRESS(_reg1, _reg2, _hwbug_address) \
 ({ \
-	_Pragma("asm_length(4)") \
+	__asm_length(4) \
 	asm volatile ( \
 		"{\n" \
 		"ldb,0,sm %[addr], 0 * 4096 + 0 * 64, %[reg1], mas=%[mas]\n" \
@@ -4134,17 +4674,17 @@ do { \
 #define MB_AFTER_ATOMIC_RELAXED_MB
 
 #if defined CONFIG_CPU_E16C || defined CONFIG_CPU_E2C3 || defined CONFIG_CPU_E12C
-#define BEFORE_ATOMIC(label, mem_model, atomic_spurious_fault) \
+#define BEFORE_ATOMIC(label, mem_model, no_atomic_spurious_fault) \
 		MB_BEFORE_ATOMIC_##mem_model \
 		label "\n" \
 		ALTERNATIVE( \
 		/* Default version */ \
-			"", \
-		/* CPU_HWBUG_ATOMIC_SPURIOUS_FAULT version */ \
 			"{nop 1}", \
-		%[atomic_spurious_fault])
+		/* CPU_NO_HWBUG_ATOMIC_SPURIOUS_FAULT version */ \
+			"", \
+		%[no_atomic_spurious_fault])
 #else
-#define BEFORE_ATOMIC(label, mem_model, atomic_spurious_fault) \
+#define BEFORE_ATOMIC(label, mem_model, no_atomic_spurious_fault) \
 		MB_BEFORE_ATOMIC_##mem_model \
 		label "\n"
 #endif /* CONFIG_CPU_E16C || CONFIG_CPU_E2C3 || CONFIG_CPU_E12C */
@@ -4161,21 +4701,23 @@ do { \
 #define STRONG_MB_ATOMIC_CHANNEL	"2"
 #define LOCK_MB_ATOMIC_CHANNEL		ACQUIRE_MB_ATOMIC_CHANNEL
 
+#define LOCK_MB_ATOMIC_MAS_VALUE	0x2
+#define ACQUIRE_MB_ATOMIC_MAS_VALUE	0x2
+#define RELAXED_MB_ATOMIC_MAS_VALUE	0x2
 #if CONFIG_CPU_ISET_MIN >= 6
-# define LOCK_MB_ATOMIC_MAS	"0x2"
-# define ACQUIRE_MB_ATOMIC_MAS	"0x2"
-# define RELEASE_MB_ATOMIC_MAS	"0x73"
+# define RELEASE_MB_ATOMIC_MAS_VALUE	0x73
 /* We use "release" operation since in practive it has strong semantics too
  * but (unlike normal one) also allows specifying "mt=1" parameter */
-# define STRONG_MB_ATOMIC_MAS	"0x73"
-# define RELAXED_MB_ATOMIC_MAS	"0x2"
+# define STRONG_MB_ATOMIC_MAS_VALUE	0x73
 #else
-# define LOCK_MB_ATOMIC_MAS	"0x2"
-# define ACQUIRE_MB_ATOMIC_MAS	"0x2"
-# define RELEASE_MB_ATOMIC_MAS	"0x2"
-# define STRONG_MB_ATOMIC_MAS	"0x2"
-# define RELAXED_MB_ATOMIC_MAS	"0x2"
+# define RELEASE_MB_ATOMIC_MAS_VALUE	0x2
+# define STRONG_MB_ATOMIC_MAS_VALUE	0x2
 #endif
+#define LOCK_MB_ATOMIC_MAS		__stringify(LOCK_MB_ATOMIC_MAS_VALUE)
+#define ACQUIRE_MB_ATOMIC_MAS		__stringify(ACQUIRE_MB_ATOMIC_MAS_VALUE)
+#define RELAXED_MB_ATOMIC_MAS		__stringify(RELAXED_MB_ATOMIC_MAS_VALUE)
+#define RELEASE_MB_ATOMIC_MAS		__stringify(RELEASE_MB_ATOMIC_MAS_VALUE)
+#define STRONG_MB_ATOMIC_MAS		__stringify(STRONG_MB_ATOMIC_MAS_VALUE)
 
 #define CLOBBERS_LOCK_MB	: "memory"
 #define CLOBBERS_ACQUIRE_MB	: "memory"
@@ -4196,7 +4738,7 @@ do { \
 do { \
 	ASM_LENGTH_V5_V6(11, 12) \
 	asm NOT_VOLATILE ( \
-		BEFORE_ATOMIC("1:", mem_model, atomic_spurious_fault) \
+		BEFORE_ATOMIC("1:", mem_model, no_atomic_spurious_fault) \
 		ALTERNATIVE( \
 		/* Default version - 10 cycles ld->st delay */ \
 			"{nop 6\n" \
@@ -4214,7 +4756,7 @@ do { \
 		: [rval] "=&r" (__rval), [addr] "+m" (*(__addr)) \
 		: [val] "ir" (__val), \
 		  [iset_v6] "i" (CPU_FEAT_ISET_V6), \
-		  [atomic_spurious_fault] "i" (CPU_HWBUG_ATOMIC_SPURIOUS_FAULT) \
+		  [no_atomic_spurious_fault] "i" (CPU_NO_HWBUG_ATOMIC_SPURIOUS_FAULT) \
 		CLOBBERS_##mem_model); \
 } while (0)
 
@@ -4223,7 +4765,7 @@ do { \
 do { \
 	ASM_LENGTH_V5_V6(11, 12) \
 	asm NOT_VOLATILE ( \
-		BEFORE_ATOMIC("1:", mem_model, atomic_spurious_fault) \
+		BEFORE_ATOMIC("1:", mem_model, no_atomic_spurious_fault) \
 		ALTERNATIVE( \
 		/* Default version - 10 cycles ld->st delay */ \
 			"{nop 6\n" \
@@ -4242,16 +4784,16 @@ do { \
 		  [rval] "=&r" (__rval) \
 		: [val] "ir" (__val), \
 		  [iset_v6] "i" (CPU_FEAT_ISET_V6), \
-		  [atomic_spurious_fault] "i" (CPU_HWBUG_ATOMIC_SPURIOUS_FAULT) \
+		  [no_atomic_spurious_fault] "i" (CPU_NO_HWBUG_ATOMIC_SPURIOUS_FAULT) \
 		CLOBBERS_##mem_model); \
 } while (0)
 
 /* Atomically add to 16 low bits and return the new 32 bits value */
 #define NATIVE_ATOMIC16_ADD_RETURN32_LOCK(val, addr, rval, tmp) \
 ({ \
-	_Pragma("asm_length(11)") \
+	__asm_length(11) \
 	asm NOT_VOLATILE ( \
-		BEFORE_ATOMIC("1:", LOCK_MB, atomic_spurious_fault) \
+		BEFORE_ATOMIC("1:", LOCK_MB, no_atomic_spurious_fault) \
 		"\n{"\
 		"\nnop 4"\
 		"\nldw,0\t0x0, [%3] 0x7, %0" \
@@ -4271,9 +4813,9 @@ do { \
 		"\n}" \
 		MB_AFTER_ATOMIC_LOCK_MB \
 		: "=&r" (rval), "=&r" (tmp) \
-		: "i" (val), "r" ((__e2k_ptr_t) (addr)), \
-		  [atomic_spurious_fault] "i" (CPU_HWBUG_ATOMIC_SPURIOUS_FAULT) \
-		  : "memory");	\
+		: "i" (val), "r" ((u64) (addr)), \
+		  [no_atomic_spurious_fault] "i" (CPU_NO_HWBUG_ATOMIC_SPURIOUS_FAULT) \
+		: "memory");	\
 })
 
 /*
@@ -4294,7 +4836,7 @@ do { \
 do { \
 	ASM_LENGTH_V5_V6(11, 12) \
 	asm NOT_VOLATILE ( \
-		BEFORE_ATOMIC("1:", LOCK_MB, atomic_spurious_fault) \
+		BEFORE_ATOMIC("1:", LOCK_MB, no_atomic_spurious_fault) \
 		ALTERNATIVE( \
 		/* Default version - 10 cycles ld->st delay */ \
 			"{nop 5\n"\
@@ -4317,7 +4859,7 @@ do { \
 		  [addr] "+m" (*(spinlock)) \
 		: [incr] "i" (1 << tail_shift), \
 		  [iset_v6] "i" (CPU_FEAT_ISET_V6), \
-		  [atomic_spurious_fault] "i" (CPU_HWBUG_ATOMIC_SPURIOUS_FAULT) \
+		  [no_atomic_spurious_fault] "i" (CPU_NO_HWBUG_ATOMIC_SPURIOUS_FAULT) \
 		: "memory", "pred2"); \
 } while (0)
 
@@ -4331,7 +4873,7 @@ do { \
 do { \
 	ASM_LENGTH_V5_V6(11, 12) \
 	asm NOT_VOLATILE ( \
-		BEFORE_ATOMIC("1:", mem_model, atomic_spurious_fault) \
+		BEFORE_ATOMIC("1:", mem_model, no_atomic_spurious_fault) \
 		ALTERNATIVE( \
 		/* Default version - 10 cycles ld->st delay */ \
 			"{nop 6\n" \
@@ -4353,7 +4895,7 @@ do { \
 		  [addr] "+m" (*(__addr)) \
 		: [val] "ir" (__val), [unless] "ir" (__unless), \
 		  [iset_v6] "i" (CPU_FEAT_ISET_V6), \
-		  [atomic_spurious_fault] "i" (CPU_HWBUG_ATOMIC_SPURIOUS_FAULT) \
+		  [no_atomic_spurious_fault] "i" (CPU_NO_HWBUG_ATOMIC_SPURIOUS_FAULT) \
 		CLOBBERS_PRED2_##mem_model); \
 } while (0)
 
@@ -4362,7 +4904,7 @@ do { \
 do { \
 	ASM_LENGTH_V5_V6(11, 12) \
 	asm NOT_VOLATILE ( \
-		BEFORE_ATOMIC("1:", mem_model, atomic_spurious_fault) \
+		BEFORE_ATOMIC("1:", mem_model, no_atomic_spurious_fault) \
 		ALTERNATIVE( \
 		/* Default version - 10 cycles ld->st delay */ \
 			"{nop 5\n"\
@@ -4383,7 +4925,7 @@ do { \
 		  [addr] "+m" (*(__addr)) \
 		: [val] "ir" (__val), \
 		  [iset_v6] "i" (CPU_FEAT_ISET_V6), \
-		  [atomic_spurious_fault] "i" (CPU_HWBUG_ATOMIC_SPURIOUS_FAULT) \
+		  [no_atomic_spurious_fault] "i" (CPU_NO_HWBUG_ATOMIC_SPURIOUS_FAULT) \
 		CLOBBERS_PRED2_##mem_model); \
 } while (0)
 
@@ -4392,7 +4934,7 @@ do { \
 do { \
 	ASM_LENGTH_V6_V7(6, 5) \
 	asm NOT_VOLATILE ( \
-		BEFORE_ATOMIC("1:", mem_model, atomic_spurious_fault) \
+		BEFORE_ATOMIC("1:", mem_model, no_atomic_spurious_fault) \
 		ALTERNATIVE_2( \
 		/* Default version - 6 cycles ld->st delay */ \
 			"{nop 5\n" \
@@ -4414,7 +4956,7 @@ do { \
 		: [val] "r" (__val), \
 		  [iset_v6] "i" (CPU_FEAT_ISET_V6), \
 		  [iset_v7] "i" (CPU_FEAT_ISET_V7), \
-		  [atomic_spurious_fault] "i" (CPU_HWBUG_ATOMIC_SPURIOUS_FAULT) \
+		  [no_atomic_spurious_fault] "i" (CPU_NO_HWBUG_ATOMIC_SPURIOUS_FAULT) \
 		CLOBBERS_##mem_model); \
 } while (0)
 
@@ -4437,7 +4979,7 @@ do { \
 do { \
 	ASM_LENGTH_V5_V6(11, 12) \
 	asm NOT_VOLATILE ( \
-		BEFORE_ATOMIC("3:", mem_model, atomic_spurious_fault) \
+		BEFORE_ATOMIC("3:", mem_model, no_atomic_spurious_fault) \
 		ALTERNATIVE( \
 		/* Default version - 10 cycles ld->st delay */ \
 			"{nop 5\n"\
@@ -4458,7 +5000,7 @@ do { \
 		  [addr] "+m" (*(__addr)) \
 		: [new] "ir" ((u64) (__new)), [old] "ir" ((u64) (__old)), \
 		  [iset_v6] "i" (CPU_FEAT_ISET_V6), \
-		  [atomic_spurious_fault] "i" (CPU_HWBUG_ATOMIC_SPURIOUS_FAULT) \
+		  [no_atomic_spurious_fault] "i" (CPU_NO_HWBUG_ATOMIC_SPURIOUS_FAULT) \
 		CLOBBERS_PRED2_##mem_model); \
 } while (0)
 
@@ -4467,7 +5009,7 @@ do { \
 do { \
 	ASM_LENGTH_V5_V6(11, 12) \
 	asm NOT_VOLATILE ( \
-		BEFORE_ATOMIC("3:", mem_model, atomic_spurious_fault) \
+		BEFORE_ATOMIC("3:", mem_model, no_atomic_spurious_fault) \
 		ALTERNATIVE( \
 		/* Default version - 10 cycles ld->st delay */ \
 			"{nop 6\n"\
@@ -4487,7 +5029,7 @@ do { \
 		  [rval] "=&r" (__rval), [addr] "+m" (*(__addr)) \
 		: [new] "ir" (__new), [old] "ir" (__old), \
 		  [iset_v6] "i" (CPU_FEAT_ISET_V6), \
-		  [atomic_spurious_fault] "i" (CPU_HWBUG_ATOMIC_SPURIOUS_FAULT) \
+		  [no_atomic_spurious_fault] "i" (CPU_NO_HWBUG_ATOMIC_SPURIOUS_FAULT) \
 		CLOBBERS_PRED2_##mem_model); \
 } while (0)
 
@@ -4496,7 +5038,7 @@ do { \
 do { \
 	ASM_LENGTH_V5_V6(11, 12) \
 	asm NOT_VOLATILE ( \
-		BEFORE_ATOMIC("3:", mem_model, atomic_spurious_fault) \
+		BEFORE_ATOMIC("3:", mem_model, no_atomic_spurious_fault) \
 		ALTERNATIVE( \
 		/* Default version - 10 cycles ld->st delay */ \
 			"{nop 6\n" \
@@ -4516,7 +5058,7 @@ do { \
 		  [rval] "=&r" (__rval), [addr] "+m" (*(__addr)) \
 		: [new] "ir" (__new), [old] "ir" (__old), \
 		  [iset_v6] "i" (CPU_FEAT_ISET_V6), \
-		  [atomic_spurious_fault] "i" (CPU_HWBUG_ATOMIC_SPURIOUS_FAULT) \
+		  [no_atomic_spurious_fault] "i" (CPU_NO_HWBUG_ATOMIC_SPURIOUS_FAULT) \
 		CLOBBERS_PRED2_##mem_model); \
 } while (0)
 
@@ -4534,7 +5076,7 @@ do { \
 	__uint128_t __qvalue; \
 	ASM_LENGTH_V5_V6(11, 12) \
 	asm NOT_VOLATILE ( \
-		BEFORE_ATOMIC("3:", mem_model, atomic_spurious_fault) \
+		BEFORE_ATOMIC("3:", mem_model, no_atomic_spurious_fault) \
 		ALTERNATIVE( \
 		/* Default version - 10 cycles ld->st delay */ \
 			"{nop 5\n" \
@@ -4562,12 +5104,13 @@ do { \
 		: [new1] "ir" (__new1), [old1] "ir" (__old1),	 \
 		  [new2] "ir" (__new2), [old2] "ir" (__old2), \
 		  [iset_v6] "i" (CPU_FEAT_ISET_V6), \
-		  [atomic_spurious_fault] "i" (CPU_HWBUG_ATOMIC_SPURIOUS_FAULT) \
+		  [no_atomic_spurious_fault] "i" (CPU_NO_HWBUG_ATOMIC_SPURIOUS_FAULT) \
 		CLOBBERS_PRED2_3_##mem_model); \
 } while (0)
 #endif /* CONFIG_HAVE_CMPXCHG_DOUBLE */
 
 #define _fl_c_mode	0x8000	/* do not flush CPU pipeline */
+#define _macp		0x4000	/* wait for color protection exceptions */
 #define _mem_mod	0x2000	/* watch for modification */
 #define _int		0x1000	/* stop the CPU pipeline until interrupt */
 #define _mt		0x800
@@ -4602,7 +5145,7 @@ static inline void __E2K_WAIT(int _num)
 
 	/* Use "asm volatile" around tricky barriers such as _ma_c, _fl_c, etc */
 	if (_num & ~(_st_c | _ld_c | _sas | _sal | _las | _lal | _mt)) {
-#pragma asm_length(0)
+		__asm_length(0)
 		asm volatile ("" ::: "memory");
 	}
 
@@ -4610,7 +5153,7 @@ static inline void __E2K_WAIT(int _num)
 	 *   cpu_has(CPU_HWBUG_SOFT_WAIT_E8C2)
 	 * so just check straight for E8C2 */
 	if (IS_ENABLED(CONFIG_CPU_E8C2) && (num & (_sas | _sal))) {
-#pragma asm_length(1)
+		__asm_length(1)
 		asm ("{nop}" ::: "memory");
 	}
 
@@ -4620,8 +5163,7 @@ static inline void __E2K_WAIT(int _num)
 			.opc = CS1_OPC_WAIT,
 			.param = num
 		};
-#pragma asm_length(1)
-#pragma no_asm_inline
+__no_asm_inline(1)
 		asm NOT_VOLATILE (ALTERNATIVE(
 			/* Default version - add "nop 5" after and a separate
 			 * wide instruction before the barrier. */
@@ -4648,8 +5190,7 @@ static inline void __E2K_WAIT(int _num)
 			.param = num & ~(_lal | _las | _sal | _sas)
 		};
 		/* #79245 - use .word to encode relaxed barriers */
-#pragma asm_length(1)
-#pragma no_asm_inline
+__no_asm_inline(1)
 		asm NOT_VOLATILE (ALTERNATIVE(
 			/* Default version */
 				".word 0x00008001\n"
@@ -4667,7 +5208,7 @@ static inline void __E2K_WAIT(int _num)
 
 	/* Use "asm volatile" around tricky barriers such as _ma_c, _fl_c, etc */
 	if (_num & ~(_st_c | _ld_c | _sas | _sal | _las | _lal | _mt)) {
-#pragma asm_length(0)
+		__asm_length(0)
 		asm volatile ("" ::: "memory");
 	}
 }
@@ -4701,18 +5242,12 @@ do { \
 #define E2K_RF_WAIT_LOAD(reg) \
 do { \
 	int unused; \
-	_Pragma("asm_length(1)") \
+	__asm_length(1) \
 	asm NOT_VOLATILE ("{adds %1, 0, %%empty}" \
 			  : "=r" (unused) \
 			  : "r" (reg) \
 			  : "memory"); \
 	NATIVE_HWBUG_AFTER_LD_ACQ(); \
-} while (0)
-
-#define E2K_FLUSHTS \
-do { \
-	_Pragma("no_asm_inline") _Pragma("asm_length(1)") \
-	asm volatile ("flushts"); \
 } while (0)
 
 /*
@@ -4744,46 +5279,44 @@ do { \
 
 #define NATIVE_FLUSHR \
 do { \
-	_Pragma("asm_length(2)") \
+	__asm_length(2) \
 	asm volatile ("{nop} {flushr}" ::: "memory"); \
 } while (0)
 
 #define	NATIVE_FLUSHC \
 do { \
-	_Pragma("asm_length(7)") \
+	__asm_length(7) \
 	asm volatile ("{nop 2} {flushc; nop 3}" ::: "memory"); \
 } while (0)
 #define native_FLUSHC NATIVE_FLUSHC
 
 #define NATIVE_FLUSHCPU \
 do { \
-	_Pragma("asm_length(8)") \
+	__asm_length(8) \
 	asm volatile ("{nop 2} {flushc; nop 3} {flushr}" ::: "memory"); \
 } while (0)
 
-#define NATIVE_FLUSH_ALL_TC \
-({ \
-	register __e2k_u64_t res; \
-	_Pragma("asm_length(4)") \
-	asm volatile ("{nop 3; invtc 0x0, %0}" \
-		      : "=r" (res)); \
-	res; \
-})
+#define NATIVE_FLUSH_ALL_TC() \
+do { \
+	/* Instruction set recommends using %empty for invtc */ \
+	__asm_length(4) \
+	asm volatile ("{nop 3; invtc 0x0, %%empty}" ::: "memory"); \
+} while (0)
 
 #define	DO_ATOMIC_WRITE_PSR_REG_VALUE(greg_no, psr_off, psr_value, \
 					under_upsr_off, under_upsr_bool) \
 ({ \
-	_Pragma("asm_length(1)") \
+	__asm_length(1) \
 	asm volatile ( \
 		"{\n\t" \
 		"  stw %%dg" #greg_no ", [%0], %2\n\t" \
 		"  stb %%dg" #greg_no ", [%1], %3\n\t" \
 		"}" \
 		: \
-		: "ri" ((__e2k_u64_t)(psr_off)), \
-		  "ri" ((__e2k_u64_t)(under_upsr_off)), \
-		  "r"  ((__e2k_u32_t)(psr_value)), \
-		  "r"  ((__e2k_u8_t)(under_upsr_bool))); \
+		: "ri" ((u64)(psr_off)), \
+		  "ri" ((u64)(under_upsr_off)), \
+		  "r"  ((u32)(psr_value)), \
+		  "r"  ((u8)(under_upsr_bool))); \
 })
 #define	KVM_DO_ATOMIC_WRITE_PSR_REG_VALUE(greg_no, psr_off, psr_value, \
 					under_upsr_off, under_upsr_bool) \
@@ -4792,7 +5325,7 @@ do { \
 
 #define	DO_ATOMIC_WRITE_UPSR_REG_VALUE(greg_no, upsr_off, upsr_value) \
 do { \
-	_Pragma("asm_length(5)") \
+	__no_asm_inline(5) \
 	asm volatile ( \
 		ALTERNATIVE_1_ALTINSTR \
 		/* CPU_FEAT_ISET_NOT_V7 version */ \
@@ -4810,8 +5343,8 @@ do { \
 		"}" \
 		ALTERNATIVE_3_FEATURE(%[cpu_feat_iset_not_v7]) \
 		: \
-		: "ri" ((__e2k_u64_t)(upsr_off)), \
-		  "r"  ((__e2k_u32_t)(upsr_value)), \
+		: "ri" ((u64)(upsr_off)), \
+		  "r"  ((u32)(upsr_value)), \
 		  [cpu_feat_iset_not_v7] "i" (CPU_FEAT_ISET_NOT_V7)); \
 } while (0)
 #define	KVM_DO_ATOMIC_WRITE_UPSR_REG_VALUE(greg_no, upsr_off, upsr_value) \
@@ -4819,21 +5352,14 @@ do { \
 
 #define NATIVE_GET_TCD() \
 ({ \
-	__e2k_u64_t res; \
-	_Pragma("asm_length(7)") \
+	u64 res; \
+	__asm_length(7) \
 	asm volatile ("{gettc 0x1, %%ctpr1\n" \
 		      " nop 5}\n" \
 		      "{rrd %%ctpr1, %0}\n" \
 		      : "=r" (res) :: "ctpr1" ); \
 	res; \
 })
-
-#define NATIVE_SET_TCD(val) \
-do { \
-	_Pragma("asm_length(1)") \
-	asm volatile ("{puttc %0, 0x0 , %%tcd}" \
-		      :: "r" (val)); \
-} while (0)
 
 /* Add ctpr3 to clobbers to explain to lcc that this
  * GNU asm does a return. */
@@ -5236,10 +5762,35 @@ do { \
 	     : "pred0"); \
 } while (0)
 
+#define ASM_USER_STRD_16(_addr, _val, _tag, _opc) \
+({ \
+	int _ret = 0; \
+	asm (	"puttagd %[val], %[tag], %[val]\n" \
+		"{strd [ %[addr] + %[opc_lo] ], %[val]\n" \
+		"strd [ %[addr] + %[opc_hi] ], %[val]\n}" \
+		NONTARGET_LABEL("1") "\n" \
+		"2:\n" \
+		".section .fixup,\"ax\"\n" \
+		"3:{adds 0, %[efault], %[ret]\n" \
+		"   ibranch 2b}\n" \
+		".previous\n" \
+		".section __ex_table,\"a\"\n" \
+		".dword 1b, 3b\n" \
+		".previous\n" \
+		: [addr] "=m" (*(u64 __user *) (_addr)), \
+		  [ret] "+r" (_ret) \
+		: [val] "r" (_val), \
+		  [tag] "ir" (_tag), \
+		  [opc_lo] "i" (_opc), \
+		  [opc_hi] "i" (_opc | 8), \
+		  [efault] "i" (-EFAULT)); \
+	_ret; \
+})
+
 /* See also: USER_LD() */
 #define PUT_USER_ASM(_x, ptr, _opc, _retval, _fmt) \
 do { \
-	_Pragma("asm_length(1)") \
+	__no_asm_inline(1) \
 	asm ("{" PUT_USER_ASM_ST(%[addr], %[opc], %[x], _fmt) "\n" \
 	     "   adds 0, 0, %[ret]}\n" \
 	     NONTARGET_LABEL("1") "\n" \
@@ -5413,7 +5964,7 @@ do { \
 do { \
 	ldst_rec_op_t __u_st_opc = { .fmt = LDST_DWORD_FMT, .prot = 1 }; \
 	u64 __npu_tmp; \
-	_Pragma("asm_length(2)") \
+	__no_asm_inline(2) \
 	asm ("{puttagd %[val], %[tag], %[tmp]\n" \
 	     " adds 0, 0, %[ret]}\n" \
 	     "{strd [ %[addr] + %[opc] ], %[tmp]}\n" \
@@ -5440,7 +5991,7 @@ do { \
 	u32 __npu_tmp_tag = (_tag); \
 	if (!WARN_ON_ONCE(!IS_ALIGNED((unsigned long) __puvt_addr, 16))) { \
 		e2k_qreg_t __qvalue; \
-		_Pragma("asm_length(2)") \
+		__no_asm_inline(2) \
 		asm ("{puttagd,2 %[val_lo], %[tag_lo], %L[qvalue]\n" \
 		     " puttagd,5 %[val_hi], %[tag_hi], %H[qvalue]\n" \
 		     " adds,1 0, 0, %[ret]}\n" \
@@ -5463,144 +6014,357 @@ do { \
 		       [efault] "i" (-EFAULT), \
 		       [opc_lo] "i" (AW(__u_st_opc)), \
 		       [opc_hi] "ir" (AW(__u_st_opc) | (_offset))); \
+	} else { \
+		(_ret) = -EFAULT; \
 	} \
 } while (0)
 
-#define USER_ATOMIC_FETCH_OP(__val, __addr, __rval, __tmp, \
-			size_letter, op, mem_model, _ret) \
+#define USER_ATOMIC_FETCH_OP(__val, __addr, __rval, __tmp, __size, size_letter, __fmt, \
+		op, use_descriptor, mem_model, _ret) \
 do { \
-	ASM_LENGTH_V5_V6(11, 12) \
-	asm NOT_VOLATILE ( \
-		BEFORE_ATOMIC("1:", mem_model, atomic_spurious_fault) \
-		ALTERNATIVE( \
-		/* Default version - 10 cycles ld->st delay */ \
-			"{nop 6\n" \
-			" adds,1 0, 0, %[ret]\n" \
-			" ld" #size_letter ",0 %[addr], %[rval], mas=0x7}\n", \
-		/* CPU_FEAT_ISET_V6 - 11 cycles ld->st delay */ \
+	if (cpu_has(CPU_FEAT_ATOMIC_LDRD)) { \
+		int uaf_fmt = (__fmt); \
+		ldst_rec_op_t uaf_opc_ld = (ldst_rec_op_t) { \
+			.fmt = uaf_fmt, \
+			.mas = _MAS_MODE_LOAD_OP_WAIT, \
+			.prot = 1, \
+		}; \
+		ldst_rec_op_t uaf_opc_st = (ldst_rec_op_t) { \
+			.fmt = uaf_fmt, \
+			.mas = mem_model##_ATOMIC_MAS_VALUE, \
+			.prot = 1, \
+		}; \
+		__asm_length(12) \
+		asm NOT_VOLATILE ( \
+			BEFORE_ATOMIC("1:", mem_model, no_atomic_spurious_fault) \
+			/* iset>=v6: 11 cycles ld->st delay */ \
 			"{nop 7\n" \
 			" adds,1 0, 0, %[ret]\n" \
-			" ld" #size_letter ",0 %[addr], %[rval], mas=0x7}\n", \
-		%[iset_v6]) \
-		NONTARGET_LABEL("2") "\n" \
-		"{nop 2\n" \
-		  op " %[rval], %[val], %[tmp]}\n" \
-		"{st" #size_letter "," mem_model##_ATOMIC_CHANNEL \
-			"%[addr], %[tmp], mas=" mem_model##_ATOMIC_MAS "\n" \
-		" ibranch 1b ? %%MLOCK}\n" \
-		"3:\n" \
-		".section .fixup,\"ax\"\n" \
-		"4:{adds 0, %[efault], %[ret]\n" \
-		"   addd 0, 0, %[rval]\n" \
-		"   ibranch 3b}\n" \
-		".previous\n" \
-		".section __ex_table,\"a\"\n" \
-		".dword 1b, 4b\n" \
-		".dword 2b, 4b\n" \
-		".previous\n" \
-		MB_AFTER_ATOMIC_##mem_model \
-		: [ret] "=&r" (_ret), [tmp] "=&r" (__tmp), \
-		  [addr] "+m" (*(__addr)), [rval] "=&r" (__rval) \
-		: [val] "ir" (__val), [efault] "i" (-EFAULT), \
-		  [iset_v6] "i" (CPU_FEAT_ISET_V6), \
-		  [atomic_spurious_fault] "i" (CPU_HWBUG_ATOMIC_SPURIOUS_FAULT) \
-		CLOBBERS_##mem_model); \
+			" ldrd,0 [ %[addr] + %[opc_ld] ], %[rval]}\n" \
+			NONTARGET_LABEL("2") "\n" \
+			"{nop 2\n" \
+			op " %[rval], %[val], %[tmp]}\n" \
+			"{strd," mem_model##_ATOMIC_CHANNEL " [ %[addr] + %[opc_st] ], %[tmp]\n" \
+			" ibranch 1b ? %%MLOCK}\n" \
+			"3:\n" \
+			".section .fixup,\"ax\"\n" \
+			"4:{adds 0, %[efault], %[ret]\n" \
+			"   addd 0, 0, %[rval]\n" \
+			"   ibranch 3b}\n" \
+			".previous\n" \
+			".section __ex_table,\"a\"\n" \
+			".dword 1b, 4b\n" \
+			".dword 2b, 4b\n" \
+			".previous\n" \
+			MB_AFTER_ATOMIC_##mem_model \
+			: [ret] "=&r" (_ret), [tmp] "=&r" (__tmp), \
+			  [addr] "+m" (*(__addr)), [rval] "=&r" (__rval) \
+			: [val] "ir" (__val), [efault] "i" (-EFAULT), \
+			  [opc_ld] "ir" (uaf_opc_ld.word), \
+			  [opc_st] "ir" (uaf_opc_st.word), \
+			  [no_atomic_spurious_fault] "i" (CPU_NO_HWBUG_ATOMIC_SPURIOUS_FAULT) \
+			CLOBBERS_##mem_model); \
+	} else if (!(use_descriptor)) { \
+		__asm_length(11) \
+		asm NOT_VOLATILE ( \
+			BEFORE_ATOMIC("1:", mem_model, no_atomic_spurious_fault) \
+			/* iset<v6: 10 cycles ld->st delay */ \
+			"{nop 6\n" \
+			" adds,1 0, 0, %[ret]\n" \
+			" ld" #size_letter ",0 %[addr], %[rval], mas=0x7}\n" \
+			NONTARGET_LABEL("2") "\n" \
+			"{nop 2\n" \
+			op " %[rval], %[val], %[tmp]}\n" \
+			"{st" #size_letter "," mem_model##_ATOMIC_CHANNEL \
+				"%[addr], %[tmp], mas=" mem_model##_ATOMIC_MAS "\n" \
+			" ibranch 1b ? %%MLOCK}\n" \
+			"3:\n" \
+			".section .fixup,\"ax\"\n" \
+			"4:{adds 0, %[efault], %[ret]\n" \
+			"   addd 0, 0, %[rval]\n" \
+			"   ibranch 3b}\n" \
+			".previous\n" \
+			".section __ex_table,\"a\"\n" \
+			".dword 1b, 4b\n" \
+			".dword 2b, 4b\n" \
+			".previous\n" \
+			MB_AFTER_ATOMIC_##mem_model \
+			: [ret] "=&r" (_ret), [tmp] "=&r" (__tmp), \
+			  [addr] "+m" (*(__addr)), [rval] "=&r" (__rval) \
+			: [val] "ir" (__val), [efault] "i" (-EFAULT), \
+			  [no_atomic_spurious_fault] "i" (CPU_NO_HWBUG_ATOMIC_SPURIOUS_FAULT) \
+			CLOBBERS_##mem_model); \
+	} else { \
+		e2k_ap_t uaf_descriptor = MAKE_AP((__addr), (__size)); \
+		__asm_length(12) \
+		asm NOT_VOLATILE ( \
+			"{puttagd,2 %L[descriptor], %[ap_lo_etag], %L[descriptor]\n" \
+			" puttagd,5 %H[descriptor], %[ap_hi_etag], %H[descriptor]}\n" \
+			BEFORE_ATOMIC("1:", mem_model, no_atomic_spurious_fault) \
+			/* iset<v6: 10 cycles ld->st delay */ \
+			"{nop 6\n" \
+			" adds,1 0, 0, %[ret]\n" \
+			" ldap" #size_letter ",0 %[descriptor], %[rval], mas=0x7}\n" \
+			NONTARGET_LABEL("2") "\n" \
+			"{nop 2\n" \
+			op " %[rval], %[val], %[tmp]}\n" \
+			"{stap" #size_letter "," mem_model##_ATOMIC_CHANNEL \
+				"%[descriptor], %[tmp], mas=" mem_model##_ATOMIC_MAS "\n" \
+			" ibranch 1b ? %%MLOCK}\n" \
+			"3:\n" \
+			".section .fixup,\"ax\"\n" \
+			"4:{adds 0, %[efault], %[ret]\n" \
+			"   addd 0, 0, %[rval]\n" \
+			"   ibranch 3b}\n" \
+			".previous\n" \
+			".section __ex_table,\"a\"\n" \
+			".dword 1b, 4b\n" \
+			".dword 2b, 4b\n" \
+			".previous\n" \
+			MB_AFTER_ATOMIC_##mem_model \
+			: [ret] "=&r" (_ret), [tmp] "=&r" (__tmp), \
+			  [addr] "+m" (*(__addr)), [rval] "=&r" (__rval), \
+			  [descriptor] "+r" (uaf_descriptor) \
+			: [val] "ir" (__val), [efault] "i" (-EFAULT), \
+			  [ap_lo_etag] "ir" (E2K_AP_LO_ETAG), [ap_hi_etag] "ir" (E2K_AP_HI_ETAG), \
+			  [no_atomic_spurious_fault] "i" (CPU_NO_HWBUG_ATOMIC_SPURIOUS_FAULT) \
+			CLOBBERS_##mem_model); \
+	} \
 } while (0)
 
 #define USER_ATOMIC_CMPXCHG_WORD_RETURN(__old, __new, __addr, __tmp, \
-		__oldval, mem_model, __ret) \
+		__oldval, use_descriptor, mem_model, __ret) \
 do { \
-	ASM_LENGTH_V5_V6(11, 12) \
-	asm NOT_VOLATILE ( \
-		BEFORE_ATOMIC("1:", mem_model, atomic_spurious_fault) \
-		ALTERNATIVE( \
-		/* Default version - 10 cycles ld->st delay */ \
-			"{nop 6\n" \
-			" adds,1 0, 0, %[ret]\n" \
-			" ldw,0 %[addr], %[oldval], mas=0x7}\n", \
-		/* CPU_FEAT_ISET_V6 - 11 cycles ld->st delay */ \
+	if (cpu_has(CPU_FEAT_ATOMIC_LDRD)) { \
+		ldst_rec_op_t uac_opc_ld = (ldst_rec_op_t) { \
+			.fmt = LDST_WORD_FMT, \
+			.mas = _MAS_MODE_LOAD_OP_WAIT, \
+			.prot = 1, \
+		}; \
+		ldst_rec_op_t uac_opc_st = (ldst_rec_op_t) { \
+			.fmt = LDST_WORD_FMT, \
+			.mas = mem_model##_ATOMIC_MAS_VALUE, \
+			.prot = 1, \
+		}; \
+		__asm_length(12) \
+		asm NOT_VOLATILE ( \
+			BEFORE_ATOMIC("1:", mem_model, no_atomic_spurious_fault) \
+			/* iset>=v6: 11 cycles ld->st delay */ \
 			"{nop 7\n" \
 			" adds,1 0, 0, %[ret]\n" \
-			" ldw,0 %[addr], %[oldval], mas=0x7}\n", \
-		%[iset_v6]) \
-		NONTARGET_LABEL("2") "\n" \
-		"{nop 1\n" \
-		" cmpesb %[oldval], %[old], %%pred2}\n" \
-		"{merges %[oldval], %[new], %[tmp], %%pred2}\n" \
-		"{stw," mem_model##_ATOMIC_CHANNEL \
-			" %[addr], %[tmp], mas=" mem_model##_ATOMIC_MAS "\n" \
-		" ibranch 1b ? %%MLOCK}\n" \
-		"3:\n" \
-		".section .fixup,\"ax\"\n" \
-		"4:{adds 0, %[efault], %[ret]\n" \
-		"   addd 0, 0, %[oldval]\n" \
-		"   ibranch 3b}\n" \
-		".previous\n" \
-		".section __ex_table,\"a\"\n" \
-		".dword 1b, 4b\n" \
-		".dword 2b, 4b\n" \
-		".previous\n" \
-		MB_AFTER_ATOMIC_##mem_model \
-		: [ret] "=&r" (__ret), [tmp] "=&r" (__tmp), \
-		  [oldval] "=&r" (__oldval), [addr] "+m" (*(__addr)) \
-		: [new] "ir" (__new), [old] "ir" (__old), \
-		  [efault] "i" (-EFAULT), \
-		  [iset_v6] "i" (CPU_FEAT_ISET_V6), \
-		  [atomic_spurious_fault] "i" (CPU_HWBUG_ATOMIC_SPURIOUS_FAULT) \
-		CLOBBERS_PRED2_##mem_model); \
-} while (0)
-
-#define USER_ATOMIC_XCHG_RETURN(__val, __addr, __oldval, \
-				  size_letter, mem_model, __ret) \
-do { \
-	ASM_LENGTH_V6_V7(6, 5) \
-	asm NOT_VOLATILE ( \
-		BEFORE_ATOMIC("1:", mem_model, atomic_spurious_fault) \
-		ALTERNATIVE_2( \
-		/* Default version - 6 cycles ld->st delay */ \
-			"{nop 5\n" \
-			" adds,1 0, 0, %[ret]\n" \
-			" ld"#size_letter ",0 %[addr], %[oldval], mas=0x7}\n", \
-		/* CPU_FEAT_ISET_V6 - 7 cycles ld->st delay */ \
+			" ldrd,0 [ %[addr] + %[opc_ld] ], %[oldval]}\n" \
+			NONTARGET_LABEL("2") "\n" \
+			"{nop 1\n" \
+			" cmpesb %[oldval], %[old], %%pred2}\n" \
+			"{merges %[oldval], %[new], %[tmp], %%pred2}\n" \
+			"{strd," mem_model##_ATOMIC_CHANNEL " [ %[addr] + %[opc_st] ], %[tmp]\n" \
+			" ibranch 1b ? %%MLOCK}\n" \
+			"3:\n" \
+			".section .fixup,\"ax\"\n" \
+			"4:{adds 0, %[efault], %[ret]\n" \
+			"   addd 0, 0, %[oldval]\n" \
+			"   ibranch 3b}\n" \
+			".previous\n" \
+			".section __ex_table,\"a\"\n" \
+			".dword 1b, 4b\n" \
+			".dword 2b, 4b\n" \
+			".previous\n" \
+			MB_AFTER_ATOMIC_##mem_model \
+			: [ret] "=&r" (__ret), [tmp] "=&r" (__tmp), \
+			  [oldval] "=&r" (__oldval), [addr] "+m" (*(__addr)) \
+			: [new] "ir" (__new), [old] "ir" (__old), [efault] "i" (-EFAULT), \
+			  [opc_ld] "ir" (uac_opc_ld.word), \
+			  [opc_st] "ir" (uac_opc_st.word), \
+			  [no_atomic_spurious_fault] "i" (CPU_NO_HWBUG_ATOMIC_SPURIOUS_FAULT) \
+			CLOBBERS_PRED2_##mem_model); \
+	} else if (!(use_descriptor)) { \
+		__asm_length(11) \
+		asm NOT_VOLATILE ( \
+			BEFORE_ATOMIC("1:", mem_model, no_atomic_spurious_fault) \
+			/* iset<v6: 10 cycles ld->st delay */ \
 			"{nop 6\n" \
 			" adds,1 0, 0, %[ret]\n" \
-			" ld"#size_letter ",0 %[addr], %[oldval], mas=0x7}\n", \
-			%[iset_v6], \
-		/* CPU_FEAT_ISET_V7 - 5 cycles ld->st delay */ \
-			"{nop 4\n" \
+			" ldw,0 %[addr], %[oldval], mas=0x7}\n" \
+			NONTARGET_LABEL("2") "\n" \
+			"{nop 1\n" \
+			" cmpesb %[oldval], %[old], %%pred2}\n" \
+			"{merges %[oldval], %[new], %[tmp], %%pred2}\n" \
+			"{stw," mem_model##_ATOMIC_CHANNEL \
+				" %[addr], %[tmp], mas=" mem_model##_ATOMIC_MAS "\n" \
+			" ibranch 1b ? %%MLOCK}\n" \
+			"3:\n" \
+			".section .fixup,\"ax\"\n" \
+			"4:{adds 0, %[efault], %[ret]\n" \
+			"   addd 0, 0, %[oldval]\n" \
+			"   ibranch 3b}\n" \
+			".previous\n" \
+			".section __ex_table,\"a\"\n" \
+			".dword 1b, 4b\n" \
+			".dword 2b, 4b\n" \
+			".previous\n" \
+			MB_AFTER_ATOMIC_##mem_model \
+			: [ret] "=&r" (__ret), [tmp] "=&r" (__tmp), \
+			  [oldval] "=&r" (__oldval), [addr] "+m" (*(__addr)) \
+			: [new] "ir" (__new), [old] "ir" (__old), [efault] "i" (-EFAULT), \
+			  [no_atomic_spurious_fault] "i" (CPU_NO_HWBUG_ATOMIC_SPURIOUS_FAULT) \
+			CLOBBERS_PRED2_##mem_model); \
+	} else { \
+		e2k_ap_t uac_descriptor = MAKE_AP((__addr), 4); \
+		__asm_length(12) \
+		asm NOT_VOLATILE ( \
+			"{puttagd,2 %L[descriptor], %[ap_lo_etag], %L[descriptor]\n" \
+			" puttagd,5 %H[descriptor], %[ap_hi_etag], %H[descriptor]}\n" \
+			BEFORE_ATOMIC("1:", mem_model, no_atomic_spurious_fault) \
+			/* iset<v6: 10 cycles ld->st delay */ \
+			"{nop 6\n" \
 			" adds,1 0, 0, %[ret]\n" \
-			" ld"#size_letter ",0 %[addr], %[oldval], mas=0x7}\n", \
-			%[iset_v7] \
-		) \
-		NONTARGET_LABEL("2") "\n" \
-		"{st"#size_letter "," mem_model##_ATOMIC_CHANNEL \
-			" %[addr], %[val], mas=" mem_model##_ATOMIC_MAS "\n" \
-		" ibranch 1b ? %%MLOCK}\n" \
-		"3:\n" \
-		".section .fixup,\"ax\"\n" \
-		"4:{adds 0, %[efault], %[ret]\n" \
-		"   addd 0, 0, %[oldval]\n" \
-		"   ibranch 3b}\n" \
-		".previous\n" \
-		".section __ex_table,\"a\"\n" \
-		".dword 1b, 4b\n" \
-		".dword 2b, 4b\n" \
-		".previous\n" \
-		MB_AFTER_ATOMIC_##mem_model \
-		: [ret] "=&r" (__ret), [oldval] "=&r" (__oldval), \
-		  [addr] "+m" (*(__addr)) \
-		: [val] "r" (__val), [efault] "i" (-EFAULT), \
-		  [iset_v6] "i" (CPU_FEAT_ISET_V6), \
-		  [iset_v7] "i" (CPU_FEAT_ISET_V7), \
-		  [atomic_spurious_fault] "i" (CPU_HWBUG_ATOMIC_SPURIOUS_FAULT) \
-		CLOBBERS_##mem_model); \
+			" ldapw,0 %[descriptor], %[oldval], mas=0x7}\n" \
+			NONTARGET_LABEL("2") "\n" \
+			"{nop 1\n" \
+			" cmpesb %[oldval], %[old], %%pred2}\n" \
+			"{merges %[oldval], %[new], %[tmp], %%pred2}\n" \
+			"{stapw," mem_model##_ATOMIC_CHANNEL \
+				" %[descriptor], %[tmp], mas=" mem_model##_ATOMIC_MAS "\n" \
+			" ibranch 1b ? %%MLOCK}\n" \
+			"3:\n" \
+			".section .fixup,\"ax\"\n" \
+			"4:{adds 0, %[efault], %[ret]\n" \
+			"   addd 0, 0, %[oldval]\n" \
+			"   ibranch 3b}\n" \
+			".previous\n" \
+			".section __ex_table,\"a\"\n" \
+			".dword 1b, 4b\n" \
+			".dword 2b, 4b\n" \
+			".previous\n" \
+			MB_AFTER_ATOMIC_##mem_model \
+			: [ret] "=&r" (__ret), [tmp] "=&r" (__tmp), \
+			  [oldval] "=&r" (__oldval), [addr] "+m" (*(__addr)), \
+			  [descriptor] "+r" (uac_descriptor) \
+			: [new] "ir" (__new), [old] "ir" (__old), [efault] "i" (-EFAULT), \
+			  [ap_lo_etag] "ir" (E2K_AP_LO_ETAG), [ap_hi_etag] "ir" (E2K_AP_HI_ETAG), \
+			  [no_atomic_spurious_fault] "i" (CPU_NO_HWBUG_ATOMIC_SPURIOUS_FAULT) \
+			CLOBBERS_PRED2_##mem_model); \
+	} \
+} while (0)
+
+#define USER_ATOMIC_XCHG_RETURN(__val, __addr, __oldval, __size, size_letter, __fmt, \
+		use_descriptor, mem_model, __ret) \
+do { \
+	if (cpu_has(CPU_FEAT_ATOMIC_LDRD)) { \
+		int uax_fmt = (__fmt); \
+		ldst_rec_op_t uax_opc_ld = (ldst_rec_op_t) { \
+			.fmt = uax_fmt, \
+			.mas = _MAS_MODE_LOAD_OP_WAIT, \
+			.prot = 1, \
+		}; \
+		ldst_rec_op_t uax_opc_st = (ldst_rec_op_t) { \
+			.fmt = uax_fmt, \
+			.mas = mem_model##_ATOMIC_MAS_VALUE, \
+			.prot = 1, \
+		}; \
+		ASM_LENGTH_V6_V7(8, 6) \
+		asm NOT_VOLATILE ( \
+			BEFORE_ATOMIC("1:", mem_model, no_atomic_spurious_fault) \
+			ALTERNATIVE( \
+			/* Default version - 7 cycles ld->st delay */ \
+				"{nop 6\n" \
+				" adds,1 0, 0, %[ret]\n" \
+				" ldrd,0 [ %[addr] + %[opc_ld] ], %[oldval]}\n", \
+			/* CPU_FEAT_ISET_V7 - 5 cycles ld->st delay */ \
+				"{nop 4\n" \
+				" adds,1 0, 0, %[ret]\n" \
+				" ldrd,0 [ %[addr] + %[opc_ld] ], %[oldval]}\n", \
+			%[iset_v7]) \
+			NONTARGET_LABEL("2") "\n" \
+			"{strd," mem_model##_ATOMIC_CHANNEL " [ %[addr] + %[opc_st] ], %[val]\n" \
+			" ibranch 1b ? %%MLOCK}\n" \
+			"3:\n" \
+			".section .fixup,\"ax\"\n" \
+			"4:{adds 0, %[efault], %[ret]\n" \
+			"   addd 0, 0, %[oldval]\n" \
+			"   ibranch 3b}\n" \
+			".previous\n" \
+			".section __ex_table,\"a\"\n" \
+			".dword 1b, 4b\n" \
+			".dword 2b, 4b\n" \
+			".previous\n" \
+			MB_AFTER_ATOMIC_##mem_model \
+			: [ret] "=&r" (__ret), [oldval] "=&r" (__oldval), \
+			  [addr] "+m" (*(__addr)) \
+			: [val] "r" (__val), [efault] "i" (-EFAULT), \
+			  [opc_ld] "ir" (uax_opc_ld.word), \
+			  [opc_st] "ir" (uax_opc_st.word), \
+			  [iset_v7] "i" (CPU_FEAT_ISET_V7), \
+			  [no_atomic_spurious_fault] "i" (CPU_NO_HWBUG_ATOMIC_SPURIOUS_FAULT) \
+			CLOBBERS_##mem_model); \
+	} else if (!(use_descriptor)) { \
+		__asm_length(7) \
+		asm NOT_VOLATILE ( \
+			BEFORE_ATOMIC("1:", mem_model, no_atomic_spurious_fault) \
+			/* iset<v6: 6 cycles ld->st delay */ \
+			"{nop 5\n" \
+			" adds,1 0, 0, %[ret]\n" \
+			" ld"#size_letter ",0 %[addr], %[oldval], mas=0x7}\n" \
+			NONTARGET_LABEL("2") "\n" \
+			"{st"#size_letter "," mem_model##_ATOMIC_CHANNEL \
+				" %[addr], %[val], mas=" mem_model##_ATOMIC_MAS "\n" \
+			" ibranch 1b ? %%MLOCK}\n" \
+			"3:\n" \
+			".section .fixup,\"ax\"\n" \
+			"4:{adds 0, %[efault], %[ret]\n" \
+			"   addd 0, 0, %[oldval]\n" \
+			"   ibranch 3b}\n" \
+			".previous\n" \
+			".section __ex_table,\"a\"\n" \
+			".dword 1b, 4b\n" \
+			".dword 2b, 4b\n" \
+			".previous\n" \
+			MB_AFTER_ATOMIC_##mem_model \
+			: [ret] "=&r" (__ret), [oldval] "=&r" (__oldval), \
+			  [addr] "+m" (*(__addr)) \
+			: [val] "r" (__val), [efault] "i" (-EFAULT), \
+			  [no_atomic_spurious_fault] "i" (CPU_NO_HWBUG_ATOMIC_SPURIOUS_FAULT) \
+			CLOBBERS_##mem_model); \
+	} else { \
+		e2k_ap_t uax_descriptor = MAKE_AP((__addr), (__size)); \
+		__asm_length(8) \
+		asm NOT_VOLATILE ( \
+			"{puttagd,2 %L[descriptor], %[ap_lo_etag], %L[descriptor]\n" \
+			" puttagd,5 %H[descriptor], %[ap_hi_etag], %H[descriptor]}\n" \
+			BEFORE_ATOMIC("1:", mem_model, no_atomic_spurious_fault) \
+			/* iset<v6: 6 cycles ld->st delay */ \
+			"{nop 5\n" \
+			" adds,1 0, 0, %[ret]\n" \
+			" ldap"#size_letter ",0 %[descriptor], %[oldval], mas=0x7}\n" \
+			NONTARGET_LABEL("2") "\n" \
+			"{stap"#size_letter "," mem_model##_ATOMIC_CHANNEL \
+				" %[descriptor], %[val], mas=" mem_model##_ATOMIC_MAS "\n" \
+			" ibranch 1b ? %%MLOCK}\n" \
+			"3:\n" \
+			".section .fixup,\"ax\"\n" \
+			"4:{adds 0, %[efault], %[ret]\n" \
+			"   addd 0, 0, %[oldval]\n" \
+			"   ibranch 3b}\n" \
+			".previous\n" \
+			".section __ex_table,\"a\"\n" \
+			".dword 1b, 4b\n" \
+			".dword 2b, 4b\n" \
+			".previous\n" \
+			MB_AFTER_ATOMIC_##mem_model \
+			: [ret] "=&r" (__ret), [oldval] "=&r" (__oldval), \
+			  [addr] "+m" (*(__addr)), [descriptor] "+r" (uax_descriptor) \
+			: [val] "r" (__val), [efault] "i" (-EFAULT), \
+			  [ap_lo_etag] "ir" (E2K_AP_LO_ETAG), [ap_hi_etag] "ir" (E2K_AP_HI_ETAG), \
+			  [no_atomic_spurious_fault] "i" (CPU_NO_HWBUG_ATOMIC_SPURIOUS_FAULT) \
+			CLOBBERS_##mem_model); \
+	} \
 } while (0)
 
 #define LOAD_UNALIGNED_ZEROPAD(_addr) \
 ({ \
 	u64 *__addr = (u64 *) (_addr); \
 	u64 _ret, _aligned_addr, _offset; \
-	_Pragma("asm_length(1)") \
+	__no_asm_inline(1) \
 	asm (	" ldd [ %[addr] + 0 ], %[ret]\n" \
 		NONTARGET_LABEL("1") "\n" \
 		"2:\n" \
@@ -5634,10 +6398,9 @@ do { \
 
 # define __EMIT_BUG(_flags) \
 do { \
-	_Pragma("asm_length(1)") \
+	__no_asm_inline(1) \
 	asm (NONTARGET_LABEL("1") "\n" \
-	     "{.word 0x00008001\n" /* SETSFT */ \
-	     " .word 0x28000000}\n" \
+	     "{setsft}\n" \
 	     ".section .rodata.str,\"aMS\",@progbits,1\n" \
 	     "2: .asciz  \""__FILE__"\"\n" \
 	     ".previous\n" \
@@ -5657,10 +6420,9 @@ do { \
 
 # define __EMIT_BUG(_flags) \
 do { \
-	_Pragma("asm_length(1)") \
+	__no_asm_inline(1) \
 	asm (NONTARGET_LABEL("1") "\n" \
-	     "{.word 0x00008001\n" /* SETSFT */ \
-	     " .word 0x28000000}\n" \
+	     "{setsft}\n" \
 	     ".section __bug_table,\"aw\"\n" \
 	     "3:\n" \
 	     ".word 1b - 3b\n"    /* bug_entry:bug_addr_disp */ \
@@ -5679,7 +6441,7 @@ do { \
  * this code used before call printk in special procedures
  *  sp register is used to pass parameters for printk
  */
-static inline void E2K_SET_USER_STACK(int x)
+static __always_inline void E2K_SET_USER_STACK(int x)
 {
 	if (__builtin_constant_p(x)) {
 		if (x) {
@@ -5712,12 +6474,12 @@ do { \
 #define NATIVE_FILL_HARDWARE_STACKS__HW() \
 do { \
 	/* "{fillc; fillr}" */ \
-	_Pragma("no_asm_inline") _Pragma("asm_length(1)") \
+	__no_asm_inline(1) \
 	asm volatile (".word 0x00008001; .word 0x7000000c" ::: "memory"); \
 } while (0)
 #define NATIVE_FILL_HARDWARE_STACKS__SW(_sw_fill_sequel) \
 do { \
-	_Pragma("asm_length(7)") \
+	__no_asm_inline(7) \
 	asm volatile ( \
 		"{\n" \
 		"nop 4\n" \
@@ -5734,7 +6496,7 @@ do { \
 #define NATIVE_FILL_CHAIN_STACK__HW() \
 do { \
 	/* "{fillc}" */ \
-	_Pragma("no_asm_inline") _Pragma("asm_length(1)") \
+	__no_asm_inline(1) \
 	asm volatile (".word 0x00008001; .word 0x70000008" ::: "memory"); \
 } while (0)
 
@@ -5745,7 +6507,7 @@ do { \
 
 #define GET_LBL_ADDR(name, where) \
 do { \
-	_Pragma("no_asm_inline") _Pragma("asm_length(1)") \
+	__no_asm_inline(1) \
 	asm ("movtd [" name "], %0" : "=r" (where)); \
 } while (0)
 
@@ -5839,7 +6601,7 @@ do { \
 		      "ct %%ctpr1\n" \
 		      : \
 		      : "ri" ((u64) (arg1)), "ri" ((u64) (arg2)), \
-		        "ri" ((u64) (arg3)), "ri" ((u64) (arg4)), \
+			"ri" ((u64) (arg3)), "ri" ((u64) (arg4)), \
 			"ri" ((u64) (arg5)), "i" (&(func)) \
 		      : "ctpr1", "r0", "r1", "r2", "r3", "r4"); \
 	unreachable(); \
@@ -5860,7 +6622,7 @@ do { \
 		      "ct %%ctpr1\n" \
 		      : \
 		      : "ri" ((u64) (arg1)), "ri" ((u64) (arg2)), \
-		        "ri" ((u64) (arg3)), "ri" ((u64) (arg4)), \
+			"ri" ((u64) (arg3)), "ri" ((u64) (arg4)), \
 			"ri" ((u64) (arg5)), "ri" ((u64) (arg6)), "i" (&(func)) \
 		      : "ctpr1", "r0", "r1", "r2", "r3", "r4", "r5"); \
 	unreachable(); \
@@ -5884,8 +6646,8 @@ do { \
 		      "}\n" \
 		      : \
 		      : "ri" ((u64) (arg1)), "ri" ((u64) (arg2)), \
-		        "ri" ((u64) (arg3)), "ri" ((u64) (arg4)), \
-		        "ri" ((u64) (arg5)), "ri" ((u64) (arg6)), \
+			"ri" ((u64) (arg3)), "ri" ((u64) (arg4)), \
+			"ri" ((u64) (arg5)), "ri" ((u64) (arg6)), \
 			"ri" ((u64) (arg7)), "i" (&(func)) \
 		      : "ctpr1", "r0", "r1", "r2", "r3", "r4", "r5", "r6"); \
 	unreachable(); \
@@ -5917,15 +6679,10 @@ do { \
 	unreachable(); \
 } while (false)
 #define __E2K_JUMP_WITH_ARGUMENTS_7(func, \
-			arg1, arg2, arg3, arg4, arg5, arg6, arg7, is_name) \
+			arg1, arg2, arg3, arg4, arg5, arg6, arg7) \
 do { \
-	if (is_name) { \
-		__E2K_JUMP_FUNC_WITH_ARGUMENTS_7(func, \
+	__E2K_JUMP_FUNC_WITH_ARGUMENTS_7(func, \
 			arg1, arg2, arg3, arg4, arg5, arg6, arg7); \
-	} else { \
-		__E2K_JUMP_FUNC_ADDR_WITH_ARGUMENTS_7(func, \
-			arg1, arg2, arg3, arg4, arg5, arg6, arg7); \
-	} \
 } while (false)
 
 #define __E2K_JUMP_FUNC_WITH_ARGUMENTS_8(func_name, \
@@ -5947,11 +6704,11 @@ do { \
 		      "}\n" \
 		      : \
 		      : "ri" ((u64) (arg1)), "ri" ((u64) (arg2)), \
-		        "ri" ((u64) (arg3)), "ri" ((u64) (arg4)), \
-		        "ri" ((u64) (arg5)), "ri" ((u64) (arg6)), \
+			"ri" ((u64) (arg3)), "ri" ((u64) (arg4)), \
+			"ri" ((u64) (arg5)), "ri" ((u64) (arg6)), \
 			"ri" ((u64) (arg7)), "ri" ((u64) (arg8)) \
 		      : "ctpr1", "r0", "r1", "r2", "r3", "r4", "r5", "r6", \
-		        "r7"); \
+			"r7"); \
 	unreachable(); \
 } while (0)
 #define __E2K_JUMP_WITH_ARGUMENTS_8(func, \
@@ -6031,7 +6788,7 @@ do { \
 
 #define E2K_GOTO_ARG0(func) \
 do { \
-	_Pragma("no_asm_inline") \
+	__no_asm_inline(1) \
 	asm volatile ("{ibranch " #func "}\n" \
 		      WORKAROUND_IBRANCH_HWBUG \
 		      :: ); \
@@ -6040,7 +6797,7 @@ do { \
 
 #define E2K_GOTO_ARG1(label, arg1)					\
 do {									\
-	_Pragma("no_asm_inline")					\
+	__no_asm_inline(1)					\
 	asm volatile (							\
 		"{\n"							\
 		"addd \t 0, %0, %%dr0\n"				\
@@ -6048,14 +6805,14 @@ do {									\
 		"}\n"							\
 		WORKAROUND_IBRANCH_HWBUG				\
 		:							\
-		: "ri" ((__e2k_u64_t) (arg1))				\
+		: "ri" ((u64) (arg1))				\
 	);								\
 	unreachable();							\
 } while (false)
 
 #define E2K_GOTO_ARG2(label, arg1, arg2)				\
 do {									\
-	_Pragma("no_asm_inline")					\
+	__no_asm_inline(1)					\
 	asm volatile ("\n"						\
 		"{\n"							\
 		"addd \t 0, %0, %%dr0\n"				\
@@ -6064,15 +6821,15 @@ do {									\
 		"}\n"							\
 		WORKAROUND_IBRANCH_HWBUG				\
 		:							\
-		: "ri" ((__e2k_u64_t) (arg1)),				\
-		  "ri" ((__e2k_u64_t) (arg2))				\
+		: "ri" ((u64) (arg1)),				\
+		  "ri" ((u64) (arg2))				\
 	);								\
 	unreachable();							\
 } while (false)
 
 #define E2K_GOTO_ARG3(label, arg1, arg2, arg3)				\
 do {									\
-	_Pragma("no_asm_inline")					\
+	__no_asm_inline(1)					\
 	asm volatile ("\n"						\
 		"{\n"							\
 		"addd \t 0, %0, %%dr0\n"				\
@@ -6082,16 +6839,16 @@ do {									\
 		"}\n"							\
 		WORKAROUND_IBRANCH_HWBUG				\
 		:							\
-		: "ri" ((__e2k_u64_t) (arg1)),				\
-		  "ri" ((__e2k_u64_t) (arg2)),				\
-		  "ri" ((__e2k_u64_t) (arg3))				\
+		: "ri" ((u64) (arg1)),				\
+		  "ri" ((u64) (arg2)),				\
+		  "ri" ((u64) (arg3))				\
 	);								\
 	unreachable();							\
 } while (false)
 
 #define E2K_GOTO_ARG4(label, arg1, arg2, arg3, arg4)			\
 do {									\
-	_Pragma("no_asm_inline")					\
+	__no_asm_inline(1)					\
 	asm volatile ("\n"						\
 		"{\n"							\
 		"addd \t 0, %0, %%dr0\n"				\
@@ -6102,17 +6859,17 @@ do {									\
 		"}\n"							\
 		WORKAROUND_IBRANCH_HWBUG				\
 		:							\
-		: "ri" ((__e2k_u64_t) (arg1)),				\
-		  "ri" ((__e2k_u64_t) (arg2)),				\
-		  "ri" ((__e2k_u64_t) (arg3)),				\
-		  "ri" ((__e2k_u64_t) (arg4))				\
+		: "ri" ((u64) (arg1)),				\
+		  "ri" ((u64) (arg2)),				\
+		  "ri" ((u64) (arg3)),				\
+		  "ri" ((u64) (arg4))				\
 	);								\
 	unreachable();							\
 } while (false)
 
 #define E2K_GOTO_ARG7(label, arg1, arg2, arg3, arg4, arg5, arg6, arg7)	\
 do {									\
-	_Pragma("no_asm_inline")					\
+	__no_asm_inline(2)					\
 	asm volatile ("\n"						\
 		"{\n"							\
 		"addd \t 0, %1, %%dr1\n"				\
@@ -6128,13 +6885,13 @@ do {									\
 		"}\n"							\
 		WORKAROUND_IBRANCH_HWBUG				\
 		:							\
-		: "i" ((__e2k_u64_t) (arg1)),				\
-		  "ri" ((__e2k_u64_t) (arg2)),				\
-		  "ri" ((__e2k_u64_t) (arg3)),				\
-		  "ri" ((__e2k_u64_t) (arg4)),				\
-		  "ri" ((__e2k_u64_t) (arg5)),				\
-		  "ri" ((__e2k_u64_t) (arg6)),				\
-		  "ri" ((__e2k_u64_t) (arg7))				\
+		: "i" ((u64) (arg1)),				\
+		  "ri" ((u64) (arg2)),				\
+		  "ri" ((u64) (arg3)),				\
+		  "ri" ((u64) (arg4)),				\
+		  "ri" ((u64) (arg5)),				\
+		  "ri" ((u64) (arg6)),				\
+		  "ri" ((u64) (arg7))				\
 	);								\
 	unreachable();							\
 } while (false)
@@ -6145,7 +6902,7 @@ do {									\
 	u64 prev_usd; \
 	u32 tag2 = ARG_TAG(2), tag3 = ARG_TAG(3), tag4 = ARG_TAG(4), \
 	    tag5 = ARG_TAG(5), tag6 = ARG_TAG(6), tag7 = ARG_TAG(7); \
-	_Pragma("asm_length(14)") \
+	__no_asm_inline(14) \
 	asm volatile ("{rrd %%usd.lo, %[_prev_usd]\n}" \
 		      "{nop 7\n" \
 		      " rwd %[_usd_lo], %%usd.lo\n" \
@@ -6164,7 +6921,7 @@ do {									\
 		      : [_ret] "=r" (__ret), [_prev_usd] "=&r" (prev_usd) \
 		      : [_func] "i" (&ttable_entry8), [_sys_num] "r" (sys_num), \
 			[_usd_lo] "r" (usd_lo), \
-		        [_arg2] "r" (arg2), [_arg3] "r" (arg3), \
+			[_arg2] "r" (arg2), [_arg3] "r" (arg3), \
 			[_arg4] "r" (arg4), [_arg5] "r" (arg5), \
 			[_arg6] "r" (arg6), [_arg7] "r" (arg7), \
 			[_tag2] "r" (tag2), [_tag3] "r" (tag3), \
@@ -6177,7 +6934,7 @@ do {									\
 #define E2K_SCALL_ARG7(trap_num, sys_num, arg1, arg2, arg3, arg4, arg5, arg6) \
 ({									\
 	unsigned long esa_ret__;					\
-	_Pragma("no_asm_inline") _Pragma("asm_length(5)") \
+	__no_asm_inline(5) \
 	asm volatile (							\
 		"{\n"							\
 		"addd \t 0, %[_sys_num], %%db[0]\n"			\
@@ -6198,13 +6955,13 @@ do {									\
 		"addd,0,sm 0x0, %%db[0], %[_ret]\n"			\
 		"}\n"							\
 		: [_ret] "=r" (esa_ret__)				\
-		: [_sys_num] "ri" ((__e2k_u64_t) (sys_num)),		\
-		  [_arg1] "ri" ((__e2k_u64_t) (arg1)),			\
-		  [_arg2] "ri" ((__e2k_u64_t) (arg2)),			\
-		  [_arg3] "ri" ((__e2k_u64_t) (arg3)),			\
-		  [_arg4] "ri" ((__e2k_u64_t) (arg4)),			\
-		  [_arg5] "ri" ((__e2k_u64_t) (arg5)),			\
-		  [_arg6] "ri" ((__e2k_u64_t) (arg6))			\
+		: [_sys_num] "ri" ((u64) (sys_num)),		\
+		  [_arg1] "ri" ((u64) (arg1)),			\
+		  [_arg2] "ri" ((u64) (arg2)),			\
+		  [_arg3] "ri" ((u64) (arg3)),			\
+		  [_arg4] "ri" ((u64) (arg4)),			\
+		  [_arg5] "ri" ((u64) (arg5)),			\
+		  [_arg6] "ri" ((u64) (arg6))			\
 		: "b[0]", "b[1]", "b[2]", "b[3]", "b[4]", "b[5]",	\
 		  "b[6]", "ctpr1"					\
 	);								\
@@ -6212,7 +6969,7 @@ do {									\
 })
 #define E2K_COND_GOTO(label, cond, pred_no)				\
 do {									\
-	_Pragma("no_asm_inline") _Pragma("asm_length(2)") \
+	__no_asm_inline(2) \
 	asm volatile (							\
 		"\ncmpesb \t0, %0, %%pred" #pred_no			\
 		"\n{"							\
@@ -6220,13 +6977,13 @@ do {									\
 		"\n}"							\
 		WORKAROUND_IBRANCH_HWBUG				\
 		:							\
-		: "ri" ((__e2k_u32_t) (cond))				\
+		: "ri" ((u32) (cond))				\
 		: "pred" #pred_no					\
 	);								\
 } while (false)
 #define E2K_COND_GOTO_ARG1(label, cond, pred_no, arg1)			\
 do {									\
-	_Pragma("no_asm_inline") _Pragma("asm_length(2)") \
+	__no_asm_inline(2) \
 	asm volatile (							\
 		"\ncmpesb \t0, %0, %%pred" #pred_no			\
 		"\n{"							\
@@ -6235,8 +6992,8 @@ do {									\
 		"\n}"							\
 		WORKAROUND_IBRANCH_HWBUG				\
 		:							\
-		: "ri" ((__e2k_u32_t) (cond)),				\
-		  "ri" ((__e2k_u64_t) (arg1))				\
+		: "ri" ((u32) (cond)),				\
+		  "ri" ((u64) (arg1))				\
 		: "pred" #pred_no					\
 	);								\
 } while (false)
@@ -6269,7 +7026,7 @@ do { \
 		      "ct %%ctpr1\n" \
 		      : \
 		      : [_func] "ir" (func), \
-		        [_arg1] "ri" (arg1), [_arg2] "ri" (arg2) \
+			[_arg1] "ri" (arg1), [_arg2] "ri" (arg2) \
 		      : "ctpr1", "r0", "r1"); \
 	unreachable(); \
 } while (0)
@@ -6394,31 +7151,39 @@ do { \
 	unreachable(); \
 } while (0)
 
-/* Important: delay after FPU reading is 9 cycles for 0 cluster
- * and 11 for 1 cluster, thus the NOPs. */
-#define E2K_GETCONTEXT(fpcr, fpsr, pfpfr, pcsp) \
+#define E2K_GETCONTEXT(_fpcr, _fpsr, _pfpfr, _pcsp, _psp, _sbr, _cr1_lo) \
 do { \
-	u64 __pcshtp; \
+	e2k_pcshtp_t __pcshtp; \
+	e2k_pshtp_t __pshtp; \
 	e2k_pcsp_t __pcsp; \
-	_Pragma("asm_length(13)") \
-	asm ("rrs %%fpcr, %0\n" \
-	     "rrs %%fpsr, %1\n" \
-	     "rrs %%pfpfr, %2\n" \
-	     "rrd %%pcshtp, %5\n" \
-	     "rrd %%pcsp.lo, %3\n" \
-	     "{rrd %%pcsp.hi, %4\n" \
-	     " shld %5, 53, %5}\n" \
-	     "{nop 6\n" \
-	     " sard %5, 53, %5}\n" \
-	     : "=r" (fpcr), "=r" (fpsr), "=r" (pfpfr), \
-	       "=r" (__pcsp.lo), "=r" (__pcsp.hi), "=r" (__pcshtp) \
-	     : ); \
-	(pcsp) = incr_pcsp_ind(__pcsp, __pcshtp); \
+	e2k_psp_t __psp; \
+	__asm_length(13) \
+	asm volatile ("{rrs %%fpcr, %[fpcr]}" \
+		      "{rrs %%fpsr, %[fpsr]}" \
+		      "{rrs %%pfpfr, %[pfpfr]}" \
+		      "{rrd %%cr1.lo, %[cr1_lo]}" \
+		      "{rrd %%pcshtp, %[pcshtp]}" \
+		      "{rrd %%pcsp.lo, %[pcsp_lo]}" \
+		      "{rrd %%pcsp.hi, %[pcsp_hi]}" \
+		      "{rrd %%pshtp, %[pshtp]}" \
+		      "{rrd %%psp.lo, %[psp_lo]}" \
+		      "{rrd %%psp.hi, %[psp_hi]}" \
+		      "{rrd %%sbr, %[sbr];" \
+		      /* Delay after FPU reading is 11 cycles */ \
+		      " nop 2}" \
+		      : [fpcr] "=r" (_fpcr), [fpsr] "=r" (_fpsr), [pfpfr] "=r" (_pfpfr), \
+			[pcsp_lo] "=r" (__pcsp.lo), [pcsp_hi] "=r" (__pcsp.hi), \
+			[psp_lo] "=r" (__psp.lo), [psp_hi] "=r" (__psp.hi), \
+			[pcshtp] "=r" (AW(__pcshtp)), [pshtp] "=r" (AW(__pshtp)), \
+			[sbr] "=r" (_sbr), [cr1_lo] "=r" (_cr1_lo) \
+		      : ); \
+	(_pcsp) = incr_pcsp_ind(__pcsp, __pcshtp.ind); \
+	(_psp) = incr_psp_ind(__psp, PSHTP_MEM_INDEX(__pshtp)); \
 } while (0)
 
 #define E2K_CLEAR_RF_108() \
 do { \
-	_Pragma("asm_length(14)") \
+	__asm_length(14) \
 	asm volatile ( \
 		"{\n" \
 		"nop 3\n" \
@@ -6466,7 +7231,7 @@ do { \
 
 #define E2K_CLEAR_RF_112() \
 do { \
-	_Pragma("asm_length(14)") \
+	__asm_length(14) \
 	asm volatile ( \
 		"{\n" \
 		"nop 3\n" \
@@ -6518,8 +7283,8 @@ do { \
 
 #define	E2K_CLEAR_CTPRS()			\
 do {						\
-	__e2k_u64_t	reg;			\
-	_Pragma("asm_length(4)") \
+	u64	reg;			\
+	__asm_length(4) \
 	asm volatile (				\
 		"{puttagd,2 0, 5, %0}\n"	\
 		"{movtd,s %0, %%ctpr1}\n"	\
@@ -6533,102 +7298,57 @@ do {						\
 #define NATIVE_RESTORE_COMMON_REGS_VALUES(_ctpr1, _ctpr2, _ctpr3, _ctpr1_hi, \
 		_ctpr2_hi, _ctpr3_hi, _lsr, _lsr1, _ilcr, _ilcr1) \
 do { \
-	_Pragma("no_asm_inline") _Pragma("asm_length(5)") \
+	__no_asm_inline(5) \
 	asm volatile ( \
-		      "{\n" \
-		      "rwd %[ctpr2], %%ctpr2\n" \
-		      "}\n" \
+		      "{rwd %[ctpr2], %%ctpr2}\n" \
  \
 		      ALTERNATIVE_1_ALTINSTR \
 		      /* CPU_FEAT_TRAP_V5 version */ \
- \
-			      "{\n" \
-			      "rwd %[ctpr3], %%ctpr3\n" \
-			      "}\n" \
-			      "{\n" \
-			      "rwd %[ctpr1], %%ctpr1\n" \
-			      "}\n" \
-			      "{\n" \
-			      "rwd %[lsr], %%lsr\n" \
-			      "addd %[lsr1], 0, %%db[1]\n" \
-			      "addd %[ilcr1], 0, %%db[3]\n" \
-			      "}\n" \
-			      /* rwd %db[1], %%lsr1 */ \
-			      ".word 0x04100011; .word 0x3dc001c3\n" \
-			      ".word 0x01c00000; .word 0x00000000\n" \
-			      "{\n" \
-			      "rwd %[ilcr], %%ilcr\n" \
-			      "}\n" \
-			      /* rwd %db[3], %%ilcr1 */ \
-			      ".word 0x04100011; .word 0x3dc003c7\n" \
-			      ".word 0x01c00000; .word 0x00000000\n" \
- \
+			      ".push_iset 5\n" \
+			      "{rwd %[ctpr3], %%ctpr3}\n" \
+			      "{rwd %[ctpr1], %%ctpr1}\n" \
+			      "{rwd %[lsr], %%lsr}\n" \
+			      "{rwd %[lsr1], %%lsr1}\n" \
+			      "{rwd %[ilcr], %%ilcr}\n" \
+			      "{rwd %[ilcr1], %%ilcr1}\n" \
+			      ".pop_iset\n" \
 		      ALTERNATIVE_2_ALTINSTR2 \
 		      /* CPU_FEAT_TRAP_V6 version */ \
- \
-			      "{\n" \
-			      "rwd %[ctpr3], %%ctpr3\n" \
-			      "addd %[ctpr1_hi], %%db[0]\n" \
-			      "addd %[ctpr2_hi], %%db[2]\n" \
-			      "}\n" \
-			      "{\n" \
-			      "rwd %[ctpr1], %%ctpr1\n" \
-			      "addd %[ctpr3_hi], %%db[4]\n" \
-			      "addd %[lsr1], 0, %%db[1]\n" \
-			      "}\n" \
-			      /* rwd %db[0], %%ctpr1.hi */ \
-			      ".word 0x04100011; .word 0x3dc00019\n" \
-			      ".word 0x01c00000; .word 0x00000000\n" \
-			      /* rwd %db[2], %%ctpr2.hi */ \
-			      ".word 0x04100011; .word 0x3dc0021a\n" \
-			      ".word 0x01c00000; .word 0x00000000\n" \
-			      /* rwd %db[4], %%ctpr3.hi */ \
-			      ".word 0x04100011; .word 0x3dc0041b\n" \
-			      ".word 0x01c00000; .word 0x00000000\n" \
-			      "{\n" \
-			      "rwd %[lsr], %%lsr\n" \
-			      "addd %[ilcr1], 0, %%db[3]\n" \
-			      "}\n" \
-			      /* rwd %db[1], %%lsr1 */ \
-			      ".word 0x04100011; .word 0x3dc001c3\n" \
-			      ".word 0x01c00000; .word 0x00000000\n" \
-			      "{\n" \
-			      "rwd %[ilcr], %%ilcr\n" \
-			      "}\n" \
-			      /* rwd %db[3], %%ilcr1 */ \
-			      ".word 0x04100011; .word 0x3dc003c7\n" \
-			      ".word 0x01c00000; .word 0x00000000\n" \
- \
+			      ".push_iset 6\n" \
+			      "{rwd %[ctpr3], %%ctpr3}\n" \
+			      "{rwd %[ctpr1], %%ctpr1}\n" \
+			      "{rwd %[ctpr1_hi], %%ctpr1.hi}\n" \
+			      "{rwd %[ctpr2_hi], %%ctpr2.hi}\n" \
+			      "{rwd %[ctpr3_hi], %%ctpr3.hi}\n" \
+			      "{rwd %[lsr], %%lsr}\n" \
+			      "{rwd %[lsr1], %%lsr1}\n" \
+			      "{rwd %[ilcr], %%ilcr}\n" \
+			      "{rwd %[ilcr1], %%ilcr1}\n" \
+			      ".pop_iset\n" \
 		      ALTERNATIVE_3_OLDINSTR2 \
- \
-			      "{\n" \
-			      "rwd %[ctpr3], %%ctpr3\n" \
-			      "}\n" \
-			      "{\n" \
-			      "rwd %[ctpr1], %%ctpr1\n" \
-			      "}\n" \
-			      "{\n" \
-			      "rwd %[lsr], %%lsr\n" \
-			      "}\n" \
-			      "{\n" \
-			      "rwd %[ilcr], %%ilcr\n" \
-			      "}\n" \
- \
+			      "{rwd %[ctpr3], %%ctpr3}\n" \
+			      "{rwd %[ctpr1], %%ctpr1}\n" \
+			      "{rwd %[lsr], %%lsr}\n" \
+			      "{rwd %[ilcr], %%ilcr}\n" \
 		      ALTERNATIVE_4_FEATURE2(%[facility1], %[facility2]) \
+ \
+		      ALTERNATIVE("", "{nop} {nop}", %[cpu_hwbug_rwd_lsr]) \
+		      "{wait all_e=1}\n" \
 		      :: [ctpr1] "r" (_ctpr1), [ctpr2] "r" (_ctpr2), \
 			 [ctpr3] "r" (_ctpr3), [ctpr1_hi] "r" (_ctpr1_hi), \
 			 [ctpr2_hi] "r" (_ctpr2_hi), [ctpr3_hi] "r" (_ctpr3_hi), \
 			 [lsr] "r" (_lsr), [lsr1] "r" (_lsr1), \
 			 [ilcr] "r" (_ilcr), [ilcr1] "r" (_ilcr1), \
 			 [facility1] "i" (CPU_FEAT_TRAP_V5), \
-			 [facility2] "i" (CPU_FEAT_TRAP_V6) \
-		      : "memory", "b[0]", "b[1]", "b[2]", "b[3]", "b[4]"); \
+			 [facility2] "i" (CPU_FEAT_TRAP_V6), \
+			 [cpu_hwbug_rwd_lsr] "i" (CPU_HWBUG_RWD_LSR) \
+		      : "memory"); \
 } while (0)
 
 #define NATIVE_RESTORE_KERNEL_GREGS(_k_gregs) \
 do { \
 	u64 f16, f17, f18, f19, tmp1, tmp2; \
-	_Pragma("no_asm_inline") ASM_LENGTH_V4_V5(8, 3) \
+	__no_asm_inline_nolength ASM_LENGTH_V4_V5(8, 3) \
 	asm volatile ( \
 		ALTERNATIVE_1_ALTINSTR \
 		/* iset v5 version - restore qp registers extended part */ \
@@ -6709,7 +7429,7 @@ do { \
 #define NATIVE_RESTORE_HOST_GREGS(_h_gregs) \
 do { \
 	u64 f20, f21, tmp1, tmp2; \
-	_Pragma("no_asm_inline") ASM_LENGTH_V4_V5(7, 2) \
+	__no_asm_inline_nolength ASM_LENGTH_V4_V5(7, 2) \
 	asm volatile ( \
 		ALTERNATIVE_1_ALTINSTR \
 		/* iset v5 version - restore qp registers extended part */ \
@@ -6766,7 +7486,7 @@ do { \
 #define LDRD(addr)						\
 ({								\
 	register long __dres;					\
-	_Pragma("asm_length(1)") \
+	__asm_length(1) \
 	asm volatile ("{ldrd [%1], %0\n}"			\
 		      : "=r"(__dres)				\
 		      : "m" (*((unsigned long long *)(addr))));	\
@@ -6777,7 +7497,7 @@ do { \
 do { \
 	u32 _fmt = ((ldst_rec_op_t *) &_opc)->fmt; \
 	u64 _ind = ((ldst_rec_op_t *) &_opc)->index; \
-	_Pragma("asm_length(4)") \
+	__no_asm_inline(4) \
 	asm ( \
 		"{nop 1\n" \
 		" cmpesb,0 %[fmt], 1, %%pred20\n" \
@@ -6799,7 +7519,7 @@ do { \
 do { \
 	u32 _fmt = ((ldst_rec_op_t *) &_opc)->fmt; \
 	u64 _ind = ((ldst_rec_op_t *) &_opc)->index; \
-	_Pragma("asm_length(7)") \
+	__no_asm_inline(7) \
 	asm ( \
 		"{nop 1\n" \
 		" cmpesb,0 %[fmt], 1, %%pred20\n" \
@@ -6926,7 +7646,7 @@ do { \
 	u64 _data; \
 	u32 _fmt = ((ldst_rec_op_t *) &_opc)->fmt; \
 	u64 _ind = ((ldst_rec_op_t *) &_opc)->index; \
-	_Pragma("asm_length(12)") \
+	__no_asm_inline(12) \
 	asm ( \
 		"{nop 1\n" \
 		" cmpesb,0 %[fmt], 1, %%pred20\n" \
@@ -6972,14 +7692,14 @@ do { \
 /* Since v6 this got replaced with "wait int=1,mem_mod=1" */
 #define C1_WAIT_TRAP_V3() \
 do { \
-	_Pragma("no_asm_inline") _Pragma("asm_length(1)") \
+	__no_asm_inline(1) \
 	asm volatile ("wait trap=1" ::: "memory"); \
 } while (0)
 
 #define C3_WAIT_TRAP_V3(__val, __phys_base, __st_core) \
 do { \
 	u64 _reg; \
-	_Pragma("asm_length(14)") \
+	__no_asm_inline(14) \
 	asm volatile ( \
 		/* 1) Disable instruction prefetch */ \
 		"mmurr %%mmu_cr, %[reg]\n" \
@@ -7068,7 +7788,7 @@ do { \
 #define C3_WAIT_INT_V6(__val, __phys_addr) \
 do { \
 	u64 _reg; \
-	_Pragma("asm_length(14)") \
+	__no_asm_inline(14) \
 	asm volatile ( \
 		/* 1) Disable instruction prefetch */ \
 		"mmurr %%mmu_cr, %[reg]\n" \
@@ -7293,49 +8013,102 @@ static inline void s3_entry_complete_e2c3(int node, phys_addr_t node_nbsr,
 #endif
 
 /* Hardware virtualized extensions support */
-
 #define E2K_GLAUNCH(_ctpr1, _ctpr1_hi, _ctpr2, _ctpr2_hi, _ctpr3, _ctpr3_hi, \
 		    _lsr, _lsr1, _ilcr, _ilcr1) \
 do { \
-	_Pragma("no_asm_inline") _Pragma("asm_length(14)") \
-	asm volatile ("{rwd %[ctpr1], %%ctpr1}\n" \
-		      "{rwd %[ctpr1_hi], %%ctpr1.hi}\n" \
-		      "{rwd %[ctpr3], %%ctpr3}\n" \
-		      "{rwd %[ctpr3_hi], %%ctpr3.hi}\n" \
-		      "{\n" \
-		      "rwd %[lsr], %%lsr\n" \
-		      "addd %[lsr1], 0, %%db[1]\n" \
-		      "addd %[ilcr1], 0, %%db[3]\n" \
-		      "}\n" \
-		      /* rwd %db[1], %%lsr1 */ \
-		      ".word 0x04100011\n" \
-		      ".word 0x3dc001c3\n" \
-		      ".word 0x01c00000\n" \
-		      ".word 0x00000000\n" \
-		      "{\n" \
-		      "rwd %[ilcr], %%ilcr\n" \
-		      "}\n" \
-		      /* rwd %db[3], %%ilcr1 */ \
-		      ".word 0x04100011\n" \
-		      ".word 0x3dc003c7\n" \
-		      ".word 0x01c00000\n" \
-		      ".word 0x00000000\n" \
-		      /* Additional `rwd %ilcr -> guest` wait on iset v7 */ \
-		      "{nop}\n" \
+	u32 __gl_core_mode; \
+	u64 __gl_tmp1, __gl_tmp2; \
+	__no_asm_inline(14) \
+	asm volatile (ALTERNATIVE( \
+		      /* Default version */ \
+			"", \
+		      /* CPU_HWBUG_RRSH_RWSH_CTPR version */ \
+			".push_iset 7\n" \
+			"rrs %%sh_core_mode, %[tmp1]\n" \
+			".pop_iset\n" \
+			"rrs %%core_mode, %[core_mode]\n" \
+			/* Get %sh_core_mode.descr_v7 */ \
+			"{ands %[core_mode], ~0x80, %[tmp2]\n" \
+			" getfzs %[tmp1], 0xe200, %[tmp1]}\n" \
+			"ors %[tmp1], %[tmp2], %[tmp1]\n" \
+			"rws %[tmp1], %%core_mode\n" \
+			"wait all_e=1\n", \
+		      %[cpu_hwbug_rrsh_rwsh_ctpr]) \
+		      ALTERNATIVE( \
+		      /* Default version */ \
+			"{rwd %[ctpr1], %%ctpr1}\n" \
+			"{rwd %[ctpr1_hi], %%ctpr1.hi}\n" \
+			"{rwd %[ctpr3], %%ctpr3}\n" \
+			"{rwd %[ctpr3_hi], %%ctpr3.hi}\n", \
+		      /* CPU_FEAT_V7_CPU_REGS version */ \
+			".push_iset 7\n" \
+			"{rwshd %[ctpr1], %%ctpr1}\n" \
+			"{rwshd %[ctpr1_hi], %%ctpr1.hi}\n" \
+			"{rwshd %[ctpr3], %%ctpr3}\n" \
+			"{rwshd %[ctpr3_hi], %%ctpr3.hi}\n" \
+			".pop_iset\n", \
+		      %[cpu_feat_v7_cpu_regs]) \
+		      ALTERNATIVE( \
+		      /* Default version */ \
+			"", \
+		      /* CPU_HWBUG_RRSH_RWSH_CTPR version */ \
+			"wait all_e=1\n" \
+			"rws %[core_mode], %%core_mode\n" \
+			"wait all_e=1\n", \
+		      %[cpu_hwbug_rrsh_rwsh_ctpr]) \
+		      "{rwd %[lsr], %%lsr}\n" \
+		      "{rwd %[lsr1], %%lsr1}\n" \
+		      "{rwd %[ilcr], %%ilcr}\n" \
+		      "{rwd %[ilcr1], %%ilcr1}\n" \
 		      /* #80747: must repeat interrupted barriers */ \
-		      "{nop 3; wait st_c=1}\n" \
+		      "{wait st_c=1,all_e=1}\n" \
 		      "{glaunch}\n" \
 		      "{wait fl_c=1\n" \
 		      " rrd %%lsr, %[lsr]}\n" \
 		      "{rrd %%ilcr, %[ilcr]}\n" \
 		      "{rrd %%lsr1, %[lsr1]}\n" \
 		      "{rrd %%ilcr1, %[ilcr1]}\n" \
-		      "{rrd %%ctpr1, %[ctpr1]}\n" \
-		      "{rrd %%ctpr1.hi, %[ctpr1_hi]}\n" \
-		      "{rrd %%ctpr2, %[ctpr2]}\n" \
-		      "{rrd %%ctpr2.hi, %[ctpr2_hi]}\n" \
-		      "{rrd %%ctpr3, %[ctpr3]}\n" \
-		      "{rrd %%ctpr3.hi, %[ctpr3_hi]}\n" \
+		      ALTERNATIVE( \
+		      /* Default version */ \
+			"", \
+		      /* CPU_HWBUG_RRSH_RWSH_CTPR version */ \
+			".push_iset 7\n" \
+			"rrs %%sh_core_mode, %[tmp1]\n" \
+			".pop_iset\n" \
+			"rrs %%core_mode, %[core_mode]\n" \
+			/* Get %sh_core_mode.descr_v7 */ \
+			"{ands %[core_mode], ~0x80, %[tmp2]\n" \
+			" getfzs %[tmp1], 0xe200, %[tmp1]}\n" \
+			"ors %[tmp1], %[tmp2], %[tmp1]\n" \
+			"rws %[tmp1], %%core_mode\n" \
+			"wait all_e=1\n", \
+		      %[cpu_hwbug_rrsh_rwsh_ctpr]) \
+		      ALTERNATIVE( \
+		      /* Default version */ \
+			"{rrd %%ctpr1, %[ctpr1]}\n" \
+			"{rrd %%ctpr1.hi, %[ctpr1_hi]}\n" \
+			"{rrd %%ctpr2, %[ctpr2]}\n" \
+			"{rrd %%ctpr2.hi, %[ctpr2_hi]}\n" \
+			"{rrd %%ctpr3, %[ctpr3]}\n" \
+			"{rrd %%ctpr3.hi, %[ctpr3_hi]}\n", \
+		      /* CPU_FEAT_V7_CPU_REGS version */ \
+			".push_iset 7\n" \
+			"{rrshd %%ctpr1, %[ctpr1]}\n" \
+			"{rrshd %%ctpr1.hi, %[ctpr1_hi]}\n" \
+			"{rrshd %%ctpr2, %[ctpr2]}\n" \
+			"{rrshd %%ctpr2.hi, %[ctpr2_hi]}\n" \
+			"{rrshd %%ctpr3, %[ctpr3]}\n" \
+			"{rrshd %%ctpr3.hi, %[ctpr3_hi]}\n" \
+			".pop_iset\n", \
+		      %[cpu_feat_v7_cpu_regs]) \
+		      ALTERNATIVE( \
+		      /* Default version */ \
+			"", \
+		      /* CPU_HWBUG_RRSH_RWSH_CTPR version */ \
+			"wait all_e=1\n" \
+			"rws %[core_mode], %%core_mode\n" \
+			"wait all_e=1\n", \
+		      %[cpu_hwbug_rrsh_rwsh_ctpr]) \
 		      /* CPU_HWBUG_BRANCH_ACTIVATES_CTPR: avoid rbranch, ibranch \
 		       * and ibranchd instructions until all %ctpr[.hi] registers \
 		       * have been read */ \
@@ -7348,13 +8121,17 @@ do { \
 		      ALTERNATIVE_2_OLDINSTR \
 		      /* Default version */ \
 			      "{nop}" \
-		      ALTERNATIVE_3_FEATURE(%[facility]) \
+		      ALTERNATIVE_3_FEATURE(%[cpu_hwbug_l1i_stops_working]) \
 		      : [lsr] "+r" (_lsr), [lsr1] "+r" (_lsr1), \
 			[ilcr] "+r" (_ilcr), [ilcr1] "+r" (_ilcr1), \
 			[ctpr1] "+r" (_ctpr1), [ctpr1_hi] "+r" (_ctpr1_hi), \
 			[ctpr2] "+r" (_ctpr2), [ctpr2_hi] "+r" (_ctpr2_hi), \
-		        [ctpr3] "+r" (_ctpr3), [ctpr3_hi] "+r" (_ctpr3_hi) \
-		      : [facility] "i" (CPU_HWBUG_L1I_STOPS_WORKING) \
+			[ctpr3] "+r" (_ctpr3), [ctpr3_hi] "+r" (_ctpr3_hi), \
+			[core_mode] "=&r" (__gl_core_mode), \
+			[tmp1] "=&r" (__gl_tmp1), [tmp2] "=&r" (__gl_tmp2) \
+		      : [cpu_hwbug_l1i_stops_working] "i" (CPU_HWBUG_L1I_STOPS_WORKING), \
+			[cpu_feat_v7_cpu_regs] "i" (CPU_FEAT_V7_CPU_REGS), \
+			[cpu_hwbug_rrsh_rwsh_ctpr] "i" (CPU_HWBUG_RRSH_RWSH_CTPR) \
 		      : "memory", "b[1]", "b[3]", "ctpr1", "ctpr2", "ctpr3"); \
 } while (0)
 
@@ -7362,7 +8139,7 @@ do { \
 #define __E2K_CALL_PTR_0(_fn) \
 ({ \
 	register u64 __res; \
-	_Pragma("asm_length(3)") \
+	__asm_length(3) \
 	asm volatile ( \
 		"movtd %[fn], %%ctpr1\n" \
 		"call %%ctpr1, wbs = %#\n" \
@@ -7376,7 +8153,7 @@ do { \
 #define __E2K_CALL_PTR_1(_fn, _arg0) \
 ({ \
 	register u64 __res; \
-	_Pragma("asm_length(3)") \
+	__asm_length(3) \
 	asm volatile ( \
 		"{addd 0x0, %[arg0], %%b[0]\n" \
 		" movtd %[fn], %%ctpr1}\n" \
@@ -7391,7 +8168,7 @@ do { \
 #define __E2K_CALL_PTR_2(_fn, _arg0, _arg1) \
 ({ \
 	register u64 __res; \
-	_Pragma("asm_length(3)") \
+	__asm_length(3) \
 	asm volatile ( \
 		"{addd 0x0, %[arg0], %%b[0]\n\t" \
 		" addd 0x0, %[arg1], %%b[1]\n\t" \
@@ -7408,7 +8185,7 @@ do { \
 #define __E2K_CALL_PTR_3(_fn, _arg0, _arg1, _arg2) \
 ({ \
 	register u64 __res; \
-	_Pragma("asm_length(3)") \
+	__asm_length(3) \
 	asm volatile ( \
 		"{addd 0x0, %[arg0], %%b[0]\n" \
 		" addd 0x0, %[arg1], %%b[1]\n" \
@@ -7426,7 +8203,7 @@ do { \
 #define __E2K_CALL_PTR_4(_fn, _arg0, _arg1, _arg2, _arg3) \
 ({ \
 	register u64 __res; \
-	_Pragma("asm_length(3)") \
+	__asm_length(3) \
 	asm volatile ( \
 		"{addd 0x0, %[arg0], %%b[0]\n\t" \
 		" addd 0x0, %[arg1], %%b[1]\n\t" \
@@ -7446,7 +8223,7 @@ do { \
 #define __E2K_CALL_PTR_5(_fn, _arg0, _arg1, _arg2, _arg3, _arg4) \
 ({ \
 	register u64 __res; \
-	_Pragma("asm_length(3)") \
+	__asm_length(3) \
 	asm volatile ( \
 		"{addd 0x0, %[arg0], %%b[0]\n" \
 		" addd 0x0, %[arg1], %%b[1]\n" \
@@ -7467,7 +8244,7 @@ do { \
 #define __E2K_CALL_PTR_6(_fn, _arg0, _arg1, _arg2, _arg3, _arg4, _arg5) \
 ({ \
 	register u64 __res; \
-	_Pragma("asm_length(3)") \
+	__asm_length(3) \
 	asm volatile ( \
 		"{addd 0x0, %[arg0], %%b[0]\n" \
 		" addd 0x0, %[arg1], %%b[1]\n" \
@@ -7490,7 +8267,7 @@ do { \
 #define __E2K_CALL_PTR_7(_fn, _arg0, _arg1, _arg2, _arg3, _arg4, _arg5, _arg6) \
 ({ \
 	register u64 __res; \
-	_Pragma("asm_length(3)") \
+	__asm_length(3) \
 	asm volatile ( \
 		"{addd 0x0, %[arg0], %%b[0]\n" \
 		" addd 0x0, %[arg1], %%b[1]\n" \
@@ -7524,7 +8301,7 @@ do { \
 #define __E2K_HCALL_0(_trap, _sys_num, _arg1) \
 ({ \
 	register u64 __res; \
-	_Pragma("asm_length(3)") \
+	__asm_length(3) \
 	asm volatile ( \
 		"addd 0x0, %[sys_num], %%b[0]\n\t" \
 		"{\n" \
@@ -7541,7 +8318,7 @@ do { \
 #define __E2K_HCALL_1(_trap, _sys_num, _arg1) \
 ({ \
 	register u64 __res; \
-	_Pragma("asm_length(3)") \
+	__asm_length(3) \
 	asm volatile ("{\n" \
 		"addd 0x0, %[sys_num], %%b[0]\n\t" \
 		"addd 0x0, %[arg1], %%b[1]\n\t" \
@@ -7561,7 +8338,7 @@ do { \
 #define __E2K_HCALL_2(_trap, _sys_num, _arg1, _arg2) \
 ({ \
 	register u64 __res; \
-	_Pragma("asm_length(3)") \
+	__asm_length(3) \
 	asm volatile ("{\n" \
 		"addd 0x0, %[sys_num], %%b[0]\n\t" \
 		"addd 0x0, %[arg1], %%b[1]\n\t" \
@@ -7583,7 +8360,7 @@ do { \
 #define __E2K_HCALL_3(_trap, _sys_num, _arg1, _arg2, _arg3) \
 ({ \
 	register u64 __res; \
-	_Pragma("asm_length(3)") \
+	__asm_length(3) \
 	asm volatile ("{\n" \
 		"addd 0x0, %[sys_num], %%b[0]\n\t" \
 		"addd 0x0, %[arg1], %%b[1]\n\t" \
@@ -7607,7 +8384,7 @@ do { \
 #define __E2K_HCALL_4(_trap, _sys_num, _arg1, _arg2, _arg3, _arg4) \
 ({ \
 	register u64 __res; \
-	_Pragma("asm_length(3)") \
+	__asm_length(3) \
 	asm volatile ("{\n" \
 		"addd 0x0, %[sys_num], %%b[0]\n\t" \
 		"addd 0x0, %[arg1], %%b[1]\n\t" \
@@ -7633,7 +8410,7 @@ do { \
 #define __E2K_HCALL_5(_trap, _sys_num, _arg1, _arg2, _arg3, _arg4, _arg5) \
 ({ \
 	register u64 __res; \
-	_Pragma("asm_length(3)") \
+	__asm_length(3) \
 	asm volatile ("{\n" \
 		"addd 0x0, %[sys_num], %%b[0]\n\t" \
 		"addd 0x0, %[arg1], %%b[1]\n\t" \
@@ -7662,7 +8439,7 @@ do { \
 			_arg2, _arg3, _arg4, _arg5, _arg6) \
 ({ \
 	register u64 __res; \
-	_Pragma("asm_length(4)") \
+	__asm_length(4) \
 	asm volatile ( \
 		"addd 0x0, %[sys_num], %%b[0]\n\t" \
 		"{\n" \
@@ -7694,7 +8471,7 @@ do { \
 			_arg2, _arg3, _arg4, _arg5, _arg6, _arg7) \
 ({ \
 	register u64 __res; \
-	_Pragma("asm_length(4)") \
+	__asm_length(4) \
 	asm volatile ("{\n" \
 		"addd 0x0, %[sys_num], %%b[0]\n\t" \
 		"addd 0x0, %[arg1], %%b[1]\n\t" \
@@ -7746,7 +8523,7 @@ do { \
 
 #define E2K_HRET(_ret) \
 do { \
-	_Pragma("asm_length(2)") \
+	__asm_length(2) \
 	asm volatile ( \
 		ALTERNATIVE_1_ALTINSTR \
 		/* CPU_HWBUG_HRET_INTC_CU version */ \
@@ -7772,7 +8549,7 @@ do { \
 #define __arch_this_cpu_read(_var, size) \
 ({ \
 	typeof(_var) __ret; \
-	_Pragma("no_asm_inline") _Pragma("asm_length(1)") \
+	__no_asm_inline(1) \
 	asm ("ld" size " %%dg" __stringify(MY_CPU_OFFSET_GREG) ", %[var], %[ret]" \
 				: [ret] "=r" (__ret) \
 				: [var] "r" (&(_var)) \
@@ -7782,9 +8559,11 @@ do { \
 
 #define __arch_this_cpu_write(_var, _val, size) \
 do { \
-	_Pragma("no_asm_inline") _Pragma("asm_length(1)") \
+	int unused; \
+	__no_asm_inline(1) \
 	asm ("st" size " %%dg" __stringify(MY_CPU_OFFSET_GREG) ", %[var], %[val]" \
-				:: [var] "r" (&(_var)), [val] "r" (_val) \
+				: "=r" (unused) /* Prevent automatic volatile */ \
+				: [var] "r" (&(_var)), [val] "r" (_val) \
 				: "memory"); \
 } while (0)
 
@@ -7796,7 +8575,7 @@ do { \
 	typeof(_var) __ret; \
 	ASM_LENGTH_V6_V7(6, 5) \
 	asm NOT_VOLATILE ( \
-		BEFORE_ATOMIC("1:", RELAXED_MB, atomic_spurious_fault) \
+		BEFORE_ATOMIC("1:", RELAXED_MB, no_atomic_spurious_fault) \
 		ALTERNATIVE_2( \
 		/* Default version - 6 cycles ld->st delay */ \
 			"{nop 5\n" \
@@ -7821,7 +8600,7 @@ do { \
 		: [var] "r" (&(_var)), [val] "r" ((u64) (_val)), \
 		  [iset_v6] "i" (CPU_FEAT_ISET_V6), \
 		  [iset_v7] "i" (CPU_FEAT_ISET_V7), \
-		  [atomic_spurious_fault] "i" (CPU_HWBUG_ATOMIC_SPURIOUS_FAULT) \
+		  [no_atomic_spurious_fault] "i" (CPU_NO_HWBUG_ATOMIC_SPURIOUS_FAULT) \
 		: "memory"); \
 	__ret; \
 })
@@ -7831,7 +8610,7 @@ do { \
 	typeof(_var) __ret, __stored_val; \
 	ASM_LENGTH_V5_V6(11, 12) \
 	asm NOT_VOLATILE ( \
-		BEFORE_ATOMIC("3:", RELAXED_MB, atomic_spurious_fault) \
+		BEFORE_ATOMIC("3:", RELAXED_MB, no_atomic_spurious_fault) \
 		ALTERNATIVE( \
 		/* Default version - 10 cycles ld->st delay */ \
 			"{nop 5\n" \
@@ -7853,7 +8632,7 @@ do { \
 		: [ret] "=&r" (__ret), [stored_val] "=&r" (__stored_val) \
 		: [var] "r" (&(_var)), [new] "ir" (_new), [old] "ir" (_old), \
 		  [iset_v6] "i" (CPU_FEAT_ISET_V6), \
-		  [atomic_spurious_fault] "i" (CPU_HWBUG_ATOMIC_SPURIOUS_FAULT) \
+		  [no_atomic_spurious_fault] "i" (CPU_NO_HWBUG_ATOMIC_SPURIOUS_FAULT) \
 		: "memory", "pred2"); \
 	__ret; \
 })
@@ -7863,7 +8642,7 @@ do { \
 	typeof(_var) __ret, __stored_val; \
 	ASM_LENGTH_V5_V6(11, 12) \
 	asm NOT_VOLATILE ( \
-		BEFORE_ATOMIC("3:", RELAXED_MB, atomic_spurious_fault) \
+		BEFORE_ATOMIC("3:", RELAXED_MB, no_atomic_spurious_fault) \
 		ALTERNATIVE( \
 		/* Default version - 10 cycles ld->st delay */ \
 			"{nop 6\n"\
@@ -7884,7 +8663,7 @@ do { \
 		: [ret] "=&r" (__ret), [stored_val] "=&r" (__stored_val) \
 		: [var] "r" (&(_var)), [new] "ir" (_new), [old] "ir" (_old), \
 		  [iset_v6] "i" (CPU_FEAT_ISET_V6), \
-		  [atomic_spurious_fault] "i" (CPU_HWBUG_ATOMIC_SPURIOUS_FAULT) \
+		  [no_atomic_spurious_fault] "i" (CPU_NO_HWBUG_ATOMIC_SPURIOUS_FAULT) \
 		: "memory", "pred2"); \
 	__ret; \
 })
@@ -7894,7 +8673,7 @@ do { \
 	typeof(_var) __ret, __stored_val; \
 	ASM_LENGTH_V5_V6(11, 12) \
 	asm NOT_VOLATILE ( \
-		BEFORE_ATOMIC("3:", RELAXED_MB, atomic_spurious_fault) \
+		BEFORE_ATOMIC("3:", RELAXED_MB, no_atomic_spurious_fault) \
 		ALTERNATIVE( \
 		/* Default version - 10 cycles ld->st delay */ \
 			"{nop 6\n"\
@@ -7915,7 +8694,7 @@ do { \
 		: [ret] "=&r" (__ret), [stored_val] "=&r" (__stored_val) \
 		: [var] "r" (&(_var)), [new] "ir" ((u64) (_new)), [old] "ir" ((u64) (_old)), \
 		  [iset_v6] "i" (CPU_FEAT_ISET_V6), \
-		  [atomic_spurious_fault] "i" (CPU_HWBUG_ATOMIC_SPURIOUS_FAULT) \
+		  [no_atomic_spurious_fault] "i" (CPU_NO_HWBUG_ATOMIC_SPURIOUS_FAULT) \
 		: "memory", "pred2"); \
 	__ret; \
 })
@@ -7925,7 +8704,7 @@ do { \
 	typeof(_var) __ret; \
 	ASM_LENGTH_V5_V6(11, 12) \
 	asm NOT_VOLATILE ( \
-		BEFORE_ATOMIC("1:", RELAXED_MB, atomic_spurious_fault) \
+		BEFORE_ATOMIC("1:", RELAXED_MB, no_atomic_spurious_fault) \
 		ALTERNATIVE( \
 		/* Default version - 10 cycles ld->st delay */ \
 			"{nop 6\n"\
@@ -7945,7 +8724,7 @@ do { \
 		: [ret] "=&r" (__ret) \
 		: [var] "r" (&(_var)), [val] "ir" ((u64) (_val)), \
 		  [iset_v6] "i" (CPU_FEAT_ISET_V6), \
-		  [atomic_spurious_fault] "i" (CPU_HWBUG_ATOMIC_SPURIOUS_FAULT) \
+		  [no_atomic_spurious_fault] "i" (CPU_NO_HWBUG_ATOMIC_SPURIOUS_FAULT) \
 		: "memory"); \
 	__ret; \
 })
@@ -8020,7 +8799,7 @@ do { \
 /* Force load OSGD->GD */
 #define E2K_LOAD_OSGD_TO_GD() \
 do { \
-	_Pragma("asm_length(3)") \
+	__asm_length(3) \
 	asm volatile ("{nop; sdisp %%ctpr2, 11}\n" \
 		      "{call %%ctpr2, wbs=%#}\n" \
 		      ::: "call"); \
@@ -8032,7 +8811,7 @@ do { \
  */
 #define E2K_INSFD_ATOMIC(src1, src2, src3_dst) \
 do { \
-	_Pragma("no_asm_inline") _Pragma("asm_length(1)") \
+	__no_asm_inline(1) \
 	asm ("insfd %[new_value], %[insf_params], %[reg], %[reg]" \
 	     : [reg] "+r" (src3_dst) \
 	     : [insf_params] "i" (src2), \
@@ -8041,7 +8820,7 @@ do { \
 
 #define E2K_ADDD_ATOMIC(src1_dst, src2) \
 do { \
-	_Pragma("no_asm_inline") _Pragma("asm_length(1)") \
+	__no_asm_inline(1) \
 	asm ("addd %[reg], %[val], %[reg]" \
 	     : [reg] "+r" (src1_dst) \
 	     : [val] "ir" (src2)); \
@@ -8049,7 +8828,7 @@ do { \
 
 #define E2K_SUBD_ATOMIC(src1_dst, src2) \
 do { \
-	_Pragma("no_asm_inline") _Pragma("asm_length(1)") \
+	__no_asm_inline(1) \
 	asm ("subd %[reg], %[val], %[reg]" \
 	     : [reg] "+r" (src1_dst) \
 	     : [val] "ir" (src2)); \
@@ -8057,7 +8836,7 @@ do { \
 
 #define E2K_SUBD_ATOMIC__SHRD32(src1_dst, src2, _old) \
 do { \
-	_Pragma("asm_length(1)") \
+	__asm_length(1) \
 	asm ("{subd %[reg], %[val], %[reg]\n" \
 	     " shrd %[reg], 32, %[old]}" \
 	     : [reg] "+r" (src1_dst), \
@@ -8067,13 +8846,13 @@ do { \
 
 #endif /* __ASSEMBLY__ */
 
-#define E2K_HALF_SPEC_LOAD(address) \
+#define E2K_SEMI_SPEC_LOAD(address) \
 do { \
-	_Pragma("asm_length(1)") \
+	__asm_length(1) \
 	asm volatile ("{ldd,sm %[addr], 0, %%empty, mas=%[mas]}" \
 		:: [addr] "r" (address), \
 		   [mas] "i" (MIGHT_HAVE_CPU_HWBUG_PREFETCH_EMPTY() ? \
-		  		MAS_BYPASS_L1_CACHE : 0)); \
+				MAS_BYPASS_L1_CACHE : 0)); \
 } while (0)
 
 #if __iset__ >= 7
@@ -8134,7 +8913,7 @@ do { \
 # define GET_V7_CPU_REG_BASE(_reg) \
 ({ \
 	u64 __crb_btm_offset, __crb_ptr; \
-	_Pragma("no_asm_inline") _Pragma("asm_length(1)") \
+	__no_asm_inline(1) \
 	asm (".push_iset 7\n" \
 	     "{getind %[reg], %[offset]\n" \
 	     " getptr %[reg], %[ptr]}\n" \
@@ -8147,7 +8926,7 @@ do { \
 # define GET_V7_CPU_REG_SIZE(_reg) \
 ({ \
 	u64 __crs_max_ind, lo = (_reg).lo, hi = (_reg).hi; \
-	_Pragma("no_asm_inline") _Pragma("asm_length(1)") \
+	__no_asm_inline(1) \
 	asm (".push_iset 7\n" \
 	     "getmi %[reg], %[max_ind]\n" \
 	     ".pop_iset\n" \
@@ -8160,7 +8939,7 @@ do { \
 ({ \
 	u64 __cri_btm_offset = 0, lo = (_reg).lo, hi = (_reg).hi; \
 	if (hi & E2K_V7_AP_RW_MASK) { \
-		_Pragma("no_asm_inline") _Pragma("asm_length(1)") \
+		__no_asm_inline(1) \
 		asm (".push_iset 7\n" \
 		     "getind %[reg], %[offset]\n" \
 		     ".pop_iset\n" \
@@ -8173,7 +8952,7 @@ do { \
 # define GET_V7_CPU_REG_PTR(_reg) \
 ({ \
 	u64 __crp_ptr; \
-	_Pragma("no_asm_inline") _Pragma("asm_length(1)") \
+	__no_asm_inline(1) \
 	asm (".push_iset 7\n" \
 	     "getptr %[reg], %[ptr]\n" \
 	     ".pop_iset\n" \
@@ -8186,7 +8965,7 @@ do { \
 # define NEW_V7_CPU_REG(_base, _ind, _size) \
 ({ \
 	__uint128_t __crn_reg = (__uint128_t) 0x388c00001f7ffffdull << 64; \
-	_Pragma("no_asm_inline") _Pragma("asm_length(4)") \
+	__no_asm_inline(4) \
 	asm (".push_iset 7\n" \
 	     "{apincr %[reg], %[base], %[reg]}\n" \
 	     "{nop 1\n" \
@@ -8205,7 +8984,7 @@ do { \
 #define GET_V7_CPU_REG_PTRC(_reg) \
 ({ \
 	u64 __crp_ptr; \
-	_Pragma("no_asm_inline") _Pragma("asm_length(1)") \
+	__no_asm_inline(1) \
 	asm (".push_iset 7\n" \
 	     "getptrc %[reg], %[ptr]\n" \
 	     ".pop_iset\n" \

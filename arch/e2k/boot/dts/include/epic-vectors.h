@@ -6,6 +6,13 @@
 #ifndef _EPIC_VECTORS_H
 #define _EPIC_VECTORS_H
 
+/*
+ * Reserve the lowest usable vector (and hence lowest priority)  0x20 for
+ * triggering cleanup after irq migration. 0x21-0x2f will still be used
+ * for device interrupts.
+ */
+#define EPIC_IRQ_MOVE_CLEANUP_VECTOR		0x20
+
 /* EPIC system vectors have the highest priority level of 3 (0x300 - 0x3ff) */
 #define LINP0_INTERRUPT_VECTOR		0x3c0
 #define LINP1_INTERRUPT_VECTOR		0x3c1
@@ -40,13 +47,16 @@
 #define LINP30_INTERRUPT_VECTOR		0x3de
 #define LINP31_INTERRUPT_VECTOR		0x3df
 
+/* VIRQ vector to emulate NMI on guest kernel */
 #define	KVM_NMI_EPIC_VECTOR			0x3e3
 #define CEPIC_TIMER_VECTOR			0x3e4
+
 #define CEPIC_EPIC_INT_VECTOR			0x3f5
 #define EPIC_MANAGED_IRQ_SHUTDOWN_VECTOR	0x3f6
 #define EPIC_IRQ_WORK_VECTOR			0x3f7
 #define ASYNC_PF_WAKE_VECTOR			0x3f8
 #define PREPIC_ERROR_VECTOR			0x3f9
+/* VIRQ vector to emulate SysRq on guest kernel */
 #define	SYSRQ_SHOWSTATE_EPIC_VECTOR		0x3fa
 #define EPIC_CALL_FUNCTION_SINGLE_VECTOR	0x3fb
 #define EPIC_CALL_FUNCTION_VECTOR		0x3fc
@@ -55,4 +65,3 @@
 #define SPURIOUS_EPIC_VECTOR			0x3ff
 
 #endif
-

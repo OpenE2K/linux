@@ -3,7 +3,7 @@
 #define __NVIF_OBJECT_H__
 #include <nvif/os.h>
 
-#ifdef CONFIG_E2K
+#ifdef __LCC__
 #pragma diag_suppress 3302
 #endif
 

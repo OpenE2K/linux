@@ -832,6 +832,9 @@ static const struct file_operations viv_drm_fops = {
 #ifdef CONFIG_COMPAT
     .compat_ioctl       = drm_compat_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+    .ptr128_ioctl       = drm_ptr128_ioctl,
+#endif
     .poll               = drm_poll,
     .read               = drm_read,
     .llseek             = no_llseek,

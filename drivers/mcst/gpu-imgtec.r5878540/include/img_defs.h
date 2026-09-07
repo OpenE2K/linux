@@ -322,7 +322,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 	#include <linux/compiler.h>
 
 	#if !defined(__fallthrough)
-		#if defined(__GNUC__) && GCC_VERSION_AT_LEAST(7, 0)
+		#if defined(__GNUC__) && GCC_VERSION_AT_LEAST(7, 0) || defined(CONFIG_CC_IS_CLANG)
 			#define __fallthrough __attribute__((__fallthrough__))
 		#else
 			#define __fallthrough

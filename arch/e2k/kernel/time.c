@@ -61,17 +61,3 @@ void __init native_time_init(void)
 	of_clk_init(NULL);
 	timer_probe();
 }
-
-/*
- * Scheduler clock - returns current time in nanosec units.
- */
-unsigned long long sched_clock(void)
-{
-	if (likely(use_esclk_sched_clock())) {
-		return esclk_sched_clock();
-	} else if (likely(use_sclk_sched_clock())) {
-		return sclk_sched_clock();
-	}
-
-	return (unsigned long long) (jiffies - INITIAL_JIFFIES) * (NSEC_PER_SEC / HZ);
-}

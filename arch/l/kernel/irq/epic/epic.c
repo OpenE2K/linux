@@ -1,5 +1,10 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
 #include <linux/kernel.h>
-#include <linux/cpu.h>
+#include <linux/seq_file.h>
 
 #include "epic.h"
 
@@ -107,6 +112,12 @@ int epic_processor_info(int epicid, int version, unsigned int cepic_freq)
 	set_cpu_possible(cpu, true);
 	set_cpu_present(cpu, true);
 
+	if (cepic_freq) {
+		pr_info_once("EPIC timer frequency is %d.%d MHz\n",
+			cepic_freq / 1000000, cepic_freq % 1000000 / 100000);
+		cepic_timer_freq = cepic_freq;
+	}
+
 	return cpu;
 }
 
@@ -116,3 +127,51 @@ static int __init epic_set_bgi_mode(char *arg)
 	return 0;
 }
 early_param("epic_bgi_mode", epic_set_bgi_mode);
+
+/* Stop generating timer interrupts and mask them */
+static int cepic_timer_shutdown(struct clock_event_device *evt)
+{
+	union cepic_timer_lvtt reg;
+
+	reg.raw = epic_read_w(CEPIC_TIMER_LVTT);
+	reg.mask = 1;
+	epic_write_w(CEPIC_TIMER_LVTT, reg.raw);
+	epic_write_w(CEPIC_TIMER_INIT, 0);
+
+	return 0;
+}
+
+static int cepic_suspend(void)
+{
+	union cepic_ctrl reg_ctrl;
+	unsigned long flags;
+
+	local_irq_save(flags);
+
+	/* Disable CEPIC */
+	reg_ctrl.raw = epic_read_w(CEPIC_CTRL);
+	reg_ctrl.soft_en = 0;
+	epic_write_w(CEPIC_CTRL, reg_ctrl.raw);
+
+	local_irq_restore(flags);
+
+	return 0;
+}
+
+void cepic_disable(void)
+{
+	cepic_timer_shutdown(NULL);
+	cepic_suspend();
+}
+
+void cpuinfo_epic(struct seq_file *m)
+{
+	if (cpu_has(CPU_FEAT_EPIC)) {
+		seq_printf(m, " epic=%lu", cepic_timer_freq);
+	}
+}
+
+unsigned int get_irr_epic(unsigned int vector)
+{
+	return epic_read_w(CEPIC_PMIRR + vector / 32 * 0x4);
+}

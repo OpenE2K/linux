@@ -596,6 +596,9 @@ static inline void __force *phys_to_virt(phys_addr_t address)
 	return __va(address);
 }
 
+extern void __iomem *ioremap_cache(resource_size_t offset, unsigned long size);
+#define ioremap_cache ioremap_cache
+
 #include <asm-generic/io.h>
 #undef PCI_IOBASE
 

@@ -46,6 +46,18 @@ static struct record_opts opts = {
 	.ctl_fd_ack          = -1,
 };
 
+#ifdef __e2k__
+#include "../arch/e2k/include/cpuinfo.h"
+
+__attribute__((constructor))
+static void init_freq(void)
+{
+	if (1 == e2k_cpuinfo_feature("prototype", NULL)) {
+		opts.freq = 200;
+	}
+}
+#endif
+
 static const struct option options[] = {
 	OPT_STRING('e', "event", &event_string, "event", "event selector. use 'perf list' to list available events"),
 	OPT_INTEGER('n', "nr-events", &nr_events,

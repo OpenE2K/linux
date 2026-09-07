@@ -68,6 +68,32 @@ extern cpuinfo_e2k_t cpu_data[NR_CPUS];
 #define INVALID_IO_BITMAP_OFFSET 0x8000
 
 typedef struct thread_struct {
+	/* User's %g16-%g31 are saved here in user traps and syscalls.
+	 * Kernel's %g16-g31 are saved to trap_pt_regs in kernel traps.
+	 *
+	 * It would be cleaner to always save %g16-%g31 to pt_regs but
+	 * then we have chicken & egg problem: %g16-%g31 must be saved
+	 * to switch stacks, but saving them requires switching stacks
+	 * (for allocating memory). */
+	struct local_gregs u_gregs;
+
+	/* On v5/v6 upon kernel entry we must save user's global registers
+	 * using `strqp` instruction, but for address argument it requires
+	 * a free register which we do not have (all contain user data). So
+	 * instead use `stgd`; to properly save ET tag combine `stgdq` with
+	 * `stgdqp`, and this temporary will hold tags saved by `stgdq`. */
+	u64 g_tmp_tag[2] __aligned(16);
+
+	/* Because we have to use the same kernel entry for both user
+	 * and kernel interrupts, we have to save user's global registers
+	 * to some temporary area, only after we copy them to pt_regs if
+	 * this was user interrupt. */
+	struct local_gregs tmp_gregs;
+
+	/* Because we don't have pt_regs ready upon kernel entry we
+	 * temporarily save stack registers here, then copy to pt_regs */
+	struct hw_stacks tmp_user_stacks;
+
 	/* Used as a temporary area for !CPU_FEAT_FILL_INSTRUCTION case */
 	struct {
 		e2k_cr0_t cr0;
@@ -275,6 +301,7 @@ typedef enum restore_caller {
 #else
 # define TASK_IS_PROTECTED(tsk)	0UL
 #endif
+#define in_ptr128_syscall()	(TASK_IS_PROTECTED(current))
 
 /*
  * When dealing with data aborts, watchpoints, or instruction traps we may end
@@ -334,7 +361,7 @@ static __always_inline void __prefetch_nospec_range(const void *addr,
 						    size_t len, int mas)
 {
 
-#ifndef CONFIG_HALF_SPECULATIVE_KERNEL
+#ifndef CONFIG_SEMI_SPECULATIVE_KERNEL
 	s64 rem, prefetched;
 #endif
 	if (__builtin_constant_p(len) && len < 24 * PREFETCH_STRIDE) {
@@ -392,7 +419,7 @@ static __always_inline void __prefetch_nospec_range(const void *addr,
 		return;
 	}
 
-#ifdef CONFIG_HALF_SPECULATIVE_KERNEL
+#ifdef CONFIG_SEMI_SPECULATIVE_KERNEL
 	E2K_PREFETCH_256_LOOP(addr, (len + 255) / 256, mas);
 #else
 	rem = len % (4 * PREFETCH_STRIDE);

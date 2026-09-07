@@ -98,14 +98,13 @@
 static inline u64
 read_bootblock_flags(bootblock_struct_t *bootblock)
 {
-	return READ_BOOTBLOCK_FIELD(bootblock, kernel_flags);
+	return READ_BOOTBLOCK_FIELD(bootblock, boot_flags);
 }
 
 static inline void
 write_bootblock_flags(bootblock_struct_t *bootblock, u64 new_flags)
 {
 	WRITE_BOOTBLOCK_FIELD(bootblock, boot_flags, new_flags);
-	WRITE_BOOTBLOCK_FIELD(bootblock, kernel_flags, new_flags);
 }
 
 static inline void

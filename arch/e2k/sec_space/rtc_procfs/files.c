@@ -8,6 +8,8 @@
 #include <linux/fs_struct.h>
 #include <linux/sched/mm.h>
 #include <linux/cacheinfo.h>
+#include <linux/miscdevice.h>
+#include <linux/seq_file.h>
 
 #include <asm/setup.h>
 
@@ -89,7 +91,7 @@ static int rtcfs_seqfile_single_open_common(struct inode *inode, struct file *fi
 	return res;
 }
 
-/**
+/*
  * Read /proc/<pid>/cmdline. The binary compiler's cmdline may look like
  * ./<bincomp> <options> -- ./<x86app> <options>. This function removes
  * bincomp arguments with the delimiter and shows strings to the user
@@ -111,7 +113,7 @@ ssize_t rtcfs_cmdline_read(struct file *file, char __user *buf,
 	ssize_t size;
 	int i;
 
-	/**
+	/*
 	 * Cmdline file locates in <pid> directory. Use parent dir name as
 	 * pid to find task
 	 */
@@ -146,9 +148,10 @@ ssize_t rtcfs_cmdline_read(struct file *file, char __user *buf,
 	 * args_offsets_offset is an offset of bincomp arguments offsets
 	 * array from hdr
 	 */
-	if (!hdr->v0.args_offsets_offset)
+	if (!hdr->v0.args_offsets_offset) {
+		read_unlock(&bi->lock);
 		goto out;
-
+	}
 	size = -EFAULT;
 
 	/* last byte must be NULL */
@@ -213,14 +216,13 @@ out_err:
 static int __rtcfs_show_maps(struct seq_file *m, struct vm_area_struct *vma,
 			const struct seq_operations *op)
 {
-	char tmp_seq_buf[4096]; /* big enough for smap entry*/
+	char tmp_seq_buf[PAGE_SIZE];
 	struct seq_file tmp_seq_file;
 	unsigned long start, end;
-	char *hypen_p, *space_p;
-	int start_len, end_len;
-	char *p, addr_buf[17]; /* %llx + null*/
+	char *space_p, *name_p, *newline_p;
+	struct vm_area_struct *vma_next;
 
-	memset(tmp_seq_buf, 0, 4096);
+	memset(tmp_seq_buf, 0, sizeof(tmp_seq_buf));
 	memcpy(&tmp_seq_file, m, sizeof(struct seq_file));
 
 	tmp_seq_file.buf   = tmp_seq_buf;
@@ -228,48 +230,70 @@ static int __rtcfs_show_maps(struct seq_file *m, struct vm_area_struct *vma,
 	tmp_seq_file.count = 0;
 
 	op->show(&tmp_seq_file, vma);
-	/* tmp_seq_buf overflow shouldn't happen */
-	BUG_ON(tmp_seq_file.count == tmp_seq_file.size);
-
-	if (!ADDR_IN_SS(vma->vm_start) || !ADDR_IN_SS(vma->vm_end)) {
+	if (seq_has_overflowed(&tmp_seq_file))
 		return 0;
-	}
 
-	/* m overflow case */
-	if (m->count + tmp_seq_file.count >= m->size) {
-		m->count = m->size;
-		return 0;
-	}
-
-	if (tmp_seq_file.count < 34) /* %llx-%llx + null*/
+	if (!ADDR_IN_SS(vma->vm_start) || !ADDR_IN_SS(vma->vm_end))
 		return 0;
 
 	if (sscanf(tmp_seq_buf, "%lx-%lx", &start, &end) != 2)
 		return 0;
 
-	hypen_p = strnchr(tmp_seq_buf, 17, '-'); /* %llx- */
-	if (!hypen_p)
-		return 0;
-
-	space_p = strnchr(tmp_seq_buf, 34, ' '); /* %llx-%llx + space */
+	/* Pointer to the space after '%llx-%llx' */
+	space_p = strnchr(tmp_seq_buf, tmp_seq_file.count, ' ');
 	if (!space_p)
 		return 0;
 
-	start_len = hypen_p - tmp_seq_buf; /* length of vma_start string */
-	end_len   = space_p - hypen_p - 1; /* length of vma_end string */
+	/* fs/proc/task_mmu.c: show_vma_header_prefix() */
+	seq_setwidth(m, 25 + sizeof(void *) * 6 - 1);
 
-	/* overwrite address in the buffer */
-	snprintf(addr_buf, sizeof(addr_buf), "%016lx",
-				(long)(start - SS_ADDR_START));
-	p = addr_buf + sizeof(addr_buf) - 1 - start_len;
-	memcpy(tmp_seq_buf, p, start_len);
+	/* Print secondary space vma_start and vma_end */
+	seq_put_hex_ll(m, NULL, start - SS_ADDR_START, 8);
+	seq_put_hex_ll(m, "-", end - SS_ADDR_START, 8);
 
-	snprintf(addr_buf, sizeof(addr_buf), "%016lx",
-				(long)(end - SS_ADDR_START));
-	p = addr_buf + sizeof(addr_buf) - 1 - end_len;
-	memcpy(hypen_p + 1, p, end_len);
+	/* Remove '\n' */
+	newline_p = strnchr(space_p, tmp_seq_file.count, '\n');
+	if (newline_p)
+		*newline_p = 0;
 
-	seq_printf(m, tmp_seq_buf);
+
+	/* Pointer to the vma name (or to the file path) */
+	name_p = strnchr(space_p, tmp_seq_file.count, '[');
+	if (!name_p)
+		name_p = strnchr(space_p, tmp_seq_file.count, '/');
+
+	if (name_p)
+		*(name_p - 1) = 0;
+
+	/* Print everything between space_p and name_p */
+	seq_puts(m, space_p);
+
+	if (name_p) {
+		/*
+		 * Set new padding because the vma addresses length may have
+		 * changed and print it
+		 */
+		seq_pad(m, ' ');
+		seq_puts(m, name_p);
+	} else {
+		/* Last vma in sec space is x86 stack */
+		vma_next = find_vma(vma->vm_mm, vma->vm_end);
+		if (vma_next && !ADDR_IN_SS(vma_next->vm_start)) {
+			seq_pad(m, ' ');
+			seq_puts(m, "[stack]");
+		}
+	}
+	seq_puts(m, "\n");
+
+	if (newline_p) {
+		/**
+		 * If there are any symbols after the first line, assume it's the
+		 * /proc/smaps file with additional info. Print it!
+		 */
+		if ((newline_p - tmp_seq_buf) < tmp_seq_file.count)
+			seq_puts(m, newline_p + 1);
+	}
+
 	return 0;
 }
 
@@ -704,4 +728,67 @@ static const struct seq_operations rtcfs_cpuinfo_ops = {
 int rtcfs_cpuinfo_open(struct inode *inode, struct file *file)
 {
 	return seq_open(file, &rtcfs_cpuinfo_ops);
+}
+
+/*
+ * /proc/misc. Hide "userfaultfd" entry.
+ *
+ * In order to do this, we need to "jump" over the target entry. The next entry
+ * to show is selected by the struct seq_operations->next function, so we
+ * override it.
+ */
+static const struct seq_operations *proc_misc_ops;
+static struct seq_operations rtcfs_misc_ops;
+
+static void *rtcfs_misc_next(struct seq_file *m, void *v, loff_t *pos)
+{
+	void *res;
+	const struct miscdevice *d;
+
+	res = proc_misc_ops->next(m, v, pos);
+	if (res == NULL)
+		return res;
+
+	/*
+	 * The original misc->next() returns a pointer to the list entry
+	 * that is included in the struct miscdevice. To determine
+	 * if this is our entry, we may check the miscdevide->name field.
+	 */
+	d = list_entry(res, struct miscdevice, list);
+
+	/*
+	 * Call misc->next() one more time to skip entry.
+	 * In this case, 'v' is a pointer to the previous result
+	 */
+	if (d->name && !strcmp(d->name, "userfaultfd"))
+		res = proc_misc_ops->next(m, res, pos);
+	return res;
+}
+
+/* Overriding misc->next function */
+int rtcfs_misc_open(struct inode *inode, struct file *file)
+{
+	struct seq_file *m;
+	struct file *proc_file;
+	int res;
+
+	/* Calling the original procfs open() using helper */
+	res = rtcfs_proc_open(inode, file);
+	if (res)
+		return res;
+
+	/* Saving a pointer to the original ops and overriding it */
+	proc_file = (struct file *)file->private_data;
+	m = proc_file->private_data; /* private_data is a pointer
+				      * to an opened seq_file
+				      */
+
+	if (proc_misc_ops == NULL) {
+		proc_misc_ops = m->op;
+		memcpy(&rtcfs_misc_ops, m->op, sizeof(struct seq_operations));
+		rtcfs_misc_ops.next = rtcfs_misc_next;
+	}
+
+	m->op = &rtcfs_misc_ops;
+	return res;
 }

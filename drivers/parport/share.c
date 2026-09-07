@@ -1252,7 +1252,7 @@ irqreturn_t parport_irq_handler(int irq, void *dev_id)
 		if (ppc_sr & (Full_Intr_Allowed)) {
 			ppc_sr_cl = ppc_sr & Full_Intr_Allowed;
 			outw(ppc_sr_cl, PPC_SR(p));
-			icr_cl = icr & Full_Intr_AllowedEn | 0x80;
+			icr_cl = (icr & Full_Intr_AllowedEn) | 0x80;
 			outb(icr_cl, ICR(p));
 			DPRINTK("parport_pc_interrupt: status 0x%x, status after clearing, 0x%x, icr 0x%x\n",
 						ppc_sr, inw(PPC_SR(p)), inb(ICR(p)));

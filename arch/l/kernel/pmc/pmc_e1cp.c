@@ -180,8 +180,8 @@ static int pmc_l_gpufreq_set_target(unsigned int target_clk1x_freq,
 
 			policy.freq_table = target_table;
 			policy.cpuinfo.transition_latency = transition_latency;
-			newstate = cpufreq_frequency_table_target(&policy,
-							target_freq, relation);
+			newstate = cpufreq_frequency_table_target(&policy, target_freq,
+						policy.min, policy.max, relation);
 			if (newstate < 0)
 				return newstate;
 
@@ -190,8 +190,8 @@ static int pmc_l_gpufreq_set_target(unsigned int target_clk1x_freq,
 
 			policy.freq_table = available_freqs;
 			policy.cpuinfo.transition_latency = transition_latency;
-			newstate = cpufreq_frequency_table_target(&policy,
-							target_freq, relation);
+			newstate = cpufreq_frequency_table_target(&policy, target_freq,
+						policy.min, policy.max, relation);
 			if (newstate < 0)
 				return newstate;
 

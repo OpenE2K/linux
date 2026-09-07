@@ -15,16 +15,6 @@
 #ifdef	CONFIG_KVM_GUEST_KERNEL
 /* it is guest virtualized kernel */
 
-/*
- * goto guest kernel system call table entry, if system call is from guest user
- * rti: register of current_thread_info()
- * rtmp0 rtmp1 rtmp2: temporary registers
- * ptmp0 ptmp1: temporary predicates
- */
-.macro	KVM_GOTO_PV_VCPU_KERNEL_TTABLE entry_num rti rtmp0 rtmp1 rtmp2 \
-						ptmp0 ptmp1
-	/* not used */
-.endm	/* GOTO_GUEST_KERNEL_TTABLE */
 
 #ifdef	CONFIG_KVM_GUEST_HW_PV
 /* guest virtualization based on hardware virtualized hypervisor */

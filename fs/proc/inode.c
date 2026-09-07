@@ -428,6 +428,33 @@ static long proc_reg_compat_ioctl(struct file *file, unsigned int cmd, unsigned 
 }
 #endif
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+
+static long pde_ptr128_ioctl(struct proc_dir_entry *pde, struct file *file,
+			     unsigned int cmd, unsigned long arg)
+{
+	typeof_member(struct proc_ops, proc_ptr128_ioctl) ptr128_ioctl;
+
+	ptr128_ioctl = pde->proc_ops->proc_ptr128_ioctl;
+	if (ptr128_ioctl)
+		return ptr128_ioctl(file, cmd, arg);
+	return -ENOTTY;
+}
+
+static long proc_reg_ptr128_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+{
+	struct proc_dir_entry *pde = PDE(file_inode(file));
+	long rv = -ENOTTY;
+	if (pde_is_permanent(pde)) {
+		return pde_ptr128_ioctl(pde, file, cmd, arg);
+	} else if (use_pde(pde)) {
+		rv = pde_ptr128_ioctl(pde, file, cmd, arg);
+		unuse_pde(pde);
+	}
+	return rv;
+}
+#endif
+
 static int pde_mmap(struct proc_dir_entry *pde, struct file *file, struct vm_area_struct *vma)
 {
 	typeof_member(struct proc_ops, proc_mmap) mmap;
@@ -608,6 +635,9 @@ static const struct file_operations proc_reg_file_ops_compat = {
 	.poll		= proc_reg_poll,
 	.unlocked_ioctl	= proc_reg_unlocked_ioctl,
 	.compat_ioctl	= proc_reg_compat_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = proc_reg_ptr128_ioctl,
+#endif
 	.mmap		= proc_reg_mmap,
 	.get_unmapped_area = proc_reg_get_unmapped_area,
 	.open		= proc_reg_open,
@@ -622,6 +652,9 @@ static const struct file_operations proc_iter_file_ops_compat = {
 	.poll		= proc_reg_poll,
 	.unlocked_ioctl	= proc_reg_unlocked_ioctl,
 	.compat_ioctl	= proc_reg_compat_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = proc_reg_ptr128_ioctl,
+#endif
 	.mmap		= proc_reg_mmap,
 	.get_unmapped_area = proc_reg_get_unmapped_area,
 	.open		= proc_reg_open,

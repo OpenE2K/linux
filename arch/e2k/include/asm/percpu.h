@@ -14,8 +14,7 @@
 # include <asm/e2k_api.h>
 
 # define __my_cpu_offset __my_cpu_offset
-register unsigned long __my_cpu_offset DO_ASM_GET_GREG_MEMONIC(
-							MY_CPU_OFFSET_GREG);
+register unsigned long __my_cpu_offset ASM_GREG(MY_CPU_OFFSET_GREG);
 
 # define set_my_cpu_offset(off) do {__my_cpu_offset = (off); } while (0)
 

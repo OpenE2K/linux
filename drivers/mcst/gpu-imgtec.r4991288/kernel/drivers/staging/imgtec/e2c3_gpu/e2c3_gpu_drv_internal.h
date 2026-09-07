@@ -54,7 +54,11 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <linux/time.h>
 #endif
 
+#if defined(CONFIG_MCST)
+#define DRV_NAME "e2c3-gpu-4991288"
+#else
 #define DRV_NAME "e2c3-gpu"
+#endif
 
 /* Convert a byte offset to a 32 bit dword offset */
 #define DWORD_OFFSET(byte_offset) ((byte_offset) >> 2)

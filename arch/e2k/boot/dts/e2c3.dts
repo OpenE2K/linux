@@ -21,30 +21,30 @@
 
 
 #define NODE 0
-#include "include/e2c3.dtsi"
+#include "include/e2k-v6.dtsi"
 #undef NODE
 
 /* linux initializes devices in reverse order */
 #if NODES > 3
 # define NODE 3
-#include "include/e2c3-node.dtsi"
+#include "include/e2k-v6-uncore.dtsi"
 #include "include/eioh.dtsi"
 # undef NODE
 #endif
 #if NODES > 2
 # define NODE 2
-#include "include/e2c3-node.dtsi"
+#include "include/e2k-v6-uncore.dtsi"
 #include "include/eioh.dtsi"
 # undef NODE
 #endif
 #if NODES > 1
 # define NODE 1
-#include "include/e2c3-node.dtsi"
+#include "include/e2k-v6-uncore.dtsi"
 #include "include/eioh.dtsi"
 # undef NODE
 #endif
 #define NODE 0
-#include "include/e2c3-node.dtsi"
+#include "include/e2k-v6-uncore.dtsi"
 #include "include/eioh.dtsi"
 #undef NODE
 };

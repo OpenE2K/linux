@@ -796,7 +796,6 @@ static inline pgprotval_t get_spte_pt_kernel_prot(struct kvm *kvm)
 static inline pgprot_t set_spte_memory_type_mask(struct kvm_vcpu *vcpu,
 					pgprot_t spte, gfn_t gfn, bool is_mmio)
 {
-	const pt_struct_t *spt = mmu_pt_get_host_pt_struct(vcpu->kvm);
 	unsigned int mem_type;
 
 	/*

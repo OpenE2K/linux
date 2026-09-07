@@ -2597,6 +2597,83 @@ _ctl_compat_mpt_command(struct MPT3SAS_ADAPTER *ioc, unsigned cmd,
 }
 #endif
 
+
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+/**
+ * _ctl_ptr128_mpt_command - convert 128bit pointers to 64bit.
+ * @ioc: per adapter object
+ * @cmd: ioctl opcode
+ * @arg: (struct mpt3_ioctl_command128)
+ *
+ * MPT3COMMAND32 - Handle 128bit applications running on 64bit os.
+ */
+static long
+_ctl_ptr128_mpt_command(struct MPT3SAS_ADAPTER *ioc, unsigned cmd,
+	void __user *arg)
+{
+	struct mpt3_ioctl_command128 karg128;
+	struct mpt3_ioctl_command128 __user *uarg;
+	struct mpt3_ioctl_command karg;
+	e2k_ap_t ap;
+	int tag;
+
+	if (_IOC_SIZE(cmd) != sizeof(struct mpt3_ioctl_command128))
+		return -EINVAL;
+
+	uarg = (struct mpt3_ioctl_command128 __user *) arg;
+
+	if (copy_from_user(&karg128, (char __user *)arg, sizeof(karg128))) {
+		pr_err("failure at %s:%d/%s()!\n",
+		    __FILE__, __LINE__, __func__);
+		return -EFAULT;
+	}
+
+	memset(&karg, 0, sizeof(struct mpt3_ioctl_command));
+	karg.hdr.ioc_number = karg128.hdr.ioc_number;
+	karg.hdr.port_number = karg128.hdr.port_number;
+	karg.hdr.max_data_size = karg128.hdr.max_data_size;
+	karg.timeout = karg128.timeout;
+	karg.max_reply_bytes = karg128.max_reply_bytes;
+	karg.data_in_size = karg128.data_in_size;
+	karg.data_out_size = karg128.data_out_size;
+	karg.max_sense_bytes = karg128.max_sense_bytes;
+	karg.data_sge_offset = karg128.data_sge_offset;
+	if (get_user_tagged_16(ap.qword, tag, &uarg->reply_frame_buf_ptr) ||
+				!IS_AP(ap, tag)) {
+		return -EFAULT;
+	}
+	if (AP_OBJ_SIZE(ap) < karg.max_reply_bytes) {
+		return -EFAULT;
+	}
+	if (get_user_tagged_16(ap.qword, tag, &uarg->data_in_buf_ptr) ||
+				!IS_AP(ap, tag)) {
+		return -EFAULT;
+	}
+	if (AP_OBJ_SIZE(ap) < karg.data_in_size) {
+		return -EFAULT;
+	}
+	karg.data_in_buf_ptr = (void *)AP_PTR(ap);
+	if (get_user_tagged_16(ap.qword, tag, &uarg->data_out_buf_ptr) ||
+				!IS_AP(ap, tag)) {
+		return -EFAULT;
+	}
+	if (AP_OBJ_SIZE(ap) < karg.data_out_size) {
+		return -EFAULT;
+	}
+	karg.data_out_buf_ptr = (void *)AP_PTR(ap);
+	if (get_user_tagged_16(ap.qword, tag, &uarg->sense_data_ptr) ||
+				!IS_AP(ap, tag)) {
+		return -EFAULT;
+	}
+	if (AP_OBJ_SIZE(ap) < karg.max_sense_bytes) {
+		return -EFAULT;
+	}
+	karg.sense_data_ptr = (void *)AP_PTR(ap);
+	set_u_border(MAX_U_BORDER);
+	/* not check mf size because it just copy_from_user */
+	return _ctl_do_mpt_command(ioc, karg, &uarg->mf);
+}
+#endif
 /**
  * _ctl_ioctl_main - main ioctl entry point
  * @file:  (struct file)
@@ -2653,6 +2730,11 @@ _ctl_ioctl_main(struct file *file, unsigned int cmd, void __user *arg,
 		if (_IOC_SIZE(cmd) == sizeof(struct mpt3_ioctl_iocinfo))
 			ret = _ctl_getiocinfo(ioc, arg);
 		break;
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	case MPT3COMMAND128:
+		ret = _ctl_ptr128_mpt_command(ioc, cmd, arg);
+		break;
+#endif
 #ifdef CONFIG_COMPAT
 	case MPT3COMMAND32:
 #endif
@@ -4111,6 +4193,9 @@ static const struct file_operations ctl_fops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = _ctl_ioctl_compat,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl = _ctl_ioctl,
+#endif
 };
 
 /* file operations table for mpt2ctl device */
@@ -4121,6 +4206,9 @@ static const struct file_operations ctl_gen2_fops = {
 	.fasync = _ctl_fasync,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = _ctl_mpt2_ioctl_compat,
+#endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl = _ctl_mpt2_ioctl,
 #endif
 };
 

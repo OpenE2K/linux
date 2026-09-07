@@ -634,6 +634,9 @@ static inline pgprot_t pgprot_nx(pgprot_t prot)
 
 #define pgprot_writethrough pgprot_writecombine
 
+#define pgprot_dmacoherent(prot) \
+	__pgprot(_PAGE_SET_MEM_TYPE(pgprot_val(prot), GEN_CACHE_MT))
+
 /* PTE_PFN_MASK extracts the PFN from a (pte|pmd|pud|pgd)val_t */
 #define PTE_PFN_MASK		_PAGE_PFN_MASK
 

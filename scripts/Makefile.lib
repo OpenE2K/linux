@@ -250,6 +250,7 @@ dtc_cpp_flags  = -Wp,-MMD,$(depfile).pre.tmp -nostdinc                    \
 		 -undef -D__DTS__
 
 ifdef CONFIG_MCST
+dtc_cpp_flags += $(DTC_CPP_FLAGS)
 dtc_cpp_flags += $(DTC_CPP_FLAGS_$(basetarget))
 endif
 
@@ -380,11 +381,12 @@ cmd_dt_S_dtb=						\
 $(obj)/%.dtb.S: $(obj)/%.dtb FORCE
 	$(call if_changed,dt_S_dtb)
 
+# MCST: rm #34343
 quiet_cmd_dtc = DTC     $@
 cmd_dtc = sed '/\#.*-cells/s/\#/@/' $< > $<.lcc_fix ; \
-	$(HOSTCC) -E $(dtc_cpp_flags) -x assembler-with-cpp -o $(dtc-tmp) $<.lcc_fix ; \
-	sed -i '/@.*-cells/s/@/\#/;/^\# /s/\.lcc_fix//' $(dtc-tmp) ; rm -f $<.lcc_fix ; \
-	sed -i 's/\.lcc_fix//' $(depfile).pre.tmp ; \
+        $(HOSTCC) -E $(dtc_cpp_flags) -x assembler-with-cpp -o $(dtc-tmp) $<.lcc_fix ; \
+        sed -i '/@.*-cells/s/@/\#/;/^\# /s/\.lcc_fix//' $(dtc-tmp) ; rm -f $<.lcc_fix ; \
+        sed -i 's/\.lcc_fix//' $(depfile).pre.tmp ; \
 	$(DTC) -o $@ -b 0 \
 		$(addprefix -i,$(dir $<) $(DTC_INCLUDE)) $(DTC_FLAGS) \
 		-d $(depfile).dtc.tmp $(dtc-tmp) ; \

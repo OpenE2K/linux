@@ -128,5 +128,14 @@ struct bincomp_map_info {
 	u64 vdso;
 };
 
-extern int rtc_load_elf32(struct linux_binprm *bprm, struct bincomp_map_info *map_info);
-extern int rtc_load_elf64(struct linux_binprm *bprm, struct bincomp_map_info *map_info);
+extern int rtc_load_x86_elf32(struct linux_binprm *bprm,
+				struct bincomp_map_info *map_info,
+				bool is_support_em64t, bool is_topdown);
+extern int rtc_load_x86_elf64(struct linux_binprm *bprm,
+				struct bincomp_map_info *map_info,
+				bool is_support_em64t, bool is_topdown);
+extern int rtc_load_bincomp_elf32(struct linux_binprm *bprm,
+				struct bincomp_map_info *map_info);
+extern int rtc_load_bincomp_elf64(struct linux_binprm *bprm,
+				struct bincomp_map_info *map_info);
+

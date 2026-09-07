@@ -358,8 +358,8 @@ boot_fast_memcpy(void *dst_va, const void *src_va, size_t n)
 
 int boot_memcmp(const void *p1_va, const void *p2_va, size_t n)
 {
-	void *p1 = boot_vp_to_pp((void *)p1_va);
-	void *p2 = boot_vp_to_pp(((void *)p2_va));
+	const void *p1 = boot_vp_to_pp((void *)p1_va);
+	const void *p2 = boot_vp_to_pp(((void *)p2_va));
 	u64 v1, v2;
 	unsigned long head, head1, head2, head3, head4,
 			tail, tail1, tail2, tail4, tail6;
@@ -416,11 +416,8 @@ int boot_memcmp(const void *p1_va, const void *p2_va, size_t n)
 		v1 = *(u64 *) p1;
 		v2 = *(u64 *) p2;
 		if (v1 != v2)
-			break;
+			return (__builtin_bswap64(v1) > __builtin_bswap64(v2)) ? 1 : -1;
 	}
-
-	if (v1 != v2)
-		return (__builtin_bswap64(v1) > __builtin_bswap64(v2)) ? 1 : -1;
 
 	tail = n;
 

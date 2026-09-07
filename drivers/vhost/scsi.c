@@ -1959,6 +1959,9 @@ static const struct file_operations vhost_scsi_fops = {
 	.release        = vhost_scsi_release,
 	.unlocked_ioctl = vhost_scsi_ioctl,
 	.compat_ioctl	= compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	ptr128_ioctl	= vhost_scsi_ioctl,
+#endif
 	.open           = vhost_scsi_open,
 	.llseek		= noop_llseek,
 };

@@ -285,11 +285,11 @@ fp:
 
 		/* Dwarf style */
 		} else if (!strncmp(name, "dwarf", sizeof("dwarf"))) {
+			const unsigned long default_stack_dump_size = 8192;
 #ifdef __e2k__
 			ui__warning("\"--call-graph dwarf\" is neither supported nor needed on e2k, using \"--call-graph fp\" instead.\n");
 			goto fp;
 #endif
-			const unsigned long default_stack_dump_size = 8192;
 
 			ret = 0;
 			param->record_mode = CALLCHAIN_DWARF;

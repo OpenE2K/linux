@@ -62,6 +62,42 @@ extern e2k_idr_t kvm_vcpu_get_idr(const struct kvm_vcpu *vcpu);
 /* guest kernel trap table base address: ttable0 */
 extern char __kvm_pv_vcpu_ttable_entry0[];
 
+/*
+ * Only the state of the hardware virtualization bits is interesting
+ */
+static inline e2k_core_mode_t read_guest_CORE_MODE_reg(struct kvm_vcpu *vcpu)
+{
+	e2k_core_mode_t core_mode;
+
+	AW(core_mode) = 0;
+
+	if (vcpu->arch.is_hv) {
+		/* register state is real actual */
+		return read_SH_CORE_MODE_reg();
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+	} else if (vcpu->arch.is_pv) {
+		/* register state is not actual */
+		return core_mode;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
+	}
+	return core_mode;
+}
+
+static inline void
+write_guest_CORE_MODE_reg(struct kvm_vcpu *vcpu, e2k_core_mode_t new_reg)
+{
+	if (vcpu->arch.is_hv) {
+		/* register state is real actual */
+		write_SH_CORE_MODE_reg(new_reg);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+	} else if (vcpu->arch.is_pv) {
+		/* register state is not actual, ignore */
+		;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
+	}
+}
+
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline e2k_addr_t kvm_get_pv_vcpu_ttable_base(struct kvm_vcpu *vcpu)
 {
 	if (likely(vcpu->arch.is_hv || vcpu->arch.is_pv)) {
@@ -81,41 +117,6 @@ set_pv_vcpu_u_stack_context(struct kvm_vcpu *vcpu, guest_hw_stack_t *stack_regs)
 	sw_ctxt->sbr.base = stacks->top;
 	sw_ctxt->usd = stacks->usd;
 	sw_ctxt->cutd = stack_regs->cutd;
-}
-
-/*
- * Only the state of the hardware virtualization bits is interesting
- */
-static inline e2k_core_mode_t read_guest_CORE_MODE_reg(struct kvm_vcpu *vcpu)
-{
-	e2k_core_mode_t core_mode;
-
-	AW(core_mode) = 0;
-
-	if (vcpu->arch.is_hv) {
-		/* register state is real actual */
-		return read_SH_CORE_MODE_reg();
-	} else if (vcpu->arch.is_pv) {
-		/* register state is not actual */
-		return core_mode;
-	} else {
-		E2K_KVM_BUG_ON(true);
-	}
-	return core_mode;
-}
-
-static inline void
-write_guest_CORE_MODE_reg(struct kvm_vcpu *vcpu, e2k_core_mode_t new_reg)
-{
-	if (vcpu->arch.is_hv) {
-		/* register state is real actual */
-		write_SH_CORE_MODE_reg(new_reg);
-	} else if (vcpu->arch.is_pv) {
-		/* register state is not actual, ignore */
-		;
-	} else {
-		E2K_KVM_BUG_ON(true);
-	}
 }
 
 static inline unsigned int guest_trap_init(struct kvm *kvm)
@@ -313,25 +314,6 @@ static inline int get_pv_vcpu_pre_trap_gener(struct kvm_vcpu *vcpu)
 static inline int get_pv_vcpu_post_trap_gener(struct kvm_vcpu *vcpu)
 {
 	return get_pv_vcpu_traps_num(vcpu);
-}
-
-extern noinline void dump_l_gregs_state(vcpu_l_gregs_t *l_gregs);
-
-static inline vcpu_l_gregs_t *get_pv_vcpu_l_gregs(struct kvm_vcpu *vcpu)
-{
-	gthread_info_t *gti = pv_vcpu_get_gti(vcpu);
-	vcpu_l_gregs_t *l_gregs = &gti->l_gregs;
-
-	if (likely(l_gregs->valid)) {
-		/* there is valid gregs ? gregs is actual for use */
-		return l_gregs;
-	}
-
-	/* make current signal (traps/syscalls) stack frame as actual */
-	if (l_gregs->updated != 0)
-		dump_l_gregs_state(l_gregs);
-	l_gregs->valid = true;
-	return l_gregs;
 }
 
 static inline bool is_actual_pv_vcpu_l_gregs(struct kvm_vcpu *vcpu)
@@ -537,7 +519,7 @@ pv_mmu_switch_to_fast_sys_call(struct kvm_vcpu *vcpu, thread_info_t *ti)
 	sw_ctxt->in_fast_syscall = true;
 
 	mmu_reg_t gk_pptb = kvm_get_space_type_spt_gk_root(vcpu);
-	NATIVE_WRITE_MMU_U_PPTB_REG(gk_pptb);
+	NATIVE_SET_MMUREG_ISET(6, u_pptb, gk_pptb);
 }
 
 static __always_inline void
@@ -550,7 +532,7 @@ pv_mmu_switch_from_fast_sys_call(struct kvm_vcpu *vcpu, thread_info_t *ti)
 	sw_ctxt->in_fast_syscall = false;
 
 	mmu_reg_t u_pptb = kvm_get_space_type_spt_u_root(vcpu);
-	NATIVE_WRITE_MMU_U_PPTB_REG(u_pptb);
+	NATIVE_SET_MMUREG_ISET(6, u_pptb, u_pptb);
 }
 
 static __always_inline void
@@ -684,8 +666,6 @@ static __always_inline void
 syscall_handler_trampoline_finish(struct kvm_vcpu *vcpu, pt_regs_t *regs,
 		pv_vcpu_ctxt_t *vcpu_ctxt, kvm_host_context_t *host_ctxt)
 {
-	gthread_info_t *gti = pv_vcpu_get_gti(vcpu);
-
 	E2K_KVM_BUG_ON(vcpu_ctxt->inject_from != FROM_PV_VCPU_SYSCALL_INJECT);
 	E2K_KVM_BUG_ON(atomic_read(&host_ctxt->signal.syscall_num) !=
 		   atomic_read(&host_ctxt->signal.in_syscall));
@@ -712,11 +692,6 @@ syscall_fork_handler_trampoline_start(struct kvm_vcpu *vcpu)
 	atomic_dec(&host_ctxt->signal.syscall_num);
 	atomic_dec(&host_ctxt->signal.in_syscall);
 }
-
-extern long call_guest_ttable_entry(int sys_num,
-				    u64 arg1, u64 arg2, u64 arg3, u64 arg4,
-				    u64 arg5, u64 arg6,
-				    unsigned long ttable_func);
 
 extern unsigned long kvm_get_guest_glob_regs(struct kvm_vcpu *vcpu,
 					     unsigned long *g_gregs[2],
@@ -1085,6 +1060,13 @@ static __always_inline bool kvm_inject_vcpu_exit(struct kvm_vcpu *vcpu)
 	vcpu->arch.vm_exit_wish = true;
 	return true;
 }
+#else
+static inline unsigned int guest_trap_init(struct kvm *kvm)
+{
+	/* Guest will manage his OSEM by himself */
+	return 0;
+}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static __always_inline bool kvm_is_need_inject_vcpu_exit(struct kvm_vcpu *vcpu)
 {
@@ -1143,6 +1125,7 @@ kvm_is_need_inject_coredump(struct kvm_vcpu *vcpu,
 	return true;
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline void init_pv_vcpu_intc_ctxt(struct kvm_vcpu *vcpu)
 {
 	vcpu->arch.from_pv_intc = false;
@@ -1157,6 +1140,7 @@ static inline void init_pv_vcpu_intc_ctxt(struct kvm_vcpu *vcpu)
 	vcpu->arch.trap_mask_wish = 0;
 	vcpu->arch.on_virqs_handling = false;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static __always_inline bool
 kvm_try_inject_event_wish(struct kvm_vcpu *vcpu, struct thread_info *ti,
@@ -1187,6 +1171,7 @@ out:
 	return need_inject;
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 /* See at arch/include/asm/switch.h  the 'switch_flags' argument values */
 static __always_inline __interrupt unsigned long
 switch_to_host_pv_vcpu_mode(thread_info_t *ti, struct kvm_vcpu *vcpu,
@@ -1405,6 +1390,7 @@ kvm_hcall_return_from(struct thread_info *ti,
 
 	return ret;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #undef	DEBUG_CHECK_VCPU_STATE_GREG
 
@@ -1593,6 +1579,7 @@ static inline bool check_is_guest_TIRs_frozen(pt_regs_t *regs, bool to_update)
 	return false;
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline void
 kvm_set_pv_vcpu_trap_context(struct kvm_vcpu *vcpu, pt_regs_t *regs)
 {
@@ -1633,6 +1620,7 @@ kvm_set_pv_vcpu_SBBP_TIRs(struct kvm_vcpu *vcpu, pt_regs_t *regs)
 
 	kvm_copy_guest_vcpu_SBBP(vcpu, regs->trap->sbbp);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline void kvm_inject_pv_vcpu_tc_entry(struct kvm_vcpu *vcpu,
 					       trap_cellar_t *tc_from)
@@ -1708,6 +1696,7 @@ static inline void kvm_set_pv_vcpu_trap_cellar(struct kvm_vcpu *vcpu)
 	kvm_write_pv_vcpu_mmu_TRAP_COUNT_reg(vcpu, vcpu->arch.mmu.tc_num * 3);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline void
 kvm_init_pv_vcpu_trap_handling(struct kvm_vcpu *vcpu, pt_regs_t *regs)
 {
@@ -1718,6 +1707,7 @@ kvm_init_pv_vcpu_trap_handling(struct kvm_vcpu *vcpu, pt_regs_t *regs)
 	}
 	kvm_clear_vcpu_trap_cellar(vcpu);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 extern void kvm_dump_shadow_u_pptb(struct kvm_vcpu *vcpu, const char *title);
 

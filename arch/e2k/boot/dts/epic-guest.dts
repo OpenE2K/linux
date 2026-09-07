@@ -26,8 +26,8 @@
 	#size-cells = <CELLS>;
 
 
-#include "include/e2c3.dtsi"
-#include "include/e2c3-node.dtsi"
+#include "include/e2k-v6.dtsi"
+#include "include/e2k-v6-uncore.dtsi"
 #include "include/eioh-guest.dtsi"
 #undef NODE
 

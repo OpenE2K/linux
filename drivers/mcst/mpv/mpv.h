@@ -101,7 +101,7 @@ unsigned char gen_mode_reg_ioh2[MAX_IOH2_VER + 1]  = {0x14};
  
 typedef struct __raw_wqueue {
 	struct task_struct *task;
-        struct list_head task_list;
+	struct list_head task_list;
 } raw_wqueue_t;
 
 typedef struct mpv_intrk
@@ -165,7 +165,7 @@ typedef struct mpv_state_struct {
 	int			intr_assemble;
 	mpv_intrk_t		kdata_intr[MPV_NUM_IN_INTR];
 	struct list_head	any_in_task_list;
-	struct pci_dev		*pdev;
+	struct pci_dev		*pci_dev;
 	struct of_device	*op;
 	int			major;
 	int			minor_base;
@@ -198,7 +198,8 @@ typedef struct mpv_state_struct {
 	long long		time_gener_intr;
 	int			dev_type;	/* sbus, pci */
 	int			irq;
-	int			irq_orig;
+	int			irq1;
+	int			irq2;
 	/* listen alive and mask input on interrupt */
 	int			listen_alive;
 } mpv_state_t;

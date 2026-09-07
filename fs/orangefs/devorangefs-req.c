@@ -751,6 +751,56 @@ static long orangefs_devreq_compat_ioctl(struct file *filp, unsigned int cmd,
 
 #endif /* CONFIG_COMPAT is in .config */
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#include <net/ptr128.h>
+
+/*  Compat structure for the ORANGEFS_DEV_MAP ioctl */
+struct ORANGEFS_dev_map_desc128 {
+	e2k_ap_t ptr;
+	__s32 total_size;
+	__s32 size;
+	__s32 count;
+};
+
+/*
+ * 128 bit user-space apps' ioctl handlers when kernel modules
+ * is compiled as a 64 bit one
+ */
+static long orangefs_devreq_ptr128_ioctl(struct file *filp, unsigned int cmd,
+				      unsigned long args)
+{
+	long ret;
+	e2k_ap_t ap;
+	int tag;
+
+	/* Check for properly constructed commands */
+	ret = check_ioctl_command(cmd);
+	if (ret < 0)
+		return ret;
+	if (cmd == ORANGEFS_DEV_MAP) {
+		struct ORANGEFS_dev_map_desc desc;
+		struct ORANGEFS_dev_map_desc128 d128;
+		struct ORANGEFS_dev_map_desc128 __user *d128p =
+			(struct ORANGEFS_dev_map_desc128 __user *)args;
+
+		if (copy_from_user(&d128, d128p, sizeof(d128)))
+			return -EFAULT;
+		desc.total_size = d128.total_size;
+		if (get_user_tagged_16(ap.qword, tag, &d128p->ptr) || !IS_AP(ap, tag) ||
+					AP_OBJ_SIZE(ap) < desc.total_size)
+			return -EFAULT;
+		desc.ptr = (void *)AP_PTR(ap);
+		set_ap_u_border(ap);
+		desc.size = d128.size;
+		desc.count = d128.count;
+		return orangefs_bufmap_initialize(&desc);
+	}
+	/* no other ioctl requires translation */
+	return dispatch_ioctl_command(cmd, args);
+}
+
+#endif
+
 static __poll_t orangefs_devreq_poll(struct file *file,
 				      struct poll_table_struct *poll_table)
 {
@@ -777,6 +827,10 @@ static const struct file_operations orangefs_devreq_file_operations = {
 #ifdef CONFIG_COMPAT		/* CONFIG_COMPAT is in .config */
 	.compat_ioctl = orangefs_devreq_compat_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = orangefs_devreq_ptr128_ioctl,
+#endif
+
 	.poll = orangefs_devreq_poll
 };
 

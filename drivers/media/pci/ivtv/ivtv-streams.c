@@ -54,6 +54,9 @@ static const struct v4l2_file_operations ivtv_v4l2_enc_fops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl32 = video_ioctl2, /* for ivtv_default() */
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl32 = video_ioctl2, /* for ivtv_default() */
+#endif
 	.release = ivtv_v4l2_close,
 	.poll = ivtv_v4l2_enc_poll,
 };
@@ -67,6 +70,9 @@ static const struct v4l2_file_operations ivtv_v4l2_dec_fops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl32 = video_ioctl2, /* for ivtv_default() */
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl32 = video_ioctl2, /* for ivtv_default() */
+#endif
 	.release = ivtv_v4l2_close,
 	.poll = ivtv_v4l2_dec_poll,
 };
@@ -77,6 +83,9 @@ static const struct v4l2_file_operations ivtv_v4l2_radio_fops = {
 	.unlocked_ioctl = video_ioctl2,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl32 = video_ioctl2, /* for ivtv_default() */
+#endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl32 = video_ioctl2, /* for ivtv_default() */
 #endif
 	.release = ivtv_v4l2_close,
 	.poll = ivtv_v4l2_enc_poll,

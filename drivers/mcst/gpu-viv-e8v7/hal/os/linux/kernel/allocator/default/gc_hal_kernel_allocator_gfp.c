@@ -496,7 +496,7 @@ _GFPAlloc(gckALLOCATOR Allocator, PLINUX_MDL Mdl, gctSIZE_T NumPages, gctUINT32 
             gcmkONERROR(gcvSTATUS_OUT_OF_MEMORY);
         }
 
-#if defined(CONFIG_X86)
+#if defined(CONFIG_X86) || defined(CONFIG_E2K)
         if (!PageHighMem(mdlPriv->contiguousPages)) {
 #if gcdENABLE_BUFFERABLE_VIDEO_MEMORY
 #if gcdENABLE_NONCACHE_COMMANDBUF
@@ -565,7 +565,7 @@ _GFPAlloc(gckALLOCATOR Allocator, PLINUX_MDL Mdl, gctSIZE_T NumPages, gctUINT32 
             gcmkONERROR(gcvSTATUS_OUT_OF_MEMORY);
         }
 
-#if defined(CONFIG_X86)
+#if defined(CONFIG_X86) || defined(CONFIG_E2K)
 #if gcdENABLE_BUFFERABLE_VIDEO_MEMORY
 #if gcdENABLE_NONCACHE_COMMANDBUF
         if (Mdl->type == gcvVIDMEM_TYPE_COMMAND)
@@ -708,7 +708,7 @@ _GFPFree(gckALLOCATOR Allocator, PLINUX_MDL Mdl)
     atomic_sub(high, &priv->high);
 
     if (mdlPriv->contiguous) {
-#if defined(CONFIG_X86)
+#if defined(CONFIG_X86) || defined(CONFIG_E2K)
         if (!PageHighMem(mdlPriv->contiguousPages))
             set_memory_wb((unsigned long)page_address(mdlPriv->contiguousPages), Mdl->numPages);
 #endif
@@ -720,7 +720,7 @@ _GFPFree(gckALLOCATOR Allocator, PLINUX_MDL Mdl)
 #endif
             __free_pages(mdlPriv->contiguousPages, get_order(Mdl->numPages * PAGE_SIZE));
     } else {
-#if defined(CONFIG_X86)
+#if defined(CONFIG_X86) || defined(CONFIG_E2K)
         set_pages_array_wb(mdlPriv->nonContiguousPages, Mdl->numPages);
 #endif
 
@@ -763,7 +763,7 @@ _GFPMmap(gckALLOCATOR Allocator, PLINUX_MDL Mdl, gctBOOL Cacheable,
         vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
 #endif
     }
-#if defined(CONFIG_X86)
+#if defined(CONFIG_X86) || defined(CONFIG_E2K)
     else {
         if (mdlPriv->contiguous)
             set_memory_wb((unsigned long)page_address(mdlPriv->contiguousPages) + (skipPages << PAGE_SHIFT), numPages);

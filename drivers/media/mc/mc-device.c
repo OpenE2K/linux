@@ -542,6 +542,106 @@ static long media_device_compat_ioctl(struct file *filp, unsigned int cmd,
 }
 #endif /* CONFIG_COMPAT */
 
+
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#include <asm/e2k_ptypes.h>
+
+struct media_links_enum128 {
+	__u32 entity;
+	e2k_ap_t pads; /* struct media_pad_desc * */
+	e2k_ap_t links; /* struct media_link_desc * */
+	__u32 reserved[4];
+};
+
+static long media_device_enum_links128(struct media_device *mdev,
+				      struct media_links_enum128 __user *ulinks)
+{
+	struct media_links_enum links;
+	struct media_entity *entity;
+	u32 ent;
+	e2k_ap_t ap;
+	int tag;
+	u64 saved_ub = get_u_border();
+
+	memset(&links, 0, sizeof(links));
+
+	if (get_user(ent, &ulinks->entity))
+		return -EFAULT;
+	entity = find_entity(mdev, ent);
+	if (entity == NULL)
+		return -EINVAL;
+	if (get_user_tagged_16(ap.qword, tag, &ulinks->pads))
+		return -EFAULT;
+	if (IS_AP(ap, tag)) {
+		unsigned int p;
+		struct media_pad_desc *upa = (struct media_pad_desc *)AP_PTR(ap);
+		set_ap_u_border(ap);
+		for (p = 0; p < entity->num_pads; p++) {
+			struct media_pad_desc pad;
+			memset(&pad, 0, sizeof(pad));
+			media_device_kpad_to_upad(&entity->pads[p], &pad);
+			if (copy_to_user(upa + p, &pad, sizeof(pad)))
+				return -EFAULT;
+		}
+
+	} else if (!AP_NULL(ap, tag)) {
+		return -EINVAL;
+	}
+	if (get_user_tagged_16(ap.qword, tag, &ulinks->pads))
+		return -EFAULT;
+	if (IS_AP(ap, tag)) {
+		struct media_link *link;
+		struct media_link_desc __user *ulink_desc =
+			(struct media_link_desc __user *)AP_PTR(ap);
+		set_ap_u_border(ap);
+		list_for_each_entry(link, &entity->links, list) {
+			struct media_link_desc klink_desc;
+
+			/* Ignore backlinks. */
+			if (link->source->entity != entity)
+				continue;
+			memset(&klink_desc, 0, sizeof(klink_desc));
+			media_device_kpad_to_upad(link->source,
+						  &klink_desc.source);
+			media_device_kpad_to_upad(link->sink,
+						  &klink_desc.sink);
+			klink_desc.flags = link->flags;
+			if (copy_to_user(ulink_desc, &klink_desc,
+					 sizeof(*ulink_desc)))
+				return -EFAULT;
+			ulink_desc++;
+		}
+	} else if (!AP_NULL(ap, tag)) {
+		return -EINVAL;
+	}
+	set_u_border(saved_ub);
+	return 0;
+}
+
+#define MEDIA_IOC_ENUM_LINKS128		_IOWR('|', 0x02, struct media_links_enum128)
+
+static long media_device_ptr128_ioctl(struct file *filp, unsigned int cmd,
+				      unsigned long arg)
+{
+	struct media_devnode *devnode = media_devnode_data(filp);
+	struct media_device *dev = devnode->media_dev;
+	long ret;
+
+	switch (cmd) {
+	case MEDIA_IOC_ENUM_LINKS128:
+		mutex_lock(&dev->graph_mutex);
+		ret = media_device_enum_links128(dev,
+				(struct media_links_enum128 __user *)arg);
+		mutex_unlock(&dev->graph_mutex);
+		break;
+
+	default:
+		return media_device_ioctl(filp, cmd, arg);
+	}
+
+	return ret;
+}
+#endif /* CONFIG_PROTECTED_MODE */
 static const struct media_file_operations media_device_fops = {
 	.owner = THIS_MODULE,
 	.open = media_device_open,
@@ -549,6 +649,9 @@ static const struct media_file_operations media_device_fops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = media_device_compat_ioctl,
 #endif /* CONFIG_COMPAT */
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl = media_device_ptr128_ioctl,
+#endif
 	.release = media_device_close,
 };
 

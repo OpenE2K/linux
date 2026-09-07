@@ -5,9 +5,7 @@
 ifdef CONFIG_E2K
 # kernel/trace/ deals with stack traces and function
 # inlining causes some frames to be lost
-ORIG_CFLAGS := $(KBUILD_CFLAGS)
-KBUILD_CFLAGS = $(subst -finline-functions-called-once,,$(ORIG_CFLAGS))
-KBUILD_CFLAGS += -finline-only-native
+subdir-ccflags-y += $(call lcc-option,-finline-only-native)
 endif
 
 ccflags-remove-$(CONFIG_FUNCTION_TRACER) += $(CC_FLAGS_FTRACE)

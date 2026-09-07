@@ -454,6 +454,7 @@ static int __apic_accept_irq(struct kvm_lapic *apic, int delivery_mode,
 	case APIC_DM_LOWEST:
 		DebugKVMAT("delivery mode is APIC_DM_LOWEST\n");
 		vcpu->arch.apic_arb_prio++;
+		fallthrough;
 	case APIC_DM_FIXED:
 		DebugKVMAT("delivery mode is APIC_DM_FIXED\n");
 		/* FIXME add logic for vcpu on reset */
@@ -724,12 +725,6 @@ u32 sw_apic_get_tmcct(struct kvm_lapic *apic)
 	return tmcct;
 }
 
-static inline void report_tpr_access(struct kvm_lapic *apic, bool write)
-{
-	pr_err("report_tpr_access() is not yet implemented\n");
-	ASSERT(1);
-}
-
 #ifdef CONFIG_KVM_HW_VIRTUALIZATION
 u32 hw_apic_read_nm(struct kvm_lapic *apic)
 {
@@ -766,8 +761,7 @@ static u32 __apic_read(struct kvm_lapic *apic, unsigned int offset)
 		break;
 
 	case APIC_TASKPRI:
-		report_tpr_access(apic, false);
-		/* fall thru */
+		val = 0;
 		break;
 	case APIC_VECT:	/* Timer CCR */
 		val = kvm_get_apic_interrupt(apic->vcpu);
@@ -1016,7 +1010,9 @@ static int apic_reg_write(struct kvm_lapic *apic, u32 reg, u32 val)
 		break;
 
 	case APIC_TASKPRI:
-		report_tpr_access(apic, true);
+		if (val & 0xff) {
+			pr_err_once("kvm: non-zero APIC_TPR is not supported\n");
+		}
 		apic_set_tpr(apic, val & 0xff);
 		break;
 
@@ -1072,6 +1068,7 @@ static int apic_reg_write(struct kvm_lapic *apic, u32 reg, u32 val)
 
 	case APIC_LVT0:
 		apic_manage_nmi_watchdog(apic, val);
+		fallthrough;
 	case APIC_LVTTHMR:
 	case APIC_LVTPC:
 	case APIC_LVT1:
@@ -1088,6 +1085,7 @@ static int apic_reg_write(struct kvm_lapic *apic, u32 reg, u32 val)
 	case APIC_LVTT:
 		apic_write_lvtt(apic, val);
 		apic_set_reg(apic, reg, val);
+		fallthrough;
 
 	case APIC_TMICT:
 		if (!apic->lapic_timer.started) {
@@ -1307,11 +1305,12 @@ void kvm_lapic_restart(struct kvm_vcpu *vcpu)
 	if (vcpu->arch.is_hv) {
 		irq = vcpu->vcpu_id * KVM_NR_VIRQS + KVM_VIRQ_LAPIC;
 		ret = kvm_get_guest_direct_virq(vcpu, irq, KVM_VIRQ_LAPIC);
-		E2K_KVM_BUG_ON(ret != 0);
-		kvm_lapic_virq_setup(vcpu);
+		WARN_ON_ONCE(ret);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	} else if (vcpu->arch.is_pv) {
 		/* paravirtualized guest should register VCPUs itself */
 		;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	}
 }
 

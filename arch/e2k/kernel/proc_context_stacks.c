@@ -109,11 +109,11 @@ int native_mkctxt_prepare_hw_user_stacks(void __user *user_func,
 	}
 
 	if (format == CTX_128_BIT) {
-		trampoline = makecontext_trampoline_128;
+		trampoline = makecontext_trampoline_128(current->mm);
 	} else if (format == CTX_64_BIT) {
-		trampoline = makecontext_trampoline_64;
+		trampoline = makecontext_trampoline_64(current->mm);
 	} else if (format == CTX_32_BIT) {
-		trampoline = makecontext_trampoline_32;
+		trampoline = makecontext_trampoline_32(current->mm);
 	} else {
 		return -EINVAL;
 	}

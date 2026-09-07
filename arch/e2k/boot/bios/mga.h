@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
 #ifndef MGA_H
 #define MGA_H
 
@@ -34,9 +39,9 @@
 					// STAT_REG if reading
 #define BBR1		0x1004		// WINDOW_REG (size of the window to copy)
 #define BBR2		0x1008		// SADDR_REG (Source address reg - byte offset
-                                        // inside framebuffer) invisible framebuffer part
+					// inside framebuffer) invisible framebuffer part
 #define BBR3		0x100c		// DADDR_REG (Destination address reg - byte offset
-                                        // inside framebuffer) visible framebuffer part
+					// inside framebuffer) visible framebuffer part
 #define BBR4		0x1010		// PITCH_REG (value to increment both SADDR_REG and 
 					// DADDR_REG to have them pointing to the next 
 					// lines of WINDOWS (source and destination windows

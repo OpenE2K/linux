@@ -74,9 +74,9 @@ extern long initrd_data, initrd_data_end;
 #define	ALIGN_UP_TO_SIZE(addr, size)	\
 		(((size) == 0) ? (addr) : ALIGN_UP_TO_MASK(addr, ((size)-1)))
 
-char cmd_preset[] = CMDLINE;
-char cmd_buf[COMMAND_LINE_SIZE];
-char *cmd_line = cmd_buf;
+static char cmd_preset[] = CMDLINE;
+static char cmd_buf[COMMAND_LINE_SIZE];
+
 char *free_memory_p;
 
 #ifdef	CONFIG_SMP
@@ -440,7 +440,7 @@ probe_memory_region(boot_info_t *boot_info, e2k_addr_t start_addr,
 #endif	/* CONFIG_E2K_SIC */
 			/*
 			    !!! WARNING !!! NEEDSWORK !!!
-		 	    Improper tagged variable handling!
+			    Improper tagged variable handling!
 			 */
 			NATIVE_WRITE_MAS_D(addr, tmpvar, MAS_IOADDR);
 
@@ -477,7 +477,7 @@ probe_memory_region(boot_info_t *boot_info, e2k_addr_t start_addr,
 
 				/*
 				    !!! WARNING !!! NEEDSWORK !!!
-		 		    Improper tagged variable handling!
+				    Improper tagged variable handling!
 				 */
 				NATIVE_WRITE_MAS_D(addr, tmpvar, MAS_IOADDR);
 				rom_putc('\n');
@@ -652,7 +652,6 @@ create_smp_config(boot_info_t *boot_info)
 
 	boot_info->mp_table_base = allocate_mpf_structure();
 
-#ifdef	CONFIG_L_IO_APIC
 #ifndef CONFIG_ENABLE_BIOS_MPTABLE
 	set_mpt_config((struct intel_mp_floating *)boot_info->mp_table_base);
 #else
@@ -661,8 +660,6 @@ create_smp_config(boot_info_t *boot_info)
 #endif /* CONFIG_BIOS */
 	rom_printk("MP-table is starting at: 0x%X size 0x%x\n",
 		boot_info->mp_table_base, PAGE_SIZE);
-
-#endif	/* CONFIG_L_IO_APIC */
 }
 
 #ifdef	CONFIG_RECOVERY
@@ -2318,7 +2315,7 @@ inline int e2k_startup_core(e2k_rt_lcfg_struct_t rt_lcfg, int core)
 
 #ifdef	CONFIG_RT_PCIIO_V7
 static void set_rt_pciio_router(int node, int link, int to_node, int rt_pciio_reg,
-			        unsigned long start, unsigned long end)
+				unsigned long start, unsigned long end)
 {
 	e2k_rt_pciio_v7_t rt_pciio;
 	int rt_pciio_no;
@@ -2412,7 +2409,7 @@ static void set_rt_pciio_xmu_router(int node, int link, int to_node, int rt_pcii
 }
 #else	/* !CONFIG_RT_PCIIO_V7 */
 static void set_rt_pciio_router(int node, int link, int to_node, int rt_pciio_reg,
-			        unsigned long start, unsigned long end)
+				unsigned long start, unsigned long end)
 {
 	e2k_rt_pciio_t rt_pciio;
 	int rt_pciio_no;
@@ -2778,11 +2775,11 @@ static void configure_io_routing(void)
        int link;
 
        for (node = 0; node < MAX_NUMNODES; node ++) {
-               if (!(phys_node_pres_map & (1 << node)))
-                       continue;
-               for_each_iolink_of_node(link) {
-                       configure_node_io_routing(node, link);
-               }
+	       if (!(phys_node_pres_map & (1 << node)))
+		       continue;
+	       for_each_iolink_of_node(link) {
+		       configure_node_io_routing(node, link);
+	       }
        }
 }
 #elif	defined(CONFIG_E2K_LEGACY_SIC)
@@ -2954,9 +2951,9 @@ static void configure_io_links(void)
        int node;
 
        for (node = 0; node < MAX_NUMNODES; node ++) {
-               if (!(phys_node_pres_map & (1 << node)))
-                       continue;
-               configure_node_io_link(node);
+	       if (!(phys_node_pres_map & (1 << node)))
+		       continue;
+	       configure_node_io_link(node);
        }
 }
 
@@ -2981,59 +2978,59 @@ static void scan_iolink_config(int node, int link)
        src_mode = io_link.mode;
        rom_printk("Node #%d IO LINK #%d is", node, link);
        if (io_link.mode == IOHUB_IOL_MODE) {
-               AW(io_hub) = early_sic_read_node_iolink_nbsr_reg(node, link, SIC_io_csr);
-               if (io_hub.ch_on)
-                       link_on = 1;
+	       AW(io_hub) = early_sic_read_node_iolink_nbsr_reg(node, link, SIC_io_csr);
+	       if (io_hub.ch_on)
+		       link_on = 1;
        } else {
-               AW(rdma) = early_sic_read_node_iolink_nbsr_reg(node, link, SIC_rdma_cs);
-               if (rdma.ch_on)
-                       link_on = 1;
+	       AW(rdma) = early_sic_read_node_iolink_nbsr_reg(node, link, SIC_rdma_cs);
+	       if (rdma.ch_on)
+		       link_on = 1;
        }
        if (!link_on) {
-               if (src_mode == IOHUB_IOL_MODE) {
-                       possible_iohubs_map |= (1 << node_iohub_to_domain(node, link));
-                       possible_iohubs_num ++;
-                       rom_printk(" IOHUB controller");
-               } else {
-                       possible_rdmas_map |= (1 << node_iohub_to_domain(node, link));
-                       possible_rdmas_num ++;
-                       rom_printk(" RDMA controller");
-               }
-               rom_printk(" OFF\n");
-               return;
+	       if (src_mode == IOHUB_IOL_MODE) {
+		       possible_iohubs_map |= (1 << node_iohub_to_domain(node, link));
+		       possible_iohubs_num ++;
+		       rom_printk(" IOHUB controller");
+	       } else {
+		       possible_rdmas_map |= (1 << node_iohub_to_domain(node, link));
+		       possible_rdmas_num ++;
+		       rom_printk(" RDMA controller");
+	       }
+	       rom_printk(" OFF\n");
+	       return;
        }
 
        ab_type = io_link.abtype;
        switch (ab_type) {
        case IOHUB_ONLY_IOL_ABTYPE:
-               rom_printk(" IO HUB controller ON connected to IOHUB");
-               dst_mode = IOHUB_IOL_MODE;
-               break;
+	       rom_printk(" IO HUB controller ON connected to IOHUB");
+	       dst_mode = IOHUB_IOL_MODE;
+	       break;
        case RDMA_ONLY_IOL_ABTYPE:
-               rom_printk(" RDMA controller ON connected to RDMA");
-               dst_mode = RDMA_IOL_MODE;
-               break;
+	       rom_printk(" RDMA controller ON connected to RDMA");
+	       dst_mode = RDMA_IOL_MODE;
+	       break;
        case RDMA_IOHUB_IOL_ABTYPE:
-               rom_printk(" RDMA controller ON connected to IOHUB/RDMA");
-               dst_mode = RDMA_IOL_MODE;
-               break;
+	       rom_printk(" RDMA controller ON connected to IOHUB/RDMA");
+	       dst_mode = RDMA_IOL_MODE;
+	       break;
        default:
-               rom_printk(" %s controller ON connected to unknown controller",
-                       (src_mode == IOHUB_IOL_MODE) ? "IO HUB" : "RDMA");
-               dst_mode = src_mode;
-               break;
+	       rom_printk(" %s controller ON connected to unknown controller",
+		       (src_mode == IOHUB_IOL_MODE) ? "IO HUB" : "RDMA");
+	       dst_mode = src_mode;
+	       break;
        }
 
        if (src_mode != dst_mode) {
-               io_link.mode = dst_mode;
-               early_sic_write_node_iolink_nbsr_reg(node, link, SIC_iol_csr, AW(io_link));
+	       io_link.mode = dst_mode;
+	       early_sic_write_node_iolink_nbsr_reg(node, link, SIC_iol_csr, AW(io_link));
        }
        if (dst_mode == IOHUB_IOL_MODE) {
-               online_iohubs_map |= (1 << node_iohub_to_domain(node, link));
-               online_iohubs_num ++;
+	       online_iohubs_map |= (1 << node_iohub_to_domain(node, link));
+	       online_iohubs_num ++;
        } else {
-               online_rdmas_map |= (1 << node_iohub_to_domain(node, link));
-               online_rdmas_num ++;
+	       online_rdmas_map |= (1 << node_iohub_to_domain(node, link));
+	       online_rdmas_num ++;
        }
        rom_printk("\n");
 }
@@ -3123,7 +3120,6 @@ void jump(void)
 	e2k_pcsp_t pcsp;
 	e2k_usbr_t usbr;
 
-	int cmd_size;
 	e2k_addr_t busy_mem_start;
 	e2k_addr_t busy_mem_end;
 	bank_info_t *bank_info;
@@ -3290,14 +3286,12 @@ void jump(void)
 		not_read_image = bootblock->boot_flags & NO_READ_IMAGE_BB_FLAG;
 
 		if (recovery_flag) {
-			rom_puts("ROM loader restarted to recover "
-				"kernel\n");
+			rom_puts("ROM loader restarted to recover kernel\n");
 		} else {
 			rom_puts("ROM loader restarted to boot kernel.\n");
 		}
 	} else {
 #endif	/* CONFIG_RECOVERY */
-
 		rom_printk("Kernel ROM loader's initialization started.\n");
 #ifdef	CONFIG_RECOVERY
 	}
@@ -3334,43 +3328,21 @@ void jump(void)
 	}
 #endif	/* CONFIG_RECOVERY */
 
-#ifdef	CONFIG_RECOVERY
-	if (!recovery_flag) {
-#endif	/* CONFIG_RECOVERY */
-
-
-#ifdef CONFIG_CMDLINE_PROMPT
-		kernel_command_prompt(cmd_line, cmd_preset);
-#else
-		cmd_size = bios_strlen(cmd_preset);
-		if (cmd_size >= sizeof(cmd_buf)) {
-			rom_printk("Kernel command line size is too big "
-				"size %d > %d (buffer size)\n",
-				cmd_size, sizeof(cmd_buf));
-			E2K_LMS_HALT_OK;
-		}
-		memcpy(cmd_line, cmd_preset, bios_strlen(cmd_preset));
-#endif /* CONFIG_CMDLINE_PROMPT */
-
-
-#ifdef	CONFIG_RECOVERY
-	}
-#endif	/* CONFIG_RECOVERY */
-
 #ifdef	CONFIG_SMP
 	smp_start_cpus();
 #else
-	
+
 #ifdef CONFIG_L_LOCAL_APIC
 	setup_local_pic(0);
 #endif /* CONFIG_L_LOCAL_APIC */
-	
+
 #endif	/* CONFIG_SMP */
 
 
 #ifdef	CONFIG_RECOVERY
-	if (!recovery_flag) {
+	if (!recovery_flag)
 #endif	/* CONFIG_RECOVERY */
+	{
 		memset(boot_info, 0, sizeof(*boot_info));
 
 		/* Creation of boot info records. */
@@ -3384,24 +3356,6 @@ void jump(void)
 #ifdef	CONFIG_E2K_SIC
 		set_memory_filters(boot_info);
 #endif	/* CONFIG_E2K_SIC */
-
-		/*
-		 * The kernel command line.
-		 */
-		cmd_size = bios_strlen(cmd_line) + 1;
-		if (cmd_size <= KSTRMAX_SIZE) {
-			memcpy(boot_info->kernel_args_string, cmd_line,
-					cmd_size);
-		} else if (cmd_size <= KSTRMAX_SIZE_EX) {
-			memcpy(boot_info->kernel_args_string_ex, cmd_line,
-					cmd_size);
-			memcpy(boot_info->kernel_args_string,
-					KERNEL_ARGS_STRING_EX_SIGNATURE,
-					KERNEL_ARGS_STRING_EX_SIGN_SIZE);
-		} else {
-			boot_info->kernel_args_string_pnt = (u64)cmd_line;
-		}
-		rom_printk("Kernel command line: %s\n", cmd_line);
 
 		memcpy(boot_info->boot_ver, BOOT_VER_STR,
 			(int)bios_strlen(BOOT_VER_STR) + 1);
@@ -3426,10 +3380,7 @@ void jump(void)
 			boot_info->cpu_type = CPU_TYPE_E8V7;
 		rom_printk("CPU & MicroProcessor: %s\n",
 			GET_CPU_TYPE_NAME(boot_info->cpu_type));
-
-#ifdef	CONFIG_RECOVERY
 	}
-#endif	/* CONFIG_RECOVERY */
 	
 	boot_info->num_of_busy = 0;
 
@@ -3470,17 +3421,49 @@ void jump(void)
 
 #ifdef CONFIG_BIOS
 #ifdef CONFIG_ENABLE_ELBRUS_PCIBIOS
-        pci_bios();
+	pci_bios();
 #endif
 #endif
 
+	/* This will initialize COM port */
 #ifdef CONFIG_BIOS
 	bios_rest();
 #endif
 
+	/* Command line */
+#ifdef	CONFIG_RECOVERY
+	if (!recovery_flag)
+#endif	/* CONFIG_RECOVERY */
+	{
+		int cmd_len = bios_strlen(cmd_preset);
+
+#ifdef CONFIG_CMDLINE_PROMPT
+		kernel_command_prompt(cmd_buf, cmd_preset);
+#else
+		if (cmd_len >= sizeof(cmd_buf)) {
+			rom_printk("Kernel command line size is too big size %d > %d (buffer size)\n",
+					cmd_len, sizeof(cmd_buf));
+			E2K_LMS_HALT_OK;
+		}
+		memcpy(cmd_buf, cmd_preset, cmd_len);
+#endif /* CONFIG_CMDLINE_PROMPT */
+
+		if (cmd_len < KSTRMAX_SIZE) {
+			memcpy(boot_info->kernel_args_string, cmd_buf, cmd_len + 1);
+		} else if (cmd_len < KSTRMAX_SIZE_EX) {
+			memcpy(boot_info->kernel_args_string_ex, cmd_buf, cmd_len + 1);
+			memcpy(boot_info->kernel_args_string,
+					KERNEL_ARGS_STRING_EX_SIGNATURE,
+					KERNEL_ARGS_STRING_EX_SIGN_SIZE);
+		} else {
+			boot_info->kernel_args_string_pnt = (u64)cmd_buf;
+		}
+		rom_printk("Kernel command line: %s\n", cmd_buf);
+	}
+
 #ifdef CONFIG_BIOS
 #if defined(CONFIG_E2K_LEGACY_SIC)
-        video_bios();
+	video_bios();
 #endif	/* CONFIG_E2K_LEGACY_SIC */
 #endif
 

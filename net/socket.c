@@ -45,6 +45,7 @@
  *		Tigran Aivazian	:	sys_send(args) calls sys_sendto(args, NULL, 0)
  *		Tigran Aivazian	:	Made listen(2) backlog sanity checks
  *					protocol-independent
+ *		<rev@mcst.ru>	:	Support e2k 128bit ptr apps ioctls 
  *
  *	This module is effectively the top level interface to the BSD socket
  *	paradigm.
@@ -127,7 +128,7 @@ static long compat_sock_ioctl(struct file *file,
 #if defined CONFIG_E2K && defined CONFIG_PROTECTED_MODE
 #include <linux/inetdevice.h>
 #include <asm/protected_syscalls.h>
-static long ptr128_sock_ioctl(struct file *, unsigned long cmd, unsigned long arg);
+static long ptr128_sock_ioctl(struct file *, unsigned int cmd, unsigned long arg);
 #endif
 static int sock_fasync(int fd, struct file *filp, int on);
 static ssize_t sock_sendpage(struct file *file, struct page *page,
@@ -3261,6 +3262,40 @@ void socket_seq_show(struct seq_file *seq)
 }
 #endif				/* CONFIG_PROC_FS */
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#include <net/ptr128.h>
+
+int get_user_ifreq128(struct ifreq *ifr, void __user **ifrdata, void __user *arg)
+{
+	e2k_ap_t	ap;
+	int tag;
+	struct ptr128_ifreq __user *arg128 = arg;
+
+	if (copy_from_user(ifr, arg, sizeof(*ifr)))
+		return -EFAULT;
+	if (ifrdata == NULL)
+		return 0;
+	if (!IS_ALIGNED((unsigned long)&arg128->ifr_data, 16)) {
+		/* sock_do_ioctl tries go get ifreq for ioctl cmds wich not requiered ireq */
+		*ifrdata = NULL;
+		return 0;
+	}
+
+	if (get_user_tagged_16(ap.qword, tag, &arg128->ifr_data))
+		return -EFAULT;
+	if (IS_AP(ap, tag)) {
+		*ifrdata = (void __user *)AP_PTR(ap);
+		set_ap_u_border(ap);
+	} else {
+		/* sock_do_ioctl tries go get ifreq for ioctl cmds wich not requiered ireq */
+		*ifrdata = NULL;
+	}
+	return 0;
+}
+
+#endif
+
+
 /* Handle the fact that while struct ifreq has the same *layout* on
  * 32/64 for everything but ifreq::ifru_ifmap and ifreq::ifru_data,
  * which are handled elsewhere, it still has different *size* due to
@@ -3284,7 +3319,11 @@ int get_user_ifreq(struct ifreq *ifr, void __user **ifrdata, void __user *arg)
 
 		return 0;
 	}
-
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	if (in_ptr128_syscall()) {
+		return get_user_ifreq128(ifr, ifrdata, arg);
+	}
+#endif
 	if (copy_from_user(ifr, arg, sizeof(*ifr)))
 		return -EFAULT;
 
@@ -3295,6 +3334,24 @@ int get_user_ifreq(struct ifreq *ifr, void __user **ifrdata, void __user *arg)
 }
 EXPORT_SYMBOL(get_user_ifreq);
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+static int put_user_ifreq128(struct ifreq *ifr, void __user *arg)
+{
+	struct ptr128_ifreq __user *arg128 = arg;
+	e2k_ap_t ap;
+	int tag;
+	set_u_border(MAX_U_BORDER);
+	if (get_user_tagged_16(ap.qword, tag, &arg128->ifr_data))
+		return -EFAULT;
+	if (copy_to_user(arg, ifr, sizeof(*ifr)))
+		return -EFAULT;
+	if (!IS_AP(ap, tag))
+		return 0;
+	if (put_user_tagged_16(ap.qword, tag, &arg128->ifr_data))
+		return -EFAULT;
+	return 0;
+}
+#endif
 int put_user_ifreq(struct ifreq *ifr, void __user *arg)
 {
 	size_t size = sizeof(*ifr);
@@ -3302,6 +3359,10 @@ int put_user_ifreq(struct ifreq *ifr, void __user *arg)
 	if (in_compat_syscall())
 		size = sizeof(struct compat_ifreq);
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	if (in_ptr128_syscall())
+		return put_user_ifreq128(ifr, arg);
+#endif
 	if (copy_to_user(arg, ifr, size))
 		return -EFAULT;
 
@@ -3473,281 +3534,30 @@ static long compat_sock_ioctl(struct file *file, unsigned int cmd,
 
 #if defined CONFIG_E2K && defined CONFIG_PROTECTED_MODE
 
-struct ptr128_if_settings {
-	unsigned int type;	/* Type of physical device or protocol */
-	unsigned int size;	/* Size of the data allocated by the caller */
-	e2k_ptr_t __user dscr;	/* interface settings */
-};
-
-struct ptr128_ifreq {
-	union {
-		char	ifrn_name[IFNAMSIZ];		/* if name, e.g. "en0" */
-	} ifr_ifrn;
-
-	union {
-		struct	sockaddr ifru_addr;
-		struct	sockaddr ifru_dstaddr;
-		struct	sockaddr ifru_broadaddr;
-		struct	sockaddr ifru_netmask;
-		struct  sockaddr ifru_hwaddr;
-		short	ifru_flags;
-		int	ifru_ivalue;
-		int	ifru_mtu;
-		struct  ifmap ifru_map;
-		char	ifru_slave[IFNAMSIZ];	/* Just fits the size */
-		char	ifru_newname[IFNAMSIZ];
-		e2k_ptr_t	ifru_data_dscr;
-		struct	ptr128_if_settings ifru_settings;
-	} ifr_ifru;
-};
-
-struct ptr128_ifconf  {
-	int		ifc_len;	/* size of buffer */
-	e2k_ptr_t	ifcu_buf_dscr;
-};
-
-struct ptr128_ethtool_rxnfc {
-	__u32				cmd;
-	__u32				flow_type;
-	e2k_ptr_t			data_dscr;
-	struct ethtool_rx_flow_spec	fs;
-	union {
-		__u32			rule_cnt;
-		__u32			rss_context;
-	};
-	__u32				rule_locs[0];
-};
-
-
-static int ptr128_dev_ifconf(struct net *net, struct ptr128_ifconf __user *uifc128)
-{
-	struct ptr128_ifconf ifc128;
-	struct ifconf ifc;
-	struct ifreq __user *ifc_req64; /* temporal buffer */
-	void *ifc_req128; /* req destination buffer */
-	int len128;
-	int err;
-	int i;
-	struct net_device *dev;
-	void __user *pos;
-	size_t size;
-	unsigned long buf_size;
-	int len, total = 0, done;
-
-	if (copy_from_user(&ifc128, uifc128, sizeof(struct ptr128_ifconf)))
-		return -EFAULT;
-
-	len128 = ifc128.ifc_len;
-	ifc.ifc_len = len128;
-	/* Allocating temporal buffer for the requested data:
-	 * NB> 'stack_size' must be multiple of 16; otherwise
-	 *     we may get non-aligned space.
-	 */
-	buf_size = (len128 + 15) & ~0xf;
-	ifc_req64 = arch_protected_alloc_user_data_stack(buf_size);
-	ifc.ifc_req = (struct ifreq *) ifc_req64;
-
-	DbgSCP("%s(net=0x%lx, uifc128=0x%lx [ifc_len=%d, ifc_req64=0x%lx])\n",
-	       __func__, net, uifc128, ifc.ifc_len, ifc_req64);
-
-	pos = ifc.ifc_buf;
-	len = ifc.ifc_len;
-	size = sizeof(struct ifreq);
-
-	/* Loop over the interfaces, and write an info block for each. */
-	rtnl_lock();
-	for_each_netdev(net, dev) {
-		if (!pos)
-			done = inet_gifconf(dev, NULL, 0, size);
-		else
-			done = inet_gifconf(dev, pos + total,
-								len - total, size);
-		if (done < 0) {
-			rtnl_unlock();
-			return -EFAULT;
-		}
-		total += done;
-	}
-	rtnl_unlock();
-
-	/* Writing results back to uifc128 */
-	/* Copying the contents of the ifc_req buffer:
-	 * NB> sys_ioctl() writes an array of 'ifreq' structs
-	 *     into ifc_req buffer. Note that protected struct size
-	 *     exceeds the one of regular structure.
-	 */
-
-	/* ifreq array size in user's space. */
-	len = (total/sizeof(struct ifreq)) * sizeof(struct ptr128_ifreq);
-	if (len > len128)
-		len = len128;
-
-	ifc_req128 = (struct ifreq *) AP_PTR(ifc128.ifcu_buf_dscr);
-	DbgSCP("%s() : ifc_req64=0x%lx --> ifc_req128=0x%lx\n", __func__,
-	       (unsigned long) ifc_req64, (unsigned long) ifc_req128);
-
-	for (i = 0; i < len; i += sizeof(struct ptr128_ifreq)) {
-		err = copy_to_user(ifc_req128 + i, ifc_req64++,
-				   sizeof(struct ifreq));
-		if (err) {
-			DbgSCP("%s:%d copy_to_user() failed\n",
-			       __FILE__, __LINE__);
-			return -EFAULT;
-		}
-	}
-	err = put_user(i, &uifc128->ifc_len);
-	if (err)
-		return err;
-
-	return 0;
-}
-
-static int ptr128_ethtool_ioctl(struct net *net, struct ptr128_ifreq __user *ifr128)
-{
-	struct ptr128_ethtool_rxnfc __user *ptr128_rxnfc;
-	bool convert_in = false, convert_out = false;
-	size_t buf_size = 0;
-	struct ethtool_rxnfc __user *rxnfc = NULL;
-	struct ifreq ifr;
-	u64 rule_cnt = 0, actual_rule_cnt;
-	u64 ethcmd;
-	e2k_ptr_t dscr;
-	int ret;
-
-	if (get_user(dscr.lo, &ifr128->ifr_ifru.ifru_data_dscr.lo) ||
-		get_user(dscr.hi, &ifr128->ifr_ifru.ifru_data_dscr.hi))
-		return -EFAULT;
-
-	ptr128_rxnfc = (struct ptr128_ethtool_rxnfc *)AP_PTR(dscr);
-
-	if (get_user(ethcmd, &ptr128_rxnfc->cmd))
-		return -EFAULT;
-
-	/* Most ethtool structures are defined without padding.
-	 * Unfortunately struct ethtool_rxnfc is an exception.
-	 */
-	switch (ethcmd) {
-	default:
-		break;
-	case ETHTOOL_GRXCLSRLALL:
-		/* Buffer size is variable */
-		if (get_user(rule_cnt, &ptr128_rxnfc->rule_cnt))
-			return -EFAULT;
-		if (rule_cnt > KMALLOC_MAX_SIZE / sizeof(u32))
-			return -ENOMEM;
-		buf_size += rule_cnt * sizeof(u32);
-		fallthrough;
-	case ETHTOOL_GRXRINGS:
-	case ETHTOOL_GRXCLSRLCNT:
-	case ETHTOOL_GRXCLSRULE:
-	case ETHTOOL_SRXCLSRLINS:
-		convert_out = true;
-		fallthrough;
-	case ETHTOOL_SRXCLSRLDEL:
-		buf_size += sizeof(struct ethtool_rxnfc);
-		convert_in = true;
-		rxnfc = arch_protected_alloc_user_data_stack(buf_size);
-		break;
-	}
-
-	if (copy_from_user(&ifr.ifr_name, &ifr128->ifr_name, IFNAMSIZ))
-		return -EFAULT;
-
-	ifr.ifr_data = convert_in ? rxnfc : (void __user *)ptr128_rxnfc;
-
-	if (convert_in) {
-		/* We expect there to be holes between fs.m_ext and
-		 * fs.ring_cookie and at the end of fs, but nowhere else.
-		 */
-		BUILD_BUG_ON(offsetof(struct ptr128_ethtool_rxnfc, fs.m_ext) +
-			     sizeof(ptr128_rxnfc->fs.m_ext) !=
-			     offsetof(struct ethtool_rxnfc, fs.m_ext) + 8 +
-			     sizeof(rxnfc->fs.m_ext) +
-			     8 /* pad_align */);
-		BUILD_BUG_ON(
-			offsetof(struct ptr128_ethtool_rxnfc, fs.location) -
-			offsetof(struct ptr128_ethtool_rxnfc, fs.ring_cookie) !=
-			offsetof(struct ethtool_rxnfc, fs.location) -
-			offsetof(struct ethtool_rxnfc, fs.ring_cookie));
-
-		if (copy_in_user(rxnfc, ptr128_rxnfc,
-				 (void __user *)(&rxnfc->fs.m_ext + 1) -
-				 (void __user *)rxnfc) ||
-		    copy_in_user(&rxnfc->fs.ring_cookie,
-				 &ptr128_rxnfc->fs.ring_cookie,
-				 (void __user *)(&rxnfc->fs.location + 1) -
-				 (void __user *)&rxnfc->fs.ring_cookie))
-			return -EFAULT;
-		if (ethcmd == ETHTOOL_GRXCLSRLALL) {
-			if (put_user(rule_cnt, &rxnfc->rule_cnt))
-				return -EFAULT;
-		} else if (copy_in_user(&rxnfc->rule_cnt,
-					&ptr128_rxnfc->rule_cnt,
-					sizeof(rxnfc->rule_cnt)))
-			return -EFAULT;
-	}
-
-	ret = dev_ioctl(net, SIOCETHTOOL, &ifr, (void __user *)ifr.ifr_data, NULL);
-	if (ret)
-		return ret;
-
-	if (convert_out) {
-		if (copy_in_user(ptr128_rxnfc, rxnfc,
-				 (const void __user *)(&rxnfc->fs.m_ext + 1) -
-				 (const void __user *)rxnfc) ||
-		    copy_in_user(&ptr128_rxnfc->fs.ring_cookie,
-				 &rxnfc->fs.ring_cookie,
-				 (const void __user *)(&rxnfc->fs.location + 1) -
-				 (const void __user *)&rxnfc->fs.ring_cookie) ||
-		    copy_in_user(&ptr128_rxnfc->rule_cnt, &rxnfc->rule_cnt,
-				 sizeof(rxnfc->rule_cnt)))
-			return -EFAULT;
-
-		if (ethcmd == ETHTOOL_GRXCLSRLALL) {
-			/* As an optimisation, we only copy the actual
-			 * number of rules that the underlying
-			 * function returned.  Since Mallory might
-			 * change the rule count in user memory, we
-			 * check that it is less than the rule count
-			 * originally given (as the user buffer size),
-			 * which has been range-checked.
-			 */
-			if (get_user(actual_rule_cnt, &rxnfc->rule_cnt))
-				return -EFAULT;
-			if (actual_rule_cnt < rule_cnt)
-				rule_cnt = actual_rule_cnt;
-			if (copy_in_user(&ptr128_rxnfc->rule_locs[0],
-					 &rxnfc->rule_locs[0],
-					 rule_cnt * sizeof(u32)))
-				return -EFAULT;
-		}
-	}
-
-	return 0;
-}
 
 static int ptr128_siocwandev(struct net *net, struct ptr128_ifreq __user *uifr128)
 {
-	e2k_ptr_t dscr;
 	struct ifreq ifr;
-	void __user *saved;
+	e2k_ap_t ap;
+	int tag;
+	u64 saved_ub = get_u_border();
 	int err;
 
-	if (copy_from_user(&ifr, uifr128, sizeof(struct ptr128_ifreq)))
+	if (copy_from_user(&ifr, uifr128, sizeof(ifr)))
 		return -EFAULT;
 
-	if (get_user(dscr.lo, &uifr128->ifr_settings.dscr.lo) ||
-		get_user(dscr.hi, &uifr128->ifr_settings.dscr.hi))
+	if (get_user_tagged_16(ap.qword, tag, &uifr128->ifr_settings.ap) || !IS_AP(ap, tag))
 		return -EFAULT;
 
-	saved = ifr.ifr_settings.ifs_ifsu.raw_hdlc;
-	ifr.ifr_settings.ifs_ifsu.raw_hdlc = (raw_hdlc_proto *) AP_PTR(dscr);
-
+	ifr.ifr_settings.ifs_ifsu.raw_hdlc = (void __user *)AP_PTR(ap);
+	set_ap_u_border(ap);
 	err = dev_ioctl(net, SIOCWANDEV, &ifr, NULL, NULL);
+	set_u_border(saved_ub);
 	if (!err) {
-		ifr.ifr_settings.ifs_ifsu.raw_hdlc = saved;
-		if (copy_to_user(uifr128, &ifr, sizeof(struct ptr128_ifreq)))
-			err = -EFAULT;
+		if (copy_to_user(uifr128, &ifr, sizeof(ifr)))
+			return -EFAULT;
+		if (put_user_tagged_16(ap.qword, tag, &uifr128->ifr_settings.ap))
+			return -EFAULT;
 	}
 	return err;
 }
@@ -3757,137 +3567,42 @@ static int ptr128_ifr_data_ioctl(struct net *net, unsigned int cmd,
 				 struct ptr128_ifreq __user *u_ifreq128)
 {
 	struct ifreq ifreq;
-	e2k_ptr_t dscr;
+	void __user *data;
 
-	if (copy_from_user(ifreq.ifr_name, u_ifreq128->ifr_name, IFNAMSIZ))
+	if (!is_socket_ioctl_cmd(cmd))
+		return -ENOTTY;
+	if (get_user_ifreq(&ifreq, &data, u_ifreq128))
 		return -EFAULT;
-	if (get_user(dscr.lo, &u_ifreq128->ifr_ifru.ifru_data_dscr.lo) ||
-		get_user(dscr.hi, &u_ifreq128->ifr_ifru.ifru_data_dscr.hi))
-		return -EFAULT;
-	ifreq.ifr_data = (void *) AP_PTR(dscr);
+	ifreq.ifr_data = data;
 
-	return dev_ioctl(net, cmd, &ifreq, (void __user *)ifreq.ifr_data, NULL);
+	return dev_ioctl(net, cmd, &ifreq, data, NULL);
 }
 
-static int ptr128_ifreq_ioctl(struct net *net, struct socket *sock,
-			      unsigned long cmd,
-			      struct ptr128_ifreq __user *uifr128)
-{
-	struct ifreq __user *uifr;
-	int err;
-
-	/* Handle the fact that while struct ifreq has the same *layout* on
-	 * 32/64 for everything but ifreq::ifru_ifmap and ifreq::ifru_data,
-	 * which are handled elsewhere, it still has different *size* due to
-	 * ifreq::ifru_ifmap (which is 16 bytes on 32 bit, 24 bytes on 64-bit,
-	 * resulting in struct ifreq being 32 and 40 bytes respectively).
-	 * As a result, if the struct happens to be at the end of a page and
-	 * the next page isn't readable/writable, we get a fault. To prevent
-	 * that, copy back and forth to the full size.
-	 */
-
-	uifr = arch_protected_alloc_user_data_stack(sizeof(*uifr128));
-	if (copy_in_user(uifr, uifr128, sizeof(*uifr128)))
-		return -EFAULT;
-
-	err = sock_do_ioctl(net, sock, cmd, (unsigned long)uifr);
-
-	if (!err) {
-		switch (cmd) {
-		case SIOCGIFFLAGS:
-		case SIOCGIFMETRIC:
-		case SIOCGIFMTU:
-		case SIOCGIFMEM:
-		case SIOCGIFHWADDR:
-		case SIOCGIFINDEX:
-		case SIOCGIFADDR:
-		case SIOCGIFBRDADDR:
-		case SIOCGIFDSTADDR:
-		case SIOCGIFNETMASK:
-		case SIOCGIFPFLAGS:
-		case SIOCGIFTXQLEN:
-		case SIOCGMIIPHY:
-		case SIOCGMIIREG:
-		case SIOCGIFNAME:
-			if (copy_in_user(uifr128, uifr, sizeof(*uifr128)))
-				err = -EFAULT;
-			break;
-		}
-	}
-	return err;
-}
-
-static int ptr128_sioc_ifmap(struct net *net, unsigned long cmd,
-			struct ptr128_ifreq __user *uifr128)
-{
-	struct ifreq ifr;
-	struct ifmap __user *uifmap;
-	int err;
-
-	uifmap = &uifr128->ifr_ifru.ifru_map;
-	err = copy_from_user(&ifr, uifr128, sizeof(ifr.ifr_name));
-	err |= get_user(ifr.ifr_map.mem_start, &uifmap->mem_start);
-	err |= get_user(ifr.ifr_map.mem_end, &uifmap->mem_end);
-	err |= get_user(ifr.ifr_map.base_addr, &uifmap->base_addr);
-	err |= get_user(ifr.ifr_map.irq, &uifmap->irq);
-	err |= get_user(ifr.ifr_map.dma, &uifmap->dma);
-	err |= get_user(ifr.ifr_map.port, &uifmap->port);
-	if (err)
-		return -EFAULT;
-
-	err = dev_ioctl(net, cmd, &ifr, NULL, NULL);
-
-	if (cmd == SIOCGIFMAP && !err) {
-		err = copy_to_user(uifr128, &ifr, sizeof(ifr.ifr_name));
-		err |= put_user(ifr.ifr_map.mem_start, &uifmap->mem_start);
-		err |= put_user(ifr.ifr_map.mem_end, &uifmap->mem_end);
-		err |= put_user(ifr.ifr_map.base_addr, &uifmap->base_addr);
-		err |= put_user(ifr.ifr_map.irq, &uifmap->irq);
-		err |= put_user(ifr.ifr_map.dma, &uifmap->dma);
-		err |= put_user(ifr.ifr_map.port, &uifmap->port);
-		if (err)
-			err = -EFAULT;
-	}
-	return err;
-}
 
 static int ptr128_sock_ioctl_trans(struct file *file, struct socket *sock,
-			 unsigned long cmd, unsigned long argp)
+			 unsigned int cmd, unsigned long arg)
 {
+	void __user *argp = (void __user *)arg;
 	struct sock *sk = sock->sk;
 	struct net *net = sock_net(sk);
 
-	DbgSCP("%s(file=0x%lx, sock=0x%lx, cmd=0x%lx, argp=0x%lx)\n",
-	       __func__, file, sock, cmd, argp);
-
 	if (cmd >= SIOCDEVPRIVATE && cmd <= (SIOCDEVPRIVATE + 15))
-		return ptr128_ifr_data_ioctl(net, cmd, (void *) argp);
+		return sock_ioctl(file, cmd, arg);
 
 	switch (cmd) {
-	case SIOCSIFBR:
-	case SIOCGIFBR:
-		return sock_ioctl(file, cmd, argp);
-	case SIOCGIFCONF:
-		return ptr128_dev_ifconf(net, (void *) argp);
-	case SIOCETHTOOL:
-		return ptr128_ethtool_ioctl(net, (void *) argp);
 	case SIOCWANDEV:
-		return ptr128_siocwandev(net, (void *) argp);
-	case SIOCGIFMAP:
-	case SIOCSIFMAP:
-		return ptr128_sioc_ifmap(net, cmd, (void *) argp);
+		return ptr128_siocwandev(net, argp);
 	case SIOCGSTAMP_OLD:
 	case SIOCGSTAMPNS_OLD:
 		if (!sock->ops->gettstamp)
 			return -ENOIOCTLCMD;
-		return sock->ops->gettstamp(sock, (void *) argp, cmd == SIOCGSTAMP_OLD,
-					    !COMPAT_USE_64BIT_TIME);
-
+		return sock->ops->gettstamp(sock, argp, cmd == SIOCGSTAMP_OLD, false);
+	case SIOCETHTOOL:
 	case SIOCBONDSLAVEINFOQUERY:
 	case SIOCBONDINFOQUERY:
 	case SIOCSHWTSTAMP:
 	case SIOCGHWTSTAMP:
-		return ptr128_ifr_data_ioctl(net, cmd, (void *) argp);
+		return ptr128_ifr_data_ioctl(net, cmd, argp);
 
 	case FIOSETOWN:
 	case SIOCSPGRP:
@@ -3900,10 +3615,15 @@ static int ptr128_sock_ioctl_trans(struct file *file, struct socket *sock,
 	case SIOCGSKNS:
 	case SIOCGSTAMP_NEW:
 	case SIOCGSTAMPNS_NEW:
-		return sock_ioctl(file, cmd, (unsigned long) argp);
+	case SIOCGIFCONF:
+	case SIOCSIFBR:
+	case SIOCGIFBR:
+		return sock_ioctl(file, cmd, arg);
 
 	case SIOCGIFFLAGS:
 	case SIOCSIFFLAGS:
+	case SIOCGIFMAP:
+	case SIOCSIFMAP:
 	case SIOCGIFMETRIC:
 	case SIOCSIFMETRIC:
 	case SIOCGIFMTU:
@@ -3940,21 +3660,20 @@ static int ptr128_sock_ioctl_trans(struct file *file, struct socket *sock,
 	case SIOCBONDRELEASE:
 	case SIOCBONDSETHWADDR:
 	case SIOCBONDCHANGEACTIVE:
-		return ptr128_ifreq_ioctl(net, sock, cmd, (void *) argp);
-
 	case SIOCSARP:
 	case SIOCGARP:
 	case SIOCDARP:
 	case SIOCOUTQ:
 	case SIOCOUTQNSD:
 	case SIOCATMARK:
-		return sock_do_ioctl(net, sock, cmd, (unsigned long) argp);
+		return sock_do_ioctl(net, sock, cmd, arg);
 	}
 
 	return -ENOIOCTLCMD;
 }
 
-static long ptr128_sock_ioctl(struct file *file, unsigned long cmd,
+
+static long ptr128_sock_ioctl(struct file *file, unsigned int cmd,
 			      unsigned long arg)
 {
 	struct socket *sock = file->private_data;
@@ -3962,21 +3681,22 @@ static long ptr128_sock_ioctl(struct file *file, unsigned long cmd,
 	struct sock *sk;
 	struct net *net;
 
-	DbgSCP("%s(file=0x%lx, cmd=0x%lx, arg=0x%lx)\n",
+	DbgSCP("%s(file=0x%p, cmd=0x%x, arg=0x%lx)\n",
 	       __func__, file, cmd, arg);
 
 	sk = sock->sk;
 	net = sock_net(sk);
 
-	if (sock->ops->ptr128_ioctl)
+	if (sock->ops->ptr128_ioctl) {
 		ret = sock->ops->ptr128_ioctl(sock, cmd, arg);
-
+	}
 	if (ret == -ENOIOCTLCMD &&
-	    (cmd >= SIOCIWFIRST && cmd <= SIOCIWLAST))
+	    (cmd >= SIOCIWFIRST && cmd <= SIOCIWLAST)) {
 		ret = ptr128_wext_handle_ioctl(net, cmd, arg);
-
-	if (ret == -ENOIOCTLCMD)
+	}
+	if (ret == -ENOIOCTLCMD) {
 		ret = ptr128_sock_ioctl_trans(file, sock, cmd, arg);
+	}
 
 	return ret;
 }

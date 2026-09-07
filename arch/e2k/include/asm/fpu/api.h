@@ -73,9 +73,7 @@
 						\
 	GET_FPU_DEFAULTS(fpsr, fpcr, pfpfr);	\
 						\
-	native_write_PFPFR_reg(pfpfr);		\
-	native_write_FPCR_reg(fpcr);		\
-	native_write_FPSR_reg(fpsr);		\
+	native_write_FPU_regs(fpcr, fpsr, pfpfr); \
 })
 
 extern void kernel_fpu_begin(void);

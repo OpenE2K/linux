@@ -221,6 +221,9 @@ static const struct file_operations seq_oss_f_ops =
 	.poll =		odev_poll,
 	.unlocked_ioctl =	odev_ioctl,
 	.compat_ioctl =	odev_ioctl_compat,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl =	odev_ioctl,
+#endif
 	.llseek =	noop_llseek,
 };
 

@@ -23,9 +23,9 @@
 
 #include "process.h"
 #include "cpu.h"
-#include "gaccess.h"
+#include "paravirt_sw/gaccess.h"
 #include "mman.h"
-#include "string.h"
+#include "paravirt_sw/string.h"
 #include "irq.h"
 #include "time.h"
 #include "lapic.h"
@@ -183,6 +183,7 @@ unsigned long kvm_pass_the_trap_to_guest(struct kvm_vcpu *vcpu,
 	return trap_mask;
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline unsigned long
 pass_virqs_to_guest_TIRs(struct pt_regs *regs, e2k_tir_t TIR)
 {
@@ -210,6 +211,7 @@ pass_virqs_to_guest_TIRs(struct pt_regs *regs, e2k_tir_t TIR)
 
 	return g_TIR.exc;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static bool lapic_state_printed = false;
 
@@ -405,6 +407,7 @@ out:
 	mutex_unlock(&kvm_lock);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 /*
  * CLW requests should be handled by host, but address to clear can be
  * from guest user data stack range, so preliminary this page fault should
@@ -1055,6 +1058,7 @@ int kvm_correct_guest_trap_return_ip(unsigned long return_ip, struct kvm *kvm)
 	}
 	return ret;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 unsigned long kvm_disabled_priv_hcall(unsigned long nr,
 				      unsigned long arg1, unsigned long arg2,
@@ -1077,24 +1081,7 @@ trap_hndl_t kvm_do_handle_guest_traps(struct pt_regs *regs)
 	return (trap_hndl_t) -ENOSYS;
 }
 
-/*
- * Any system calls from guest user start this function.
- * User data stack was not switched to kernel (host or guest) stack, so
- * the host function (including all called functions) should not use data stack.
- * Function switch user data stack just to guest kernel stack and possible
- * debugging mode will use guest stack (it is not right in theory, but it need
- * only to debug)
- */
-/* FIXME: only to debug (including gregs save/restore), __interrupt */
-/* should be uncommented */
-__visible long /*__interrupt*/ goto_guest_kernel_ttable_C(long sys_num_and_entry,
-						u64 arg1, u64 arg2, u64 arg3,
-						u64 arg4, u64 arg5, u64 arg6)
-{
-	pr_err("%s() should not be called and need delete\n", __func__);
-	return -ENOSYS;
-}
-
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 int kvm_copy_hw_stacks_frames(struct kvm_vcpu *vcpu, void *dst, void *src,
 			      long size, bool is_chain)
 {
@@ -1140,8 +1127,7 @@ static inline void prepare_guest_fast_ttable_entry_crs(struct kvm_vcpu *vcpu,
 	cr1.cui = KERNEL_CODES_INDEX;
 
 	/* Write back new chain stack frame parameters to cr */
-	write_CR0_ip(cr0);
-	write_CR1_reg(cr1);
+	write_cr(cr0, cr1);
 
 	return;
 }
@@ -1160,7 +1146,7 @@ __interrupt  void notrace handle_guest_fast_sys_call(void)
 	struct kvm_vcpu *vcpu = ti->vcpu;
 
 	pv_mmu_switch_to_fast_sys_call(vcpu, ti);
-	HOST_VCPU_STATE_REG_SWITCH_TO_GUEST(vcpu);
+	// FIXME HOST_VCPU_STATE_REG_SWITCH_TO_GUEST(vcpu);
 	prepare_guest_fast_ttable_entry_crs(vcpu, GUEST_FAST_SYSCALL_TRAP_NUM);
 
 	/* Pass control to guest fast syscall ttable entry */
@@ -1175,9 +1161,10 @@ void notrace handle_compat_guest_fast_sys_call(void)
 	struct kvm_vcpu *vcpu = ti->vcpu;
 
 	pv_mmu_switch_to_fast_sys_call(vcpu, ti);
-	HOST_VCPU_STATE_REG_SWITCH_TO_GUEST(vcpu);
+	// FIXME HOST_VCPU_STATE_REG_SWITCH_TO_GUEST(vcpu);
 	prepare_guest_fast_ttable_entry_crs(vcpu,
 					    GUEST_COMPAT_FAST_SYSCALL_TRAP_NUM);
 
 	/* Pass control to guest compat fast syscall ttable entry */
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */

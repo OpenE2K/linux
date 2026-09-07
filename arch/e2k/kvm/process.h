@@ -27,7 +27,7 @@
 #include "cpu_defs.h"
 #include "irq.h"
 #include "mmu.h"
-#include "gaccess.h"
+#include "paravirt_sw/gaccess.h"
 
 extern bool debug_guest_user_stacks;
 #undef	DEBUG_KVM_GUEST_STACKS_MODE
@@ -43,6 +43,8 @@ extern bool debug_guest_user_stacks;
 #undef	DEBUG_GPT_REGS_MODE
 #define	DEBUG_GPT_REGS_MODE	0	/* KVM host and guest kernel */
 					/* stack activations print */
+
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 
 #define	GUEST_KERNEL_THREAD_STACK_SIZE	(64 * 1024U)	/* 64 KBytes */
 
@@ -402,11 +404,11 @@ kvm_check_guest_active_cr_mem_item(struct kvm_vcpu *vcpu,
 	e2k_pcshtp_t pcshtp;
 	unsigned long pcs_bound;
 
-	if (base & E2K_ALIGN_PCSTACK_MASK != 0)
+	if (base & E2K_ALIGN_PCSTACK_MASK)
 		return -EINVAL;
-	if (cr_ind & ((1UL << E2K_ALIGN_CHAIN_WINDOW) - 1) != 0)
+	if (cr_ind & ((1UL << E2K_ALIGN_CHAIN_WINDOW) - 1))
 		return -EINVAL;
-	if (cr_item & (sizeof(u64) - 1) != 0)
+	if (cr_item & (sizeof(u64) - 1))
 		return -EINVAL;
 	pcsp = native_read_PCSP_reg();
 	pcshtp = native_read_PCSHTP_reg();
@@ -519,19 +521,7 @@ extern void kvm_arch_vcpu_to_wait(struct kvm_vcpu *vcpu);
 extern void kvm_arch_vcpu_to_run(struct kvm_vcpu *vcpu);
 
 extern int kvm_start_pv_guest(struct kvm_vcpu *vcpu);
-extern void prepare_stacks_to_startup_vcpu(struct kvm_vcpu *vcpu,
-					   e2k_mem_ps_t *ps_frames,
-					   e2k_mem_crs_t *pcs_frames,
-					   u64 *args, int args_num,
-					   char *entry_point, e2k_psr_t psr,
-					   e2k_size_t usd_size,
-					   e2k_size_t *ps_ind,
-					   e2k_size_t *pcs_ind, int cui,
-					   bool kernel);
 extern int kvm_prepare_pv_vcpu_start_stacks(struct kvm_vcpu *vcpu);
-
-extern int kvm_init_vcpu_thread(struct kvm_vcpu *vcpu);
-extern int hv_vcpu_setup_thread(struct kvm_vcpu *vcpu);
 extern int pv_vcpu_setup_thread(struct kvm_vcpu *vcpu);
 
 extern unsigned long kvm_switch_guest_kernel_stacks(struct kvm_vcpu *vcpu,
@@ -545,6 +535,20 @@ extern unsigned long kvm_switch_to_virt_mode(struct kvm_vcpu *vcpu,
 				   void (*func) (void *data, void *arg1,
 						 void *arg2),
 				   void *data, void *arg1, void *arg2);
+#else
+static inline int pv_vcpu_setup_thread(struct kvm_vcpu *vcpu)
+{
+	return -ENOTSUPP;
+}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
+
+extern void prepare_stacks_to_startup_vcpu(struct kvm_vcpu *vcpu,
+		e2k_mem_ps_t *ps_frames, e2k_mem_crs_t *pcs_frames,
+		u64 *args, int args_num, char *entry_point, e2k_psr_t psr,
+		e2k_size_t usd_size, e2k_size_t *ps_ind, e2k_size_t *pcs_ind,
+		int cui, bool kernel);
+
+extern int kvm_init_vcpu_thread(struct kvm_vcpu *vcpu);
 extern void kvm_halt_host_vcpu_thread(struct kvm_vcpu *vcpu);
 extern void kvm_spare_host_vcpu_release(struct kvm_vcpu *vcpu);
 extern void kvm_guest_vcpu_thread_stop(struct kvm_vcpu *vcpu);
@@ -619,6 +623,7 @@ extern int kvm_pv_host_enable_async_pf(struct kvm_vcpu *vcpu,
 				       u32 irq_controller);
 #endif /* CONFIG_KVM_ASYNC_PF */
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 extern int kvm_apply_updated_psp_bounds(struct kvm_vcpu *vcpu,
 					unsigned long base, unsigned long size,
 					unsigned long start, unsigned long end,
@@ -669,9 +674,10 @@ pv_vcpu_hw_stacks_copy(struct kvm_vcpu *vcpu, pt_regs_t *regs,
 		return 0;
 
 	if (unlikely(pcs_size > 0)) {
-		raw_all_v7_irq_disable();
+		unsigned long flags;
+		raw_all_irq_save(flags);
 		k_pcsp = native_read_PCSP_reg();
-		raw_all_v7_irq_enable();
+		raw_all_irq_restore(flags);
 
 		if (unlikely(vcpu_pcsp_ind(vcpu, g_pcsp) > vcpu_pcsp_size(vcpu, g_pcsp))) {
 			pr_err("%s(): guest kernel stack was overflown : PCSP ind 0x%llx > size 0x%llx\n",
@@ -724,7 +730,6 @@ pv_vcpu_user_hw_stacks_copy_crs(struct kvm_vcpu *vcpu, e2k_stacks_t *g_stacks,
 				pt_regs_t *regs, e2k_mem_crs_t *crs)
 {
 	e2k_mem_crs_t __user *u_frame;
-	gthread_info_t *gti = pv_vcpu_get_gti(vcpu);
 	int ret;
 
 	u_frame = (void __user *)vcpu_pcsp_ptr(vcpu, g_stacks->pcsp);
@@ -748,7 +753,6 @@ pv_vcpu_user_hw_stacks_copy_ps_frames(struct kvm_vcpu *vcpu,
 {
 	void __user *u_psframe;
 	int ret;
-	gthread_info_t *gti = pv_vcpu_get_gti(vcpu);
 
 	u_psframe = (void __user *)vcpu_psp_ptr(vcpu, g_stacks->psp);
 	DebugGUST("copy #%d user ps frames from %px to guest kernel procedure stack %p (base 0x%llx + ind 0x%llx)\n",
@@ -847,7 +851,7 @@ pv_vcpu_user_crs_copy_to_kernel(struct kvm_vcpu *vcpu,
 
 	hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t) u_frame, true, &exception);
 	if (kvm_is_error_hva(hva)) {
-		pr_err("%s(): failed to find GPA for dst %lx GVA, inject page fault to guest\n",
+		pr_err("%s(): failed to find GPA for dst %px GVA, inject page fault to guest\n",
 			__func__, u_frame);
 		kvm_vcpu_inject_page_fault(vcpu, u_frame, &exception);
 		return -EAGAIN;
@@ -864,6 +868,7 @@ pv_vcpu_user_crs_copy_to_kernel(struct kvm_vcpu *vcpu,
 
 	return 0;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 unsigned long kvm_add_ctx_signal_stack(struct kvm_vcpu *vcpu, u64 key,
 				       bool is_main);

@@ -304,7 +304,7 @@ extern unsigned long __recovery_memset_16(void *addr, u64 val, u64 tag,
 	__ret; \
 })
 
-extern void __tagged_memcpy_8(void *dst, const void *src, size_t len);
+extern void __tagged_memcpy_8(volatile void *dst, const volatile void *src, size_t len);
 
 /*
  * recovery_memcpy_8() - optimized memory copy using strd/ldrd instructions
@@ -337,6 +337,7 @@ extern unsigned long __recovery_memcpy_8(void *dst, const void *src, size_t len,
 extern unsigned long __recovery_memcpy_16(void *dst, const void *src, size_t len,
 		unsigned long strqp_opcode, unsigned long ldrqp_opcode,
 		int prefetch);
+
 #ifdef E2K_P2V
 # define HAS_HWBUG_WC_DAM (IS_ENABLED(CONFIG_CPU_E2S) || \
 		IS_ENABLED(CONFIG_CPU_E8C) || IS_ENABLED(CONFIG_CPU_E8C2))
@@ -347,7 +348,7 @@ extern unsigned long __recovery_memcpy_16(void *dst, const void *src, size_t len
 ({ \
 	unsigned long __ret; \
 	u64 ___strd_opcode = (strd_opcode); \
-	__ret = __recovery_memcpy_8((dst), (src), (len), ___strd_opcode, \
+	__ret = __recovery_memcpy_8((void *)(dst), (void *)(src), (len), ___strd_opcode, \
 			    (ldrd_opcode), (prefetch)); \
 	if (HAS_HWBUG_WC_DAM && \
 			(((___strd_opcode >> LDST_REC_OPC_MAS_SHIFT) & \
@@ -362,7 +363,7 @@ extern unsigned long __recovery_memcpy_16(void *dst, const void *src, size_t len
  */
 static __can_be_priv_hypercall __always_inline unsigned long
 native_fast_tagged_memory_copy(
-		void *dst, const void __force *src, size_t len,
+		volatile void *dst, const volatile void __force *src, size_t len,
 		ldst_rec_op_t st_op, ldst_rec_op_t ld_op, int prefetch)
 {
 	unsigned long ret;
@@ -370,10 +371,10 @@ native_fast_tagged_memory_copy(
 	if (CONFIG_CPU_ISET_MIN >= 5 && !st_op.fmt_h && !ld_op.fmt_h &&
 	    st_op.fmt == LDST_QWORD_FMT && ld_op.fmt == LDST_QWORD_FMT &&
 	    !((u64) dst & 0xf) && !((u64) src & 0xf) && !(len & 0xf)) {
-		ret = __recovery_memcpy_16(dst, src, len,
+		ret = __recovery_memcpy_16((void *)dst, (void *)src, len,
 					   AW(st_op), AW(ld_op), prefetch);
 	} else {
-		ret = __recovery_memcpy_8(dst, src, len,
+		ret = __recovery_memcpy_8((void *)dst, (void *)src, len,
 					  AW(st_op), AW(ld_op), prefetch);
 	}
 
@@ -393,11 +394,12 @@ native_fast_tagged_memory_set(
 
 	AW(st_op) = strd_opcode;
 
-	if (CONFIG_CPU_ISET_MIN >= 5 && !((u64) addr & 0xf) && !(len & 0xf) &&
+	if (cpu_has(CPU_FEAT_QPREG) && !((u64) addr & 0xf) && !(len & 0xf) &&
 	    !st_op.fmt_h && st_op.fmt == LDST_QWORD_FMT) {
+		tag = (tag << 4) | tag;
 		ret = __recovery_memset_16(addr, val, tag, len, strd_opcode);
 	} else {
-		ret = __recovery_memset_8(addr, val, tag, len, strd_opcode);
+		ret = __recovery_memset_8((void *)addr, val, tag, len, strd_opcode);
 	}
 
 	if (HAS_HWBUG_WC_DAM &&
@@ -419,8 +421,8 @@ native_extract_tags_32(u16 *dst, const void *src)
 	return 0;
 }
 
-static inline void native_tagged_memcpy_8(void *__restrict dst,
-		const void *__restrict src, size_t n,
+static inline void native_tagged_memcpy_8(volatile void *__restrict dst,
+		const volatile void *__restrict src, size_t n,
 		const unsigned long dst_align,
 		const unsigned long src_align)
 {
@@ -462,10 +464,10 @@ static inline void native_tagged_memcpy_8(void *__restrict dst,
 #else /* !CONFIG_KVM_GUEST_KERNEL */
 /* it is native kernel with or without virtualization support */
 #define tagged_memcpy_8(dst, src, n)					\
-({									\
+do {									\
 	native_tagged_memcpy_8(dst, src, n,				\
 			__alignof(*(dst)), __alignof(*(src)));		\
-})
+} while (0)
 #endif /* CONFIG_KVM_GUEST_KERNEL */
 
 extern void boot_fast_memcpy(void *, const void *, size_t);
@@ -481,7 +483,7 @@ extern notrace void boot_fast_memset(void *s_va, long c, size_t count);
  * using privileged LD/ST recovery operations
  */
 static inline void
-fast_tagged_memory_copy(void *dst, const void *src, size_t len, int prefetch)
+fast_tagged_memory_copy(volatile void *dst, const volatile void *src, size_t len, int prefetch)
 {
 	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT };
 	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT,
@@ -493,71 +495,71 @@ fast_tagged_memory_copy(void *dst, const void *src, size_t len, int prefetch)
 	BUG_ON(copied != len);
 }
 
-static inline void colored_page_copy(void *dst, const void *src)
+static inline void colored_page_copy(volatile void *dst, const volatile void *src)
 {
 	ldst_rec_op_t ld_op = (ldst_rec_op_t) { .fmt_h = LDST_MCOLOR_FMT_H,
 						.mas = MAS_BYPASS_L1_CACHE };
+	u64 i = 0;
 
 	WARN_ON_ONCE(!IS_ALIGNED((u64)dst, PAGE_SIZE) || !IS_ALIGNED((u64)src, PAGE_SIZE));
 
 	if (cpu_has(CPU_FEAT_E48C_MAKET)) {
-		ldst_rec_op_t st_op = (ldst_rec_op_t) { .fmt_h = LDST_MCOLOR_FMT_H };
-		size_t copied =  __recovery_memcpy_16(dst, src, PAGE_SIZE, AW(st_op), AW(ld_op), 1);
-		BUG_ON(copied != PAGE_SIZE);
-	} else {
-		u64 i = 0;
+		fast_tagged_memory_copy(dst, src, PAGE_SIZE, true);
+		return;
+	}
 
-		for (; i < PAGE_SIZE / 8; i++) {
-			ldst_rec_op_t st_op = (ldst_rec_op_t) {
+	for (; i < PAGE_SIZE / 8; i++) {
+		ldst_rec_op_t st_op = (ldst_rec_op_t) {
 				.fmt = LDST_QWORD_FMT,
 				.mask = 0xff,
 				.dcp = 1
-			};
-			register u64 val asm("r16");
-			u64 color, *src_i, *dst_i;
-			u8 color_shift;
+		};
+		register u64 val asm("r16");
+		u64 color, *src_i, *dst_i;
+		u8 color_shift;
 
-			src_i = (u64 *)src + i;
-			dst_i = (u64 *)dst + i;
+		src_i = (u64 *)src + i;
+		dst_i = (u64 *)dst + i;
 
-			val = __user_ldrd_d_opc(src_i,
-					(ldst_rec_op_t) { .word = TAGGED_MEM_LOAD_REC_OPC });
-			color = __user_ldrd_d_opc(src_i, ld_op);
+		val = __user_ldrd_d_opc(src_i,
+				(ldst_rec_op_t) { .word = TAGGED_MEM_LOAD_REC_OPC });
+		color = __user_ldrd_d_opc(src_i, ld_op);
 
-			color_shift = ((u64)dst_i & 0x10) ? 61 : 60;
-			dst_i = (u64 *)((u64)dst_i | (color << color_shift));
+		color_shift = ((u64)dst_i & 0x10) ? 61 : 60;
+		dst_i = (u64 *)((u64)dst_i | (color << color_shift));
 
-			__user_strd_d_opc(val, dst_i, st_op);
-		}
+		__user_strd_d_opc(val, dst_i, st_op);
 	}
 }
 
 /* Avoid 16 bytes loads when talking to devices (this might non-prefetchable area) */
-static inline void fast_tagged_memcpy_io(void *dst, const void *src, size_t len, int prefetch)
+static inline void fast_tagged_memcpy_io(volatile void *dst, const volatile void *src,
+					size_t len, int prefetch)
 {
 	ldst_rec_op_t st_op = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT };
 	ldst_rec_op_t ld_op = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT,
 			.mas = MAS_FILL_OPERATION | MAS_BYPASS_L1_CACHE };
 	size_t copied;
 
-	copied = __recovery_memcpy_8(dst, src, len,
+	copied = __recovery_memcpy_8((void *)dst, (void *)src, len,
 					    AW(st_op), AW(ld_op), prefetch);
 	BUG_ON(copied != len);
 }
 
 static __always_inline __must_check size_t
-fast_tagged_memory_copy_to_user(void __user *dst, const void *src, size_t len,
-		size_t *copied, int prefetch)
+fast_tagged_memory_copy_to_user(volatile void __user *dst, const volatile void *src, size_t len,
+				size_t *copied, int prefetch)
 {
 	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT, .prot = 1 };
 	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT,
 			.mas = MAS_FILL_OPERATION | MAS_BYPASS_L1_CACHE };
-	return native_fast_tagged_memory_copy((void __force *) dst, src, len,
+	return native_fast_tagged_memory_copy((volatile void __force *) dst, src, len,
 			strd_opcode, ldrd_opcode, prefetch);
 }
+
 static __always_inline __must_check size_t
-fast_tagged_memory_copy_from_user(void *dst, const void __user *src, size_t len,
-		size_t *copied, int prefetch)
+fast_tagged_memory_copy_from_user(volatile void *dst, const volatile void __user *src, size_t len,
+				  size_t *copied, int prefetch)
 {
 	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT };
 	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT,
@@ -565,14 +567,15 @@ fast_tagged_memory_copy_from_user(void *dst, const void __user *src, size_t len,
 	return native_fast_tagged_memory_copy(dst, (void __force *) src, len,
 			strd_opcode, ldrd_opcode, prefetch);
 }
+
 static __always_inline __must_check size_t
-fast_tagged_memory_copy_in_user(void __user *dst, const void __user *src, size_t len,
-		size_t *copied, int prefetch)
+fast_tagged_memory_copy_in_user(volatile void __user *dst, const volatile void __user *src,
+				size_t len, size_t *copied, int prefetch)
 {
 	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT, .prot = 1 };
 	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT,
 			.mas = MAS_FILL_OPERATION | MAS_BYPASS_L1_CACHE, .prot = 1 };
-	return native_fast_tagged_memory_copy((void __force *)  dst, (void __force *) src,
+	return native_fast_tagged_memory_copy((volatile void __force *)  dst, (void __force *) src,
 			len, strd_opcode, ldrd_opcode, prefetch);
 }
 static inline unsigned long

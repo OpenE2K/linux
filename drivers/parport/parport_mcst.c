@@ -270,7 +270,7 @@ static void parport_pc_init_state(struct pardevice *dev,
 		s->u.pc.ecr = 0x01; /* mPS2 mode */
 	} else {	
 		if (dev->irq_func &&
-	    		dev->port->irq != PARPORT_IRQ_NONE)
+			dev->port->irq != PARPORT_IRQ_NONE)
 			/* Set ackIntEn */
 			s->u.pc.ctr |= 0x10;
 
@@ -2400,12 +2400,12 @@ out5:
 	release_region(base, 3);
 
 #ifdef CONFIG_E90
-        iounmap(base);
+	iounmap(base);
 #endif
 
 out4:
 #endif
-	parport_put_port(p);
+	parport_del_port(p);
 out3:
 	kfree(priv);
 out2:
@@ -2447,7 +2447,7 @@ void parport_pc_unregister_port(struct parport *p)
 				    priv->dma_handle);
 #endif
 	kfree(p->private_data);
-	parport_put_port(p);
+	parport_del_port(p);
 	kfree(ops); /* hope no-one cached it */
 }
 EXPORT_SYMBOL(parport_pc_unregister_port);
@@ -2991,16 +2991,16 @@ static int parport_pc_pci_probe(struct pci_dev *dev,
 		unsigned long io_lo, io_hi;
 
 #ifdef CONFIG_E90
-    		 io_lo = ioremap(pci_resource_start(dev, lo),
-	                                     pci_resource_len(dev, lo));
+		 io_lo = ioremap(pci_resource_start(dev, lo),
+					     pci_resource_len(dev, lo));
 #else
 		io_lo = pci_resource_start(dev, lo);
 #endif
 		io_hi = 0;
 		if ((hi >= 0) && (hi <= 6))
 #ifdef CONFIG_E90
-    			io_hi = ioremap(pci_resource_start(dev, hi),
-	                                     pci_resource_len(dev, hi));
+			io_hi = ioremap(pci_resource_start(dev, hi),
+					     pci_resource_len(dev, hi));
 #else
 			io_hi = pci_resource_start(dev, hi);
 #endif
@@ -3010,7 +3010,7 @@ static int parport_pc_pci_probe(struct pci_dev *dev,
 					def.) */
 #ifdef _WORKAROUND_MCST_PP
 		if (id->driver_data == mcst_pp_iee1284) {
-		        io_hi = io_lo + 0x08;
+			io_hi = io_lo + 0x08;
 		}
 #endif /* _WORKAROUND_MCST_PP */
 		/* TODO: test if sharing interrupts works */
@@ -3522,8 +3522,8 @@ size_t parport_write_block_dma_compat (struct parport *port,
 	struct device *dev = port->physport->dev;
 	int cnt = 0;
 
-        ppc_cr = inb(ECONTROL(port));
-        outb(((ppc_cr & 0xf8) | mSPPh), ECONTROL(port));
+	ppc_cr = inb(ECONTROL(port));
+	outb(((ppc_cr & 0xf8) | mSPPh), ECONTROL(port));
 											
 	DPRINTK( "enter parport_write_block_dma_compat, length = 0x%lx\n", length);
 	if (length >= (maxlen * 4)){

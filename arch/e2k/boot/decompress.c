@@ -532,8 +532,6 @@ static void reserve_memory(boot_info_t *bootinfo, struct board_mem *bm)
 		reserve_memory_area(bm, boot_info->ramdisk_base,
 				boot_info->ramdisk_size, 1, "ramdisk");
 
-	reserve_memory_area(bm, 0x7ee00000, PAGE_SIZE, 1, "APIC page");
-
 	boot_reserve_mp_table(bootinfo, bm);
 
 	if (bootinfo->kernel_args_string_pnt)
@@ -553,7 +551,7 @@ static void reserve_memory(boot_info_t *bootinfo, struct board_mem *bm)
 	USBR = read_USBR_reg();
 	area_base = USBR.base;
 	USD = read_USD_reg();
-	area_size = area_base - (USD.Ptr - USD.Ind);
+	area_size = area_base - (USD_PTR(USD) - USD_IND(USD));
 	area_base -= area_size;
 	reserve_memory_area(bm, area_base, area_size, 1,
 			"kernel boot-time data stack");

@@ -1,12 +1,13 @@
 # SPDX-License-Identifier: GPL-2.0
 # Copyright (c) 2023 MCST
+
 KASAN_SANITIZE := n
 GCOV_PROFILE := n
 
 OBJCOPY		+= -O binary -R .note -R .comment -S
 OBJCOPYFLAGS	:= -O binary -R .note -R .comment -S
 
-ccflags-y := -DCONFIG_BOOT_E2K -fno-semi-spec-ld -fno-spec-ld \
+ccflags-y := -DCONFIG_BOOT_E2K $(call lcc-options,-fno-semi-spec-ld -fno-spec-ld) \
 	     -ftrivial-auto-var-init=uninitialized
 
 targets := vmlinux vmlinux.bin vmlinux.bin.gz vmlinux.bin.bz2 vmlinux.bin.xz \
@@ -31,8 +32,7 @@ FLAGS_EPIC_EIOH := -DCONFIG_BOOT_EPIC -DCONFIG_EIOH
 ifeq ($(CONFIG_E2S),y)
 	KBUILD_CFLAGS += -DCONFIG_E2S -DCONFIG_E2K_FULL_SIC
 	KBUILD_AFLAGS += -DCONFIG_E2S -DCONFIG_E2K_FULL_SIC
-else
- ifeq ($(CONFIG_E8C),y)
+else ifeq ($(CONFIG_E8C),y)
 	KBUILD_CFLAGS += -DCONFIG_E8C \
 			 -DCONFIG_E2K_FULL_SIC \
 			 -DCONFIG_NBSR_CFG_V4 \
@@ -41,8 +41,7 @@ else
 			 -DCONFIG_E2K_FULL_SIC \
 			 -DCONFIG_NBSR_CFG_V4 \
 			 -DCONFIG_L_IOH2
- else
-  ifeq ($(CONFIG_E1CP),y)
+else ifeq ($(CONFIG_E1CP),y)
 	KBUILD_CFLAGS += -DCONFIG_E1CP \
 			 -DCONFIG_E2K_LEGACY_SIC \
 			 -DCONFIG_NBSR_CFG_V4 \
@@ -51,8 +50,7 @@ else
 			 -DCONFIG_E2K_LEGACY_SIC \
 			 -DCONFIG_NBSR_CFG_V4 \
 			 -DCONFIG_L_IOH2
-  else
-   ifeq ($(CONFIG_E8C2),y)
+else ifeq ($(CONFIG_E8C2),y)
 	KBUILD_CFLAGS += -DCONFIG_E8C2 \
 			 -DCONFIG_E2K_FULL_SIC \
 			 -DCONFIG_NBSR_CFG_V4 \
@@ -60,8 +58,7 @@ else
 	KBUILD_AFLAGS += -DCONFIG_E8C2 \
 			 -DCONFIG_E2K_FULL_SIC \
 			 -DCONFIG_L_IOH2
-   else
-    ifeq ($(CONFIG_E12C),y)
+else ifeq ($(CONFIG_E12C),y)
 	KBUILD_CFLAGS += -DCONFIG_E12C \
 			 -DCONFIG_E2K_FULL_SIC \
 			 -DCONFIG_NBSR_CFG_V6 \
@@ -72,8 +69,7 @@ else
 			 -DCONFIG_NBSR_CFG_V6 \
 			 -DCONFIG_L_IOH2 \
 			 $(FLAGS_EPIC_EIOH)
-    else
-     ifeq ($(CONFIG_E16C),y)
+else ifeq ($(CONFIG_E16C),y)
 	KBUILD_CFLAGS += -DCONFIG_E16C \
 			 -DCONFIG_E2K_FULL_SIC \
 			 -DCONFIG_NBSR_CFG_V6 \
@@ -84,54 +80,43 @@ else
 			 -DCONFIG_NBSR_CFG_V6 \
 			 -DCONFIG_L_IOH2 \
 			 $(FLAGS_EPIC_EIOH)
-     else
-      ifeq ($(CONFIG_E2C3),y)
-	 KBUILD_CFLAGS += -DCONFIG_E2C3 \
-			  -DCONFIG_E2K_FULL_SIC \
-			  -DCONFIG_NBSR_CFG_V6 \
-			  -DCONFIG_L_IOH2 \
-			  $(FLAGS_EPIC_EIOH)
-	 KBUILD_AFLAGS += -DCONFIG_E2C3 \
-			  -DCONFIG_E2K_FULL_SIC \
-			  -DCONFIG_NBSR_CFG_V6 \
-			  -DCONFIG_L_IOH2 \
-			  $(FLAGS_EPIC_EIOH)
-      else
-       ifeq ($(CONFIG_E48C),y)
-	  KBUILD_CFLAGS += -DCONFIG_E48C \
-			   -DCONFIG_E2K_FULL_SIC \
-			   -DCONFIG_NBSR_CFG_V6 \
-			   -DCONFIG_E2K_SIC_V7 \
-			   -DCONFIG_L_IOH2 \
-			   $(FLAGS_EPIC_EIOH)
-	  KBUILD_AFLAGS += -DCONFIG_E48C \
-			   -DCONFIG_E2K_FULL_SIC \
-			   -DCONFIG_NBSR_CFG_V6 \
-			   -DCONFIG_E2K_SIC_V7 \
-			   -DCONFIG_L_IOH2 \
-			   $(FLAGS_EPIC_EIOH)
-       else
-        ifeq ($(CONFIG_E8V7),y)
-	   KBUILD_CFLAGS += -DCONFIG_E8V7 \
-			    -DCONFIG_E2K_FULL_SIC \
-			    -DCONFIG_NBSR_CFG_V6 \
-			    -DCONFIG_E2K_SIC_V7 \
-			    -DCONFIG_L_IOH2 \
-			    $(FLAGS_EPIC_EIOH)
-	   KBUILD_AFLAGS += -DCONFIG_E8V7 \
-			    -DCONFIG_E2K_FULL_SIC \
-			    -DCONFIG_NBSR_CFG_V6 \
-			    -DCONFIG_E2K_SIC_V7 \
-			    -DCONFIG_L_IOH2 \
-			    $(FLAGS_EPIC_EIOH)
-	endif
-       endif
-      endif
-     endif
-    endif
-   endif
-  endif
- endif
+else ifeq ($(CONFIG_E2C3),y)
+	KBUILD_CFLAGS += -DCONFIG_E2C3 \
+			 -DCONFIG_E2K_FULL_SIC \
+			 -DCONFIG_NBSR_CFG_V6 \
+			 -DCONFIG_L_IOH2 \
+			 $(FLAGS_EPIC_EIOH)
+	KBUILD_AFLAGS += -DCONFIG_E2C3 \
+			 -DCONFIG_E2K_FULL_SIC \
+			 -DCONFIG_NBSR_CFG_V6 \
+			 -DCONFIG_L_IOH2 \
+			 $(FLAGS_EPIC_EIOH)
+else ifeq ($(CONFIG_E48C),y)
+	KBUILD_CFLAGS += -DCONFIG_E48C \
+			 -DCONFIG_E2K_FULL_SIC \
+			 -DCONFIG_NBSR_CFG_V6 \
+			 -DCONFIG_E2K_SIC_V7 \
+			 -DCONFIG_L_IOH2 \
+			 $(FLAGS_EPIC_EIOH)
+	KBUILD_AFLAGS += -DCONFIG_E48C \
+			 -DCONFIG_E2K_FULL_SIC \
+			 -DCONFIG_NBSR_CFG_V6 \
+			 -DCONFIG_E2K_SIC_V7 \
+			 -DCONFIG_L_IOH2 \
+			 $(FLAGS_EPIC_EIOH)
+else ifeq ($(CONFIG_E8V7),y)
+	KBUILD_CFLAGS += -DCONFIG_E8V7 \
+			 -DCONFIG_E2K_FULL_SIC \
+			 -DCONFIG_NBSR_CFG_V6 \
+			 -DCONFIG_E2K_SIC_V7 \
+			 -DCONFIG_L_IOH2 \
+			 $(FLAGS_EPIC_EIOH)
+	KBUILD_AFLAGS += -DCONFIG_E8V7 \
+			 -DCONFIG_E2K_FULL_SIC \
+			 -DCONFIG_NBSR_CFG_V6 \
+			 -DCONFIG_E2K_SIC_V7 \
+			 -DCONFIG_L_IOH2 \
+			 $(FLAGS_EPIC_EIOH)
 endif
 
 # remove profile flags
@@ -164,14 +149,15 @@ ROM_LDFLAGS  = -e start -T $(TOPDIR)/$(ROMSCRIPT)
 # .got section size - this is a small optimization.
 DECOMPRESSOR_FLAGS := -fvisibility=hidden -DE2K_P2V -O3
 CFLAGS_decompress.o += -fpic $(DECOMPRESSOR_FLAGS)
-CFLAGS_machdep_fpic.o += -fpic $(DECOMPRESSOR_FLAGS)
+# Silence warnings for code that will be eliminated during
+# compiler optimization pass
+CFLAGS_machdep_fpic.o += -fpic $(DECOMPRESSOR_FLAGS) \
+			 -Wno-shift-count-overflow -Wno-shift-count-negative
 CFLAGS_string_fpic.o += -fpic $(DECOMPRESSOR_FLAGS)
 CFLAGS_string_guest_fpic.o += -fpic $(DECOMPRESSOR_FLAGS)
 AFLAGS_recovery_string_fpic.o += -fpic $(DECOMPRESSOR_FLAGS)
 AFLAGS_REMOVE_recovery_string_v5_fpic.o = $(CFLAGS_ALL_CPUS)
 AFLAGS_recovery_string_v5_fpic.o += -march=elbrus-v5 $(DECOMPRESSOR_FLAGS)
-
-CFLAGS_bootblock.o += -fno-toplevel-reorder
 
 targets += bootblock.o decompress.o machdep_fpic.o string_fpic.o \
 	   recovery_string_fpic.o recovery_string_v5_fpic.o
@@ -315,7 +301,7 @@ LDFLAGS_cpiggy.o := -r -b binary --oformat elf64-e2k -T $(srctree)/$(src)/vmlinu
 $(obj)/cpiggy.o: $(obj)/vmlinux.bin$(suffix-y) FORCE
 	$(call if_changed,ld)
 
-LDFLAGS_image = -static -e gap -T $(srctree)/$(src)/boot.lds \
+LDFLAGS_image = -static -e 0x0 -T $(srctree)/$(src)/boot.lds \
  -defsym __kernel_size=$(shell wc -c < $(objtree)/$(obj)/vmlinux.bin)
 $(obj)/image: $(obj)/bpiggy.o $(obj)/bootblock.o FORCE
 	$(call if_changed,ld)

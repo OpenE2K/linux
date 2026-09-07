@@ -4,7 +4,7 @@
  */
 
 #include <linux/memblock.h>
-
+#include <linux/crash_dump.h>
 #include <asm/pool.h>
 
 /*
@@ -15,10 +15,11 @@
 #define POOL_MEMBLOCK POOL_ALLOCATOR_NR
 
 #define DEBUG_POOL 0
-#define TracePool(...) do { \
-	if (DEBUG_POOL) \
-		trace_printk(##__VA_ARGS__); \
-} while (0)
+#if DEBUG_POOL
+# define TracePool(...) trace_printk(__VA_ARGS__)
+#else
+# define TracePool(fmt, ...) no_printk(KERN_DEBUG pr_fmt(fmt), ##__VA_ARGS__)
+#endif
 
 static inline unsigned long page_order_to_size(unsigned long order)
 {
@@ -66,18 +67,26 @@ static void pool_free_internal(bool is_memblock_pool, void *addr, unsigned long 
  */
 static void * __ref pool_alloc_object(struct pool *pool)
 {
+	gfp_t flags = pool->flags;
+
+	if (!is_kdump_kernel())
+		flags |= __GFP_THISNODE;
+
 	switch (pool->allocator) {
 	case POOL_SLAB:
-		return kmalloc_node(pool->objsize, pool->flags | __GFP_THISNODE, pool->node);
+		return kmalloc_node(pool->objsize, flags, pool->node);
 	case POOL_BUDDY: {
-		struct page *p = alloc_pages_node(pool->node, pool->flags | __GFP_THISNODE,
+		struct page *p = alloc_pages_node(pool->node, flags,
 						  pool->objorder);
 		return p ? page_to_virt(p) : NULL;
 	}
 	case POOL_MEMBLOCK:
+		if (is_kdump_kernel())
+			return memblock_alloc(pool->objsize, pool->objsize);
+
 		return memblock_alloc_exact_nid_raw(pool->objsize, pool->objsize,
-						    MEMBLOCK_LOW_LIMIT, MEMBLOCK_ALLOC_ACCESSIBLE,
-						    pool->node);
+					MEMBLOCK_LOW_LIMIT, MEMBLOCK_ALLOC_ACCESSIBLE,
+					pool->node);
 	default:
 		WARN_ON(1);
 		return NULL;
@@ -185,12 +194,8 @@ static int chunk_alloc_objects(struct pool *pool, struct pool_chunk *chunk)
 {
 	for (size_t i = 0; i < chunk->capacity; i++) {
 		chunk->mem[i] = pool_alloc_object(pool);
-		if (!chunk->mem[i]) {
-			for (size_t j = 0; j < i; j++)
-				pool_free_object(pool, chunk->mem[j]);
-
+		if (!chunk->mem[i])
 			return -ENOMEM;
-		}
 	}
 
 	return 0;
@@ -271,6 +276,9 @@ struct pool *pool_create(unsigned long capacity, unsigned long objsize,
 
 	return create_pool(capacity, objsize, allocator, flags, node);
 }
+#ifdef CONFIG_TEST_POOL_MODULE
+EXPORT_SYMBOL(pool_create);
+#endif
 
 #ifdef CONFIG_DEBUG_PAGEALLOC
 struct pool * __init pool_create_memblock(unsigned long capacity, unsigned long objsize, int node)
@@ -283,7 +291,7 @@ void pool_destroy(struct pool *pool)
 {
 	int order = order_base_2(PAGE_ALIGN(sizeof(struct pool)) >> PAGE_SHIFT);
 
-	TracePool("pool_destroy: pool = 0x%lx\n", pool);
+	TracePool("pool_destroy: pool = 0x%px\n", pool);
 
 	if (pool->chunk) {
 		pool_free_objects(pool);
@@ -292,6 +300,9 @@ void pool_destroy(struct pool *pool)
 
 	free_pages((unsigned long)pool, order);
 }
+#ifdef CONFIG_TEST_POOL_MODULE
+EXPORT_SYMBOL(pool_destroy);
+#endif
 
 static void *chunk_get(struct pool_chunk *chunk)
 {

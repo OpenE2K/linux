@@ -179,11 +179,7 @@ static IMG_BOOL allocateMemoryHelper(
                 psDevContext->sDevSpecs.asMMU_HeapInfo[ui32Heap].ui32HeapId,
                 ui32Size,
                 ui32Alignment,
-#ifdef __LCC__
                 (void *)0x1000,
-#else
-                0x1000,
-#endif
                 pMemInfo->sysMemHandle,
                 &pMemInfo->talmmuHandle);
 		IMG_ASSERT(result == IMG_SUCCESS && pMemInfo->talmmuHandle != NULL);

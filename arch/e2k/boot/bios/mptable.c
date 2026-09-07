@@ -1,5 +1,6 @@
 /*
- * $Id: mptable.c,v 1.22 2009/02/24 15:13:30 atic Exp $
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
  */
 
 #include <linux/types.h>

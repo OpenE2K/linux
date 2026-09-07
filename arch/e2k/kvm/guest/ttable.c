@@ -13,6 +13,7 @@
 #include <asm/copy-hw-stacks.h>
 #include <asm/syscalls.h>
 #include <asm/fast_syscalls.h>
+#include <asm/mmu_regs_access.h>
 #include <asm/ptrace.h>
 #include <asm/traps.h>
 #include <asm/trap_table.h>
@@ -24,7 +25,6 @@
 #include <asm/kvm/hypercall.h>
 #include <asm/kvm/priv-hypercall.h>
 #include <asm/kvm/cpu_regs_access.h>
-#include <asm/kvm/mmu_regs_access.h>
 #include <asm/kvm/runstate.h>
 #include <asm/kvm/guest/traps.h>
 #include <asm/kvm/guest/trap_table.h>
@@ -177,7 +177,6 @@ static void kvm_guest_save_trap_cellar(pt_regs_t *regs)
 	trap->curr_cnt = -1;
 	trap->ignore_user_tc = 0;
 	trap->tc_called = 0;
-	trap->from_sigreturn = 0;
 	KVM_RESET_MMU_TRAP_COUNT();
 	DebugGT("was saved %d TC entries\n", tc_no);
 }

@@ -145,17 +145,7 @@
 #define ECC_STAT_UECNT_SHIFT 16
 #define ECC_MODE_MASK 0x7
 
-#define PCS_PMC_REGS_base 0x1000
-#define PMC_INFO 0x000
-#define PMC_FREQ_CORE_FLOAT 0x110
-#define PMC_FREQ_OCN_FLOAT 0x114
-#define PMC_FREQ_GRAPHIC_FLOAT 0x600
-#define PMC_FREQ_CORE_TABLE 0x120
-#define PMC_FREQ_OCN_TABLE 0x140
-#define PMC_FREQ_GRAPHIC_TABLE 0x620
-#define PMC_SYS_MON_0_REG 0x500
-#define PMC_SYS_MON_1_REG 0x504
-#define PMC_FREQ_TABLE_DEPTH 8
+#define PCS_PMC_REGS_base PMC_INFO
 #define E2C3_size 7
 #define DIVF_LIM_LO_MASK 0x00FC0000
 #define DIVF_LIM_LO_SHIFT 18
@@ -988,7 +978,7 @@ static int read_wlcc_data(struct link_data *data, int node)
 		/* iol_bitrate[22:20] from PCS_CTRL3 reg (v5) moved
 		 * to pin_wlcc_speed_presets[18:16] PMC_SYS_MON_0 reg (v6)
 		 * */
-		a->io_mpll = (sic_read_node_nbsr_reg(node, PCS_PMC_REGS_base + PMC_SYS_MON_0_REG)
+		a->io_mpll = (sic_read_node_nbsr_reg(node, PMC_SYS_MON_0)
 				& PIN_WLCC_SPEED_PRESETS_MASK) >> PIN_WLCC_SPEED_PRESETS_SHIFT;
 
 		a->wlcc_rate = (readl(base_addr + IOL_PLM_CTLR_SHIFT)
@@ -1327,10 +1317,10 @@ static int get_wlcc_information(struct link_data *data, char *buf,
 {
 	struct link_data *b = data;
 	int cpu_type = machine.native_id;
-	char *wlcc_half_rate[] = {"2.5", "3", "2.5", "3", "1.25", "1.5", "2", "4"};
-	char *wlcc_full_rate[] = {"5", "6", "5", "6", "2.5", "3", "4", "8"};
-	char *wlcc_half_rate_v6[] = {"1.25", "1.5", "2.5", "3", "1", "2", "2.25", "2.75"};
-	char *wlcc_full_rate_v6[] = {"2.5", "3", "5", "6", "2", "4", "4.5", "5.5"};
+	char *wlcc_half_rate_v6[] = {"2.5", "3", "2.5", "3", "1.25", "1.5", "2", "4"};
+	char *wlcc_full_rate_v6[] = {"5", "6", "5", "6", "2.5", "3", "4", "8"};
+	char *wlcc_half_rate[] = {"1.25", "1.5", "2.5", "3", "1", "2", "2.25", "2.75"};
+	char *wlcc_full_rate[] = {"2.5", "3", "5", "6", "2", "4", "4.5", "5.5"};
 
 	j += sprintf(buf + j, "NODE%d-wlcc: ", hwmon->node);
 	if (b->wlcc_rate == 1) {
@@ -1698,7 +1688,7 @@ static ssize_t show_mem_data(struct device *dev,
 {
 	struct hwmon_data *hwmon = dev_get_drvdata(dev);
 	struct mem_data b = read_mem(hwmon->node);
-	int j;
+	int j = 0;
 	int i;
 	int mem_channels = get_mem_channels();
 	int cpu_type = machine.native_id;
@@ -1857,7 +1847,6 @@ static ssize_t show_mem_rate(struct device *dev,
 			struct device_attribute *attr, char *buf)
 {
 	struct hwmon_data *hwmon = dev_get_drvdata(dev);
-	int idx = to_sensor_dev_attr(attr)->index;
 	struct mem_data b = read_mem_rate(hwmon->node);
 	int j = 0;
 	int curr_ch;
@@ -1955,13 +1944,10 @@ static ssize_t show_mem_rate_e8c(struct device *dev,
 static struct pins_data read_pins(int node)
 {
 	struct pins_data a;
-	int PMC_ADDR = PCS_PMC_REGS_base + PMC_INFO;
-	int pmc_inform = sic_read_node_nbsr_reg(node, PMC_ADDR);
+	int pmc_inform = sic_read_node_nbsr_reg(node, PMC_INFO);
 	int rt_lcfg_val;
-	int sys_mon_0_reg = PCS_PMC_REGS_base + PMC_SYS_MON_0_REG;
-	int sys_mon_0 = sic_read_node_nbsr_reg(node, sys_mon_0_reg);
-	int sys_mon_1_reg = PCS_PMC_REGS_base + PMC_SYS_MON_1_REG;
-	int sys_mon_1 = sic_read_node_nbsr_reg(node, sys_mon_1_reg);
+	int sys_mon_0_reg = PMC_SYS_MON_0;
+	int sys_mon_1_reg = PMC_SYS_MON_1;
 	int curr_LCFG;
 
 	switch (node) {
@@ -2626,7 +2612,6 @@ static int create_info_device_attr(struct device *dev)
 #ifdef CONFIG_E2K
 	int cpu_type = machine.native_id;
 #endif
-	int mult_link = ((sic_read_nbsr_reg(ST_P)) >> MULTILINK_SHIFT) & MULTILINK_MASK;
 
 #ifdef CONFIG_E2K
 	switch (cpu_type) {

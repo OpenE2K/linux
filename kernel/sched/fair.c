@@ -201,6 +201,15 @@ static struct ctl_table sched_fair_sysctls[] = {
 		.extra1         = SYSCTL_ONE,
 	},
 #endif
+#ifdef CONFIG_MCST
+	{
+		.procname	= "sched_min_ns_no_migrate",
+		.data		= &sysctl_sched_min_ns_no_migrate,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+#endif
 	{}
 };
 
@@ -8482,13 +8491,6 @@ static int detach_tasks(struct lb_env *env)
 		return 0;
 
 	while (!list_empty(tasks)) {
-#ifdef CONFIG_MCST
-# ifdef CONFIG_SYSCTL
-		unsigned int sched_min_ns_no_migrate = sysctl_sched_min_ns_no_migrate;
-# else
-		unsigned int sched_min_ns_no_migrate = 0;
-# endif
-#endif
 
 		/*
 		 * We don't want to steal all, otherwise we may be treated likewise,
@@ -8529,11 +8531,11 @@ static int detach_tasks(struct lb_env *env)
 			    load < 16 && !env->sd->nr_balance_failed)
 				goto next;
 
-#if defined(CONFIG_MCST)
+#ifdef CONFIG_MCST
 			if (p->last_tm_on_cpu == 0)
 				goto next;
 
-			if (getns64timeofday() < p->last_tm_on_cpu + sched_min_ns_no_migrate)
+			if (getns64timeofday() < p->last_tm_on_cpu + sysctl_sched_min_ns_no_migrate)
 				goto next;
 #endif
 

@@ -133,7 +133,6 @@ is_kernel_data_stack_bounds(bool on_kernel, e2k_usd_t usd)
 #ifndef	CONFIG_VIRTUALIZATION
 /* it is native kernel without any virtualization */
 
-#define	handle_guest_traps(regs)	/* none any guests */
 static __always_inline void
 init_guest_traps_handling(struct pt_regs *regs, bool user_mode_trap)
 {
@@ -141,16 +140,6 @@ init_guest_traps_handling(struct pt_regs *regs, bool user_mode_trap)
 
 static __always_inline void init_guest_syscalls_handling(struct pt_regs *regs)
 {
-}
-
-static inline bool is_guest_proc_stack_bounds(struct pt_regs *regs)
-{
-	return false;	/* none any guest */
-}
-
-static inline bool is_guest_chain_stack_bounds(struct pt_regs *regs)
-{
-	return false;	/* none any guest */
 }
 
 static inline bool is_guest_TIRs_frozen(struct pt_regs *regs)
@@ -268,7 +257,7 @@ extern unsigned long kvm_pass_page_fault_to_guest(struct pt_regs *regs,
 						  trap_cellar_t *tcellar);
 extern void kvm_complete_page_fault_to_guest(unsigned long what_complete);
 
-extern int do_hret_last_wish_intc(struct kvm_vcpu *vcpu, struct pt_regs *regs);
+extern int intc_hret_last_wish(struct kvm_vcpu *vcpu, struct pt_regs *regs);
 
 extern unsigned long (*ttable_entry18) (unsigned long, unsigned long,
 					unsigned long, unsigned long,
@@ -359,24 +348,7 @@ static inline bool kvm_handle_guest_last_wish(struct pt_regs *regs)
 	return false;
 }
 
-/*
- * Guest kernel (same as host) does not use AAU, so if trap occurred on
- * guest kernel it is error. Do not pass the trap to guest, host will handle
- * thr trap and kill the guest.
- * Guest user can use AAU and if trap occurred on guest user, then this trap
- * need pass to handle one by guest kernel
- */
-static inline bool
-kvm_should_pass_aau_kernel_trap_to_guest(struct pt_regs *regs)
-{
-	return false;
-}
-
-static inline bool kvm_should_pass_aau_user_trap_to_guest(struct pt_regs *regs)
-{
-	return true;
-}
-
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 /*
  * Some traps need not pass to guest, they can be handled by host only.
  */
@@ -500,27 +472,32 @@ static inline bool kvm_handle_guest_traps(struct pt_regs *regs)
 	return false;
 }
 
-static inline bool is_guest_proc_stack_bounds(struct pt_regs *regs)
+static inline int
+kvm_host_do_aau_page_fault(struct pt_regs *const regs, e2k_addr_t address,
+			   const tc_cond_t condition, const tc_mask_t mask,
+			   const unsigned int aa_no)
 {
-	if (!kvm_test_intc_emul_flag(regs))
-		return false;
+	if (likely(!kvm_test_intc_emul_flag(regs))) {
+		return native_do_aau_page_fault(regs, address, condition, mask,
+						aa_no);
+	}
 
-	return kvm_is_guest_proc_stack_bounds(regs);
+	return kvm_pv_mmu_aau_page_fault(current_thread_info()->vcpu, regs,
+					 address, condition, aa_no);
 }
-
-static inline bool is_guest_chain_stack_bounds(struct pt_regs *regs)
+#else
+static inline int
+kvm_host_do_aau_page_fault(struct pt_regs *const regs, e2k_addr_t address,
+			   const tc_cond_t condition, const tc_mask_t mask,
+			   const unsigned int aa_no)
 {
-	if (!kvm_test_intc_emul_flag(regs))
-		return false;
-
-	return kvm_is_guest_chain_stack_bounds(regs);
+	return native_do_aau_page_fault(regs, address, condition, mask, aa_no);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #ifndef	CONFIG_KVM_GUEST_KERNEL
 /* It is native host kernel with virtualization support on */
 /* guest cannot support hypervisor mode and create own virtual machines, */
-
-#define	handle_guest_traps(regs)	kvm_handle_guest_traps(regs)
 
 static __always_inline void
 init_guest_traps_handling(struct pt_regs *regs, bool user_mode_trap)
@@ -554,34 +531,7 @@ static inline bool handle_guest_last_wish(struct pt_regs *regs)
 	return kvm_handle_guest_last_wish(regs);
 }
 
-static inline int
-kvm_host_instr_page_fault(struct pt_regs *regs, tc_fault_type_t ftype,
-			  const int async_instr)
-{
-	struct kvm_vcpu *vcpu = current_thread_info()->vcpu;
-
-	if (!kvm_test_intc_emul_flag(regs)) {
-		native_instr_page_fault(regs, ftype, async_instr);
-		return 0;
-	}
-
-	return kvm_pv_mmu_instr_page_fault(vcpu, regs, ftype, async_instr);
-}
-
-static inline int
-kvm_host_do_aau_page_fault(struct pt_regs *const regs, e2k_addr_t address,
-			   const tc_cond_t condition, const tc_mask_t mask,
-			   const unsigned int aa_no)
-{
-	if (likely(!kvm_test_intc_emul_flag(regs))) {
-		return native_do_aau_page_fault(regs, address, condition, mask,
-						aa_no);
-	}
-
-	return kvm_pv_mmu_aau_page_fault(current_thread_info()->vcpu, regs,
-					 address, condition, aa_no);
-}
-
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static bool kvm_check_sys_call_disable(pt_regs_t *regs, e2k_tir_t TIR)
 {
 	e2k_tir_t tir;
@@ -720,7 +670,7 @@ pass_the_trap_to_guest(struct pt_regs *regs, e2k_tir_t TIR, int trap_no)
 	if (trap_no == exc_last_wish_num) {
 		int r;
 
-		r = do_hret_last_wish_intc(vcpu, regs);
+		r = intc_hret_last_wish(vcpu, regs);
 		if (r == 0) {
 			return 1;
 		} else {
@@ -755,6 +705,19 @@ failed:
 	}
 	return ret;
 }
+#else
+static inline unsigned long
+pass_aau_trap_to_guest(struct pt_regs *regs, e2k_tir_t TIR)
+{
+	return 0;
+}
+
+static inline unsigned long
+pass_the_trap_to_guest(struct pt_regs *regs, e2k_tir_t TIR, int trap_no)
+{
+	return 0;
+}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline unsigned long pass_coredump_trap_to_guest(struct pt_regs *regs)
 {
@@ -802,6 +765,7 @@ pass_virqs_to_guest(struct pt_regs *regs, e2k_tir_t TIR)
 	return kvm_pass_virqs_to_guest(regs, TIR);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline unsigned long
 pass_clw_fault_to_guest(struct pt_regs *regs, trap_cellar_t *tcellar)
 {
@@ -824,51 +788,47 @@ static inline void complete_page_fault_to_guest(unsigned long what_complete)
 {
 	kvm_complete_page_fault_to_guest(what_complete);
 }
+#else
+static inline unsigned long
+pass_clw_fault_to_guest(struct pt_regs *regs, trap_cellar_t *tcellar)
+{
+	return 0;
+}
+
+static inline unsigned long
+pass_page_fault_to_guest(struct pt_regs *regs, trap_cellar_t *tcellar)
+{
+	return 0;
+}
+
+static inline void complete_page_fault_to_guest(unsigned long what_complete) { }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
+
 #endif /* ! CONFIG_KVM_GUEST_KERNEL */
 #endif /* ! CONFIG_VIRTUALIZATION */
-
-static inline bool
-native_is_proc_stack_bounds(struct thread_info *ti, struct pt_regs *regs)
-{
-	return (user_mode(regs) &&
-		PSP_IND(regs->stacks.psp) >= PSP_SIZE(regs->stacks.psp) ||
-		PSP_IND(regs->stacks.psp) <= 0);
-}
-
-static inline bool
-native_is_chain_stack_bounds(struct thread_info *ti, struct pt_regs *regs)
-{
-	return (user_mode(regs) &&
-		PCSP_IND(regs->stacks.pcsp) >= PCSP_SIZE(regs->stacks.pcsp) ||
-		PCSP_IND(regs->stacks.pcsp) <= 0);
-}
 
 #ifdef	CONFIG_KVM_GUEST_KERNEL
 /* it is native guest kernel */
 #include <asm/kvm/guest/trap_table.h>
 #else /* !CONFIG_KVM_GUEST_KERNEL */
 /* it is native kernel with or without virtualization support */
-static inline bool
-is_proc_stack_bounds(struct thread_info *ti, struct pt_regs *regs)
-{
-	return native_is_proc_stack_bounds(ti, regs);
-}
-
-static inline bool
-is_chain_stack_bounds(struct thread_info *ti, struct pt_regs *regs)
-{
-	return native_is_chain_stack_bounds(ti, regs);
-}
 
 #ifdef	CONFIG_VIRTUALIZATION
 /* it is host kernel with virtualization support */
+
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline int
-instr_page_fault(struct pt_regs *regs, tc_fault_type_t ftype,
-		 const int async_instr)
+instr_page_fault(struct pt_regs *regs, tc_fault_type_t ftype, const int async_instr)
 {
+	struct kvm_vcpu *vcpu = current_thread_info()->vcpu;
 	int ret;
 
-	ret = kvm_host_instr_page_fault(regs, ftype, async_instr);
+	if (!kvm_test_intc_emul_flag(regs)) {
+		native_instr_page_fault(regs, ftype, async_instr);
+		return 0;
+	}
+
+	ret = kvm_pv_mmu_instr_page_fault(vcpu, regs, ftype, async_instr);
 	if (unlikely(ret < 0)) {
 		pr_err("%s(): kill guest: fault handling failed, error %d\n",
 		       __func__, ret);
@@ -876,6 +836,9 @@ instr_page_fault(struct pt_regs *regs, tc_fault_type_t ftype,
 	}
 	return ret;
 }
+#else
+# define instr_page_fault native_do_instr_page_fault
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline int
 do_aau_page_fault(struct pt_regs *const regs, e2k_addr_t address,

@@ -1,0 +1,85 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
+#include <dt-bindings/interrupt-controller/irq.h>
+#include "epic-vectors.h"
+#include "e2k-macro.dtsi"
+
+	lpic: lpic {
+		compatible = "mcst,epic";
+		interrupt-controller;
+
+		#interrupt-cells = <2>;
+
+		interrupt-parent = <&lpic>;
+		numa-node-id = <0>;
+		nonposted-mmio;
+		interrupts =
+			<ERROR_EPIC_VECTOR			0>,
+			<SPURIOUS_EPIC_VECTOR			0>,
+			<EPIC_RESCHEDULE_VECTOR			0>,
+			<EPIC_CALL_FUNCTION_VECTOR		0>,
+			<EPIC_CALL_FUNCTION_SINGLE_VECTOR	0>,
+			<EPIC_IRQ_WORK_VECTOR			0>,
+			<EPIC_IRQ_MOVE_CLEANUP_VECTOR		0>,
+			<EPIC_MANAGED_IRQ_SHUTDOWN_VECTOR 	0>;
+			interrupt-names = "ERR Error interrupts",
+				"SPU Spurious interrupts",
+				"RES Rescheduling interrupts",
+				"CAL Function call interrupts",
+				"CAL Function single call interrupts",
+				"IWI IRQ work interrupts",
+				"IMI IRQ move cleanup interrupts",
+				"MSV managed irq shutdown vector";
+	};
+	lmsi: lmsi {
+		compatible = "mcst,l-msi";
+		interrupt-parent = <&lpic>;
+		msi-controller;
+	};
+	timer {
+		compatible = "mcst,lt";
+		interrupt-parent = <&pic0>;
+		interrupts = <2 IRQ_TYPE_EDGE_RISING>;
+		requester-id = <0x111>;
+		numa-node-id = <0>;
+	};
+	epic_timer {
+		compatible = "mcst,epic-timer";
+		interrupt-parent = <&lpic>;
+		interrupts = <CEPIC_TIMER_VECTOR 0>;
+		numa-node-id = <0>;
+		nonposted-mmio;
+	};
+	kvm {
+		compatible = "mcst,kvm";
+		interrupt-parent = <&lpic>;
+		interrupts =
+			<SYSRQ_SHOWSTATE_EPIC_VECTOR	0>,
+			<KVM_NMI_EPIC_VECTOR		0>,
+			<ASYNC_PF_WAKE_VECTOR		0>,
+			<CEPIC_EPIC_INT_VECTOR		0>;
+		interrupt-names =
+			"KVM SysRq showstate",
+			"KVM NMI",
+			"ASYNC PF WAKE interrupts",
+			"CEPIC EPIC interrupts";
+	};
+
+#if CELLS == 2
+	cpufreq {
+		compatible = "mcst,cpufreq";
+#if NODES > 3
+		mcst,freq-nodes = <&pmc_freq0>, <&pmc_freq1>, <&pmc_freq2>, <&pmc_freq3>;
+#elif NODES > 2
+		mcst,freq-nodes = <&pmc_freq0>, <&pmc_freq1>, <&pmc_freq2>;
+#elif NODES > 1
+		mcst,freq-nodes = <&pmc_freq0>, <&pmc_freq1>;
+#else
+		mcst,freq-nodes = <&pmc_freq0>;
+#endif
+	};
+#endif
+

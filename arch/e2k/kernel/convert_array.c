@@ -182,7 +182,7 @@ int get_pm_struct(const void	__user *prot_array,
 	unsigned long pm_sc_debug_mode = current->mm->context.pm_sc_debug_mode;
 #endif /* DYNAMIC_DEBUG_SYSCALLP_ENABLED */
 
-	DbgSCP("struct128 = 0x%lx, struct64 = 0x%lx, size = %d\n",
+	DbgSCP("struct128 = 0x%px, struct64 = 0x%px, size = %d\n",
 		prot_array, new_array, max_prot_array_size);
 	DbgSCP("fields = %d, items = %d, mask_t = 0x%lx, mask_a = 0x%lx, mask_rw = 0x%lx\n",
 		fields, items, mask_type, mask_align, mask_rw);

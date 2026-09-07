@@ -68,5 +68,5 @@ include $(TOP)/services/server/env/linux/Kbuild.mk
 
 ifeq ($(CONFIG_MCST_GPU_IMGTEC_R4991288), y)
   obj-$(CONFIG_MCST_GPU_IMGTEC) += $(PVRSRV_MODNAME).o
-  obj-$(CONFIG_MCST_GPU_IMGTEC) += kernel/drivers/staging/imgtec/e2c3_gpu/e2c3_gpu_drv.o
+  obj-$(CONFIG_MCST_GPU_IMGTEC) += kernel/drivers/staging/imgtec/e2c3_gpu/e2c3_gpu_drv_4991288.o
 endif

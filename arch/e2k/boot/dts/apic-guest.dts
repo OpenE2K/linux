@@ -3,9 +3,7 @@
  * Copyright (c) 2023 MCST
  */
 
-
 /dts-v1/;
-/plugin/;
 
 #ifndef CELLS
 #define CELLS 2
@@ -20,14 +18,18 @@
 # define PIC _PIC(NODE)
 
 
-&{/} {
+/ {
+	version = "1.0_2025-10-23";
+	model = "Elbrus-generic";
+	compatible = "mcst,apic-guest";
+
 	#address-cells = <CELLS>;
 	#size-cells = <SIZE_CELLS>;
 
 
 #define NODE 0
-#include "include/e2s.dtsi"
-#include "include/e2s-node.dtsi"
+#include "include/e2k-v3.dtsi"
+#include "include/e2k-v3-uncore.dtsi"
 #include "include/iohub-guest.dtsi"
 #undef NODE
 

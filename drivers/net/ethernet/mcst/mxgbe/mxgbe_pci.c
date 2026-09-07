@@ -68,10 +68,15 @@ static int probe(struct pci_dev *pdev, const struct pci_device_id *pid)
 		/* check devtree config */
 		if (np) {
 			of_status_prop = of_get_property(np, "status", NULL);
-			if (!strcmp(of_status_prop, "disabled")) {
+			if (of_status_prop) {
+				if (!strcmp(of_status_prop, "disabled")) {
+					dev_warn(&pdev->dev,
+						 "device disabled in devicetree\n");
+					return -ENODEV;
+				}
+			} else {
 				dev_warn(&pdev->dev,
-					"device disabled in devicetree\n");
-				return -ENODEV;
+					 "no status found in DT, device enabled!\n");
 			}
 		} else {
 			dev_warn(&pdev->dev,

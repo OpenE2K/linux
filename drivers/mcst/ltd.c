@@ -20,44 +20,58 @@
 struct ltd_regs {
 	union ltd_control {
 		struct {
-			u32 enable		:1;	/* 0 	RW 	0x0 	 - включение передачи данных в хост.*/
-			u32 enable_interrupt	:1;	/* 1 	RW 	0x0 	 - включение выдачи прерывания в хост.*/
-			u32 reserved		:6;	/* 7:2 	RO 	0x0 	Резерв.*/
-			u32 size		:4;	/* 11:8 	RW 	0x0 	 - размер кольцевого буфера в байтах (степень двойки, уменьшенная на 12). 0 = 4К, 1 = 8K, ..., A–F = 4M.*/
-			u32 reserved2		:18;	/* 29:12 	RO 	0x0 	Резерв.*/
-			u32 reset		:1;	/* 30 	RW 	0x0 	 - сброс контроллера без остановки.*/
-			u32 flush		:1;	/* 31 	RW 	0x0 	 - немедленная запись накопленных данных в кольцевой буфер.*/
+			u32 enable	     :1; /* 0     RW 0x0 - turn on data xfer to host.*/
+			u32 enable_interrupt :1; /* 1     RW 0x0 - turn on sending interrupt */
+						 /*                xfer to host.*/
+			u32 reserved	     :6; /* 7:2   RO 0x0 -  reserve.*/
+			u32 size	     :4; /* 11:8  RW 0x0 - size of ring buffer in bytes */
+						 /*                (degree of 2 - 12) */
+						 /*                0 = 4К,v 1 = 8K, ..., A–F = 4M.*/
+			u32 reserved2	     :18;/* 29:12 RO 0x0 - reserve.*/
+			u32 reset	     :1; /* 30    RW 0x0 - reset controller not stopping.*/
+			u32 flush	     :1; /* 31    RW0x0  - immediate writing of */
+						 /*                accumulated data to  */
+						 /*	           a ring buffer	*/
 		};
 		u32 raw;
 	} control;
 	union ltd_status {
 		struct {
-			u32 data_available	:1;	/* 0 	RW1C 	0x0 	 - в кольцевой буфер выданы данные.*/
-			u32 error		:1;	/* 1 	RW1C 	0x0 	 - произошла ошибка, подробности в регистрах Fault Status и Fault Offset.*/
-			u32 reserved		:30;	/* 31:2 RO 	0x0 	Резерв.*/
+			u32 data_available :1;	/* 0 	RW1C 0x0 - data has been output */
+						/*                 to the ring buffer.*/
+			u32 error	   :1;	/* 1 	RW1C 0x0 - error ocuured. */
+						/*                 details in Fault Status */
+						/*                 and Fault Offset regs.*/
+			u32 reserved	   :30;	/* 31:2 RO   0x0 - reserve.*/
 		};
 		u32 raw;
 	} status;
 	/* sic! swap tail & head names in order to use linux marcos */
-	u32 tail;		/* 31:0 	RW 	0x0 	- смещение первого не прочитанного хостом байта.*/
-	u32 head;		/* 31:0 	RO 	0x0 	 - смещение первого не не записанного устройством байта.*/
-				/* 11:0 	RO 	0x0 	Резерв.*/
-	u32 buffer_base_low;	/* 31:12 	RW 	0x0 	 - указатель на кольцевой буфер, разряды [31:12].*/
-	u32 buffer_base_high;		/* 31:0 	RW 	0x0 	 - указатель на кольцевой буфер, разряды [63:32].*/
-	u32 aggregation_time_threshold;	/* 31:0 	RW 	0x0 	 - минимальный промежуток времени между прерываниями, в тактах.*/
-	u32 aggregation_data_threshold;	/* 31:0 	RW 	0x0 	 - минимальный промежуток между прерываниями в байтах.*/
+	u32 tail;		/*  RW 0x0 - offset of the first byte not read by host.*/
+	u32 head;		/*  RO 0x0 - offset of the first byte not written by device0*/
+	u32 buffer_base_low;	/*  RW 0x0 - ring buffer pointer, low bits.*/
+	u32 buffer_base_high;   /*  RW 0x0 - ring buffer pointer, high bits */
+	u32 aggregation_time_threshold;	/* RW 0x0 - minimum time interval between interrupts, */
+					/*          in cycles.*/
+	u32 aggregation_data_threshold;	/* RW 0x0 - minimum interval between interrupts in bytes.*/
 	union ltd_fault_status {
 		struct {
-			u32 valid		:1;	/* 0 	RW 	0x0 	 - регистры Fault Status и Fault Offset содержат валидные данные. */
-			u32 overwrite		:1;	/* 1 	RW 	0x0 	 - ошибка произошла при установленном бите Valid. Регистры Fault Status и Fault Offset содержат данные, соответствующие ошибке, вызвавшей установку бита Valid. */
-			u32 overflow_error	:1;	/* 2 	RW 	0x0 	 - произошла потеря данных. */
-			u32 memory_error	:1;	/* 3 	RW 	0x0 	 - произошла ошибка при записи в DRAM.*/
-			u32 parity_error	:1;	/* 4 	RW 	0x0 	 - произошла ошибка чётности во внутренних буферах устройства.*/
-			u32 reserved		:27;	/* 31:5 RO 	0x0 	Резерв. */
+			u32 valid	   :1;	/* 0 	RW 0x0 	 - valid data in Fault Status & */
+						/*                 Fault Offset regs. */
+			u32 overwrite	   :1;	/* 1 	RW 0x0 	 - error occured when bit 'valid' */
+						/*                 was on. Regs Fault Status &    */
+						/*                 Fault Offsethold data ,        */
+						/*                 corresponding error raised     */
+						/*                 setting bit 'value' on         */
+			u32 overflow_error :1;	/* 2 	RW 0x0 	 - data lost occured. */
+			u32 memory_error   :1;	/* 3 	RW 0x0 	 - ECC error when write to DRAM.  */
+			u32 parity_error   :1;	/* 4 	RW 0x0 	 - ECC error in internal buffers  */
+						/*                 of device.                     */
+			u32 reserved	   :27;	/* 31:5 RO 0x0 	 - reserve.                       */
 		};
 		u32 raw;
 	} fault_status;
-	u32 fault_offset;		/* 31:0 	RW 	0x0 	 - смещение, на котором произошла ошибка.*/
+	u32 fault_offset;		/* 31:0 	RW 0x0 	 - offset of error.*/
 } __packed;
 
 struct ltd_tty {
@@ -108,7 +122,7 @@ static struct ltd_tty *ltd_ttys;
 	unsigned __val2 = __val;				\
 	void __iomem *__a = __addr;				\
 	unsigned __off = __a - (void __iomem *)l->regs;		\
-	dev_dbg(l->dev, "r:%02x:%08x %s:%d\n",			\
+	dev_dbg(l->dev, "w:%02x:%08x %s:%d\n",			\
 		 __off, __val2, __func__, __LINE__);		\
 	writel(__val2, __a);				\
 } while (0)
@@ -120,7 +134,7 @@ static inline struct ltd_tty *to_ltd_tty(struct tty_port *port)
 
 static irqreturn_t ltd_tty_interrupt(int irq, void *dev_id)
 {
-	unsigned long flags;
+	unsigned long flags, tail;
 	struct ltd_tty *l = dev_id;
 
 	union ltd_status status = { .raw = rltd(&l->regs->status) };
@@ -153,15 +167,17 @@ static irqreturn_t ltd_tty_interrupt(int irq, void *dev_id)
 		goto out;
 	
 	n = min(count, n);
-	memcpy(buf, l->buf + l->head, n);
+	memcpy(buf, l->buf + l->tail, n);
+
+	spin_lock_irqsave(&l->lock, flags);
+	tail = circ_add(l->tail, count);
+	l->tail = tail;
+	spin_unlock_irqrestore(&l->lock, flags);
 	if (count > n)
 		memcpy(buf + n, l->buf, count - n);
 	tty_flip_buffer_push(&l->port);
 
-	spin_lock_irqsave(&l->lock, flags);
-	l->tail = circ_add(l->tail, count);
-	spin_unlock_irqrestore(&l->lock, flags);
-	wltd(l->tail, &l->regs->tail);
+	wltd(tail, &l->regs->tail);
 
 out:
 	wltd(status.raw, &l->regs->status);
@@ -187,7 +203,8 @@ static int ltd_tty_activate(struct tty_port *port, struct tty_struct *tty)
 					l->irq, ret);
 		goto out;
 	}
-	circ_clear(l);
+	l->head = 0;
+	l->tail = 0;
 
 	control.enable_interrupt = 1;
 	control.enable = 0;

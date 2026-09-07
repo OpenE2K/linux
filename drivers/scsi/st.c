@@ -4182,6 +4182,9 @@ static const struct file_operations st_fops =
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = st_compat_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl = st_ioctl,
+#endif
 	.open =		st_open,
 	.flush =	st_flush,
 	.release =	st_release,

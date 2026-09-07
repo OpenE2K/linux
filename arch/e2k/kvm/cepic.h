@@ -99,6 +99,7 @@ kvm_read_guest_cepic_virqs_num(struct kvm_vcpu *vcpu)
 
 	return atomic_read(&cepic->virqs_num);
 }
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline void
 kvm_set_guest_cepic_virqs_num(struct kvm_vcpu *vcpu, int count)
 {
@@ -111,6 +112,7 @@ kvm_reset_guest_cepic_virqs_num(struct kvm_vcpu *vcpu)
 {
 	kvm_set_guest_cepic_virqs_num(vcpu, 0);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 static inline void
 kvm_inc_guest_cepic_virqs_num(struct kvm_vcpu *vcpu)
 {

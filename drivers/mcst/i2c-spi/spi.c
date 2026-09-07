@@ -653,11 +653,12 @@ static size_t l_spi_max_message_size(struct spi_device *spi)
 static int l_spi_probe(struct platform_device *pdev)
 {
 	int ret;
-	struct l_spi *l_spi;
 	u32 mode;
-	int freq_changed;
-	struct resource *res;
 	char s[64];
+	int freq_changed;
+	struct l_spi *l_spi;
+	struct resource *res;
+	struct device_node *np;
 	struct i2c_spi_data *pdata = dev_get_platdata(&pdev->dev);
 	struct spi_master *master = devm_spi_alloc_master(&pdev->dev,
 					sizeof(struct l_spi));
@@ -685,14 +686,10 @@ static int l_spi_probe(struct platform_device *pdev)
 
 	master->bus_num = pdev->id;
 	sprintf(s, "/l_spi@%d", pdev->id);
-	/* let spi be configured from platform device of_node */
-	if (!l_spi->dev->of_node) {
-		master->dev.of_node = of_find_node_by_path(s);
-		dev_dbg(&pdev->dev, "master->dev.of_node set from device tree with default name\n");
-	} else {
-		master->dev.of_node = l_spi->dev->of_node;
-		dev_dbg(&pdev->dev, "master->dev.of_node set from platform device\n");
-	}
+	np = of_find_node_by_path(s);
+	master->dev.of_node = np ? np :
+		l_spi->dev->of_node ? l_spi->dev->of_node :
+		l_spi->dev->parent->of_node;
 
 	master->num_chipselect = pdata->num_chipselect;
 

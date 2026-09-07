@@ -46,7 +46,10 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <linux/moduleparam.h>
 #include <linux/workqueue.h>
 #include <linux/string.h>
+#if defined(CONFIG_MCST) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
+#else
 #include <stdbool.h>
+#endif
 
 /* for action device access */
 #include "pvrsrv.h"

@@ -197,12 +197,17 @@ static unsigned char swI2CReadSDA(void)
         return 0;
 }
 
+#ifndef CONFIG_CC_IS_CLANG
 #pragma GCC push_options
 #pragma GCC optimize("O0")
+#endif
 
 /*
  *  This function sends ACK signal
  */
+#ifdef CONFIG_CC_IS_CLANG
+__attribute__((optnone))
+#endif
 static void swI2CAck(unsigned char ack)
 {
 	if(ack)
@@ -233,6 +238,9 @@ static void swI2CAck(unsigned char ack)
 /*
  *  This function sends the start command to the slave device
  */
+#ifdef CONFIG_CC_IS_CLANG
+__attribute__((optnone))
+#endif
 void swI2CStart(void)
 {
     /* Start I2C */
@@ -244,6 +252,9 @@ void swI2CStart(void)
 /*
  *  This function sends the stop command to the slave device
  */
+#ifdef CONFIG_CC_IS_CLANG
+__attribute__((optnone))
+#endif
 void swI2CStop(void)
 {
     /* Stop the I2C */
@@ -262,6 +273,9 @@ void swI2CStop(void)
  *       0   - Success
  *      -1   - Fail to write byte
  */
+#ifdef CONFIG_CC_IS_CLANG
+__attribute__((optnone))
+#endif
 long swI2CWriteByte(unsigned char data) 
 {
     unsigned char value = data;
@@ -325,6 +339,9 @@ long swI2CWriteByte(unsigned char data)
  *  Return Value:
  *      One byte data read from the Slave device
  */
+#ifdef CONFIG_CC_IS_CLANG
+__attribute__((optnone))
+#endif
 unsigned char swI2CReadByte(unsigned char ack)
 {
     int i;
@@ -349,7 +366,9 @@ unsigned char swI2CReadByte(unsigned char ack)
 
     return data;
 }
+#ifndef CONFIG_CC_IS_CLANG
 #pragma GCC pop_options
+#endif
 
 /*
  * This function initializes the i2c attributes and bus

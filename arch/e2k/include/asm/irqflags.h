@@ -107,10 +107,10 @@ do { \
 } while (false)
 
 #define	BOOT_NATIVE_SWITCH_IRQ_TO_UPSR_MASK_REG() \
-		boot_write_PSR_reg(E2K_KERNEL_PSR_LOC_IRQ_ENABLED)
+		write_irq_barrier_PSR_reg(E2K_KERNEL_PSR_LOC_IRQ_ENABLED)
 
 #define	BOOT_SWITCH_IRQ_TO_UPSR_MASK_REG() \
-		boot_write_PSR_reg(E2K_KERNEL_PSR_LOC_IRQ_ENABLED)
+		write_irq_barrier_PSR_reg(E2K_KERNEL_PSR_LOC_IRQ_ENABLED)
 
 #define	NATIVE_SET_USER_INITIAL_UPSR_LOC_IRQ() \
 ({ \
@@ -506,9 +506,6 @@ static __always_inline int psr_glob_irqs_disabled(e2k_psr_t psr)
 
 #define __raw_all_loc_irqs_disabled()	psr_and_upsr_all_loc_irqs_disabled()
 
-#define native_psr_irqs_disabled()	\
-		psr_irqs_disabled_flags(AW(native_nv_read_PSR_reg()))
-
 #define	psr_and_upsr_nm_loc_irqs_disabled()			\
 ({								\
 	bool ret;						\
@@ -557,25 +554,25 @@ static __always_inline int psr_glob_irqs_disabled(e2k_psr_t psr)
 
 #define SAVE_CURR_TIME_SWITCH_TO                                        \
 { 									\
-        cpu_times[raw_smp_processor_id()].curr_time_switch_to =         \
+	cpu_times[raw_smp_processor_id()].curr_time_switch_to =         \
 						read_CLKR_reg_value();	\
 }
 
 #define CALCULATE_TIME_SWITCH_TO                                        \
 {                                                                       \
-        int cpu = raw_smp_processor_id();                               \
+	int cpu = raw_smp_processor_id();                               \
 	cpu_times[cpu].curr_time_switch_to = read_CLKR_reg_value() -    \
-                              cpu_times[cpu].curr_time_switch_to;       \
-        if (cpu_times[cpu].curr_time_switch_to <                        \
-            cpu_times[cpu].min_time_switch_to){                         \
-            cpu_times[cpu].min_time_switch_to =                         \
-                               cpu_times[cpu].curr_time_switch_to;      \
-        }                                                               \
-        if (cpu_times[cpu].curr_time_switch_to >                        \
-            cpu_times[cpu].max_time_switch_to){                         \
-            cpu_times[cpu].max_time_switch_to =                         \
-                                cpu_times[cpu].curr_time_switch_to;     \
-        }                                                               \
+			      cpu_times[cpu].curr_time_switch_to;       \
+	if (cpu_times[cpu].curr_time_switch_to <                        \
+	    cpu_times[cpu].min_time_switch_to){                         \
+	    cpu_times[cpu].min_time_switch_to =                         \
+			       cpu_times[cpu].curr_time_switch_to;      \
+	}                                                               \
+	if (cpu_times[cpu].curr_time_switch_to >                        \
+	    cpu_times[cpu].max_time_switch_to){                         \
+	    cpu_times[cpu].max_time_switch_to =                         \
+				cpu_times[cpu].curr_time_switch_to;     \
+	}                                                               \
 }
 
 #else /* !CONFIG_MCST_RT */
@@ -728,36 +725,8 @@ do { \
 #define raw_all_irq_enable()		IRQ_ALL_STI()
 #define raw_all_irq_disable()		IRQ_ALL_CLI()
 
-#define raw_all_v7_irq_enable()			\
-do {						\
-	if (cpu_has(CPU_FEAT_V7_CPU_REGS)) {	\
-		IRQ_ALL_STI();			\
-	}					\
-} while (0)
-
-#define raw_all_v7_irq_disable()		\
-do {						\
-	if (cpu_has(CPU_FEAT_V7_CPU_REGS)) {	\
-		IRQ_ALL_CLI();			\
-	}					\
-} while (0)
-
 #define raw_all_irq_save(x)		IRQ_SAVE_AND_ALL_CLI(x)
 #define raw_all_irq_restore(x)		IRQ_RESTORE(x)
-
-#define raw_all_v7_irq_save(x)			\
-do {						\
-	if (cpu_has(CPU_FEAT_V7_CPU_REGS)) {	\
-		IRQ_SAVE_AND_ALL_CLI(x);	\
-	}					\
-} while (0)
-
-#define raw_all_v7_irq_restore(x)		\
-do {						\
-	if (cpu_has(CPU_FEAT_V7_CPU_REGS)) {    \
-		IRQ_RESTORE(x);			\
-	}					\
-} while (0)
 
 /* Save UPSR and disable all interupts in PSR.
  *
@@ -794,7 +763,7 @@ do {						\
 #define all_irq_restore(flags)					\
 	do {							\
 		typecheck(unsigned long, flags);		\
-		if (raw_all_irqs_disabled_flags(flags)) {	\
+		if (raw_irqs_disabled_flags(flags)) {		\
 			raw_all_irq_restore(flags);		\
 			trace_hardirqs_off();			\
 		} else {					\

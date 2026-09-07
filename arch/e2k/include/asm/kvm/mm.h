@@ -90,10 +90,25 @@ extern int kvm_guest_mm_drop(struct kvm_vcpu *vcpu, int gmmid_nr);
 extern int kvm_activate_guest_mm(struct kvm_vcpu *vcpu,
 			int active_gmmid_nr, int gmmid_nr, gpa_t u_phys_ptb);
 extern int kvm_pv_init_gmm_create(struct kvm *kvm);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 extern int kvm_guest_pv_mm_init(struct kvm *kvm);
 extern void kvm_guest_pv_mm_reset(struct kvm *kvm);
 extern void kvm_guest_pv_mm_free(struct kvm *kvm);
 extern void kvm_guest_pv_mm_destroy(struct kvm *kvm);
+#else
+static inline int kvm_guest_pv_mm_init(struct kvm *kvm)
+{
+	BUG();
+}
+static inline void kvm_guest_pv_mm_free(struct kvm *kvm)
+{
+	BUG();
+}
+static inline void kvm_guest_pv_mm_destroy(struct kvm *kvm)
+{
+	BUG();
+}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #define	for_each_guest_mm(gmm, entry, next, gmmid_table)	\
 		for_each_guest_nid_node(gmm, entry, next, gmmid_table,  \

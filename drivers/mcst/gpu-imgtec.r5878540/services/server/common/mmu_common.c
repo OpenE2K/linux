@@ -401,6 +401,14 @@ _CleanupThread_FreeMMUMapping(void* pvData)
 			return PVRSRV_ERROR_RETRY;
 		}
 		psCleanup->psSync = psDevNode->psMMUCacheSyncPrim;
+#ifdef CONFIG_MCST
+	/*rm 29533: check one more time as hCleanupLock was dropped */
+	if (!psMMUCtxCleanupData->bMMUContextExists)
+	{
+		OSFreeMem(psCleanup);
+		PVR_GOTO_WITH_ERROR(eError, PVRSRV_OK, e0);
+	}
+#endif
 	}
 
 	uiSyncCurrent = OSReadDeviceMem32(psCleanup->psSync->pui32LinAddr);

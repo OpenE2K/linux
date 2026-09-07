@@ -13,8 +13,6 @@ machdep_t machine = { 0 };
 
 unsigned long cpu_features[(NR_CPU_FEATURES + 63) / 64];
 
-mmu_features_t mmu_features;
-
 static int cpu_to_iset(int cpu)
 {
 	int iset = ELBRUS_GENERIC_ISET;

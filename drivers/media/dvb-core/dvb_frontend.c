@@ -2926,6 +2926,9 @@ static const struct file_operations dvb_frontend_fops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= dvb_frontend_compat_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	= dvb_frontend_ioctl,
+#endif
 	.poll		= dvb_frontend_poll,
 	.open		= dvb_frontend_open,
 	.release	= dvb_frontend_release,

@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/module.h>
@@ -10,6 +15,117 @@
 #include <asm/sic_regs.h>
 
 #include "../../../drivers/pci/pci.h"
+
+
+typedef struct iohub_sysdata {
+	int	domain;		/* IOHUB (PCI) domain */
+	int	node;		/* NUMA node */
+	int	link;		/* local number of IO link on the node */
+	/* IOHUB can be connected to EIOHUB and vice versa */
+	bool	has_iohub;
+	u8	iohub_revision;		/* IOHUB revision */
+	u8	iohub_generation;	/* IOHUB generation */
+	bool	has_eioh;
+	u8	eioh_generation;	/* EIOHUB generation */
+	u8	eioh_revision;		/* EIOHUB revision */
+
+	struct resource		mem_space; /* pci registers memory */
+	void *l_iommu;
+} iohub_sysdata_t;
+
+
+int iohub_revision(struct pci_dev *pdev)
+{
+	struct pci_config_window *_cfg = pdev->bus->sysdata;
+	struct iohub_sysdata *_sd = _cfg->priv;
+	u8 _rev = l_eioh_device(pdev) ?
+			_sd->eioh_revision & 0xf :
+			_sd->iohub_revision >> 1;
+	return _rev;
+}
+EXPORT_SYMBOL(iohub_revision);
+
+int iohub_generation(struct pci_dev *pdev)
+{
+	struct pci_config_window *_cfg = pdev->bus->sysdata;
+	struct iohub_sysdata *_sd = _cfg->priv;
+	return l_eioh_device(pdev) ? _sd->eioh_generation :
+					_sd->iohub_generation;
+}
+EXPORT_SYMBOL(iohub_generation);
+
+bool is_iohub_asic(struct pci_dev *pdev)
+{
+	struct pci_config_window *_cfg = pdev->bus->sysdata;
+	struct iohub_sysdata *_sd = _cfg->priv;
+	u8 _rev = l_eioh_device(pdev) ?
+			!(_sd->eioh_revision & 0xf0) :
+			_sd->iohub_revision & 1;
+	return _rev;
+}
+EXPORT_SYMBOL(is_iohub_asic);
+
+static const struct pci_device_id l_iohub_root_devices[] = {
+	{
+		PCI_DEVICE(PCI_VENDOR_ID_ELBRUS,
+			   PCI_DEVICE_ID_MCST_VIRT_PCI_BRIDGE),
+	},
+	{
+		PCI_DEVICE(PCI_VENDOR_ID_MCST_PCIE_BRIDGE,
+		      PCI_DEVICE_ID_MCST_PCIE_BRIDGE)
+	},
+	{}
+};
+
+static const struct pci_device_id l_eioh_proto_root_devices[] = {
+	{
+		PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP,
+			   PCI_DEVICE_ID_MCST_EIOH_PROTO_PCIE_SWITCH_PORT),
+	},
+	{
+		PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP,
+			   PCI_DEVICE_ID_MCST_EIOH_PROTO_PCIE_SWITCH_PORT_R2000P),
+	},
+	{}
+};
+
+static bool __l_eioh_device(struct pci_dev *pdev)
+{
+	struct pci_bus *b = pdev->bus;
+	if (pdev->vendor == PCI_VENDOR_ID_MCST_TMP &&
+			pdev->device == PCI_DEVICE_ID_MCST_VPPB) {
+		return pdev->revision >= 0x10 ? true : false;
+	} else if (pci_match_id(l_iohub_root_devices, pdev)) {
+		return false;
+	} else if (pci_match_id(l_eioh_proto_root_devices, pdev)) {
+		return true;
+	}
+	if (pci_is_root_bus(b)) {
+		u16 vid = 0, did = 0;
+		u8 rev;
+		pci_bus_read_config_word(b, 0, PCI_VENDOR_ID, &vid);
+		pci_bus_read_config_word(b, 0, PCI_DEVICE_ID, &did);
+		pci_bus_read_config_byte(b, 0, PCI_REVISION_ID, &rev);
+		if (vid == PCI_VENDOR_ID_MCST_TMP &&
+			did == PCI_DEVICE_ID_MCST_VPPB) {
+			return rev >= 0x10 ? true : false;
+		}
+		return false;
+	}
+	return __l_eioh_device(b->self);
+}
+
+bool l_eioh_device(struct pci_dev *pdev)
+{
+	struct pci_config_window *cfg = pdev->bus->sysdata;
+	struct iohub_sysdata *sd = cfg->priv;
+	if (!sd->has_eioh)
+		return false;
+	if (!sd->has_iohub)
+		return true;
+	return __l_eioh_device(pdev);
+}
+EXPORT_SYMBOL(l_eioh_device);
 
 static bool e2k_is_eioh(void)
 {
@@ -44,7 +160,7 @@ static struct pci_config_window *l_pci_init(struct platform_device *pdev,
 
 	if (!cfgres) {
 		dev_err(dev, "missing cfg resource\n");
-		return ERR_PTR(err);
+		return ERR_PTR(-EINVAL);
 	}
 
 	cfg = pci_ecam_create(dev, cfgres, &bus, ops);

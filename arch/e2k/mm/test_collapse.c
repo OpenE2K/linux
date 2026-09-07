@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
 #include <asm/set_memory.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -20,6 +25,8 @@ typedef enum test_mode {
 	SINGLE,
 	MULTI
 } test_mode_t;
+
+static void run_test_sceduler(void);
 
 static int test_free_pages(int n)
 {
@@ -177,15 +184,17 @@ void assert_test_work_handler(struct work_struct *work)
 
 	access_write();
 	test_free_pages(areas);
+
+	run_test_sceduler();
 }
 
-DECLARE_DELAYED_WORK(dense_test_work, assert_test_work_handler);
+DECLARE_DELAYED_WORK(dense_assert, assert_test_work_handler);
 
 static void dense_test(struct work_struct *work)
 {
 	test_set_mode(SINGLE);
 	if (test_alloc_pages(ALLOC_ORDER)) {
-		pr_err("Error: page collapse test memory allocation failed\n");
+		pr_alert("Error: page collapse test (dense) memory allocation failed\n");
 		return;
 	}
 
@@ -193,16 +202,17 @@ static void dense_test(struct work_struct *work)
 	access_read();
 	set_rw_dsc();
 
-	schedule_delayed_work(&dense_test_work, 4 * HZ);
+	run_test_sceduler();
+
 }
 
-DECLARE_DELAYED_WORK(sparse_test_work, assert_test_work_handler);
+DECLARE_DELAYED_WORK(sparse_assert, assert_test_work_handler);
 
 static void sparse_test(struct work_struct *work)
 {
 	test_set_mode(MULTI);
 	if (test_alloc_pages(ALLOC_ORDER)) {
-		pr_err("Error: page collapse test memory allocation failed\n");
+		pr_alert("Error: page collapse test (sparse) memory allocation failed\n");
 		return;
 	}
 
@@ -210,18 +220,35 @@ static void sparse_test(struct work_struct *work)
 	access_read();
 	set_rw_cont();
 
-	schedule_delayed_work(&sparse_test_work, 4 * HZ);
+	run_test_sceduler();
 }
 
-DECLARE_DELAYED_WORK(d_work, dense_test);
-DECLARE_DELAYED_WORK(s_work, sparse_test);
+DECLARE_DELAYED_WORK(dense_work, dense_test);
+DECLARE_DELAYED_WORK(sparse_work, sparse_test);
+
+static struct delayed_work *suite_sched[] = {
+	&dense_work,
+	&dense_assert,
+	&sparse_work,
+	&sparse_assert,
+	0
+};
+
+static size_t nr_current = 0;
+
+static void run_test_sceduler(void)
+{
+	if (suite_sched[nr_current] != 0) {
+		schedule_delayed_work(suite_sched[nr_current], 2 * HZ);
+		nr_current++;
+	}
+}
 
 static int __init collapse_test_init(void)
 {
 	pr_info("Running collapse pages test suite...\n");
 
-	schedule_delayed_work(&d_work, 0);
-	schedule_delayed_work(&s_work, 10 * HZ);
+	run_test_sceduler();
 
 	return 0;
 }

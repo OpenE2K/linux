@@ -1148,6 +1148,10 @@ int __init early_init_dt_scan_memory(void)
 	return found_memory;
 }
 
+#ifdef CONFIG_E2K
+extern char command_line[];
+#endif
+
 int __init early_init_dt_scan_chosen(char *cmdline)
 {
 	int l, node;
@@ -1185,6 +1189,13 @@ int __init early_init_dt_scan_chosen(char *cmdline)
 		strscpy(cmdline, p, min(l, COMMAND_LINE_SIZE));
 
 handle_cmdline:
+#ifdef CONFIG_E2K
+	/*
+	 * Expand devtree command line with boot command line
+	 */
+	strlcat(cmdline, command_line, COMMAND_LINE_SIZE);
+#endif
+
 	/*
 	 * CONFIG_CMDLINE is meant to be a default in case nothing else
 	 * managed to set the command line, unless CONFIG_CMDLINE_FORCE

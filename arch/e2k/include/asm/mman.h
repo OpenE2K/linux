@@ -38,10 +38,11 @@ enum sma_mode {
 	SMA_WB_MT,
 	SMA_WC_MT,
 	SMA_UC_MT,
+	SMA_SPLIT,
 };
 
 int e2k_set_vmm_cui(struct mm_struct *mm, int cui,
-                    unsigned long code_base, unsigned long code_end);
+		    unsigned long code_base, unsigned long code_end);
 
 #define VM_HW_STACK_COMMON_FLAGS (VM_PRIVILEGED | VM_DONTEXPAND)
 #define VM_HW_STACK_PS_FLAGS	(VM_HW_STACK_COMMON_FLAGS | VM_HW_STACK_PS)

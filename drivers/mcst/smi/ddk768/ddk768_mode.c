@@ -441,7 +441,7 @@ void debug_mode_param(mode_parameter_t *modeParam)
  *      The signature to be filled in the user_data_mode_t structure to be considered
  *      a valid structure.
  */
-unsigned long ddk768_getUserDataSignature()
+unsigned long ddk768_getUserDataSignature(void)
 {
     return MODE_USER_DATA_SIGNATURE;
 }
@@ -603,7 +603,7 @@ mode_parameter_t *ddk768_findVesaModeParam(
  * Return a point to the gDefaultModeParamTable.
  * Function in other files used this to get the mode table pointer.
  */
-mode_parameter_t *ddk768_getStockModeParamTable()
+mode_parameter_t *ddk768_getStockModeParamTable(void)
 {
     return(gDefaultModeParamTable);
 }
@@ -612,7 +612,7 @@ mode_parameter_t *ddk768_getStockModeParamTable()
  * (Obsolete)
  * Return the size of the Stock Mode Param Table
  */
-unsigned long ddk768_getStockModeParamTableSize()
+unsigned long ddk768_getStockModeParamTableSize(void)
 {
     return (sizeof(gDefaultModeParamTable) / sizeof(mode_parameter_t) - 1);
 }
@@ -692,7 +692,7 @@ unsigned long ddk768_getStockModeParamTableSizeEx(
  *  Output:
  *      Total number of maximum entries
  */
-unsigned long getMaximumModeEntries()
+unsigned long getMaximumModeEntries(void)
 {
     return MAX_MODE_TABLE_ENTRIES;
 }
@@ -1046,10 +1046,10 @@ long ddk768_setCustomMode(
     /*
      * Set up PLL, a structure to hold the value to be set in clocks.
      */
-	if (ddk768_getCrystalType())
-		pll.inputFreq = (24576000/2);
-	else
-		pll.inputFreq = (24000000/2);
+    if (ddk768_getCrystalType())
+	pll.inputFreq = (24576000/2);
+    else
+	pll.inputFreq = (24000000/2);
 	
     /* 
      * Call calcPllValue() to fill up the other fields for PLL structure.

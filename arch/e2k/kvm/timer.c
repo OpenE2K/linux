@@ -63,6 +63,7 @@
 #define	HRTIMER_EXPIRES_APPROX(time)	\
 		(((time) / 100) * HRTIMER_EXPIRES_PERCENT)
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 /*H:200
  * The Guest Timer.
  *
@@ -130,6 +131,7 @@ again:
 		goto again;
 	}
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 /* This is the function called when the Guest's timer expires. */
 static enum hrtimer_restart clockdev_fn(struct hrtimer *timer)
@@ -192,7 +194,7 @@ void kvm_init_clockdev(struct kvm_vcpu *vcpu)
 	}
 	hrtimer_init(&vcpu->arch.hrt, CLOCK_MONOTONIC, HRTIMER_MODE_ABS);
 	vcpu->arch.hrt.function = clockdev_fn;
-	DebugKVM("created early timer for the VCPU #%d at %px base 0x%lx\n",
+	DebugKVM("created early timer for the VCPU #%d at %px base 0x%px\n",
 		vcpu->vcpu_id, &vcpu->arch.hrt, vcpu->arch.hrt.base);
 }
 
@@ -207,7 +209,8 @@ void kvm_cancel_clockdev(struct kvm_vcpu *vcpu)
 	hrtimer_cancel(&vcpu->arch.hrt);
 	DebugKVM("VCPU #%d early timer at %px was shutting down\n",
 		vcpu->vcpu_id, &vcpu->arch.hrt);
-	if (vcpu->arch.apic != NULL) {
+	if (vcpu->arch.apic != NULL &&
+		vcpu->arch.apic->lapic_timer.timer.base != NULL) {
 		hrtimer_cancel(&vcpu->arch.apic->lapic_timer.timer);
 		DebugKVM("VCPU #%d local apic timer at %px was shutting down\n",
 			vcpu->vcpu_id, &vcpu->arch.apic->lapic_timer.timer);

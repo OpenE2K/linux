@@ -3,12 +3,26 @@
  * Copyright (c) 2023 MCST
  */
 
+struct mga2_layer {
+	struct drm_plane	plane;
+};
 
+struct mga2_plane_desc {
+	enum drm_plane_type     type;
+	u8                      pipe;
+	const uint32_t          *formats;
+	uint32_t                nformats;
+	const struct drm_plane_helper_funcs *func;
+};
+
+static void mga2_put_fb_unref_gem(void *data, async_cookie_t cookie)
+{
+	drm_gem_object_put(data);
+}
 
 static unsigned long get_frame_duration(struct drm_crtc *crtc)
 {
 	struct drm_device *drm = crtc->dev;
-	struct mga2_crtc *mcrtc = to_mga2_crtc(crtc);
 	unsigned int pipe = drm_crtc_index(crtc);
 	struct drm_vblank_crtc *vblank = &drm->vblank[pipe];
 
@@ -25,17 +39,60 @@ static unsigned long get_next_vblank_time(struct drm_crtc *crtc,
 	return jiffies + nsecs_to_jiffies(framedur_ns) + 1;
 }
 
-struct mga2_layer {
-	struct drm_plane	plane;
-};
+/*
+* A scanout can still be occurring, so we can't drop the
+* reference to the old framebuffer. To solve this we get
+* the time of the release of the old framebuffer in order
+* to check it while freeing.
+*/
+static void mga2_check_scanout_disable(struct drm_plane_state *old_state,
+				enum drm_plane_type type)
+{
+	bool fb_changed = !!old_state->fb;
+	struct drm_crtc *crtc = old_state->crtc;
+	struct mga2_crtc *mcrtc = to_mga2_crtc(crtc);
+	struct drm_framebuffer *fb = old_state->fb;
+	struct drm_gem_object *gem = fb->obj[0];
+	struct mga2_gem_object *mo = to_mga2_gem(gem);
+	if (!fb_changed || mcrtc->fb_unref_gem[type])
+		return;
 
-struct mga2_plane_desc {
-	       enum drm_plane_type     type;
-	       u8                      pipe;
-	       const uint32_t          *formats;
-	       uint32_t                nformats;
-	       const struct drm_plane_helper_funcs *func;
-};
+	mcrtc->fb_unref_gem[type] = gem;
+	drm_gem_object_get(gem);
+
+	DRM_DEBUG_ATOMIC("[FB:%d] framedur:%lx, unref_time:%lx, cur_time:%lx\n",
+		fb->base.id, mo->framedur_us, mo->hw_unref_time,  jiffies);
+}
+
+static void mga2_check_scanout_enable(struct drm_plane_state *new_state,
+				struct drm_plane_state *old_state,
+				enum drm_plane_type type)
+{
+	struct drm_crtc *crtc = new_state->crtc;
+	struct mga2_crtc *mcrtc = to_mga2_crtc(crtc);
+	struct drm_framebuffer *fb = new_state->fb;
+	struct drm_gem_object *gem = fb->obj[0];
+	struct mga2_gem_object *mo = to_mga2_gem(gem);
+	bool fb_changed = old_state->fb && old_state->fb != new_state->fb;
+
+	mo->framedur_us = max(mo->framedur_us, get_frame_duration(crtc));
+	if (fb_changed) {
+		mo = to_mga2_gem(old_state->fb->obj[0]);
+		mo->hw_unref_time = get_next_vblank_time(crtc, mo->framedur_us);
+	}
+	if (mcrtc->fb_unref_gem[type]) {
+		gem = mcrtc->fb_unref_gem[type];
+		mcrtc->fb_unref_gem[type] = NULL;
+		mo = to_mga2_gem(gem);
+		mo->hw_unref_time = get_next_vblank_time(crtc, mo->framedur_us);
+
+		DRM_DEBUG_ATOMIC("[FB:%d] framedur:%lx, unref_time:%lx, cur_time:%lx\n",
+				fb->base.id, mo->framedur_us,
+				mo->hw_unref_time,  jiffies);
+
+		async_schedule(mga2_put_fb_unref_gem, gem);
+	}
+}
 
 static void mga2_cursor_atomic_disable(struct drm_plane *plane,
 				       struct drm_atomic_state *state)
@@ -47,12 +104,15 @@ static void mga2_cursor_atomic_disable(struct drm_plane *plane,
 		return;
 	wcrtc(0, NCRSADDR);
 	wcrtc(MGA2_DC_B_STROB, DISPCTRL);
+	mga2_check_scanout_disable(old_state, plane->type);
 }
 
 static void mga2_cursor_atomic_update(struct drm_plane *plane,
 					      struct drm_atomic_state *state)
 {
 
+	struct drm_plane_state *old_state =
+				drm_atomic_get_old_plane_state(state, plane);
 	struct drm_plane_state *new_state =
 				drm_atomic_get_new_plane_state(state, plane);
 	struct mga2_crtc *mcrtc = to_mga2_crtc(new_state->crtc);
@@ -62,6 +122,9 @@ static void mga2_cursor_atomic_update(struct drm_plane *plane,
 		(new_state->crtc_y & 0xffff), NCRSCOORD);
 	wcrtc(ba | MGA2_DC_B_CRS_ENA, NCRSADDR);
 	wcrtc(MGA2_DC_B_STROB, DISPCTRL);
+
+	mga2_check_scanout_enable(new_state, old_state, plane->type);
+
 }
 
 static const struct drm_plane_helper_funcs mga2_cursor_helper_funcs = {
@@ -102,21 +165,13 @@ static void mga2_overlay_atomic_disable(struct drm_plane *plane,
 	struct drm_plane_state *old_state =
 				drm_atomic_get_old_plane_state(state, plane);
 	struct mga2_crtc *mcrtc = to_mga2_crtc(old_state->crtc);
-	bool fb_changed = !!old_state->fb;
 	if (!old_state->crtc)
 		return;
+
 	wcrtc(MGA2_DC0_OVL_UPD_BUSY, OVL_CTRL);
-	/*
-	* A scanout can still be occurring, so we can't drop the
-	* reference to the old framebuffer. To solve this we get
-	* the time of the release of the old framebuffer in order
-	* to check it while freeing.
-	*/
-	if (fb_changed) {
-		struct mga2_gem_object *mo = to_mga2_gem(old_state->fb->obj[0]);
-		mo->hw_unref_time = get_next_vblank_time(old_state->crtc,
-					mo->framedur_us);
-	}
+
+	mga2_check_scanout_disable(old_state, plane->type);
+
 }
 
 static u64 mga2_plane_to_offset(struct drm_plane_state *state, int plane)
@@ -323,29 +378,29 @@ static void mga2_overlay_atomic_update(struct drm_plane *plane,
 {
 	struct drm_plane_state *old_state =
 			drm_atomic_get_old_plane_state(astate, plane);
-	struct drm_plane_state *state =
+	struct drm_plane_state *new_state =
 			drm_atomic_get_new_plane_state(astate, plane);
-	struct drm_crtc *crtc = state->crtc;
+	struct drm_crtc *crtc = new_state->crtc;
 	struct mga2_crtc *mcrtc = to_mga2_crtc(crtc);
-	struct drm_framebuffer *fb = state->fb;
+	struct drm_framebuffer *fb = new_state->fb;
 	u64 ba = to_mga2_gem(fb->obj[0])->dma_addr;
 	int pl[3] = {};
 	u32 alpha, v;
 	int hscale, vscale, scale = 0;
-	struct drm_rect os, s = drm_plane_state_src(state);
-	struct drm_rect od, d = drm_plane_state_dest(state);
-	bool fb_changed = old_state->fb && old_state->fb != state->fb;
+	struct drm_rect os, s = drm_plane_state_src(new_state);
+	struct drm_rect od, d = drm_plane_state_dest(new_state);
 	struct mga2 *mga2 = plane->dev->dev_private;
 
 	BUILD_BUG_ON(-1 >> 1 != -1);
-	if (!state->fb  || WARN_ON(!state->crtc) ||
-			(!old_state->visible && !state->visible))
+	if (!new_state->fb  || WARN_ON(!new_state->crtc) ||
+			(!old_state->visible && !new_state->visible))
 		return;
-	if (!state->visible) {
+	if (!new_state->visible) {
 		wcrtc(MGA2_DC0_OVL_UPD_BUSY, OVL_CTRL);
 		return;
 	}
-	WARN_ON(DRM_MODE_ROTATE_0 != (state->rotation & DRM_MODE_ROTATE_MASK));
+	WARN_ON(DRM_MODE_ROTATE_0 !=
+				(new_state->rotation & DRM_MODE_ROTATE_MASK));
 	hscale = mga2_rect_calc_hscale(&s, &d, MGA2_MIN_SCALE, MGA2_MAX_SCALE);
 	vscale = mga2_rect_calc_vscale(&s, &d, MGA2_MIN_SCALE, MGA2_MAX_SCALE);
 
@@ -361,8 +416,8 @@ static void mga2_overlay_atomic_update(struct drm_plane *plane,
 					MGA2_MAX_SCALE);
 	scale = scale || !old_state->fb;
 
-	s = state->src;
-	d = state->dst;
+	s = new_state->src;
+	d = new_state->dst;
 	os = old_state->src;
 	od = old_state->dst;
 	drm_rect_debug_print("clipped src: ", &s, true);
@@ -395,32 +450,23 @@ static void mga2_overlay_atomic_update(struct drm_plane *plane,
 		wcrtc(fb->pitches[pl[2]], OVL_STRIDE2);
 	}
 
-	wcrtc(ba + mga2_plane_to_offset(state, pl[0]), OVL_BASE0);
-	wcrtc(ba + mga2_plane_to_offset(state, pl[1]), OVL_BASE1);
-	wcrtc(ba + mga2_plane_to_offset(state, pl[2]), OVL_BASE2);
+	wcrtc(ba + mga2_plane_to_offset(new_state, pl[0]), OVL_BASE0);
+	wcrtc(ba + mga2_plane_to_offset(new_state, pl[1]), OVL_BASE1);
+	wcrtc(ba + mga2_plane_to_offset(new_state, pl[2]), OVL_BASE2);
 
-	alpha = state->alpha != DRM_BLEND_ALPHA_OPAQUE ?
-			state->alpha >> 8 :
+	alpha = new_state->alpha != DRM_BLEND_ALPHA_OPAQUE ?
+			new_state->alpha >> 8 :
 			fb->format->has_alpha ? 0 : 0xff;
 	alpha <<= MGA2_DC0_OVL_ALPHA_SHIFT;
 	wcrtc(MGA2_DC0_OVL_UPD_BUSY | MGA2_DC0_OVL_ENABLE | alpha, OVL_CTRL);
 
-	if (!old_state->visible && state->visible) {
+	if (!old_state->visible && new_state->visible) {
 		wcrtc(mga2->props.colorkey_min_val, OVL_KEY_MIN);
 		wcrtc(mga2->props.colorkey_max_val, OVL_KEY_MAX);
 	}
 
-	/*
-	* A scanout can still be occurring, so we can't drop the
-	* reference to the old framebuffer. To solve this we get
-	* the time of the release of the old framebuffer in order
-	* to check it while freeing.
-	*/
-	if (fb_changed) {
-		struct mga2_gem_object *mo = to_mga2_gem(old_state->fb->obj[0]);
-		mo->framedur_us = get_frame_duration(crtc);
-		mo->hw_unref_time = get_next_vblank_time(crtc, mo->framedur_us);
-	}
+	mga2_check_scanout_enable(new_state, old_state, plane->type);
+
 }
 
 static int mga2_layer_create_properties(struct drm_device *drm)
@@ -522,20 +568,13 @@ static void mga2_primary_atomic_disable(struct drm_plane *plane,
 {
 	struct drm_plane_state *old_state =
 				drm_atomic_get_old_plane_state(state, plane);
-	bool fb_changed = !!old_state->fb;
 	struct mga2_crtc *mcrtc = to_mga2_crtc(old_state->crtc);
 	if (!old_state->crtc)
 		return;
 	wcrtc(MGA2_DC_CTRL_NOSCRRFRSH | rcrtc(CTRL), CTRL);
-	/*
-	* A scanout can still be occurring, so we can't drop the
-	* reference to the old framebuffer. To solve this we get a
-	* reference to old_fb and set a worker to release it later.
-	*/
-	if (fb_changed && !mcrtc->fb_unref_gem) {
-		mcrtc->fb_unref_gem = old_state->fb->obj[0];
-		drm_gem_object_get(mcrtc->fb_unref_gem);
-	}
+
+	mga2_check_scanout_disable(old_state, plane->type);
+
 }
 
 static int mga2_format_to_primary(struct mga2_crtc *m, u32 format)
@@ -648,34 +687,27 @@ static int mga2_format_to_primary(struct mga2_crtc *m, u32 format)
 	return pixfmt;
 }
 
-static void mga2_put_fb_unref_gem(void *data, async_cookie_t cookie)
-{
-	drm_gem_object_put(data);
-}
-
 static void mga2_primary_atomic_update(struct drm_plane *plane,
 					      struct drm_atomic_state *astate)
 {
-	unsigned long t;
 	struct drm_plane_state *old_state =
 			drm_atomic_get_old_plane_state(astate,  plane);
-	struct drm_plane_state *state =
+	struct drm_plane_state *new_state =
 			drm_atomic_get_new_plane_state(astate, plane);
-	struct drm_framebuffer *fb = state->fb;
-	struct mga2_crtc *mcrtc = to_mga2_crtc(state->crtc);
+	struct drm_framebuffer *fb = new_state->fb;
+	struct mga2_crtc *mcrtc = to_mga2_crtc(new_state->crtc);
 	struct mga2_gem_object *mo = to_mga2_gem(fb->obj[0]);
 	unsigned ba = mo->dma_addr;
-	int x = state->src_x >> 16;
-	int y = state->src_y >> 16;
+	int x = new_state->src_x >> 16;
+	int y = new_state->src_y >> 16;
 	int pix = mga2_format_to_primary(mcrtc, fb->format->format);
-	bool fb_changed = old_state->fb && old_state->fb != state->fb;
 
 	WARN_ON(mo->dma_addr & (-1LL << 32));
 	if (WARN_ON(pix < 0))
 		return;
 
-	drm_rect_debug_print("src: ", &state->src, true);
-	drm_rect_debug_print("dst: ", &state->dst, false);
+	drm_rect_debug_print("src: ", &new_state->src, true);
+	drm_rect_debug_print("dst: ", &new_state->dst, false);
 
 	ba += /*fb->offsets[0] +*/ y * fb->pitches[0] +
 		x * fb->format->cpp[0];
@@ -690,26 +722,8 @@ static void mga2_primary_atomic_update(struct drm_plane *plane,
 		plane->name, &fb->format->format,
 		x, y,
 		fb->pitches[0], fb->offsets[0]);
-	/*
-	* A scanout can still be occurring, so we can't drop the
-	* reference to the old framebuffer. To solve this we get
-	* the time of the release of the old framebuffer in order
-	* to check it while freeing.
-	*/
-	mo->framedur_us = max(mo->framedur_us, get_frame_duration(state->crtc));
-	if (fb_changed) {
-		mo = to_mga2_gem(old_state->fb->obj[0]);
-		t = get_next_vblank_time(state->crtc, mo->framedur_us);
-		mo->hw_unref_time = t;
-	}
-	if (mcrtc->fb_unref_gem) {
-		struct drm_gem_object *gem = mcrtc->fb_unref_gem;
-		mo = to_mga2_gem(gem);
-		t = get_next_vblank_time(state->crtc, mo->framedur_us);
-		mo->hw_unref_time = t;
-		mcrtc->fb_unref_gem = NULL;
-		async_schedule(mga2_put_fb_unref_gem, gem);
-	}
+
+	mga2_check_scanout_enable(new_state, old_state, plane->type);
 }
 
 static struct drm_plane_helper_funcs mga2_primary_helper_funcs = {
@@ -811,7 +825,9 @@ static struct mga2_layer *mga2_layer_init_one(struct drm_device *drm,
 	struct mga2_layer *layer;
 	int ret;
 
-	layer = devm_kzalloc(drm->dev, sizeof(*layer), GFP_KERNEL);
+	/*FIXME: can't use devm_*alloc(),
+	 wrong cleanup order in case of error, see rm #29871 */
+	layer = drmm_kzalloc(drm, sizeof(*layer), GFP_KERNEL);
 	if (!layer)
 		return ERR_PTR(-ENOMEM);
 
@@ -850,7 +866,9 @@ static struct drm_plane **mga2_layers_init(struct mga2_crtc *mcrtc,
 	int i;
 	int n = mga25(mcrtc->dev_id) ? ARRAY_SIZE(mga2_planes) :
 			 ARRAY_SIZE(mga2_planes) - 1;
-	planes = devm_kcalloc(drm->dev, ARRAY_SIZE(mga2_planes) + 1,
+	/*FIXME: can't use devm_*alloc(),
+		wrong cleanup order in case of error, see rm #29871 */
+	planes = drmm_kcalloc(drm, ARRAY_SIZE(mga2_planes) + 1,
 			      sizeof(*planes), GFP_KERNEL);
 	if (!planes)
 		return ERR_PTR(-ENOMEM);

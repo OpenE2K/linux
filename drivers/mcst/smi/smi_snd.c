@@ -814,7 +814,7 @@ void smi_audio_remove(struct drm_device *dev)
 	iounmap(chip_irq_id->pvMem);
 }
 
-void smi_audio_resume()
+void smi_audio_resume(void)
 {
 
 	int sample_rate = 44100;
@@ -831,7 +831,7 @@ void smi_audio_resume()
 }
 
 
-void smi_audio_suspend()
+void smi_audio_suspend(void)
 {
 	SM768_AudioStop();
 	SM768_AudioDeinit();

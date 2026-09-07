@@ -145,15 +145,15 @@ bool debug_guest_ust = false;
 #define	MAX_HW_INTR	6
 
 #ifdef	CONFIG_DEBUG_PT_REGS
-#define	DO_NEW_CHECK_PT_REGS_ADDR(prev_regs, regs, usd_lo_reg)		\
+#define	DO_NEW_CHECK_PT_REGS_ADDR(prev_regs, regs, usd_reg)		\
 {									\
 									\
 	register struct pt_regs *new_regs;				\
 	register e2k_addr_t	delta_sp;				\
-	register e2k_usd_lo_t	usd_lo_cur;				\
+	register e2k_usd_t	usd_cur;				\
 									\
-	usd_lo_cur = NATIVE_NV_READ_USD_LO_REG();			\
-	delta_sp = usd_lo_cur.USD_lo_base - usd_lo_reg.USD_lo_base;	\
+	usd_cur = native_read_USD_REG();				\
+	delta_sp = USD_BASE(usd_cur) - USD_BASE(usd_reg);		\
 	new_regs = (pt_regs_t *)(((e2k_addr_t) prev_regs) + delta_sp);	\
 	if (regs != new_regs) {						\
 		pr_alert("ttable_entry() calculated pt_regs structure 0x%px is not the same as from thread_info structure 0x%px\n", \
@@ -169,8 +169,8 @@ bool debug_guest_ust = false;
  * Calculate placement of pt_regs structure, it should be
  * same as from thread_info structure
  */
-#define	NEW_CHECK_PT_REGS_ADDR(prev_regs, regs, usd_lo_reg)	\
-		DO_NEW_CHECK_PT_REGS_ADDR(prev_regs, regs, usd_lo_reg)
+#define	NEW_CHECK_PT_REGS_ADDR(prev_regs, regs, usd_reg)	\
+		DO_NEW_CHECK_PT_REGS_ADDR(prev_regs, regs, usd_reg)
 #else
 #define	NEW_CHECK_PT_REGS_ADDR(prev_regs, regs, usd_lo_reg)
 #endif
@@ -502,10 +502,37 @@ static int init_cf_fill_depth(void)
 
 pure_initcall(init_cf_fill_depth);
 
+static void e2k_notify_resume(void)
+{
+#ifdef CONFIG_E2K_DELAYED_SIGNALS
+	if (unlikely(current->forced_info.si_signo)) {
+		force_sig_info(&current->forced_info);
+		current->forced_info.si_signo = 0;
+	}
+#endif
+}
+
 void do_notify_resume(struct pt_regs *regs)
 {
+	e2k_notify_resume();
 	resume_user_mode_work(regs);
 	rseq_handle_notify_resume(NULL, regs);
+}
+
+/**
+ * on_kernel_entry - called on every transition from user into kernel
+ *
+ * Must not make any function calls since for trap handlers it
+ * is called early when sensitive to function calls context is
+ * not saved yet.
+ *
+ * Is called as early as possible.
+ */
+static __always_inline void on_kernel_entry(void)
+{
+	set_max_u_border();
+	cpuhas_greg0 = cpu_features[0];
+	cpuhas_greg1 = cpu_features[1];
 }
 
 /*
@@ -533,8 +560,14 @@ void notrace __irq_entry user_trap_handler(struct pt_regs *regs)
 	trap = pt_regs_to_trap_regs(regs);
 	trap->upsr = current_thread_info()->upsr;
 	trap->flags = 0;
+#if IS_ENABLED(CONFIG_SOFT_PM)
+	/* reset mask before iterating over excs */
+	trap->corrected_als_mask = 0;
+#endif /* CONFIG_SOFT_PM || CONFIG_SOFT_PM_MODULE */
 	regs->trap = trap;
 	regs->kernel_entry = 0;
+
+	on_kernel_entry();
 
 #ifdef CONFIG_CLI_CHECK_TIME
 	start_tick = NATIVE_READ_CLKR_REG_VALUE();
@@ -582,12 +615,6 @@ void notrace __irq_entry user_trap_handler(struct pt_regs *regs)
 	init_guest_traps_handling(regs, true /* user mode trap */);
 
 	/*
-	 * %sbbp LIFO stack is unfreezed by writing %TIR register,
-	 * so it must be read before TIRs.
-	 */
-	save_sbbp(trap->sbbp);
-
-	/*
 	 * Put some distance between reading AASR (above) and using it here
 	 * since reading of AAU registers is slow.
 	 */
@@ -612,6 +639,12 @@ void notrace __irq_entry user_trap_handler(struct pt_regs *regs)
 	regs->aau_context = aau_regs;
 
 	/*
+	 * %sbbp LIFO stack is unfreezed by writing %TIR register,
+	 * so it must be read before TIRs.
+	 */
+	save_sbbp(trap->sbbp);
+
+	/*
 	 * Now we can store all needed trap context into the
 	 * current pt_regs structure
 	 */
@@ -628,12 +661,7 @@ void notrace __irq_entry user_trap_handler(struct pt_regs *regs)
 	}
 
 	read_ticks(clock1);
-	/*
-	 * Here (in SAVE_STACK_REGS) hardware bug #29263 is being worked
-	 * around with 'flushc' instruction, so NO function calls must
-	 * happen and IRQs must not be enabled (even NMIs) until now.
-	 */
-	NATIVE_SAVE_STACK_REGS(regs, current_thread_info(), true, true);
+	NATIVE_SAVE_STACK_REGS(regs, true, true);
 	info_save_stack_reg(clock1);
 
 	/* It's important to save AAD before all call operations. */
@@ -653,8 +681,10 @@ void notrace __irq_entry user_trap_handler(struct pt_regs *regs)
 	 */
 	barrier();
 
+	raw_get_mmu_pid_irqs_off(&current->mm->context, MMU_PID_RELOAD_CHECK);
+
 	/* Since iset v6 %aaldi must be saved too */
-	if (machine.native_iset_ver >= E2K_ISET_V6 && unlikely(AAU_STOPPED(aasr)))
+	if (machine.native_iset_ver >= E2K_ISET_V6 && unlikely(aau_stopped(aasr)))
 		NATIVE_SAVE_AALDIS(aau_regs->aaldi);
 
 	/* No atomic/DAM operations are allowed before this point.
@@ -671,16 +701,14 @@ void notrace __irq_entry user_trap_handler(struct pt_regs *regs)
 	}
 	native_unfreeze_TIRS();
 
+	/* Move user's scratch gregs to final destination */
+	copy_local_gregs(&current->thread.u_gregs, &current->thread.tmp_gregs);
+
 	/* Restore some host context if trap is on guest.
 	 * This uses function calls so cannot be called earlier. */
 	trap_guest_exit(current_thread_info(), regs, trap, 0);
 
 	info_save_mmu_reg(clock1);
-
-	if (unlikely(is_chain_stack_bounds(current_thread_info(), regs)))
-		trap->TIRs[0].exc_chain_stack_bounds = 1;
-	if (unlikely(is_proc_stack_bounds(current_thread_info(), regs)))
-		trap->TIRs[0].exc_proc_stack_bounds = 1;
 
 #ifdef CONFIG_SECONDARY_SPACE_SUPPORT
 	if (unlikely(TASK_IS_BINCO(current))) {
@@ -756,7 +784,7 @@ void notrace __irq_entry user_trap_handler(struct pt_regs *regs)
 
 /*
  * We can only get here if either FILLC or FILLR isn't supported.
- * Otherwise finish_user_trap_handler_switched_stacks is called directly.
+ * Otherwise finish_user_trap_handler_switched_hw_stacks is called directly.
  */
 void notrace __noreturn finish_user_trap_handler_sw_fill(void)
 {
@@ -771,7 +799,7 @@ void notrace __noreturn finish_user_trap_handler_sw_fill(void)
 	regs = current_thread_info()->pt_regs;
 	trap = regs->trap;
 
-	finish_user_trap_handler_switched_stacks(regs, trap, from);
+	finish_user_trap_handler_switched_hw_stacks(regs, trap, from);
 
 	unreachable();
 }
@@ -810,6 +838,9 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 #ifdef CONFIG_CLI_CHECK_TIME
 	register u64 start_tick = native_read_CLKR_reg_value();
 #endif
+
+	cpuhas_greg0 = cpu_features[0];
+	cpuhas_greg1 = cpu_features[1];
 
 	trap = pt_regs_to_trap_regs(regs);
 	trap->upsr = read_UPSR_reg();
@@ -860,12 +891,6 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 	init_guest_traps_handling(regs, false /* user mode trap */);
 
 	/*
-	 * %sbbp LIFO stack is unfreezed by writing %TIR register,
-	 * so it must be read before TIRs.
-	 */
-	save_sbbp(trap->sbbp);
-
-	/*
 	 * Put some distance between reading AASR (above) and using it here
 	 * since reading of AAU registers is slow.
 	 */
@@ -878,6 +903,12 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 		aau_regs = NULL;
 	}
 	regs->aau_context = aau_regs;
+
+	/*
+	 * %sbbp LIFO stack is unfreezed by writing %TIR register,
+	 * so it must be read before TIRs.
+	 */
+	save_sbbp(trap->sbbp);
 
 	/*
 	 * Now we can store all needed trap context into the
@@ -897,14 +928,14 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 		kstack_pf_addr = 0;
 	}
 	read_ticks(clock);
-	NATIVE_SAVE_STACK_REGS(regs, current_thread_info(), false,
-			       likely(!hw_overflow && !kstack_pf_addr));
+	NATIVE_SAVE_STACK_REGS(regs, false, likely(!hw_overflow && !kstack_pf_addr));
 	info_save_stack_reg(clock);
 
 	/* It's important to save AAD before all call operations. */
 	if (unlikely(aasr.iab)) {
 		NATIVE_SAVE_AADS(aau_regs);
 	}
+
 	/*
 	 * If AAU fault happened read aalda/aaldi/aafstr here,
 	 * before some call zeroes them.
@@ -936,9 +967,12 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 	}
 	native_unfreeze_TIRS();
 
+	/* Move kernel's scratch gregs to final destination */
+	copy_scratch_gregs_from_local(&trap->k_gregs, &current->thread.tmp_gregs);
+
 	/* Since iset v6 %aaldi must be saved too */
 	if (machine.native_iset_ver >= E2K_ISET_V6 &&
-	    unlikely(AAU_STOPPED(aasr)))
+	    unlikely(aau_stopped(aasr)))
 		NATIVE_SAVE_AALDIS(aau_regs->aaldi);
 
 	/* No atomic/DAM operations are allowed before this point.
@@ -997,23 +1031,30 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 	 * interrupts. But there is one exception - if we received a maskable
 	 * interrupt we must do a reschedule, otherwise we might lose it.
 	 */
-	if (unlikely(need_resched() && preempt_count() == 0) &&
-	    (!nmi || (exceptions & exc_interrupt_mask))
+	if (preempt_count() == 0 && (!nmi || (exceptions & exc_interrupt_mask))) {
+		if (unlikely(need_resched())
 #ifdef CONFIG_PREEMPT_LAZY
-	    || (preempt_count() == 0 && current_thread_info()->preempt_lazy_count == 0
-		&& test_thread_flag(TIF_NEED_RESCHED_LAZY))
+			|| unlikely((current_thread_info()->preempt_lazy_count == 0
+			    && test_thread_flag(TIF_NEED_RESCHED_LAZY)))
 #endif
-	    ) {
-		unsigned long flags;
-		raw_all_irq_save(flags);
-		/* Check again under closed interrupts to avoid races */
-		if (likely(need_resched() && !host_is_at_HV_GM_mode()))
-			preempt_schedule_irq();
-		raw_all_irq_restore(flags);
+		) {
+			unsigned long flags;
+			raw_all_irq_save(flags);
+			/* Check again under closed interrupts to avoid races */
+			if (!host_is_at_HV_GM_mode())
+				if (likely(need_resched()
+#ifdef CONFIG_PREEMPT_LAZY
+				    || ((current_thread_info()->preempt_lazy_count == 0)
+					&& test_thread_flag(TIF_NEED_RESCHED_LAZY))
+#endif
+				))
+					preempt_schedule_irq();
+			raw_all_irq_restore(flags);
+		}
 	}
 #endif
 
-	if (unlikely(AAU_STOPPED(aasr))) {
+	if (unlikely(aau_stopped(aasr))) {
 		aaldas = __builtin_alloca(AALDAS_REGS_NUM * sizeof(aaldas[0]));
 		machine.calculate_aau_aaldis_aaldas(regs, aaldas, aau_regs);
 	} else {
@@ -1072,6 +1113,8 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 	/* MMU registers must be written with not active CLW/AAU */
 	uaccess_enable_in_kernel_trap(regs);
 
+	machine.restore_scratch_gregs(&trap->k_gregs);
+
 	write_cr(cr0, cr1);
 
 	if (cpu_has(CPU_HWBUG_AAU_AALDV))
@@ -1087,6 +1130,13 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 			NATIVE_RESTORE_AADS(aau_regs);
 	}
 
+	if (!cpu_has(CPU_FEAT_ATOMIC_LDRD) && regs->stacks.usd.P) {
+		e2k_usd_t usd_value = read_USD_reg();
+		usd_value.P = 1;
+		usd_value.Psl += 1;
+		write_USD_reg(usd_value);
+	}
+
 	/*
 	 * There must not be any branches after restoring ctpr register
 	 * because of hardware bug (old one that was not found and also
@@ -1096,7 +1146,7 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 	 * RESTORE_COMMON_REGS() must be called before RESTORE_AAU_MASK_REGS()
 	 * because of ctpr2 and AAU registers restoring dependencies.
 	 */
-	if (likely(!AAU_STOPPED(aasr))) {
+	if (likely(!aau_stopped(aasr))) {
 		NATIVE_RESTORE_COMMON_REGS(regs);
 		NATIVE_RESTORE_AAU_MASK_REGS((e2k_aaldm_t) {.word = 0},
 					     (e2k_aaldv_t) {.word = 0},
@@ -1131,7 +1181,7 @@ fetch_pm_robust_entry(long __user **entry, long __user *head,
 	int tag;
 
 	if (get_user_tagged_16(descr.qword, tag, head)) {
-		pr_debug("%s failed with head == 0x%lx\n", __func__, head);
+		pr_debug("%s failed with head == 0x%px\n", __func__, head);
 		return -EFAULT;
 	}
 
@@ -1153,7 +1203,7 @@ fetch_pm_robust_entry(long __user **entry, long __user *head,
 
 err_out:
 	pr_debug(
-	    "%s() failed with AP == <%x> 0x%llx : 0x%llx (head == 0x%lx)\n",
+	    "%s() failed with AP == <%x> 0x%llx : 0x%llx (head == 0x%px)\n",
 	     __func__, tag, descr.lo, descr.hi, head);
 	return -EFAULT;
 }
@@ -1291,8 +1341,11 @@ static inline u8 get_size_arg_number(const int sys_num, const u8 argnum)
 #define MASK_PROT_ARG_INT_OR_STRING	7
 #define MASK_PROT_ARG_INT_OR_DSCR	8
 #define MASK_PROT_ARG_NOARG		0xf
+#define MASK_PROT_NO_MORE_ARGS		0xff
 #define MASK_PROT_ARG_NON_EMPTY		0x10 /* Argument must not be 0/NULL */
+#define MASK_SET_U_BORDER		0x20 /* ARG is AP and call set_ap_u_border(AP) */
 #define MASK_PROT_ARG_OPTIONAL		0x80
+#define TAG_PROT_ARG_NOT_SBMTD		0x55 /* Argument was not submitted to syscal */
 /* Bits of lower syscall mask byte (mask&0xff) : */
 #define ADJUST_SIZE_MASK		1
 #define NEGATIVE_DESCR_SIZE_MASK	2
@@ -1300,22 +1353,22 @@ static inline u8 get_size_arg_number(const int sys_num, const u8 argnum)
 
 static inline
 unsigned long e2k_dscr_ptr_size(e2k_ptr_t dscr, long min_size, long *ptr_size,
-				u16 sys_num, u8 argnum, u8 *fatal, u8 lower_byte_mask)
+				u16 sys_num, u8 argnum, long *fatal, u8 lower_byte_mask)
 {
 	/* NB> 'min_size' may be negative; this is why it has 'long' type */
 
 	*ptr_size = AP_OBJ_SIZE(dscr);
 
-	if (check_pm_sc_debug_mode(PM_SC_DBG_MODE_DEBUG)) {
-		if (unlikely(cpu_has(CPU_FEAT_ISET_V7)))
-			pr_info("dscr=0x%llx:0x%llx sys_num=%d arg#%d minSize=0x%lx OBJ_SIZE=0x%lx\n",
-				dscr.lo, dscr.hi,
-				sys_num, argnum, min_size, *ptr_size);
-		else
-			pr_info("dscr=0x%llx:0x%.8x.%.8x sys_num=%d arg#%d minSize=0x%lx OBJ_SIZE=0x%lx\n",
-				dscr.lo, (u32)(dscr.hi >> 32), (u32)dscr.hi,
-				sys_num, argnum, min_size, *ptr_size);
-	}
+#if DEBUG_1SYSCALL
+	if (unlikely(cpu_has(CPU_FEAT_ISET_V7)))
+		Dbg1SC("dscr=0x%llx:0x%llx sys_num=%d arg#%d minSize=0x%lx OBJ_SIZE=0x%lx\n",
+			dscr.lo, dscr.hi,
+			sys_num, argnum, min_size, *ptr_size);
+	else
+		Dbg1SC("dscr=0x%llx:0x%.8x.%.8x sys_num=%d arg#%d minSize=0x%lx OBJ_SIZE=0x%lx\n",
+			dscr.lo, (u32)(dscr.hi >> 32), (u32)dscr.hi,
+			sys_num, argnum, min_size, *ptr_size);
+#endif /* DEBUG_1SYSCALL */
 
 	if (min_size < 0) {
 		argnum = get_size_arg_number(sys_num, argnum);
@@ -1330,9 +1383,9 @@ unsigned long e2k_dscr_ptr_size(e2k_ptr_t dscr, long min_size, long *ptr_size,
 				     min_size, argnum);
 		PM_EXCEPTION_ON_WARNING(SIGABRT, 0, EINVAL);
 		*ptr_size = 0;
-		*fatal = 1;
+		*fatal = -EINVAL;
 		return 0;
-	} else if (unlikely(*ptr_size < 0 && lower_byte_mask && NEGATIVE_DESCR_SIZE_MASK)) {
+	} else if (unlikely(*ptr_size < 0 && (lower_byte_mask & NEGATIVE_DESCR_SIZE_MASK))) {
 		PROTECTED_MODE_WARNING(PMSCWARN_NEGATIVE_DSCR_SIZE,
 			     sys_num, sys_call_ID_to_name[sys_num], *ptr_size, argnum);
 		if (unlikely(!check_pm_sc_debug_mode(PM_SC_DBG_MODE_NO_ERR_MESSAGES))
@@ -1342,16 +1395,16 @@ unsigned long e2k_dscr_ptr_size(e2k_ptr_t dscr, long min_size, long *ptr_size,
 		PM_EXCEPTION_ON_WARNING(SIGABRT, 0, EINVAL);
 		*ptr_size = 0;
 		if (unlikely(check_pm_sc_debug_mode(PM_SC_DBG_WARNINGS_AS_ERRORS))) {
-			*fatal = 1;
+			*fatal = -EINVAL;
 			return 0;
 		}
 	} else if (*ptr_size < min_size) {
 		PROTECTED_MODE_ALERT(PMSCERRMSG_SC_ARG_SIZE_TOO_LITTLE,
 				     sys_num, sys_call_ID_to_name[sys_num],
 				     *ptr_size, min_size, argnum);
-		PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, 0, EINVAL);
+		PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, 0, EFAULT);
 		*ptr_size = 0;
-		*fatal = 1;
+		*fatal = -EFAULT;
 		return 0;
 	}
 	return AP_PTRC(dscr);
@@ -1378,7 +1431,7 @@ static inline int null_prot_ptr(u32 tag, u64 arg)
 static unsigned long get_protected_ARG(u64 sys_num, u8 tag, u64 mask,
 				       u32 a_num, unsigned long protarg_lo,
 				       unsigned long protarg_hi, long min_size,
-				       u8 *fatal, struct pt_regs *regs)
+				       long *fatal, struct pt_regs *regs)
 {
 	u8 msk = (mask >> (a_num * 8)) & 0xff;
 	u8 msk_type = msk & 0xf;
@@ -1387,6 +1440,7 @@ static unsigned long get_protected_ARG(u64 sys_num, u8 tag, u64 mask,
 	u32 tag_lo = tag & 0xf;
 	u32 optional_arg = msk & MASK_PROT_ARG_OPTIONAL;
 	char arg[4] = "#0";
+	e2k_ap_t ap_arg = (e2k_ap_t){.lo = protarg_lo, .hi = protarg_hi};
 
 	if (msk_type == MASK_PROT_ARG_NOARG) {
 		return 0L;	/* this is not effective syscall arg */
@@ -1405,46 +1459,46 @@ static unsigned long get_protected_ARG(u64 sys_num, u8 tag, u64 mask,
 		return 0L;	/* arg was not passed or irrelevant */
 	}
 
-	DbgSCP("[%d](SC#%lld, tag=0x%x, msk=0x%x, arg=0x%lx:0x%lx, min_size=%lx)\n",
+	Dbg1SC("[%d](SC#%lld, tag=0x%x, msk=0x%x, arg=0x%lx:0x%lx, min_size=%lx)\n",
 		a_num, sys_num, tag, msk, protarg_lo, protarg_hi, min_size);
 
 	if (msk_type == MASK_PROT_ARG_LONG_OR_DSCR) {
-		msk_type = (tag == ETAGAPQ) ? MASK_PROT_ARG_DSCR : MASK_PROT_ARG_LONG;
+		msk_type = IS_AP(ap_arg, tag) ? MASK_PROT_ARG_DSCR : MASK_PROT_ARG_LONG;
 	} else if (unlikely(msk_type == MASK_PROT_ARG_INT_OR_DSCR)) {
-		msk_type = (tag == ETAGAPQ) ? MASK_PROT_ARG_DSCR : MASK_PROT_ARG_INT;
+		msk_type = IS_AP(ap_arg, tag) ? MASK_PROT_ARG_DSCR : MASK_PROT_ARG_INT;
 	} else if (unlikely(msk_type == MASK_PROT_ARG_LONG_OR_STRING
 				|| msk_type == MASK_PROT_ARG_INT_OR_STRING)) {
-		if (tag == ETAGAPQ)
+		if (IS_AP(ap_arg, tag))
 			msk_type = MASK_PROT_ARG_STRING;
 		else
 			msk_type = (msk_type == MASK_PROT_ARG_LONG_OR_STRING) ?
 						MASK_PROT_ARG_LONG : MASK_PROT_ARG_INT;
 	}
 
-	if (!optional_arg && !protarg_lo && msk & MASK_PROT_ARG_NON_EMPTY) {
+	if (!optional_arg && !protarg_lo && (msk & MASK_PROT_ARG_NON_EMPTY)) {
 		arg[1] = '0' + a_num; /* string # of the argument: "#1" .. "#6" */
 		PROTECTED_MODE_ALERT(PMSCERRMSG_SC_ARG_VAL_UNSUPPORTED,
 				     sys_call_ID_to_name[regs->sys_num], arg, 0);
 		PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, 0, EINVAL);
-		*fatal = 1;
+		*fatal = -EINVAL;
 	}
 
-	if (((msk_type == MASK_PROT_ARG_INT)
-		&& (tag != ETAGDWQ) && (tag != ETAGPL))
+	if (((msk_type == MASK_PROT_ARG_INT) || (msk_type == MASK_PROT_ARG_LONG))
 		/* The check below does the following:
 		 * - in the current ABI syscall argument takes 4 words (16 bytes);
-		 * - if syscall argument is of type 'int' (not 'long'), then
-		 *   only lowest word (word #0) gets filled by compiler while
-		 *   other 3 words may contain trash (contents of previous call);
+		 * - if syscall argument is of type 'int' or 'long', then only lowest word (word #0)
+		 *   gets filled by compiler if arg size allows, while other 3 words rest untouched
+		 *   and may contain trash (inherited from previous call);
 		 * - if tag of the lowest word is numeric one (i.e. '0'), then
 		 *   this argument is definitely of type 'int' and
 		 * - we can zero the word #1 to make next checks simpler.
 		 */
-		|| (tag_lo && !(tag_lo & 0x3))) { /* numerical tag in lower word */
+		&& tag_lo && !(tag_lo & 0x3)) { /* numerical tag in lo-word; trash in hi-word */
 		/* this is 'int' argument */
 		tag_lo &= 0x3;
 		tag = tag_lo;
 		protarg_lo = (int) protarg_lo; /* removing trash in higher word */
+		msk_type = MASK_PROT_ARG_INT;
 	}
 
 #if DEBUG_SYSCALLP_CHECK
@@ -1464,28 +1518,23 @@ static unsigned long get_protected_ARG(u64 sys_num, u8 tag, u64 mask,
 					PMSCERRMSG_SC_ARG_MISSED_OR_UNINIT,
 					a_num);
 		PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, 0, EINVAL);
-		*fatal = 1;
+		*fatal = -EINVAL;
 		return 0L; /* uninitialized or missed arg must me zeroed */
 	}
 #endif /* DEBUG_SYSCALLP_CHECK */
 
-	e2k_ap_t dscr;
-	dscr.lo = protarg_lo;
-	dscr.hi = protarg_hi;
-
-	if (IS_PL(dscr, tag)) {
+	if (IS_PL(ap_arg, tag)) {
 		e2k_pl_t pl;
 
 		if (msk_type != MASK_PROT_ARG_FPTR) {
 			PROTECTED_MODE_ALERT(PMSCERRMSG_SC_UNEXPECTED_FUNC_IN_ARG,
 					sys_num, sys_call_ID_to_name[sys_num], tag, a_num);
 			PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, 0, EINVAL);
-			*fatal = 1;
+			*fatal = -EINVAL;
 		} else if (cpu_has(CPU_FEAT_ISET_V6)) {
 			int cui;
 			/* Checking for correct CUI: */
-			LO(pl) = protarg_lo;
-			HI(pl) = protarg_hi;
+			pl.qword = ap_arg.qword;
 			cui = find_cui_by_ip(pl.target);
 			if (cui < 0) {
 				PROTECTED_MODE_ALERT(PMSCERRMSG_CUI_NOT_FOUND,
@@ -1508,14 +1557,14 @@ static unsigned long get_protected_ARG(u64 sys_num, u8 tag, u64 mask,
 	}
 
 	/* First, we check if the argument is non-pointer: */
-	if (!IS_AP(dscr, tag)) {
+	if (!IS_AP(ap_arg, tag)) {
 		unsigned long ret = (tag == ETAGDWQ) ? 0 : protarg_lo;
 
-		if (unlikely(!null_prot_ptr(tag_lo, protarg_lo) &&
+		if (unlikely(!AP_NULL(ap_arg, tag) &&
 			     (msk_type == MASK_PROT_ARG_DSCR ||
 			      msk_type == MASK_PROT_ARG_STRING))) {
 			if (PM_SYSCALL_WARN_ONLY == 0)
-				*fatal = 1;
+				*fatal = -EINVAL;
 			DbgSCP("tag=0x%x tag_lo=0x%x msk=0x%x protarg_lo=0x%lx\n",
 			     tag, tag_lo, (int)msk, protarg_lo);
 			PROTECTED_MODE_ALERT(PMSCERRMSG_NOT_DESCR_IN_SC_ARG,
@@ -1529,14 +1578,19 @@ static unsigned long get_protected_ARG(u64 sys_num, u8 tag, u64 mask,
 	}
 
 	/* Finally, this is descriptor; getting pointer from it: */
-	ptr = e2k_dscr_ptr_size(dscr, min_size, &size,
+	if (msk & MASK_SET_U_BORDER) {
+		set_ap_u_border(ap_arg);
+		ptr = AP_PTR(ap_arg);
+		goto return_ptr;
+	}
+	ptr = e2k_dscr_ptr_size(ap_arg, min_size, &size,
 				sys_num, a_num, fatal, mask & 0xff);
 
 	/* Second, we check if the argument is string: */
 	if (msk_type == MASK_PROT_ARG_STRING) {
 		if (e2k_ptr_str_check((char __user *)ptr, size)) {
 			if (PM_SYSCALL_WARN_ONLY == 0)
-				*fatal = 1;
+				*fatal = -EINVAL;
 			PROTECTED_MODE_ALERT(PMSCERRMSG_NOT_STRING_IN_SC_ARG,
 					     sys_num,
 					     sys_call_ID_to_name[sys_num],
@@ -1546,7 +1600,7 @@ static unsigned long get_protected_ARG(u64 sys_num, u8 tag, u64 mask,
 		/* Eventually, we check if this is proper pointer: */
 		if (unlikely(sys_num && msk_type != MASK_PROT_ARG_DSCR)) {
 			if (PM_SYSCALL_WARN_ONLY == 0)
-				*fatal = 1;
+				*fatal = -EINVAL;
 			PROTECTED_MODE_ALERT
 			    (PMSCERRMSG_UNEXPECTED_DESCR_IN_SC_ARG, sys_num,
 			     sys_call_ID_to_name[sys_num], a_num);
@@ -1554,7 +1608,7 @@ static unsigned long get_protected_ARG(u64 sys_num, u8 tag, u64 mask,
 	}
 	if (*fatal)
 		PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, 0, EINVAL);
-
+return_ptr:
 	return ptr;
 }
 
@@ -1649,7 +1703,7 @@ static inline void print_prot_syscall_arg_masks(int sys_num)
 	pr_info("\n\n##### prot_syscall_arg_masks[%d]: #####\n", NR_syscalls);
 	for (i = 0; i <= NR_syscalls; i++) {
 		if (sys_call_table_entry8[i] ==
-		    (protected_system_call_func) sys_ni_syscall) {
+		    (protected_system_call_func) (void *) sys_ni_syscall) {
 			pr_info("NR#%d\t[%s]\t\t >>>sys_ni_syscall<<<\n", i,
 				sys_call_ID_to_name[i]);
 			continue;
@@ -1683,7 +1737,7 @@ static inline
 void report_unsupported_prot_syscall(int sys_num)
 {
 	PROTECTED_MODE_ALERT(PMSCERRMSG_SC_NOT_AVAILABLE_IN_PM,
-			     sys_num, SYSCALL_NAME(sys_num));
+			     sys_num, SYSCALL_NAME_ON_ID(sys_num));
 	if (sys_num < NR_syscalls)
 		print_prot_syscall_arg_masks(sys_num);
 }
@@ -1747,36 +1801,25 @@ SYS_RET_TYPE notrace ttable_entry8_C(u64 sys_num, u64 tags, long arg1,
 		long arg2, long arg3, long arg4, struct pt_regs *regs)
 {
 #ifdef CONFIG_DEBUG_PT_REGS
-	e2k_usd_lo_t usd_lo_prev;
+	e2k_usd_t usd_prev;
 	struct pt_regs *prev_regs = regs;
 #endif
 	long rval = -EINVAL;
-	long arg5 = regs->dargs[4], arg6 = regs->dargs[5], arg7 = regs->dargs[6],
-	     arg8 = regs->dargs[7], arg9 = regs->dargs[8], arg10 = regs->dargs[9],
-	     arg11 = regs->dargs[10], arg12 = regs->dargs[11];
+	long arg5 = regs->dargs[4], arg7 = regs->dargs[6];
 	unsigned long a1, a2, a3, a4, a5, a6;
-	protected_system_call_func sys_call;
+	protected_system_call_func sys_call = (protected_system_call_func) (void *) sys_ni_syscall;
 	unsigned long ti_flags = current_thread_info()->flags;
-	u64 mask;
-	long size1, size2, size3, size4;
+	u64 mask = 0;
+	long size1 = 0, size2 = 0, size3, size4;
 	u16 size5, size6;
-	u8 wrong_arg = 0;	/* signal that an argument detected wrong */
+	long wrong_res = 0;	/* signal that an argument detected wrong */
 #ifdef CONFIG_E2K_PROFILING
 	register long start_tick = native_read_CLKR_reg_value();
 	register long clock1;
 #endif
 
-	if (sys_num >= NR_syscalls) {
-		sys_call = (protected_system_call_func) sys_ni_syscall;
-		mask = size1 = size2 = 0;
-	} else {
-		sys_call = sys_call_table_entry8[sys_num];
-		mask = prot_syscall_arg_masks[sys_num].mask;
-		if (!mask)
-			mask = prot_syscall_arg_masks[NR_syscalls].mask;
-		size1 = prot_syscall_arg_masks[sys_num].size1;
-		size2 = prot_syscall_arg_masks[sys_num].size2;
-	}
+	init_pt_regs_for_syscall(regs);
+	on_kernel_entry();
 
 #ifdef CONFIG_DEBUG_PT_REGS
 	/*
@@ -1786,8 +1829,8 @@ SYS_RET_TYPE notrace ttable_entry8_C(u64 sys_num, u64 tags, long arg1,
 	 */
 	usd_prev = native_read_USD_reg();
 #endif
-	init_pt_regs_for_syscall(regs);
-	SAVE_STACK_REGS(regs, current_thread_info(), true, false);
+	raw_get_mmu_pid_irqs_off(&current->mm->context, MMU_PID_RELOAD_CHECK);
+	SAVE_STACK_REGS(regs, true, false);
 	regs->sys_num = sys_num;
 	regs->return_desk = 0;
 
@@ -1809,34 +1852,6 @@ SYS_RET_TYPE notrace ttable_entry8_C(u64 sys_num, u64 tags, long arg1,
 	current_thread_info()->pt_regs = regs;
 	native_write_irq_barrier_PSR_reg(E2K_KERNEL_PSR_ENABLED);
 
-	if (check_pm_sc_debug_mode(PM_SC_DBG_MODE_DEBUG)) {
-		/* Checking if there is a descriptor in args: */
-		if ((((tags >> 8) & 0xff) == ETAGAPQ) || /* arg1-2 */
-			(((tags >> 16) & 0xff) == ETAGAPQ)) /* arg3-4 */
-			pr_info("\nsys_num = %lld: arg1 = 0x%lx, arg2 = 0x%.8x.%.8x, arg3 = 0x%lx, arg4 = 0x%.8x.%.8x\n",
-				sys_num, arg1, (u32)(arg2 >> 32), (u32)arg2,
-				arg3, (u32)(arg4 >> 32), (u32)arg4);
-		else
-			pr_info("\nsys_num = %lld: arg1 = 0x%lx, arg2 = 0x%lx, arg3 = 0x%lx, arg4 = 0x%lx\n",
-				sys_num, arg1, arg2, arg3, arg4);
-		if ((((tags >> 24) & 0xff) == ETAGAPQ) || /* arg5-6 */
-			(((tags >> 32) & 0xff) == ETAGAPQ)) /* arg7-8 */
-			pr_info("tags = 0x%llx, arg5 = 0x%lx, arg6 = 0x%.8x.%.8x, arg7 = 0x%lx, arg8 = 0x%.8x.%.8x\n",
-				tags, arg5, (u32)(arg6 >> 32), (u32)arg6, arg7,
-				(u32)(arg8 >> 32), (u32)arg8);
-		else
-			pr_info("tags = 0x%llx, arg5 = 0x%lx, arg6 = 0x%lx, arg7 = 0x%lx, arg8 = 0x%lx\n",
-				tags, arg5, arg6, arg7, arg8);
-		if (((tags >> 40) & 0xff) == ETAGAPQ) /* arg9-10 */
-			pr_info("\targ9 = 0x%lx, arg10 = 0x%.8x.%.8x\n", arg9,
-				(u32)(arg10 >> 32), (u32)arg10);
-		else
-			pr_info("\targ9 = 0x%lx, arg10 = 0x%lx\n", arg9, arg10);
-
-		pr_info("_NR_ %lld/%s start: mask=0x%llx current %px pid %d\n",
-			sys_num, SYSCALL_NAME(sys_num), mask, current, current->pid);
-	}
-
 	/* All other arguments have been saved in assembler already */
 	regs->dargs[0] = arg1;
 	regs->dargs[1] = arg2;
@@ -1844,60 +1859,166 @@ SYS_RET_TYPE notrace ttable_entry8_C(u64 sys_num, u64 tags, long arg1,
 	regs->dargs[3] = arg4;
 	regs->tags = tags;
 
-	if (likely(sys_num < NR_syscalls)) {
-		if (size1 < 0)
-			size1 = check_arg_descr_size(sys_num, 1, size1, regs, mask,
-						     &arg3, &arg5, &arg7);
-		size3 = prot_syscall_arg_masks[sys_num].size3;
-		if (size3 < 0)
-			size3 = check_arg_descr_size(sys_num, 3, size3, regs, mask,
-						     &arg3, &arg5, &arg7);
-		size4 = prot_syscall_arg_masks[sys_num].size4;
-		/* So far we don't have negative size in the 4th row.
-		 * To be added in the future if needed:
-		 if (size4 < 0)
-		 size4 = regs->args[-size4];
-		 */
-		size5 = prot_syscall_arg_masks[sys_num].size5;
-		/* So far we don't have negative size in the 5th row.
-		 * To be added in the future if needed:
-		 if (size5 < 0)
-		 size5 = regs->args[-size5];
-		 */
-		if (size2 < 0)
-			size2 = check_arg_descr_size(sys_num, 2, size2, regs, mask,
-						     &arg3, &arg5, &arg7);
-		size6 = prot_syscall_arg_masks[sys_num].size6;
-		/* So far we don't have negative size in the 6th row.
-		 * To be added in the future if needed:
-		if (size6 < 0)
-			size6 = regs->args[-size6];
-		 */
-
-		a1 = get_protected_ARG(sys_num, (tags >> 8) & 0xffU, mask, 1,
-			       arg1, arg2, size1, &wrong_arg, regs);
-		a2 = get_protected_ARG(sys_num, (tags >> 16) & 0xffU, mask, 2,
-			       arg3, arg4, size2, &wrong_arg, regs);
-		a3 = get_protected_ARG(sys_num, (tags >> 24) & 0xffU, mask, 3,
-			       arg5, arg6, size3, &wrong_arg, regs);
-		a4 = get_protected_ARG(sys_num, (tags >> 32) & 0xffU, mask, 4,
-			       arg7, arg8, size4, &wrong_arg, regs);
-		a5 = get_protected_ARG(sys_num, (tags >> 40) & 0xffU, mask, 5,
-			       arg9, arg10, size5, &wrong_arg, regs);
-		a6 = get_protected_ARG(sys_num, (tags >> 48) & 0xffU, mask, 6,
-			       arg11, arg12, size6, &wrong_arg, regs);
-	} else { /* (sys_num >= NR_syscalls) */
-		a1 = 0;
-		a2 = 0;
-		a3 = 0;
-		a4 = 0;
-		a5 = 0;
-		a6 = 0;
+	a1 = a2 = a3 = a4 = a5 = a6 = ULONG_MAX;
+	if (unlikely(ti_flags & _TIF_WORK_SYSCALL_TRACE)) {
+		wrong_res = syscall_trace_entry(regs);
+		if (regs->kernel_entry != 8)
+			BUG();
+		if (wrong_res) {
+			syscall_trace_leave(regs);
+			goto wrong_res;
+		}
+		sys_num = regs->sys_num;
 	}
 
+	if (sys_num < NR_syscalls) {
+		sys_call = sys_call_table_entry8[sys_num];
+		mask = prot_syscall_arg_masks[sys_num].mask;
+		if (!mask)
+			mask = prot_syscall_arg_masks[NR_syscalls].mask;
+		size1 = prot_syscall_arg_masks[sys_num].size1;
+		size2 = prot_syscall_arg_masks[sys_num].size2;
+	}
+	if (sys_call == (protected_system_call_func) (void *) sys_ni_syscall) {
+		report_unsupported_prot_syscall(sys_num);
+		wrong_res = -ENOSYS;
+		goto wrong_res;
+	}
+	if (check_pm_sc_debug_mode(PM_SC_DBG_MODE_DEBUG) &&
+			((mask >> 8) & 0xff) != MASK_PROT_NO_MORE_ARGS) {
+		u64 arg_tag = tags >> 8;
+		u64 arg_msk = mask >> 8;
+		if ((arg_msk & 0xff) == MASK_PROT_NO_MORE_ARGS ||
+			(arg_msk & MASK_PROT_ARG_OPTIONAL &&
+			(arg_tag & 0xff) == TAG_PROT_ARG_NOT_SBMTD))
+			goto end_of_args;
+		/* Checking if there is a descriptor in args: */
+		if ((arg_tag & 0xff) == ETAGAPQ) /* arg1-2 */
+			pr_info("\nsys_num = %lld tags = 0x%llx:\n\t\targ1 = 0x%lx, arg2 = 0x%.8x.%.8x",
+				sys_num, tags, arg1, (u32)(arg2 >> 32), (u32)arg2);
+		else
+			pr_info("\nsys_num = %lld tags = 0x%llx: arg1 = 0x%lx, arg2 = 0x%lx",
+				sys_num, tags, arg1, arg2);
+
+		arg_tag >>= 8;
+		arg_msk >>= 8;
+		if ((arg_msk & 0xff) == MASK_PROT_NO_MORE_ARGS ||
+			(arg_msk & MASK_PROT_ARG_OPTIONAL &&
+			(arg_tag & 0xff) == TAG_PROT_ARG_NOT_SBMTD))
+			goto end_of_args;
+		if ((arg_tag & 0xff) == ETAGAPQ) /* arg3-4 */
+			pr_info("\t\targ3 = 0x%lx, arg4 = 0x%.8x.%.8x ",
+				arg3, (u32)(arg4 >> 32), (u32)arg4);
+		else
+			pr_info("\t\targ3 = 0x%lx, arg4 = 0x%lx ", arg3, arg4);
+		arg_tag >>= 8;
+		arg_msk >>= 8;
+		if ((arg_msk & 0xff)  == MASK_PROT_NO_MORE_ARGS ||
+			(arg_msk & MASK_PROT_ARG_OPTIONAL &&
+			(arg_tag & 0xff) == TAG_PROT_ARG_NOT_SBMTD))
+			goto end_of_args;
+		if ((arg_tag & 0xff) == ETAGAPQ) /* arg5-6 */
+			pr_cont("\n\t\targ5 = 0x%lx, arg6 = 0x%.8x.%.8x ",
+				arg5, (u32)(regs->dargs[5] >> 32), (u32)regs->dargs[5]);
+		else
+			pr_cont("arg5 = 0x%lx, arg6 = 0x%lx ", arg5, regs->dargs[5]);
+
+		arg_tag >>= 8;
+		arg_msk >>= 8;
+		if ((arg_msk & 0xff) == MASK_PROT_NO_MORE_ARGS ||
+			(arg_msk & MASK_PROT_ARG_OPTIONAL &&
+			(arg_tag & 0xff) == TAG_PROT_ARG_NOT_SBMTD))
+			goto end_of_args;
+		if ((arg_tag & 0xff) == ETAGAPQ) /* arg7-8 */
+			pr_cont("\n\t\targ7 = 0x%lx, arg8 = 0x%.8x.%.8x ",
+				arg7, (u32)(regs->dargs[7] >> 32), (u32)regs->dargs[7]);
+		else
+			pr_cont("arg7 = 0x%lx, arg8 = 0x%lx ", arg7, regs->dargs[7]);
+		arg_tag >>= 8;
+		arg_msk >>= 8;
+		if ((arg_msk & 0xff) == MASK_PROT_NO_MORE_ARGS ||
+			(arg_msk & MASK_PROT_ARG_OPTIONAL &&
+			(arg_tag & 0xff) == TAG_PROT_ARG_NOT_SBMTD))
+			goto end_of_args;
+		if ((arg_tag & 0xff) == ETAGAPQ) /* arg9-10 */
+			pr_cont("\n\t\targ9 = 0x%lx, arg10 = 0x%.8x.%.8x ", regs->dargs[8],
+				(u32)(regs->dargs[9] >> 32), (u32)regs->dargs[9]);
+		else
+			pr_cont("arg9 = 0x%lx, arg10 = 0x%lx ", regs->dargs[8], regs->dargs[9]);
+
+		arg_tag >>= 8;
+		arg_msk >>= 8;
+		if ((arg_msk & 0xff) == MASK_PROT_NO_MORE_ARGS ||
+			(arg_msk & MASK_PROT_ARG_OPTIONAL &&
+			(arg_tag & 0xff) == TAG_PROT_ARG_NOT_SBMTD))
+			goto end_of_args;
+		if ((arg_tag & 0xff) == ETAGAPQ) /* arg11-12 */
+			pr_cont("\n\t\targ11 = 0x%lx, arg12 = 0x%.8x.%.8x\n", regs->dargs[10],
+				(u32)(regs->dargs[11] >> 32), (u32)regs->dargs[11]);
+		else
+			pr_cont(" arg11 = 0x%lx, arg12 = 0x%lx\n",
+				regs->dargs[10], regs->dargs[11]);
+end_of_args:
+		pr_info("_NR_ %lld/%s start: mask=0x%llx current %px pid %d",
+			sys_num, SYSCALL_NAME_ON_ID(sys_num), mask, current, current->pid);
+	}
+	if (size1 < 0)
+		size1 = check_arg_descr_size(sys_num, 1, size1, regs, mask,
+					     &arg3, &arg5, &arg7);
+	size3 = prot_syscall_arg_masks[sys_num].size3;
+	if (size3 < 0)
+		size3 = check_arg_descr_size(sys_num, 3, size3, regs, mask,
+					     &arg3, &arg5, &arg7);
+	size4 = prot_syscall_arg_masks[sys_num].size4;
+	/* So far we don't have negative size in the 4th row.
+	 * To be added in the future if needed:
+	 if (size4 < 0)
+	 size4 = regs->args[-size4];
+	 */
+	size5 = prot_syscall_arg_masks[sys_num].size5;
+	/* So far we don't have negative size in the 5th row.
+	 * To be added in the future if needed:
+	 if (size5 < 0)
+	 size5 = regs->args[-size5];
+	 */
+	if (size2 < 0)
+		size2 = check_arg_descr_size(sys_num, 2, size2, regs, mask,
+					     &arg3, &arg5, &arg7);
+	size6 = prot_syscall_arg_masks[sys_num].size6;
+	/* So far we don't have negative size in the 6th row.
+	 * To be added in the future if needed:
+	if (size6 < 0)
+		size6 = regs->args[-size6];
+	 */
+	a1 = get_protected_ARG(sys_num, (regs->tags >> 8) & 0xffU, mask, 1,
+	       regs->dargs[0], regs->dargs[1], size1, &wrong_res, regs);
+	if (wrong_res)
+		goto wrong_res;
+	a2 = get_protected_ARG(sys_num, (regs->tags >> 16) & 0xffU, mask, 2,
+		       regs->dargs[2], regs->dargs[3], size2, &wrong_res, regs);
+	if (wrong_res)
+		goto wrong_res;
+	a3 = get_protected_ARG(sys_num, (regs->tags >> 24) & 0xffU, mask, 3,
+		       regs->dargs[4], regs->dargs[5], size3, &wrong_res, regs);
+	if (wrong_res)
+		goto wrong_res;
+	a4 = get_protected_ARG(sys_num, (regs->tags >> 32) & 0xffU, mask, 4,
+		       regs->dargs[6], regs->dargs[7], size4, &wrong_res, regs);
+	if (wrong_res)
+		goto wrong_res;
+	a5 = get_protected_ARG(sys_num, (regs->tags >> 40) & 0xffU, mask, 5,
+		       regs->dargs[8], regs->dargs[9], size5, &wrong_res, regs);
+	if (wrong_res)
+		goto wrong_res;
+	a6 = get_protected_ARG(sys_num, (regs->tags >> 48) & 0xffU, mask, 6,
+		       regs->dargs[10], regs->dargs[11], size6, &wrong_res, regs);
+	if (wrong_res)
+		goto wrong_res;
+wrong_res:
+
 #if DEBUG_1SYSCALL
-	Dbg1SC(sys_num, "system call %lld (0x%lx, 0x%lx, 0x%lx, 0x%lx, 0x%lx, 0x%lx)\n",
-			sys_num, a1, a2, a3, a4, a5, a6);
+	Dbg1SC(sys_num, "system call %lld (0x%lx, 0x%lx, 0x%lx, 0x%lx, 0x%lx, 0x%lx) expected res = %ld\n",
+			sys_num, a1, a2, a3, a4, a5, a6, wrong_res);
 #else
 	if (check_pm_sc_debug_mode(PM_SC_DBG_MODE_COMPLEX_WRAPPERS) &&
 		current->mm->context.pm_sc_debug_mode & PM_SC_DBG_STRING_ARGS) {
@@ -1925,46 +2046,21 @@ SYS_RET_TYPE notrace ttable_entry8_C(u64 sys_num, u64 tags, long arg1,
 			   sys_num, SYSCALL_NAME_ON_ID(sys_num), a1, a2, a3, a4, a5, a6);
 	}
 #endif
-
-	if (unlikely(sys_call == (protected_system_call_func)sys_ni_syscall)) {
-		report_unsupported_prot_syscall(sys_num);
-		rval = -ENOSYS;
-		regs->sys_rval = rval;
-		goto out;
-	} else if (likely(!(ti_flags & _TIF_WORK_SYSCALL_TRACE) && !wrong_arg)) {
-		/* Fast path */
+	if (likely(!wrong_res)) {
+		/* syscall_trace_entry was called above if _TIF_WORK_SYSCALL_TRACE */
 		rval = sys_call(a1, a2, a3, a4, a5, a6, regs);
 		regs->sys_rval = rval;
-	} else if (likely(!wrong_arg)) {
-		/* Trace syscall enter */
-		rval = syscall_trace_entry(regs);
-
-		/* Update system call number, since tracer could have changed it */
-		if (regs->kernel_entry == 8) {
-			if ((unsigned) regs->sys_num < NR_syscalls) {
-				sys_call = sys_call_table_entry8[regs->sys_num];
-			} else {
-				sys_call = (protected_system_call_func) sys_ni_syscall;
-			}
-		} else {
-			BUG();
+		if (unlikely(ti_flags & _TIF_WORK_SYSCALL_TRACE)) {
+			/* Trace syscall exit */
+			syscall_trace_leave(regs);
+			/* Update rval, since tracer could have changed it */
+			rval = regs->sys_rval;
 		}
+	} else { /* (unlikely(wrong_res)) */
 
-		if (!rval) {
-			rval = sys_call(a1, a2, a3, a4, a5, a6, regs);
-			regs->sys_rval = rval;
-		}
-
-		/* Trace syscall exit */
-		syscall_trace_leave(regs);
-		/* Update rval, since tracer could have changed it */
-		rval = regs->sys_rval;
-	} else { /* (unlikely(wrong_arg)) */
-
-		rval = -EFAULT; /* NB> This error code expected from several syscalls. */
+		rval = wrong_res;
 		regs->sys_rval = rval;
 	}
-
 #if DEBUG_1SYSCALL
 	Dbg1SC(sys_num, "syscall %lld : rval = 0x%lx / %ld\n", sys_num, rval,
 	       rval);
@@ -1980,8 +2076,7 @@ SYS_RET_TYPE notrace ttable_entry8_C(u64 sys_num, u64 tags, long arg1,
 	 * args = (long *) ((((unsigned long) regs) + sizeof(struct pt_regs)
 	 *		+ 0xfUL) & (~0xfUL));
 	 */
-out:
-	NEW_CHECK_PT_REGS_ADDR(prev_regs, regs, usd_lo_prev);
+	NEW_CHECK_PT_REGS_ADDR(prev_regs, regs, usd_prev);
 
 	finish_syscall(regs, FROM_SYSCALL_PROT_8, true);
 }
@@ -2036,19 +2131,26 @@ SYS_RET_TYPE notrace handle_sys_call(system_call_func sys_call,
 				     long arg1, long arg2, long arg3, long arg4,
 				     long arg5, long arg6, struct pt_regs *regs)
 {
+	struct mm_struct *mm = current->mm;
+	u64 ctx = mm->context.cpumsk[raw_smp_processor_id()];
+	u64 last_ctx = raw_cpu_read(last_mmu_context);
 	unsigned long ti_flags = current_thread_info()->flags;
 	long rval;
-	bool guest_enter, ts_host_at_vcpu_mode = ts_host_at_vcpu_mode();
+
+	init_pt_regs_for_syscall(regs);
+	on_kernel_entry();
 
 	check_cli();
 	info_save_stack_reg(native_read_CLKR_reg_value());
 	syscall_enter_kernel_times_account(regs);
 
-	SAVE_STACK_REGS(regs, current_thread_info(), true, false);
-	init_pt_regs_for_syscall(regs);
+	SAVE_STACK_REGS(regs, true, false);
+	get_mmu_pid_irqs_off_impl(&mm->context, MMU_PID_RELOAD_CHECK, ctx, last_ctx);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	/* Switch back to host page tables under closed interrupts
 	 * (before we can be rescheduled from an interrupt). */
-	guest_enter = guest_syscall_enter(regs, ts_host_at_vcpu_mode);
+	bool guest_enter = guest_syscall_enter(regs, ts_host_at_vcpu_mode());
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	/* Make sure current_pt_regs() works properly by initializing
 	 * pt_regs pointer before enabling any interrupts. */
 	current_thread_info()->pt_regs = regs;
@@ -2056,6 +2158,7 @@ SYS_RET_TYPE notrace handle_sys_call(system_call_func sys_call,
 
 	SAVE_SYSCALL_ARGS(regs, arg1, arg2, arg3, arg4, arg5, arg6);
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (unlikely(guest_enter)) {
 		/* the system call is from guest and syscall is injecting */
 		pv_vcpu_syscall_intc(current_thread_info(), regs);
@@ -2068,6 +2171,7 @@ SYS_RET_TYPE notrace handle_sys_call(system_call_func sys_call,
 		guest_syscall_inject(current_thread_info(), regs);
 		unreachable();
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	Dbg1SC(regs->sys_num, "_NR_ %d current %px pid %d name %s\n"
 	       "handle_sys_call: k_usd: base 0x%llx, size 0x%llx, sbr 0x%llx\n"
@@ -2153,7 +2257,7 @@ nosys:
 
 /*
  * We can only get here if either FILLC or FILLR isn't supported.
- * Otherwise finish_syscall_switched_stacks is called directly.
+ * Otherwise finish_syscall_switched_hw_stacks is called directly.
  */
 void notrace __noreturn finish_syscall_sw_fill(void)
 {
@@ -2164,16 +2268,13 @@ void notrace __noreturn finish_syscall_sw_fill(void)
 
 	user_hw_stacks_restore__sw_sequel();
 
-	finish_syscall_switched_stacks(regs, from, return_to_user, ts_host_at_vcpu_mode);
+	finish_syscall_switched_hw_stacks(regs, from, return_to_user, ts_host_at_vcpu_mode);
 
 	unreachable();
 }
 
-int copy_context_from_signal_stack(struct local_gregs *l_gregs,
-				   struct pt_regs *regs,
-				   struct trap_pt_regs *trap, u64 *sbbp,
-				   e2k_aau_t *aau_context,
-				   struct k_sigaction *ka)
+int copy_context_from_signal_stack(struct pt_regs *regs, struct trap_pt_regs *trap,
+		e2k_aau_t *aau_context, struct k_sigaction *ka)
 {
 	struct signal_stack_context __priv *context;
 
@@ -2197,11 +2298,6 @@ int copy_context_from_signal_stack(struct local_gregs *l_gregs,
 
 	if (ka && copy_from_priv(ka, &context->sigact, sizeof(*ka)))
 		return -EFAULT;
-
-	if (l_gregs && !TASK_IS_BINCO(current) &&
-	    copy_from_priv(l_gregs, &context->l_gregs, sizeof(*l_gregs))) {
-		return -EFAULT;
-	}
 
 	return 0;
 }
@@ -2273,18 +2369,15 @@ notrace long do_sigreturn(void)
 	struct pt_regs *cur_regs = current_pt_regs();
 	unsigned long cur_ti_flags = current_thread_info()->flags;
 	struct trap_pt_regs saved_trap, *trap;
-	u64 sbbp[SBBP_ENTRIES_NUM];
 	struct k_sigaction ka;
 	e2k_aau_t aau_context;
-	struct local_gregs l_gregs;
 	e2k_usd_t usd;
-	rt_sigframe_t __user *frame;
+	const rt_sigframe_t __user *frame;
 
 	/* Always make any pending restarted system call return -EINTR.
 	 * Otherwise we might restart the wrong system call. */
 	current->restart_block.fn = do_no_restart_syscall;
-	if (copy_context_from_signal_stack(&l_gregs, &regs, &saved_trap,
-					   sbbp, &aau_context, &ka)) {
+	if (copy_context_from_signal_stack(&regs, &saved_trap, &aau_context, &ka)) {
 		user_exit();
 		do_exit(SIGKILL);
 	}
@@ -2308,7 +2401,7 @@ notrace long do_sigreturn(void)
 		do_exit(SIGKILL);
 	}
 
-	frame = (rt_sigframe_t __user *) current_thread_info()->u_stack.top;
+	frame = (const rt_sigframe_t __user *) current_thread_info()->u_stack.top;
 
 	usd = regs.stacks.usd;
 	update_u_stack_limits(USD_BASE(usd), regs.stacks.top);
@@ -2325,15 +2418,9 @@ notrace long do_sigreturn(void)
 	/* Must not happen since copy_context_to_signal_stack()
 	 * skips copying completed entries */
 	BUG_ON(trap && trap->curr_cnt);
-	if (trap && (3 * trap->curr_cnt) < trap->tc_count && trap->tc_count > 0) {
-		trap->from_sigreturn = 1;
-		do_trap_cellar(&regs, 0);
-	}
+	trap_cellar_resume(&regs);
 
 	clear_restore_sigmask();
-
-	if (!TASK_IS_BINCO(current))
-		restore_local_glob_regs(&l_gregs, true);
 
 	if (unlikely(cur_ti_flags & _TIF_WORK_SYSCALL_TRACE))
 		/* Trace syscall exit */
@@ -2357,7 +2444,7 @@ notrace long do_sigreturn(void)
 				regs.sys_rval = -EINTR;
 				break;
 			}
-			/* fallthrough */
+			fallthrough;
 		case -ERESTARTNOINTR:
 			restart_needed = true;
 			break;
@@ -2410,6 +2497,7 @@ SYSCALL_DEFINE1(sigreturn, u64, flags)
 	return ret;
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 __section(".entry.text")
 notrace long return_pv_vcpu_trap(void)
 {
@@ -2450,9 +2538,11 @@ void notrace __noreturn return_to_injected_syscall_sw_fill(void)
 	unreachable();
 }
 
+u64 return_to_injected_syscall_sw_fill_wsz __read_mostly = 0;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
+
 u64 finish_user_trap_handler_sw_fill_wsz __read_mostly = 0;
 u64 finish_syscall_sw_fill_wsz __read_mostly = 0;
-u64 return_to_injected_syscall_sw_fill_wsz __read_mostly = 0;
 
 static int initialize_sw_fill_window_size(void)
 {
@@ -2461,7 +2551,9 @@ static int initialize_sw_fill_window_size(void)
 
 	finish_user_trap_handler_sw_fill_wsz = (u64) FINISH_USER_TRAP_HANDLER_SW_FILL_SIZE;
 	finish_syscall_sw_fill_wsz = (u64) FINISH_SYSCALL_SW_FILL_SIZE;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	return_to_injected_syscall_sw_fill_wsz = (u64) RETURN_TO_INJECTED_SYSCALL_SW_FILL_SIZE;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	return 0;
 }

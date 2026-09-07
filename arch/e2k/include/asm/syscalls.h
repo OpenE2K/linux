@@ -27,8 +27,7 @@ extern pid_t sys_clone_thread(unsigned long flags, unsigned long arg2,
 		unsigned long long arg3, int __user *parent_tidptr,
 		int __user *child_tidptr, unsigned long tls);
 extern long sys_e2k_longjmp2(struct jmp_info __user *regs, u64 retval);
-extern long sys_e2k_syswork(long syswork, long arg2,
-		long arg3, long arg4, long arg5);
+extern long sys_e2k_syswork(long syswork, long arg2, long arg3);
 extern long sys_sigreturn(u64 flags);
 
 extern long sys_stat64(const char __user *filename,
@@ -104,8 +103,8 @@ extern long protected_sys_clone(const unsigned long	a1,	/* flags */
 			 const unsigned long a5,/* tls */
 			 const unsigned long	unused6,
 			 struct pt_regs	*regs);
-extern long protected_sys_clone3(struct protected_clone_args __user	*protected_uargs,
-				 const size_t				size,
+extern long protected_sys_clone3(void __user	*protected_uargs,
+				 const size_t	size,
 			 const unsigned long	unused3,
 			 const unsigned long	unused4,
 			 const unsigned long	unused5,
@@ -203,6 +202,13 @@ extern long protected_sys_munlock(unsigned long	addr,
 				const unsigned long unused5,
 				const unsigned long unused6,
 				const struct pt_regs *regs);
+extern long protected_sys_move_pages(int pid,
+				unsigned long nr_pages,
+				const void __user * __user *pages,
+				const int __user *nodes,
+				int __user *status,
+				int flags,
+				const struct pt_regs *regs);
 extern long protected_sys_open(const char __user *pathname,
 			       int		flags,
 			       mode_t		mode,
@@ -211,7 +217,7 @@ extern long protected_sys_open(const char __user *pathname,
 				const unsigned long unused6,
 				const struct pt_regs	*regs);
 extern long protected_sys_readv(unsigned long fd, const void __user *vec,
-			 unsigned long vlen, unsigned long a4,
+			 int vlen, unsigned long a4,
 			 unsigned long a5, unsigned long a6,
 			 const struct pt_regs *regs);
 extern long protected_sys_semctl(const long	semid,	/* a1 */
@@ -236,28 +242,68 @@ extern long protected_sys_write(const unsigned int	fd,
 			  const unsigned long	unused6,
 			  const struct pt_regs	*regs);
 extern long protected_sys_writev(unsigned long fd, const void __user *vec,
-		unsigned long vlen, unsigned long a4, unsigned long a5,
+		int vlen, unsigned long a4, unsigned long a5,
 		unsigned long a6, const struct pt_regs *regs);
 extern long protected_sys_preadv(unsigned long fd, const void __user *vec,
-		unsigned long vlen, unsigned long pos_l, unsigned long pos_h,
+		int vlen, unsigned long pos_l, unsigned long pos_h,
 		unsigned long a6, const struct pt_regs *regs);
 extern long protected_sys_pwritev(unsigned long fd, const void __user *vec,
-		unsigned long vlen, unsigned long pos_l, unsigned long pos_h,
+		int vlen, unsigned long pos_l, unsigned long pos_h,
 		unsigned long a6, const struct pt_regs *regs);
 extern long protected_sys_preadv2(unsigned long fd, const void __user *vec,
-		unsigned long vlen, unsigned long pos_l, unsigned long pos_h,
+		int vlen, unsigned long pos_l, unsigned long pos_h,
 		rwf_t flags, const struct pt_regs *regs);
 extern long protected_sys_pwritev2(unsigned long fd, const void __user *vec,
-		unsigned long vlen, unsigned long offset_l,
+		int vlen, unsigned long offset_l,
 		unsigned long offset_h, rwf_t flags,
 		struct pt_regs *regs);
-extern long protected_sys_socketcall(const unsigned long        a1, /* call */
-			      const unsigned long __user *a2, /* args */
+extern long protected_sys_socketcall(const unsigned long call,
+			      const unsigned long __user *args,
 			      const unsigned long unused3,
 			      const unsigned long unused4,
 			      const unsigned long unused5,
 			      const unsigned long unused6,
 			      const struct pt_regs	*regs);
+extern long protected_sys_accept(const int	sockfd,
+				 struct sockaddr __user *addr,
+				 int __user *addrlen,
+			      const unsigned long unused4,
+			      const unsigned long unused5,
+			      const unsigned long unused6,
+			      const struct pt_regs	*regs);
+extern long protected_sys_accept4(const int	sockfd,
+				  struct sockaddr __user *addr,
+				  int __user *addrlen,
+				  const int	flags,
+			      const unsigned long unused5,
+			      const unsigned long unused6,
+			      const struct pt_regs	*regs);
+extern long protected_sys_getpeername(const int sockfd,
+				      struct sockaddr __user *addr, int __user *addrlen,
+			const unsigned long unused4,
+			const unsigned long unused5,
+			const unsigned long unused6,
+			const struct pt_regs *regs);
+extern long protected_sys_getsockname(const int sockfd,
+				      struct sockaddr __user *addr, int __user *addrlen,
+			const unsigned long unused4,
+			const unsigned long unused5,
+			const unsigned long unused6,
+			const struct pt_regs *regs);
+extern long protected_sys_getsockopt(const int sockfd, const int level, const int optname,
+				     char __user *optval,
+				     int __user *optlen,
+			      const unsigned long unused6,
+			      const struct pt_regs	*regs);
+extern long protected_sys_setsockopt(const int sockfd, const int level, const int optname,
+				     char __user *optval,
+				     int	optlen,
+			      const unsigned long unused6,
+			      const struct pt_regs	*regs);
+extern long protected_sys_recvfrom(const int sockfd,
+				   void __user *buff, size_t size, const unsigned flags,
+				   struct sockaddr __user *src_addr, int __user *strlen,
+				const struct pt_regs	*regs);
 extern long protected_sys_sendmsg(const unsigned long	sockfd,
 			      const void __user		*msg,
 			      const unsigned long	flags,
@@ -266,12 +312,12 @@ extern long protected_sys_sendmsg(const unsigned long	sockfd,
 			      const unsigned long unused6,
 			      const struct pt_regs	*regs);
 extern long protected_sys_sendmmsg(const unsigned long	sockfd,
-				   void		__user *msgvec,
-			   const unsigned long		vlen,
-			   const unsigned long		flags,
-			   const unsigned long unused5,
-			   const unsigned long unused6,
-			   const struct pt_regs		*regs);
+				   struct protected_mmsghdr __user *msgvec,
+				   const unsigned int	vlen,
+				   const unsigned long	flags,
+				   const unsigned long unused5,
+				   const unsigned long unused6,
+				   const struct pt_regs		*regs);
 extern long protected_sys_recvmsg(const unsigned long	socket,
 			      const void __user		*message,
 			      const unsigned long	flags,
@@ -280,9 +326,9 @@ extern long protected_sys_recvmsg(const unsigned long	socket,
 			      const unsigned long unused6,
 			      const struct pt_regs	*regs);
 extern long protected_sys_recvmmsg(const unsigned long	socket,
-			      const unsigned long message,
-			      const unsigned long	vlen,
-			      const unsigned long	flags,
+			      const struct protected_mmsghdr __user *message,
+			      const unsigned int  vlen,
+			      const unsigned int flags,
 			      const unsigned long timeout,
 			      const unsigned long unused6,
 			      const struct pt_regs	*regs);
@@ -393,12 +439,12 @@ extern long protected_sys_epoll_pwait(const unsigned long	epfd,		/* a1 */
 				      const unsigned long	sigsetsize,	/* a6 */
 				      const struct pt_regs *regs);
 extern long protected_sys_epoll_pwait2(const unsigned long   epfd,       /* a1 */
-                      void __user       *event,     /* a2 */
-                      const long        maxevents,  /* a3 */
+		      void __user       *event,     /* a2 */
+		      const long        maxevents,  /* a3 */
 		      const unsigned long timeout,  /* a4 */
 		      const unsigned long sigmask,  /* a5 */
-                      const unsigned long   sigsetsize, /* a6 */
-                      const struct pt_regs *regs);
+		      const unsigned long   sigsetsize, /* a6 */
+		      const struct pt_regs *regs);
 extern long protected_sys_select(int			nfds,		/* a1 */
 				 fd_set __user		*readfds,	/* a2 */
 				 fd_set __user		*writefds,	/* a3 */
@@ -430,7 +476,7 @@ extern long protected_sys_mincore(const unsigned long	addr,	/* a1 */
 				 const struct pt_regs *regs);
 extern long protected_sys_process_madvise(const long	pidfd,		/* a1 */
 				   void __user		*vec,		/* a2 */
-				   const unsigned long	vlen,		/* a3 */
+				   const long		len,		/* a3 */
 				   const unsigned long	behavior,	/* a4 */
 				   const unsigned long	flags,		/* a5 */
 				   const unsigned long unused6,		/* a6 */
@@ -546,6 +592,9 @@ extern long protected_syscall_notyetsupported(const unsigned long unused_a1,
 					      const unsigned long unused_a5,
 					      const unsigned long unused_a6,
 					struct pt_regs	*regs);
+extern long protected_sys_msgctl(int msqid, int cmd, void __user * buf,
+				 long a4, long a5, long a6, const struct pt_regs *regs);
+
 #endif	/* CONFIG_PROTECTED_MODE */
 
 #ifdef	CONFIG_COMPAT
@@ -599,7 +648,7 @@ extern long compat_sys_swapcontext(struct ucontext_32 __user *oucp,
 extern
 const char *sys_call_ID_to_name[];
 
-#define SYSCALL_NAME(sys_num) \
+#define SYSCALL_NAME_ON_ID(sys_num) \
 	(((u32) (sys_num)) < NR_syscalls ? sys_call_ID_to_name[(u32) (sys_num)] : "BadSyscallID")
 
 #endif /* _ASM_E2K_SYSCALLS_H */

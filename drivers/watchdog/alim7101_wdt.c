@@ -295,6 +295,9 @@ static const struct file_operations wdt_fops = {
 	.release	=	fop_close,
 	.unlocked_ioctl	=	fop_ioctl,
 	.compat_ioctl	= 	compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   =	fop_ioctl,
+#endif
 };
 
 static struct miscdevice wdt_miscdev = {

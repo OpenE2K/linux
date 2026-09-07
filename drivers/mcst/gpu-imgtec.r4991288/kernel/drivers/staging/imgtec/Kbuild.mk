@@ -85,8 +85,8 @@ adf_sunxi-y += \
  kernel/drivers/staging/imgtec/sunxi/adf_sunxi.o \
  kernel/drivers/staging/imgtec/adf_common.o
 
-e2c3_gpu-y += \
- kernel/drivers/staging/imgtec/e2c3_gpu/e2c3_gpu_drv.o
+e2c3_gpu_drv_4991288-y += \
+ kernel/drivers/staging/imgtec/e2c3_gpu/e2c3_gpu_drv_4991288.o
 
 drm_nulldisp-y += \
  kernel/drivers/staging/imgtec/drm_nulldisp_drv.o \

@@ -35,8 +35,11 @@ OFFSET(TSK_TI_FLAGS, task_struct, thread_info.flags);
 OFFSET(TSK_U_STACK_TOP, task_struct, thread_info.u_stack.top);
 OFFSET(TSK_K_USD_LO, task_struct, thread_info.k_usd.lo);
 OFFSET(TSK_K_USD_HI, task_struct, thread_info.k_usd.hi);
+#ifdef SHOW_WOKEN_TIME
 OFFSET(TSK_IRQ_ENTER_CLK, task_struct, thread_info.irq_enter_clk);
+#endif
 OFFSET(TSK_UPSR, task_struct, thread_info.upsr);
+OFFSET(TSK_MM, task_struct, mm);
 #ifndef CONFIG_MMU_SEP_VIRT_SPACE_ONLY
 OFFSET(TSK_K_ROOT_PTB, task_struct, thread.regs.k_root_ptb);
 #endif
@@ -50,64 +53,86 @@ OFFSET(TSK_TI_K_PSP_HI, task_struct, thread_info.k_psp.hi);
 OFFSET(TSK_TI_K_PCSP_LO, task_struct, thread_info.k_pcsp.lo);
 OFFSET(TSK_TI_K_PCSP_HI, task_struct, thread_info.k_pcsp.hi);
 
-OFFSET(TSK_TI_TMP_U_PSP_LO, task_struct, thread_info.tmp_user_stacks.psp.lo);
-OFFSET(TSK_TI_TMP_U_PSP_HI, task_struct, thread_info.tmp_user_stacks.psp.hi);
-OFFSET(TSK_TI_TMP_U_PCSP_LO, task_struct, thread_info.tmp_user_stacks.pcsp.lo);
-OFFSET(TSK_TI_TMP_U_PCSP_HI, task_struct, thread_info.tmp_user_stacks.pcsp.hi);
-OFFSET(TSK_TI_TMP_U_PSHTP, task_struct, thread_info.tmp_user_stacks.pshtp);
-OFFSET(TSK_TI_TMP_U_PCSHTP, task_struct, thread_info.tmp_user_stacks.pcshtp);
+OFFSET(TSK_TMP_U_PSP_LO, task_struct, thread.tmp_user_stacks.psp.lo);
+OFFSET(TSK_TMP_U_PSP_HI, task_struct, thread.tmp_user_stacks.psp.hi);
+OFFSET(TSK_TMP_U_PCSP_LO, task_struct, thread.tmp_user_stacks.pcsp.lo);
+OFFSET(TSK_TMP_U_PCSP_HI, task_struct, thread.tmp_user_stacks.pcsp.hi);
+OFFSET(TSK_TMP_U_PSHTP, task_struct, thread.tmp_user_stacks.pshtp);
+OFFSET(TSK_TMP_U_PCSHTP, task_struct, thread.tmp_user_stacks.pcshtp);
 
-OFFSET(TSK_TI_G_VCPU_STATE, task_struct,
-	thread_info.k_gregs.g[GUEST_VCPU_STATE_GREGS_PAIRS_INDEX].base);
-OFFSET(TSK_TI_G_TASK, task_struct,
-	thread_info.k_gregs.g[CURRENT_TASK_GREGS_PAIRS_INDEX].base);
-OFFSET(TSK_TI_G_MY_CPU_OFFSET, task_struct,
-	thread_info.k_gregs.g[MY_CPU_OFFSET_GREGS_PAIRS_INDEX].base);
-OFFSET(TSK_TI_G_CPU_ID_PREEMPT, task_struct,
-	thread_info.k_gregs.g[SMP_CPU_ID_GREGS_PAIRS_INDEX].base);
-OFFSET(TSK_TI_G_VCPU_STATE_EXT, task_struct,
-	thread_info.k_gregs.g[GUEST_VCPU_STATE_GREGS_PAIRS_INDEX].ext);
-OFFSET(TSK_TI_G_TASK_EXT, task_struct,
-	thread_info.k_gregs.g[CURRENT_TASK_GREGS_PAIRS_INDEX].ext);
-OFFSET(TSK_TI_G_MY_CPU_OFFSET_EXT, task_struct,
-	thread_info.k_gregs.g[MY_CPU_OFFSET_GREGS_PAIRS_INDEX].ext);
-OFFSET(TSK_TI_G_CPU_ID_PREEMPT_EXT, task_struct,
-	thread_info.k_gregs.g[SMP_CPU_ID_GREGS_PAIRS_INDEX].ext);
+OFFSET(TSK_G_TMP_TAG, task_struct, thread.g_tmp_tag);
 
-OFFSET(TSK_TI_TMP_G_VCPU_STATE, task_struct,
-	thread_info.tmp_k_gregs.g[GUEST_VCPU_STATE_GREGS_PAIRS_INDEX].base);
-OFFSET(TSK_TI_TMP_G_TASK, task_struct,
-	thread_info.tmp_k_gregs.g[CURRENT_TASK_GREGS_PAIRS_INDEX].base);
-OFFSET(TSK_TI_TMP_G_MY_CPU_OFFSET, task_struct,
-	thread_info.tmp_k_gregs.g[MY_CPU_OFFSET_GREGS_PAIRS_INDEX].base);
-OFFSET(TSK_TI_TMP_G_CPU_ID_PREEMPT, task_struct,
-	thread_info.tmp_k_gregs.g[SMP_CPU_ID_GREGS_PAIRS_INDEX].base);
-OFFSET(TSK_TI_TMP_G_VCPU_STATE_EXT, task_struct,
-	thread_info.tmp_k_gregs.g[GUEST_VCPU_STATE_GREGS_PAIRS_INDEX].ext);
-OFFSET(TSK_TI_TMP_G_TASK_EXT, task_struct,
-	thread_info.tmp_k_gregs.g[CURRENT_TASK_GREGS_PAIRS_INDEX].ext);
-OFFSET(TSK_TI_TMP_G_MY_CPU_OFFSET_EXT, task_struct,
-	thread_info.tmp_k_gregs.g[MY_CPU_OFFSET_GREGS_PAIRS_INDEX].ext);
-OFFSET(TSK_TI_TMP_G_CPU_ID_PREEMPT_EXT, task_struct,
-	thread_info.tmp_k_gregs.g[SMP_CPU_ID_GREGS_PAIRS_INDEX].ext);
+OFFSET(TSK_U_BGR, task_struct, thread.u_gregs.bgr);
+OFFSET(TSK_U_G16, task_struct, thread.u_gregs.g[0].base);
+OFFSET(TSK_U_G16_EXT, task_struct, thread.u_gregs.g[0].ext);
+OFFSET(TSK_U_G17, task_struct, thread.u_gregs.g[1].base);
+OFFSET(TSK_U_G17_EXT, task_struct, thread.u_gregs.g[1].ext);
+OFFSET(TSK_U_G18, task_struct, thread.u_gregs.g[2].base);
+OFFSET(TSK_U_G18_EXT, task_struct, thread.u_gregs.g[2].ext);
+OFFSET(TSK_U_G19, task_struct, thread.u_gregs.g[3].base);
+OFFSET(TSK_U_G19_EXT, task_struct, thread.u_gregs.g[3].ext);
+OFFSET(TSK_U_G20, task_struct, thread.u_gregs.g[4].base);
+OFFSET(TSK_U_G20_EXT, task_struct, thread.u_gregs.g[4].ext);
+OFFSET(TSK_U_G21, task_struct, thread.u_gregs.g[5].base);
+OFFSET(TSK_U_G21_EXT, task_struct, thread.u_gregs.g[5].ext);
+OFFSET(TSK_U_G22, task_struct, thread.u_gregs.g[6].base);
+OFFSET(TSK_U_G22_EXT, task_struct, thread.u_gregs.g[6].ext);
+OFFSET(TSK_U_G23, task_struct, thread.u_gregs.g[7].base);
+OFFSET(TSK_U_G23_EXT, task_struct, thread.u_gregs.g[7].ext);
+OFFSET(TSK_U_G24, task_struct, thread.u_gregs.g[8].base);
+OFFSET(TSK_U_G24_EXT, task_struct, thread.u_gregs.g[8].ext);
+OFFSET(TSK_U_G25, task_struct, thread.u_gregs.g[9].base);
+OFFSET(TSK_U_G25_EXT, task_struct, thread.u_gregs.g[9].ext);
+OFFSET(TSK_U_G26, task_struct, thread.u_gregs.g[10].base);
+OFFSET(TSK_U_G26_EXT, task_struct, thread.u_gregs.g[10].ext);
+OFFSET(TSK_U_G27, task_struct, thread.u_gregs.g[11].base);
+OFFSET(TSK_U_G27_EXT, task_struct, thread.u_gregs.g[11].ext);
+OFFSET(TSK_U_G28, task_struct, thread.u_gregs.g[12].base);
+OFFSET(TSK_U_G28_EXT, task_struct, thread.u_gregs.g[12].ext);
+OFFSET(TSK_U_G29, task_struct, thread.u_gregs.g[13].base);
+OFFSET(TSK_U_G29_EXT, task_struct, thread.u_gregs.g[13].ext);
+OFFSET(TSK_U_G30, task_struct, thread.u_gregs.g[14].base);
+OFFSET(TSK_U_G30_EXT, task_struct, thread.u_gregs.g[14].ext);
+OFFSET(TSK_U_G31, task_struct, thread.u_gregs.g[15].base);
+OFFSET(TSK_U_G31_EXT, task_struct, thread.u_gregs.g[15].ext);
+
+OFFSET(TSK_TMP_BGR, task_struct, thread.tmp_gregs.bgr);
+OFFSET(TSK_TMP_G16, task_struct, thread.tmp_gregs.g[0].base);
+OFFSET(TSK_TMP_G16_EXT, task_struct, thread.tmp_gregs.g[0].ext);
+OFFSET(TSK_TMP_G17, task_struct, thread.tmp_gregs.g[1].base);
+OFFSET(TSK_TMP_G17_EXT, task_struct, thread.tmp_gregs.g[1].ext);
+OFFSET(TSK_TMP_G18, task_struct, thread.tmp_gregs.g[2].base);
+OFFSET(TSK_TMP_G18_EXT, task_struct, thread.tmp_gregs.g[2].ext);
+OFFSET(TSK_TMP_G19, task_struct, thread.tmp_gregs.g[3].base);
+OFFSET(TSK_TMP_G19_EXT, task_struct, thread.tmp_gregs.g[3].ext);
+OFFSET(TSK_TMP_G20, task_struct, thread.tmp_gregs.g[4].base);
+OFFSET(TSK_TMP_G20_EXT, task_struct, thread.tmp_gregs.g[4].ext);
+OFFSET(TSK_TMP_G21, task_struct, thread.tmp_gregs.g[5].base);
+OFFSET(TSK_TMP_G21_EXT, task_struct, thread.tmp_gregs.g[5].ext);
+OFFSET(TSK_TMP_G22, task_struct, thread.tmp_gregs.g[6].base);
+OFFSET(TSK_TMP_G22_EXT, task_struct, thread.tmp_gregs.g[6].ext);
+OFFSET(TSK_TMP_G23, task_struct, thread.tmp_gregs.g[7].base);
+OFFSET(TSK_TMP_G23_EXT, task_struct, thread.tmp_gregs.g[7].ext);
+OFFSET(TSK_TMP_G24, task_struct, thread.tmp_gregs.g[8].base);
+OFFSET(TSK_TMP_G24_EXT, task_struct, thread.tmp_gregs.g[8].ext);
+OFFSET(TSK_TMP_G25, task_struct, thread.tmp_gregs.g[9].base);
+OFFSET(TSK_TMP_G25_EXT, task_struct, thread.tmp_gregs.g[9].ext);
+OFFSET(TSK_TMP_G26, task_struct, thread.tmp_gregs.g[10].base);
+OFFSET(TSK_TMP_G26_EXT, task_struct, thread.tmp_gregs.g[10].ext);
+OFFSET(TSK_TMP_G27, task_struct, thread.tmp_gregs.g[11].base);
+OFFSET(TSK_TMP_G27_EXT, task_struct, thread.tmp_gregs.g[11].ext);
+OFFSET(TSK_TMP_G28, task_struct, thread.tmp_gregs.g[12].base);
+OFFSET(TSK_TMP_G28_EXT, task_struct, thread.tmp_gregs.g[12].ext);
+OFFSET(TSK_TMP_G29, task_struct, thread.tmp_gregs.g[13].base);
+OFFSET(TSK_TMP_G29_EXT, task_struct, thread.tmp_gregs.g[13].ext);
+OFFSET(TSK_TMP_G30, task_struct, thread.tmp_gregs.g[14].base);
+OFFSET(TSK_TMP_G30_EXT, task_struct, thread.tmp_gregs.g[14].ext);
+OFFSET(TSK_TMP_G31, task_struct, thread.tmp_gregs.g[15].base);
+OFFSET(TSK_TMP_G31_EXT, task_struct, thread.tmp_gregs.g[15].ext);
+
 #ifdef	CONFIG_VIRTUALIZATION
 OFFSET(TI_VCPU, thread_info, vcpu);
 #endif	/* CONFIG_VIRTUALIZATION */
-OFFSET(TI_KERNEL_GREGS, thread_info, k_gregs.g);
-OFFSET(TI_G_VCPU_STATE, thread_info,
-	k_gregs.g[GUEST_VCPU_STATE_GREGS_PAIRS_INDEX].base);
-OFFSET(TI_G_TASK, thread_info, k_gregs.g[CURRENT_TASK_GREGS_PAIRS_INDEX].base);
-OFFSET(TI_G_MY_CPU_OFFSET, thread_info,
-		k_gregs.g[MY_CPU_OFFSET_GREGS_PAIRS_INDEX].base);
-OFFSET(TI_G_CPU_ID_PREEMPT, thread_info, k_gregs.g[SMP_CPU_ID_GREGS_PAIRS_INDEX].base);
-OFFSET(TI_G_VCPU_STATE_EXT, thread_info,
-		k_gregs.g[GUEST_VCPU_STATE_GREGS_PAIRS_INDEX].ext);
-OFFSET(TI_G_TASK_EXT, thread_info,
-		k_gregs.g[CURRENT_TASK_GREGS_PAIRS_INDEX].ext);
-OFFSET(TI_G_MY_CPU_OFFSET_EXT, thread_info,
-		k_gregs.g[MY_CPU_OFFSET_GREGS_PAIRS_INDEX].ext);
-OFFSET(TI_G_CPU_ID_PREEMPT_EXT, thread_info,
-		k_gregs.g[SMP_CPU_ID_GREGS_PAIRS_INDEX].ext);
 
 #ifdef CONFIG_FUNCTION_GRAPH_TRACER
 OFFSET(TSK_CURR_RET_STACK, task_struct, curr_ret_stack);
@@ -147,10 +172,6 @@ OFFSET(VCPU_STATE_CPU_REGS, kvm_vcpu_state, cpu.regs);
 OFFSET(VCPU_ARCH_CTXT_SBR, kvm_vcpu, arch.sw_ctxt.sbr);
 OFFSET(VCPU_ARCH_CTXT_USD_HI, kvm_vcpu, arch.sw_ctxt.usd.hi);
 OFFSET(VCPU_ARCH_CTXT_USD_LO, kvm_vcpu, arch.sw_ctxt.usd.lo);
-OFFSET(VCPU_ARCH_CTXT_SAVED_VALID, kvm_vcpu, arch.sw_ctxt.saved.valid);
-OFFSET(VCPU_ARCH_CTXT_SAVED_SBR, kvm_vcpu, arch.sw_ctxt.saved.sbr);
-OFFSET(VCPU_ARCH_CTXT_SAVED_USD_HI, kvm_vcpu, arch.sw_ctxt.saved.usd.hi);
-OFFSET(VCPU_ARCH_CTXT_SAVED_USD_LO, kvm_vcpu, arch.sw_ctxt.saved.usd.lo);
 
 #ifdef	CONFIG_CLW_ENABLE
 OFFSET(VCPU_ARCH_CTXT_US_CL_D, kvm_vcpu, arch.sw_ctxt.us_cl_d);
@@ -220,6 +241,7 @@ DEFINE(TRAP_PTREGS_SZOF, sizeof(struct trap_pt_regs));
 DEFINE(PT_PTRACED, PT_PTRACED);
 DEFINE(E2K_FLAG_32BIT, E2K_FLAG_32BIT);
 DEFINE(MAX_NR_CPUS, NR_CPUS);
+DEFINE(CR0_IP_MASK, E2K_VA_MASK & ~7);
 DEFINE(E2K_KERNEL_UPSR_LOC_IRQ_ENABLED, E2K_KERNEL_UPSR_LOC_IRQ_ENABLED.word);
 DEFINE(E2K_KERNEL_UPSR_LOC_IRQ_DISABLED_ALL, E2K_KERNEL_UPSR_LOC_IRQ_DISABLED_ALL.word);
 DEFINE(E2K_KERNEL_UPSR_GLOB_IRQ_ENABLED, E2K_KERNEL_UPSR_GLOB_IRQ_ENABLED.word);
@@ -231,17 +253,23 @@ DEFINE(KERNEL_P_STACK_SIZE, KERNEL_P_STACK_SIZE);
 DEFINE(KERNEL_PC_STACK_SIZE, KERNEL_PC_STACK_SIZE);
 DEFINE(KERNEL_STACKS_SIZE, KERNEL_STACKS_SIZE);
 DEFINE(CPU_HWBUG_USD_ALIGNMENT, CPU_HWBUG_USD_ALIGNMENT);
-DEFINE(CPU_NO_HWBUG_INTC_CR_WRITE, CPU_NO_HWBUG_INTC_CR_WRITE);
+DEFINE(CPU_HWBUG_CR_BEFORE_WRITES, CPU_HWBUG_CR_BEFORE_WRITES);
+DEFINE(CPU_HWBUG_CR_EVERY_WRITE, CPU_HWBUG_CR_EVERY_WRITE);
+DEFINE(CPU_HWBUG_CR_FIRST_WRITE, CPU_HWBUG_CR_FIRST_WRITE);
+DEFINE(CPU_HWBUG_HCALL_EXC_ILL_INSTR_ADDR, CPU_HWBUG_HCALL_EXC_ILL_INSTR_ADDR);
+DEFINE(CPU_FEAT_ATOMIC_LDRD, CPU_FEAT_ATOMIC_LDRD);
 DEFINE(CPU_FEAT_TRAP_V5, CPU_FEAT_TRAP_V5);
 DEFINE(CPU_FEAT_TRAP_V6, CPU_FEAT_TRAP_V6);
 DEFINE(CPU_FEAT_QPREG, CPU_FEAT_QPREG);
 DEFINE(CPU_FEAT_SEP_VIRT_SPACE, CPU_FEAT_SEP_VIRT_SPACE);
+DEFINE(CPU_FEAT_SVSC, CPU_FEAT_SVSC);
 DEFINE(CPU_FEAT_ISET_V6, CPU_FEAT_ISET_V6);
 DEFINE(CPU_FEAT_ISET_V7, CPU_FEAT_ISET_V7);
 DEFINE(CPU_FEAT_GLOBAL_IRQ_MASK, CPU_FEAT_GLOBAL_IRQ_MASK);
 DEFINE(USER_ADDR_MAX, USER_ADDR_MAX);
 DEFINE(DAM_ENTRIES_NUM, DAM_ENTRIES_NUM);
 DEFINE(OS_VAB_REG_ADDR, _MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_OS_VAB_NO));
+DEFINE(PAGE_SIZE, PAGE_SIZE);
 DEFINE(ROOT_PTB_REG_ADDR, _MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_U_PPTB_NO));
 DEFINE(LDST_REC_QP_Q, AW((ldst_rec_op_t) { .fmt = LDST_QWORD_FMT }));
 DEFINE(LDST_REC_D, AW((ldst_rec_op_t) { .fmt = LDST_DWORD_FMT }));

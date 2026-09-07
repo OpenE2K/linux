@@ -3173,6 +3173,9 @@ static bool __console_emit_next_record(struct console *con, char *text, char *ex
 		stop_critical_timings();
 	}
 
+#if defined(CONFIG_E2K) && defined(CONFIG_E2K_KEXEC)
+	if (!console_suspended)
+#endif
 	call_console_driver(con, write_text, len, dropped_text, atomic_printing);
 
 	write_console_seq(con, seq + 1, atomic_printing);

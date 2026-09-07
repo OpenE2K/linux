@@ -441,12 +441,12 @@ static bool insert_wsz(const void *template, unsigned int offset,
  * This function changes the rbs field (encoded in quadro registers) of CS1 syllable
  * to define the right base of %b registers.
  *
- * In fact, the base of %b registers in eBPF JIT is constant and equals 7 (jited
- * program's register window contains 14 registers). However, eBPF JIT uses this
- * mechanism for consistency with cBPF JIT and for possible need in the future.
- * For cBPF JIT the base of %b registers equals 12 (24 registers in jited
- * program's register window) if the program uses scratch memory and r8
- * otherwise.
+ * In fact, the base of %b registers in eBPF JIT is constant and equals 8 (jited
+ * program's register window contains at least 16 registers). However, eBPF JIT uses
+ * this mechanism for consistency with cBPF JIT and for possible need in the future.
+ * For cBPF JIT the base of %b registers equals 12 (at least 24 registers in jited
+ * program's register window) if the program uses scratch memory and 4 (at least
+ * 8 registers in register window) otherwise.
  */
 static bool insert_rbs(const void *template, unsigned int offset,
 		void *start, unsigned int reg_start, const struct cmd_len *cmd_lens)
@@ -470,8 +470,8 @@ static bool insert_rbs(const void *template, unsigned int offset,
  * right window base should be inserted for every function call in a jited program.
  * Window base is encoded in quadro registers in wbs field of CS1 syllable.
  *
- * In fact, the window base in eBPF JIT is constant and equals 7 (jited program's
- * register window contains 14 registers). However, eBPF JIT uses this mechanism
+ * In fact, the window base in eBPF JIT is constant and equals 8 (jited program's
+ * register window contains 16 registers). However, eBPF JIT uses this mechanism
  * for consistency with cBPF JIT and for possible need in the future. cBPF JIT
  * creates functions with different length of register window, which depends on
  * whether cBPF program uses scratch memory or not.

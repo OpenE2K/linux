@@ -2291,6 +2291,9 @@ static const struct file_operations snd_timer_f_ops =
 	.poll =		snd_timer_user_poll,
 	.unlocked_ioctl =	snd_timer_user_ioctl,
 	.compat_ioctl =	snd_timer_user_ioctl_compat,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl =	snd_timer_user_ioctl,
+#endif
 	.fasync = 	snd_timer_user_fasync,
 };
 

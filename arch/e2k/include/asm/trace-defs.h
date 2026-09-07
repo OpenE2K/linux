@@ -226,7 +226,9 @@ trace_get_dtlb_translation(struct mm_struct *mm, e2k_addr_t address,
 		u64 *dtlb_entry, u64 *dtlb_pud, u64 *dtlb_pmd, u64 *dtlb_pte,
 		int pt_level, enum pt_dtlb_translation_mode mode)
 {
-	unsigned long request;
+	unsigned long request, flags;
+	e2k_mmu_cr_t mmu_cr;
+	struct uaccess_regs ua_regs;
 	bool user = (mode == PT_DTLB_TRANSLATION_USER ||
 		     mode == PT_DTLB_TRANSLATION_AUTO && IS_USER_VPTB_ADDR(address));
 
@@ -236,8 +238,17 @@ trace_get_dtlb_translation(struct mm_struct *mm, e2k_addr_t address,
 	if (cpu_has(CPU_FEAT_SEPARATE_TLU_CACHE))
 		pt_level = E2K_PAGES_LEVEL_NUM;
 
-	if (user)
+	raw_all_irq_save(flags);
+
+	if (user) {
 		uaccess_enable();
+	} else if (cpu_has(CPU_FEAT_SVSC)) {
+		ua_regs.u_root_ptb = NATIVE_READ_MMU_U_PPTB_REG();
+		ua_regs.ctx = READ_MMU_PID();
+		WRITE_UACCESS_REGS(E2K_KERNEL_CONTEXT, __pa(mm_node_pgd(&init_mm, numa_node_id())));
+	}
+
+	mmu_cr = svsc_save();
 
 	*dtlb_entry = get_MMU_DTLB_ENTRY(address);
 
@@ -256,8 +267,16 @@ trace_get_dtlb_translation(struct mm_struct *mm, e2k_addr_t address,
 		*dtlb_pte = get_MMU_DTLB_ENTRY(request);
 	}
 
-	if (user)
+	svsc_restore(mmu_cr);
+
+	if (user) {
 		uaccess_disable();
+	} else if (cpu_has(CPU_FEAT_SVSC)) {
+		WRITE_UACCESS_REGS(ua_regs.ctx, ua_regs.u_root_ptb);
+	}
+
+
+	raw_all_irq_restore(flags);
 }
 
 #define	mmu_print_pt_flags(entry, print, mmu_pt_v6, mmu_pt_v7) \

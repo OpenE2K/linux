@@ -68,7 +68,11 @@ gckIOMMU_Destory(IN gckOS Os, IN gckIOMMU Iommu)
     if (Iommu) {
         if (Iommu->paddingPageDmaHandle) {
             dma_unmap_page(Iommu->device, Iommu->paddingPageDmaHandle,
+#ifdef CONFIG_MCST
+                           PAGE_SIZE, DMA_TO_DEVICE);
+#else
                            PAGE_SIZE, DMA_FROM_DEVICE);
+#endif
         }
 
         gcmkOS_SAFE_FREE(Os, Iommu);
@@ -108,9 +112,13 @@ gckIOMMU_Construct(IN gckOS Os, OUT gckIOMMU *Iommu)
 
         dmaHandle = dma_map_page(dev, page, 0, PAGE_SIZE, DMA_TO_DEVICE);
 
+#ifdef CONFIG_MCST
+	if (!dma_mapping_error(dev, dmaHandle))
+	    dma_unmap_page(dev, dmaHandle, PAGE_SIZE, DMA_TO_DEVICE);
+#else
         if (dmaHandle)
             dma_unmap_page(dev, dmaHandle, PAGE_SIZE, DMA_FROM_DEVICE);
-
+#endif
         __free_page(page);
 
         /* Iommu bypass */
@@ -132,9 +140,13 @@ gckIOMMU_Construct(IN gckOS Os, OUT gckIOMMU *Iommu)
 
     gckOS_ZeroMemory(iommu, gcmSIZEOF(gcsIOMMU));
 
-    if (Os->paddingPage)
-        iommu->paddingPageDmaHandle = dma_map_page(dev, Os->paddingPage, 0, PAGE_SIZE, DMA_TO_DEVICE);
-
+    if (Os->paddingPage) {
+	    iommu->paddingPageDmaHandle = dma_map_page(dev, Os->paddingPage, 0, PAGE_SIZE, DMA_TO_DEVICE);
+#ifdef CONFIG_MCST
+        if (dma_mapping_error(dev, iommu->paddingPageDmaHandle))
+            gcmkONERROR(gcvSTATUS_OUT_OF_MEMORY);
+#endif
+    }
     iommu->domain = domain;
     iommu->device = dev;
 

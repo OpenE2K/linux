@@ -117,38 +117,34 @@ typedef struct boot_info {
 	__u64	nodes_map;	/* online nodes map */
 	__u64	mach_serialn;	/* serial number of the machine */
 	__u8	mac_addr[6];	/* base MAC address for ethernet cards */
-	__u16	signature_deprecated;		  /* signature */
+	__u16	reserved1;	/* reserved1 */
 	char	kernel_args_string[KSTRMAX_SIZE]; /* command line of kernel used to pass command */
 						  /* line from e2k BIOS */
 	node_banks_t	nodes_mem[L_MAX_MEM_NUMNODES]; /* array of descriptors of banks of */
 						       /* available physical memory on each node */
 	bank_info_t	busy[L_MAX_BUSY_AREAS];	       /* descriptors of areas occupied by BIOS */
-	__u64	cntp_info_deprecated[32]; /* control points info to save and restore it state */
-	__u64	dmp_deprecated[20];	  /* Info for future work of dump analyzer */
-	__u64	mac_table_ptr; /* Pointer to the beginning
-				  of the list of MAC addresses */
-	__u64	reserved1[10];	/* reserved1 */
+	__u64	reserved2[52];	/* reserved2 */
+	__u64	mac_table_ptr;	/* Pointer to the beginning of the list of MAC addresses */
+	__u64	reserved3[10];	/* reserved3 */
 	__u64	kernel_args_string_pnt;	  /* pointer to command line of kernel passed by BIOS */
 	__u64	dmi_info;	/* smbios and dmi address */
 	__u8	mb_name[16];	/* Motherboard product name */
-	__u32	reserved2;	/* reserved2 */
+	__u32	reserved4;	/* reserved4 */
 	__u32	kernel_csum;	/* kernel image control sum */
-	__u64	reserved3;	/* reserved3 */
+	__u64	reserved5;				/* reserved5 */
 	__u8	boot_ver[BOOT_VER_STR_SIZE];		/* boot version */
 	__u8	mb_type;				/* mother board type */
-	__u8	chipset_type_deprecated;		/* chipset type */
+	__u8	reserved6;				/* reserved6 */
 	__u8	cpu_type;				/* cpu type */
 	__u8	kernel_args_string_ex[KSTRMAX_SIZE_EX];	/* extended command line of kernel */
 							/* used to pass command line from e2k */
 							/* BIOS */
-	__u8	reset_type;				/* reset type */
-	__u32	cache_lines_damaged;			/* number of damaged cache lines */
-
-	jb_info_t jb_info;				/* jb info */
-	s3_info_t s3_info;				/* S3 info */
-
-	__u64	nodes_mem_slabs_deprecated[47];         /* array of slabs */
-	bank_info_t banks_ex[L_MAX_PHYS_BANKS_EX];	/* extended array of descriptors of */
+	__u8		reset_type;			/* reset type */
+	__u32		cache_lines_damaged;		/* number of damaged cache lines */
+	jb_info_t	jb_info;			/* jb info */
+	s3_info_t	s3_info;			/* S3 info */
+	__u64		reserved7[47];			/* reserved7 */
+	bank_info_t	banks_ex[L_MAX_PHYS_BANKS_EX];	/* extended array of descriptors of */
 							/* banks of available physical memory */
 	__u64	devtree;				/* devtree pointer */
 	__u32	bootlog_addr;				/* bootlog address */
@@ -176,13 +172,13 @@ typedef struct bootblock_struct {
 	__u8		bootblock_ver;		/* bootblock version number */
 	__u32		reserved1;		/* reserved1 */
 	boot_times_t	boot_times;		/* boot load times */
-	__u16		kernel_flags;		/* kernel flags, boot should not modify it */
-	__u16		reserved2;		/* reserved2 */
-	__u32		reserved3;		/* reserved3 */
-	__u64		reserved4[2];		/* reserved4 */
-	__u32		reserved5;		/* reserved5 */
-	__u16		boot_flags;		/* boot flags */
-	__u16		bootblock_marker;	/* marker of the end of boot block (0xAA55) */
+	__u16	kernel_flags_deprecated;	/* kernel flags */
+	__u16	reserved2;			/* reserved2 */
+	__u32	reserved3;			/* reserved3 */
+	__u64	reserved4[2];			/* reserved4 */
+	__u32	reserved5;			/* reserved5 */
+	__u16	boot_flags;			/* boot flags */
+	__u16	bootblock_marker;		/* marker of the end of boot block (0xAA55) */
 } bootblock_struct_t;
 
 extern	bootblock_struct_t *bootblock_virt;	/* bootblock structure virtual pointer */
@@ -198,24 +194,14 @@ extern	bootblock_struct_t *bootblock_virt;	/* bootblock structure virtual pointe
 /* kernel restarted in the mode of control point creation. BIOS should read kernel image from */
 /* the disk to the specified area of the memory and start kernel (this flag should be used with */
 /* RECOVERY_BB_FLAG flag). */
-#define	CNT_POINT_BB_FLAG_DEPRECATED	0x0002
-/* BIOS should not read kernel image from disk and start current image in the specified area of */
-/* the memory (this flag should be used with RECOVERY_BB_FLAG flag) */
 #define NO_READ_IMAGE_BB_FLAG		0x0004
-/* This flag is used only by kernel to indicate dump analyzer mode */
-#define	DUMP_ANALYZE_BB_FLAG_DEPRECATED	0x0008
-/* BIOS should dump all physical memory before start all other actions */
-#define	MEMORY_DUMP_BB_FLAG_DEPRECATED	0x0010
 
 /*
  * The machine identification flags
  */
 
 #define	SIMULATOR_MACH_FLAG		0x0001	/* system is running on simulator */
-#define	PROTOTYPE_MACH_FLAG_DEPRECATED	0x0002	/* machine is prototype */
 #define	IOHUB_MACH_FLAG_DEPRECATED	0x0004	/* machine has IOHUB */
-#define OLDMGA_MACH_FLAG_DEPRECATED	0x0008	/* MGA card has old firmware */
-#define MULTILINK_MACH_FLAG_DEPRECATED	0x0010	/* some nodes are connected by sevral IP links */
 #define	MSI_MACH_FLAG			0x0020	/* boot inits right values in apic to support */
 						/* MSI. Meanfull for e2k only. For v9 it always */
 						/* true */

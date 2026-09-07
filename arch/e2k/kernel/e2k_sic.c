@@ -53,6 +53,24 @@ e2k_addr_t sic_get_io_area_max_size(void)
 
 static DEFINE_RAW_SPINLOCK(sic_mc_reg_lock);
 
+
+static e2k_mc_ctl_t sic_get_mc_ctl(int node, int channel)
+{
+	u32 val;
+	if (machine.native_iset_ver >= E2K_ISET_V6) {
+		unsigned long flags;
+
+		raw_spin_lock_irqsave(&sic_mc_reg_lock, flags);
+		sic_write_node_nbsr_reg(node, MC_CH, channel);
+		val = sic_read_node_nbsr_reg(node, MC_CTL);
+		raw_spin_unlock_irqrestore(&sic_mc_reg_lock, flags);
+	} else {
+		val = sic_read_node_nbsr_reg(node, MC_CTL + channel * 0x40);
+	}
+	return (e2k_mc_ctl_t){.word = val};
+}
+
+
 static unsigned int
 sic_read_node_mc_nbsr_reg(int node, int channel, int reg_offset)
 {
@@ -132,7 +150,7 @@ void  sic_write_l3_reg(int node, int ha_bank, int reg_off, u32 val)
 EXPORT_SYMBOL(sic_write_l3_reg);
 
 
-u32 sic_read_ocn_reg(int node, int commn, int reg_off)
+static u32 sic_read_ocn_reg(int node, int commn, int reg_off)
 {
 	unsigned long flags;
 	u32 reg_val;
@@ -455,19 +473,21 @@ static int is_mc_enabled(int node, int mch)
 	if (!node_online(node)) {
 		return 0;
 	}
-	if (machine.native_id == MACHINE_ID_E1CP ||
-	    machine.native_id == MACHINE_ID_E8C) {
-		/* I don't know how to determibe mc aval on these cpus */
-		return 1;
+	e2k_mc_ctl_t mc_ctl = sic_get_mc_ctl(node, mch);
+	if (!mc_ctl.mcen) {
+		return 0;
+	}
+	if (machine.native_iset_ver == E2K_ISET_V6) {
+		e2k_hmu_mic_t hmu_mic;
+		AW(hmu_mic) = sic_read_node_nbsr_reg(node, HMU_MIC);
+		return !!(hmu_mic.mcen & (1 << mch));
 	}
 	if (machine.native_iset_ver == E2K_ISET_V7) {
 		e2k_ocn_mil_t ocn_mil;
 		AW(ocn_mil) = sic_read_node_nbsr_reg(node, OCN_MIL);
 		return !!(v7_mc_enabled(ocn_mil, mch) && v7_mch_enabled(node, mch));
 	}
-	e2k_hmu_mic_t hmu_mic;
-	AW(hmu_mic) = sic_read_node_nbsr_reg(node, HMU_MIC);
-	return !!(hmu_mic.mcen & (1 << mch));
+	return 1;
 }
 
 
@@ -505,7 +525,7 @@ int __init e2k_sic_init(void)
 				mc_enabled_mask[node] |= (1 << mc);
 			}
 		} 
-		DebugSIC("mc_enabled_mask[%d] = 0x%08llx\n", node, mc_enabled_mask[node]);
+		pr_info("mc_enabled_mask[%d] = 0x%08llx\n", node, mc_enabled_mask[node]);
 		if (CURRENT_ISET >= E2K_ISET_V7) {
 			e2k_l3_imsk_t r;
 			AW(r) = 0;
@@ -805,7 +825,7 @@ static void sic_mc_regs_dump(int node)
 		u32 reg;
 		pr_emerg("Crime MC_STATUS regs:\n");
 		for_each_mc_enabled_of_node(node, mc) {
-			reg = sic_read_node_mc_nbsr_reg(node, mc, MC_STATUS_E2K);
+			reg = sic_read_node_v7_mc_nbsr_reg(node, mc, MC_STATUS_E2K);
 			if (reg != MC_STATUS_REG_GOOD)
 				pr_emerg("MC_STATUS[%d] 0x%x\n", mc, reg);
 		}

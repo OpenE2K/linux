@@ -152,6 +152,7 @@ static inline void kvm_clear_handling_vcpu_virqs(struct kvm_vcpu *vcpu)
 	vcpu->arch.on_virqs_handling = false;
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline bool kvm_test_hw_stack_bounds_waiting(struct kvm_vcpu *vcpu,
 						    thread_info_t *ti)
 {
@@ -162,6 +163,13 @@ static inline bool kvm_test_hw_stack_bounds_waiting(struct kvm_vcpu *vcpu,
 						  exc_proc_stack_bounds_mask |
 						  exc_chain_stack_bounds_mask);
 }
+#else
+static inline bool kvm_test_hw_stack_bounds_waiting(struct kvm_vcpu *vcpu,
+						    thread_info_t *ti)
+{
+	return false;
+}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 /* kvm->arch.virq_lock should be locked by caller */
 static inline bool kvm_has_virqs_to_guest(struct kvm_vcpu *vcpu)
@@ -272,11 +280,6 @@ kvm_try_inject_direct_guest_virqs(struct kvm_vcpu *vcpu,
 				  unsigned long psr)
 {
 	return false;
-}
-
-static __always_inline int kvm_guest_handled_virqs(struct kvm_vcpu *vcpu)
-{
-	return 0;
 }
 #endif /* CONFIG_DIRECT_VIRQ_INJECTION */
 

@@ -325,21 +325,21 @@ void host_print_pt_regs(const pt_regs_t *regs)
 		print_all_TC(trap->tcellar, trap->tc_count);
 		if (exceptions & exc_data_debug_mask) {
 			host_pr_info("ddbar0 0x%llx, ddbar1 0x%llx, ddbar2 0x%llx, ddbar3 0x%llx\n",
-				READ_DDBAR0_REG_VALUE(), READ_DDBAR1_REG_VALUE(),
-				READ_DDBAR2_REG_VALUE(), READ_DDBAR3_REG_VALUE());
+				READ_DDBAR0_REG(), READ_DDBAR1_REG(),
+				READ_DDBAR2_REG(), READ_DDBAR3_REG());
 			if (cpu_has(CPU_FEAT_ISET_V7)) {
 				host_pr_info("ddbcr 0x%llx, ddmcr 0x%llx, ddmcr1 0x%llx, ddbsr 0x%llx\n",
 					READ_DDBCR_REG_VALUE(), READ_DDMCR_REG_VALUE(),
 					READ_DDMCR1_REG_VALUE(), READ_DDBSR_REG_VALUE());
 				host_pr_info("ddmar0 0x%llx, ddmar1 0x%llx, ddmar2 0x%llx, ddmar3 0x%llx\n",
-					READ_DDMAR0_REG_VALUE(), READ_DDMAR1_REG_VALUE(),
-					READ_DDMAR2_REG_VALUE(), READ_DDMAR3_REG_VALUE());
+					READ_DDMAR0_REG(), READ_DDMAR1_REG(),
+					READ_DDMAR2_REG(), READ_DDMAR3_REG());
 			} else {
 				host_pr_info("ddbcr 0x%llx, ddmcr 0x%llx, ddbsr 0x%llx\n",
 					READ_DDBCR_REG_VALUE(), READ_DDMCR_REG_VALUE(),
 					READ_DDBSR_REG_VALUE());
 				host_pr_info("ddmar0 0x%llx, ddmar1 0x%llx\n",
-					READ_DDMAR0_REG_VALUE(), READ_DDMAR1_REG_VALUE());
+					READ_DDMAR0_REG(), READ_DDMAR1_REG());
 			}
 		}
 		if (exceptions & exc_instr_debug_mask) {
@@ -464,7 +464,6 @@ host_print_stack_frames(struct task_struct *task, struct pt_regs *pt_regs,
 		host_pr_alert("  %d: print stack: works already on cpu %d\n",
 				current->pid, cpu);
 	} else {
-		stack_regs->show_trap_regs = debug_trap;
 		stack_regs->show_user_regs = debug_userstack;
 #ifdef CONFIG_DATA_STACK_WINDOW
 		stack_regs->show_k_data_stack = debug_datastack;
@@ -477,8 +476,10 @@ host_print_stack_frames(struct task_struct *task, struct pt_regs *pt_regs,
 		host_print_chain_stack(stack_regs, show_reg_window);
 	}
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	/* if task is host of guest VM or VCPU, then print guest stacks */
 	print_guest_stack(task, stack_regs, show_reg_window);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	stack_regs->used = 0;
 
@@ -713,8 +714,7 @@ static void host_print_chain_stack(struct stack_regs *regs, int show_reg_window)
 		if (show_reg_window) {
 			psp_ind -= AS(crs.cr1_lo).wbs * EXT_4_NR_SZ;
 
-			if (regs->show_trap_regs && trap_num < MAX_USER_TRAPS &&
-			    regs->trap[trap_num].valid &&
+			if (trap_num < MAX_USER_TRAPS && regs->trap[trap_num].valid &&
 			    regs->trap[trap_num].frame ==
 					orig_chain_base + cr_ind) {
 				if (machine.native_iset_ver >= E2K_ISET_V6) {

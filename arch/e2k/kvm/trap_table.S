@@ -7,10 +7,6 @@
 // Trap table entries implemented on assembler
 //
 
-#undef NATIVE_TASK_SIZE
-#undef	HOST_TASK_SIZE
-#undef	GUEST_TASK_SIZE
-
 #include <linux/linkage.h>
 
 #include <asm/alternative-asm.h>
@@ -30,6 +26,7 @@
 
 #define HCALL_WSZ 13
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 /* ttable_entry16/17 - wrappers for software paravirtualiation mode.
  * Hypervisor must use hret when entered from hcall, so we remember
  * whether guest used `hcall' or `sdisp' here. */
@@ -323,6 +320,7 @@ SYM_FUNC_START(ttable_entry18)
 #else	/* !CONFIG_PRIV_HYPERCALLS */
 #endif	/* CONFIG_PRIV_HYPERCALLS */
 SYM_FUNC_END(ttable_entry18)
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 /*
  * lcc does not support setting __interrupt attribute on
@@ -342,7 +340,7 @@ SYM_FUNC_END(ttable_entry18)
 	} \
 	{ \
 		disp %ctpr3, ENTRY; \
-		rrd %osr0, %dr17; /* See comment before `kvm_sw_cpu_context.host_osr0` */ \
+		rrd CURRENT_REG, %dr17; \
 		/* Important: the first memory access in kernel is store. \
 		 * This is needed to flush SLT before trying to load anything. */ \
 		stw,sm %r0, [slt_disable + 0]; \
@@ -350,105 +348,30 @@ SYM_FUNC_END(ttable_entry18)
 	} \
 	{ \
 		rwd %dr20, %rpr.lo; \
-		CLW_ONLY(mmurr,2 %us_cl_d, %dr12) \
 	} \
 	{ \
 		rwd %dr21, %rpr.hi; \
 		ldd,2 [%dr17 + TI_VCPU], %dr19; \
 	} \
 	{ \
-		CLW_ONLY(nop 2;) /* mmurw us_cl_d -> mmurr us_cl_* */ \
-		CLW_ONLY(mmurw,2 %dr16, %us_cl_d) \
-	} \
-	{ \
-		rrd %sbr, %dr7; \
-		puttagd,5 %dr0, 0, %dr0; \
-	} \
-	{ \
-		rrd %usd.hi, %dr20; \
-		puttagd,2 %dr1, 0, %dr1; \
-		CLW_ONLY(mmurr,5 %us_cl_b, %dr13) \
+		puttagd,2 %dr0, 0, %dr0; \
+		puttagd,5 %dr1, 0, %dr1; \
 	} \
 	{ \
 		puttagd,2 %dr2, 0, %dr2; \
-		CLW_ONLY(mmurr,5 %us_cl_up, %dr14) \
-	} \
-	{ \
-		ldd [%dr19 + VCPU_ARCH_CTXT_SBR], %dr10; \
-		ldd [%dr19 + VCPU_ARCH_CTXT_USD_HI], %dr8; \
-		ldd [%dr19 + VCPU_ARCH_CTXT_USD_LO], %dr9; \
-		ldb [%dr19 + VCPU_ARCH_CTXT_SAVED_VALID], %r11; \
-	} \
-	{ \
-		rrd %usd.lo, %dr21; \
-		puttagd,2 %dr3, 0, %dr3; \
-		CLW_ONLY(mmurr,5 %us_cl_m0, %dr15) \
+		puttagd,5 %dr3, 0, %dr3; \
 	} \
 	{ \
 		puttagd,2 %dr4, 0, %dr4; \
-		CLW_ONLY(mmurr,5 %us_cl_m1, %dr16) \
+		puttagd,5 %dr5, 0, %dr5; \
 	} \
 	{ \
-		puttagd,2 %dr5, 0, %dr5; \
-		CLW_ONLY(mmurr,5 %us_cl_m2, %dr17) \
-	} \
-	{ \
+		/* Wait for CLW to stop */ \
+		wait all_e=1; \
 		puttagd,2 %dr6, 0, %dr6; \
-		CLW_ONLY(mmurr,5 %us_cl_m3, %dr18;) \
-	} \
-	{ \
-		CLW_ONLY(std %dr12, [ %dr19 + VCPU_ARCH_CTXT_US_CL_D ];) \
-		CLW_ONLY(std %dr13, [ %dr19 + VCPU_ARCH_CTXT_US_CL_B ];) \
-	} \
-	{ \
-		CLW_ONLY(std %dr14, [ %dr19 + VCPU_ARCH_CTXT_US_CL_UP ];) \
-		CLW_ONLY(std %dr15, [ %dr19 + VCPU_ARCH_CTXT_US_CL_M0 ];) \
-	} \
-	ALTERNATIVE_1_ALTINSTR \
-		/* CPU_HWBUG_USD_ALIGNMENT version */ \
-		{ \
-			CLW_ONLY(std %dr16, [ %dr19 + VCPU_ARCH_CTXT_US_CL_M1 ];) \
-			rwd %dr10, %sbr; \
-			nop 1; \
-		} \
-	ALTERNATIVE_2_OLDINSTR \
-		/* Default version */ \
-		{ \
-			CLW_ONLY(std %dr16, [ %dr19 + VCPU_ARCH_CTXT_US_CL_M1 ];) \
-			rwd %dr10, %sbr; \
-		} \
-	ALTERNATIVE_3_FEATURE(CPU_HWBUG_USD_ALIGNMENT) \
-	{ \
-		rwd %dr9, %usd.lo; \
-		CLW_ONLY(std %dr17, [ %dr19 + VCPU_ARCH_CTXT_US_CL_M2 ];) \
-		CLW_ONLY(std %dr18, [ %dr19 + VCPU_ARCH_CTXT_US_CL_M3 ];) \
-	} \
-	{ \
-		rwd %dr8, %usd.hi; \
-		nop 4; /* usd->getsp */ \
 		sxt 6, %r0, %dr0; \
-		std %dr7, [ %dr19 + VCPU_ARCH_CTXT_SBR ]; \
-		cmpesb %r11, 0, %pred0; \
-	} \
-	{ \
-		std %dr20, [ %dr19 + VCPU_ARCH_CTXT_USD_HI ]; \
-		std %dr21, [ %dr19 + VCPU_ARCH_CTXT_USD_LO ]; \
-		adds,1 0, 1, %r11; \
-		ibranch  1f ? ~%pred0; \
-	} \
-	{ \
-		stb,2 %r11, [ %dr19 + VCPU_ARCH_CTXT_SAVED_VALID ]; \
-		std %dr10, [ %dr19 + VCPU_ARCH_CTXT_SAVED_SBR ]; \
-	} \
-	{ \
-		std %dr8, [ %dr19 + VCPU_ARCH_CTXT_SAVED_USD_HI ]; \
-		std %dr9, [ %dr19 + VCPU_ARCH_CTXT_SAVED_USD_LO ]; \
 		ct %ctpr3; \
 	} \
-1: \
-	{ \
-		setsft; \
-	}
 
 .section .hcall_entry0, "ax",@progbits
 SYM_FUNC_START(hcall_entry0)
@@ -460,6 +383,7 @@ SYM_FUNC_START(hcall_entry1)
 	HW_HCALL(kvm_light_hcalls)
 SYM_FUNC_END(hcall_entry1)
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 .section ".irqentry.text", "ax"
 SYM_FUNC_START(trap_handler_trampoline)
 	HANDLER_TRAMPOLINE(%ctpr2, 11, trap_handler_trampoline_continue, 0)
@@ -503,3 +427,4 @@ SYM_FUNC_START(syscall_fork_trampoline)
 		setsft;
 	}
 SYM_FUNC_END(syscall_fork_trampoline)
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */

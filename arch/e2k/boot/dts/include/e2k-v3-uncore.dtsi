@@ -1,0 +1,27 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
+#include <dt-bindings/interrupt-controller/irq.h>
+#include "apic-vectors.h"
+
+#ifndef NODE
+# error NODE undefined
+#endif
+
+	LVT: LVT {
+		compatible = "mcst,apic-lvt";
+		interrupt-parent = <&lpic>;
+		interrupt-controller;
+		numa-node-id = <NODE>;
+
+		#interrupt-cells = <3>;
+	};
+	SIC {
+		compatible = "mcst,sic";
+		/* reg = <0x1 0x10000000 0 0x100000>; not used */
+		interrupt-parent = <&LVT>;
+		numa-node-id = <NODE>;
+		interrupts = <LVT4_INTERRUPT_VECTOR 4 0>;
+	};

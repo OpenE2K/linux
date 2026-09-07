@@ -1,3 +1,7 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
 
 #include <linux/clockchips.h>
 #include <linux/delay.h>
@@ -9,6 +13,7 @@
 #include <linux/percpu.h>
 #include <linux/cpuhotplug.h>
 #include <linux/acpi_pmtmr.h>
+#include <linux/seq_file.h>
 #include <asm/l_timer.h>
 
 #include "apic.h"
@@ -17,7 +22,6 @@
 
 static unsigned int lapic_timer_frequency = 0;
 static int apic_timer_irq;
-static int apic_registaration_cpu = -1;
 static struct clock_event_device __percpu *apic_timer_evt;
 
 /*
@@ -276,21 +280,6 @@ static irqreturn_t smp_apic_timer_interrupt(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
-static int __init lapic_init_clockevent(struct clock_event_device *evt)
-{
-	if (!lapic_timer_frequency)
-		return -1;
-
-	evt->mult = div_sc(lapic_timer_frequency/APIC_DIVISOR,
-				TICK_NSEC, evt->shift);
-	evt->max_delta_ns =
-		clockevent_delta2ns(0x7FFFFF, &lapic_clockevent);
-	evt->min_delta_ns =
-		clockevent_delta2ns(0xF, &lapic_clockevent);
-
-	return 0;
-}
-
 /*
  * In this functions we calibrate APIC bus clocks to the external timer.
  *
@@ -367,6 +356,9 @@ static int __init calibrate_APIC_clock(void)
 {
 	long delta, deltatsc;
 
+	if (lapic_timer_frequency)
+		return -EALREADY;
+
 	apic_printk(APIC_VERBOSE, "Using local APIC timer interrupts.\n"
 		    "calibrating APIC timer ...\n");
 
@@ -400,17 +392,15 @@ static int __init calibrate_APIC_clock(void)
 	deltatsc = (long)(lapic_cal_tsc2 - lapic_cal_tsc1);
 
 	lapic_timer_frequency = (delta * APIC_DIVISOR) / LAPIC_CAL_LOOPS;
-	levt_freq = (lapic_cal_t1 - lapic_cal_t2) * (HZ / LAPIC_CAL_LOOPS);
+	levt_freq = delta * HZ / LAPIC_CAL_LOOPS;
 
-	apic_printk(APIC_VERBOSE, "..... delta %ld\n", delta);
-	apic_printk(APIC_VERBOSE, "..... calibration result: %u\n",
-		    lapic_timer_frequency);
+	apic_printk(APIC_VERBOSE, "... calibration result: %u\n", lapic_timer_frequency);
 
-	apic_printk(APIC_VERBOSE, "..... CPU clock speed is %ld.%04ld MHz.\n",
+	apic_printk(APIC_VERBOSE, "... CPU clock speed is %ld.%04ld MHz.\n",
 		    (deltatsc / LAPIC_CAL_LOOPS) / (1000000 / HZ),
 		    (deltatsc / LAPIC_CAL_LOOPS) % (1000000 / HZ));
 
-	apic_printk(APIC_VERBOSE, "..... host bus clock speed is %u.%04u MHz.\n",
+	apic_printk(APIC_VERBOSE, "... host bus clock speed is %u.%04u MHz.\n",
 		    lapic_timer_frequency / (1000000 / HZ),
 		    lapic_timer_frequency % (1000000 / HZ));
 
@@ -420,7 +410,7 @@ static int __init calibrate_APIC_clock(void)
 	if (lapic_timer_frequency < (1000000 / HZ)) {
 		local_irq_enable();
 		pr_warn("APIC frequency too slow, disabling apic timer\n");
-		return -1;
+		return -EINVAL;
 	}
 
 	local_irq_enable();
@@ -432,19 +422,23 @@ static int apic_timer_starting_cpu(unsigned int cpu)
 {
 	struct clock_event_device *evt = this_cpu_ptr(apic_timer_evt);
 
-	if (apic_registaration_cpu == -1 || apic_registaration_cpu == cpu)
+	WARN_ON(levt_freq == 0 && (!BootStrap(apic_read(APIC_BSP)) ||
+				   system_state != SYSTEM_BOOTING));
+
+	if (levt_freq == 0)
 		return 0;
 
-	memcpy(evt, &lapic_clockevent, sizeof(*evt));
+	*evt = lapic_clockevent;
 	evt->cpumask = cpumask_of(smp_processor_id());
 
-	clockevents_register_device(evt);
+	clockevents_config_and_register(evt, levt_freq, 0xF, 0xFFFFFFFF);
 	enable_percpu_irq(apic_timer_irq, 0);
 	return 0;
 }
 
 static int apic_timer_dying_cpu(unsigned int cpu)
 {
+	/* Deregisteration is done in tick_cleanup_dead_cpu() */
 	disable_percpu_irq(apic_timer_irq);
 	return 0;
 }
@@ -452,21 +446,40 @@ static int apic_timer_dying_cpu(unsigned int cpu)
 static void __init apic_late_time_init(void)
 {
 	struct clock_event_device *evt = this_cpu_ptr(apic_timer_evt);
-	apic_registaration_cpu = smp_processor_id();
+
+	BUG_ON(!BootStrap(apic_read(APIC_BSP)));
+
 	if (calibrate_APIC_clock())
 		return;
-	if (lapic_init_clockevent(&lapic_clockevent))
-		return;
-	memcpy(evt, &lapic_clockevent, sizeof(*evt));
+
+	*evt = lapic_clockevent;
 	evt->cpumask = cpumask_of(smp_processor_id());
 
-	clockevents_register_device(evt);
+	clockevents_config_and_register(evt, levt_freq, 0xF, 0xFFFFFFFF);
 	enable_percpu_irq(apic_timer_irq, 0);
+}
+
+void cpuinfo_apic(struct seq_file *m)
+{
+	/* APIC can be installed into PCI on machine with EPIC
+	 * but here we want to report our main PIC. */
+	if (!cpu_has(CPU_FEAT_EPIC)) {
+		seq_printf(m, " apic=%u", HZ * lapic_timer_frequency);
+	}
 }
 
 static int __init apic_local_timer_of_register(struct device_node *np)
 {
+	u32 freq;
 	int ret;
+
+	/* Get clock frequency if present */
+	if (!of_property_read_u32(np, "clock-frequency", &freq)) {
+		lapic_timer_frequency = freq / HZ;
+		levt_freq = freq / APIC_DIVISOR;
+		apic_printk(APIC_VERBOSE, "Local APIC timer frequency set to %u.%04u MHz from device tree.\n",
+				freq / 1000000, freq % 1000000);
+	}
 
 	apic_timer_evt = alloc_percpu(struct clock_event_device);
 	if (!apic_timer_evt)
@@ -484,7 +497,7 @@ static int __init apic_local_timer_of_register(struct device_node *np)
 		return ret;
 	}
 
-	ret = cpuhp_setup_state(CPUHP_AP_ONLINE_DYN,
+	ret = cpuhp_setup_state(CPUHP_AP_IRQ_E2K_TIMER_STARTING,
 				  "apic-timer:starting",
 				  apic_timer_starting_cpu,
 				  apic_timer_dying_cpu);

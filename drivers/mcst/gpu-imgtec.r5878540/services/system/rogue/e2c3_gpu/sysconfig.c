@@ -200,6 +200,7 @@ struct _SYS_DATA_ {
 static void DeviceConfigDestroy(PVRSRV_DEVICE_CONFIG *psDevConfig)
 {
 	OSFreeMem(psDevConfig);
+	gsPhysHeapConfig.hPrivData = NULL;
 }
 
 static PVRSRV_ERROR DeviceConfigCreate(SYS_DATA *psSysData,

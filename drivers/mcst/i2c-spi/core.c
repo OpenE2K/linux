@@ -17,6 +17,7 @@
 #include <asm/pic.h>
 #include <asm-l/i2c-spi.h>
 #include "i2c-spi.h"
+#include <linux/kexec.h>
 
 static struct i2c_spi_data iohub_iohub2_driver_data = {
 	.num_chipselect = 4,
@@ -38,6 +39,7 @@ static struct i2c_spi_data eioh2_driver_data = {
  * Elbrus I2C-SPI and Reset Controller that is part of Elbrus IOHUB
  * and is implemented as a pci device in iohub.
  */
+
 static const struct pci_device_id i2c_spi_ids[] = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_ELBRUS, PCI_DEVICE_ID_MCST_I2CSPI),
 		.driver_data = (unsigned long)&iohub_iohub2_driver_data },
@@ -151,6 +153,17 @@ static int i2c_spi_resume(struct pci_dev *dev)
 	return 0;
 }
 
+static void i2c_spi_shutdown(struct pci_dev *dev)
+{
+	/*
+	 * In kexec case set current_state to D3cold to
+	 * avoid turn off Bus Master bit on the device
+	 * performed from pci_device_shutdown
+	 */
+	if (kexec_in_progress)
+		dev->current_state = PCI_D3cold;
+}
+
 static struct pci_driver i2c_spi_driver = {
 	.name		= "i2c_spi",
 	.id_table	= i2c_spi_ids,
@@ -158,6 +171,7 @@ static struct pci_driver i2c_spi_driver = {
 	.remove		= i2c_spi_remove,
 	.suspend	= i2c_spi_suspend,
 	.resume		= i2c_spi_resume,
+	.shutdown	= i2c_spi_shutdown
 };
 
 __init

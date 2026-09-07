@@ -10,6 +10,7 @@ ENTRY(start)
 SECTIONS {
 	.bootblock : {
 		_bootblock = .;
+		. = _bootblock + 0x100;
 		arch/e2k/boot/bootblock.o(.rodata)
 		_ebootblock = .;
 	}

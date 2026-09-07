@@ -1,6 +1,6 @@
 /*
- * $Id: mpspec.c,v 1.8 2009/02/24 15:13:21 atic Exp $
- * From linuxbios.org
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
  */
 
 #include <linux/threads.h>

@@ -846,6 +846,9 @@ void bpf_jit_compile(struct bpf_prog *prog)
 	unsigned int template_size = 0;
 	unsigned int total_regs = 8, callee_reg_start = 8;
 
+	if (!bpf_jit_enable)
+		return;
+
 	if (init_prog_info(&bpf_prog_info, prog->len))
 		return;
 

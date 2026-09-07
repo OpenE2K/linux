@@ -12,17 +12,18 @@ Confs()
 {
 cat <<EOF
  e2k_nort e2k_rt e2k_nn e2k_nnrt e2k_host e2k_guest
+ v6_nort v6_nn
  e2c3_proto e12c_proto e16c_proto e48c_proto e8v7_proto
  e8v7_nort e8v7_rt
  e48c_nort e48c_rt e48c_nn e48c_nnrt
  e12c_nort e12c_rt e12c_nn e12c_nnrt
  e16c_nort e16c_rt e16c_nn e16c_nnrt
- e1cp_nort e1cp_rt e1cp_host e1cp_guest
  e2c3_nort e2c3_rt
- e2s_nort e2s_rt e2s_nn e2s_nnrt e2s_host e2s_guest e2s_nort_debug
- e4c_nort e4c_rt e4c_nn e4c_nnrt e4c_host e4c_guest e4c_nort_debug
- e8c_nort e8c_rt e8c_nn e8c_nnrt e8c_host e8c_guest e8c_nort_debug
  e8c2_nort e8c2_rt e8c2_nn e8c2_nnrt e8c2_host e8c2_guest e8c2_nort_debug
+ e8c_nort e8c_rt e8c_nn e8c_nnrt e8c_host e8c_guest e8c_nort_debug
+ e1cp_nort e1cp_rt e1cp_host e1cp_guest
+ e4c_nort e4c_rt e4c_nn e4c_nnrt e4c_host e4c_guest e4c_nort_debug
+ e2s_nort e2s_rt e2s_nn e2s_nnrt e2s_host e2s_guest e2s_nort_debug
 EOF
 }
 CONFS=`Confs | sed -e 's/$/ /g'`
@@ -91,113 +92,54 @@ localversion()
 	$conf_script --file $OUTPUT_DIR/.config --set-str CONFIG_LOCALVERSION "-${l}" \
 	|| exit 1
 }
-###############################################################################
-#CONFIG_DRM_MGA2	generic, e1cp, e2c3
-#CONFIG_DRM_MGA25	generic, e2c3, e8v7
-conf_no_builtin_gpu()
-{
-	$conf_script $OPTFILE \
-	-d CONFIG_MCST_GPU_VIV -d CONFIG_DRM_VIVANTE \
-	-d CONFIG_DRM_IMX -d CONFIG_DRM_IMX_HDMI \
-	-d CONFIG_MCST_GPU_IMGTEC -d CONFIG_IMGTEC \
-	-d CONFIG_MEM2ALLOC -d CONFIG_HANTRODEC -d CONFIG_BIGE \
-	-d CONFIG_ELDWCXPCS -d CONFIG_MGB -d CONFIG_MXGBE \
-	|| exit 1
-}
-conf_i3c_disable()
-{
-	$conf_script $OPTFILE \
-	-d CONFIG_I3C -d CONFIG_MIPI_I3C_HCI \
-	|| exit 1
-}
 conf_spi_eth()
 {
 	$conf_script $OPTFILE \
 	-m CONFIG_WIZNET_W5100 -m CONFIG_WIZNET_W5100_SPI \
 	|| exit 1
 }
-conf_mgb_rt()
+conf_v6()
 {
-	$conf_script $OPTFILE -m CONFIG_MGB_RT \
-	|| exit 1
+	# union of conf_e2c3, conf_e12c and conf_e16c
+	$conf_script $OPTFILE \
+	-e CONFIG_E2K_MINVER_V6 \
+	|| exit 1;
+
 }
 conf_e1cp()
 {
-	# e1cp has:
-	# 1) Vivante 3D GPU GC2500 (25 GFLOPS FP32) -
-	#    galcore.ko (CONFIG_MCST_GPU_VIV), vivante.ko (CONFIG_DRM_VIVANTE)
-	# 2) MGA2 - mga2.ko (CONFIG_DRM_MGA2),
-	#    dw_hdmi_imx.ko (CONFIG_DRM_IMX_HDMI)
 	$conf_script $OPTFILE \
 	-e CONFIG_E2K_MACHINE -e CONFIG_E2K_E1CP \
-	-d CONFIG_SMP \
 	|| exit 1
-	conf_no_builtin_gpu;
-	$conf_script $OPTFILE \
-	-m CONFIG_MCST_GPU_VIV -m CONFIG_DRM_VIVANTE \
-	-m CONFIG_DRM_IMX_HDMI -m CONFIG_DRM_IMX \
-	|| exit 1;
-	conf_i3c_disable;
 }
 conf_e2s()
 {
 	$conf_script $OPTFILE \
 	-e CONFIG_E2K_MACHINE -e CONFIG_E2K_E2S \
 	|| exit 1;
-	conf_no_builtin_gpu;
-	conf_i3c_disable;
 }
 conf_e8c()
 {
 	$conf_script $OPTFILE \
 	-e CONFIG_E2K_MACHINE -e CONFIG_E2K_E8C \
 	|| exit 1;
-	conf_no_builtin_gpu;
-	conf_i3c_disable;
 }
 conf_e8c2()
 {
 	$conf_script $OPTFILE \
 	-e CONFIG_E2K_MACHINE -e CONFIG_E2K_E8C2 \
 	|| exit 1;
-	conf_no_builtin_gpu;
-	conf_i3c_disable;
 }
 conf_e2c3()
 {
-	# e2c3 has:
-	# 1) MGA2.5 (MGA2 with more controllers, overlays and 2x 2D GPU) -
-	#    mga2 (CONFIG_DRM_MGA2),
-	#    dw_hdmi_imx (CONFIG_DRM_IMX_HDMI)
-	# 2) Imagination 3D GX6650 GPU (300 GFLOPS FP32) - pvrsrvkm.ko,
-	#    dolly_drv.ko (CONFIG_MCST_GPU_IMGTEC)
-	# 3) Imagination D5820 (decoder) - vxd.ko, img_mem.ko (CONFIG_IMGTEC)
-	# 4) Imagination E5510 (encoder) - vxekm.ko, imgvideo.ko (CONFIG_IMGTEC)
-	# 5) Google VP9 memory allocator - mem2alloc.ko (CONFIG_MEM2ALLOC)
-	# 6) Google VP9 decoder - hantrodec.ko (CONFIG_HANTRODEC)
-	# 7) Google VP9 encoder - bige.ko (CONFIG_BIGE)
 	$conf_script $OPTFILE \
 	-e CONFIG_E2K_MACHINE -e CONFIG_E2K_E2C3 \
 	|| exit 1;
-	conf_no_builtin_gpu;
-	$conf_script $OPTFILE \
-	-m CONFIG_DRM_IMX_HDMI -m CONFIG_DRM_IMX \
-	-m CONFIG_MCST_GPU_IMGTEC -m CONFIG_IMGTEC \
-	-m CONFIG_MEM2ALLOC -m CONFIG_HANTRODEC -m CONFIG_BIGE \
-	-m CONFIG_ELDWCXPCS -m CONFIG_MGB \
-	-e CPU_FREQ_DEFAULT_GOV_SCHEDUTIL \
-	|| exit 1;
-	conf_i3c_disable;
 }
 conf_e12c()
 {
 	$conf_script $OPTFILE \
 	-e CONFIG_E2K_MACHINE -e CONFIG_E2K_E12C \
-	|| exit 1;
-	conf_no_builtin_gpu;
-	conf_i3c_disable;
-	$conf_script $OPTFILE \
-	-m CONFIG_ELDWCXPCS -m CONFIG_MGB -m CONFIG_MXGBE \
 	|| exit 1;
 }
 conf_e16c()
@@ -205,21 +147,11 @@ conf_e16c()
 	$conf_script $OPTFILE \
 	-e CONFIG_E2K_MACHINE -e CONFIG_E2K_E16C \
 	|| exit 1;
-	conf_no_builtin_gpu;
-	$conf_script $OPTFILE \
-	-m CONFIG_ELDWCXPCS -m CONFIG_MGB -m CONFIG_MXGBE \
-	|| exit 1;
-	conf_i3c_disable;
 }
 conf_e48c()
 {
 	$conf_script $OPTFILE \
 	-e CONFIG_E2K_MACHINE -e CONFIG_E2K_E48C \
-	|| exit 1;
-	conf_no_builtin_gpu;
-	$conf_script $OPTFILE \
-	-e CONFIG_EDAC \
-	-m CONFIG_ELDWCXPCS -m CONFIG_MGB -m CONFIG_MXGBE \
 	|| exit 1;
 }
 conf_e8v7()
@@ -227,13 +159,6 @@ conf_e8v7()
 	$conf_script $OPTFILE \
 	-e CONFIG_E2K_MACHINE -e CONFIG_E2K_E8V7 \
 	|| exit 1;
-	conf_no_builtin_gpu;
-	# Enable Google VP9 encoder - bige.ko (CONFIG_BIGE)
-	$conf_script $OPTFILE \
-	-e CONFIG_EDAC \
-        -m CONFIG_MEM2ALLOC -m CONFIG_BIGE \
-	-m CONFIG_ELDWCXPCS -m CONFIG_MGB -m CONFIG_MXGBE \
-        || exit 1;
 }
 conf_nn()
 {
@@ -243,64 +168,26 @@ conf_nn()
 }
 conf_prototype()
 {
-	# CONFIG_HZ is set to 10 to reduce hardware requirements
-	# CONFIG_IGB is builtin temporarily (e2c3 prototype uses it)
-	# CONFIG_BLK_DEV_LOOP is builtin temporarily (for virtualization on e2c3 prototype)
-	# CONFIG_KERNEL_GZIP is switched to CONFIG_KERNEL_LZ4 (for faster booting)
-	# Filesystems for convenience (to avoid slow copying of modules to prototype).
-	#
-	# Tracing is disabled for faster booting on prototype
-	# which is useful for faster iteration by engineers.
-	$conf_script $OPTFILE \
-	-d CONFIG_KERNEL_GZIP -e CONFIG_KERNEL_LZ4 \
-	-u CONFIG_HZ_100 -e CONFIG_HZ_10 \
-	-e CONFIG_BLK_DEV_LOOP -e CONFIG_ELDWCXPCS \
-	-e CONFIG_IGB -e CONFIG_MGB \
-	-d CONFIG_KPROBE_EVENTS -d CONFIG_FTRACE_SYSCALLS -d CONFIG_FUNCTION_TRACER \
-	-e CONFIG_REISERFS_FS -e CONFIG_MSDOS_FS -e CONFIG_EXFAT_FS -e CONFIG_NTFS_FS \
-	|| exit 1
+	ADDITIONAL_CONFIGS+=" prototype.config "
 }
 
-conf_virtio()
-{
-	$conf_script $OPTFILE \
-	-e CONFIG_VIRTIO \
-	-e CONFIG_VIRTIO_PCI \
-	-e CONFIG_VIRTIO_PCI_LEGACY \
-	-e CONFIG_VIRTIO_BLK \
-	-e CONFIG_SCSI_VIRTIO \
-	-e CONFIG_VIRTIO_NET \
-	-e CONFIG_VHOST_NET \
-	-e CONFIG_VIRTIO_CONSOLE \
-	-m CONFIG_VSOCKETS \
-	-m CONFIG_VHOST_VSOCK \
-	-m CONFIG_VIRTIO_VSOCKETS \
-	-m CONFIG_VIRTIO_VSOCKETS_COMMON \
-	-e CONFIG_VIRTIO_BALLOON \
-	-m CONFIG_VIRTIO_INPUT \
-	-m CONFIG_DRM_VIRTIO_GPU \
-	-m CONFIG_VIRTIO_MMIO \
-	-e CONFIG_VIRTIO_MMIO_CMDLINE_DEVICES \
-	|| exit 1
-}
-conf_kvm_common()
+conf_pv_common()
 {
 	$conf_script $OPTFILE \
 	-e CONFIG_VIRTUALIZATION \
 	-e CONFIG_KVM \
-	-e CONFIG_KVM_COMPAT \
 	-e CONFIG_KVM_GUEST \
-	-e CONFIG_KVM_PARAVIRTUALIZATION \
 	-e CONFIG_KVM_HW_VIRTUALIZATION \
 	-e CONFIG_DIRECT_VIRQ_INJECTION \
 	-e CONFIG_VIRQ_VCPU_INJECTION \
 	|| exit 1
 }
-conf_host()
+conf_pv_host()
 {
-	conf_kvm_common;
+	conf_pv_common;
 	$conf_script $OPTFILE \
 	-d CONFIG_KVM_GUEST_KERNEL \
+	-e CONFIG_KVM_PARAVIRTUALIZATION \
 	-e CONFIG_KVM_HOST_KERNEL \
 	-e CONFIG_KVM_HOST_MODE \
 	-e CONFIG_KVM_SHADOW_PT_ENABLE \
@@ -309,26 +196,12 @@ conf_host()
 	-e CONFIG_KVM_PHYS_PT_ENABLE \
 	|| exit 1
 }
-conf_qxl()
+conf_pv_guest()
 {
-	$conf_script $OPTFILE \
-	-e CONFIG_DRM_QXL \
-	|| exit 1
-}
-conf_hardware_virt()
-{
-	conf_host;
-	conf_qxl;
-	conf_virtio;
-	$conf_script $OPTFILE \
-	-m CONFIG_DRM_BOCHS \
-	|| exit 1
-}
-conf_kvm_pv_guest()
-{
-	conf_kvm_common;
+	conf_pv_common;
 	$conf_script $OPTFILE \
 	-d CONFIG_KVM_HOST_KERNEL \
+	-e CONFIG_KVM_PARAVIRTUALIZATION \
 	-e CONFIG_KVM_GUEST_KERNEL \
 	-e CONFIG_KVM_GUEST_MODE \
 	-e CONFIG_KVM_GUEST_SMP \
@@ -336,13 +209,8 @@ conf_kvm_pv_guest()
 	-d CONFIG_KVM_GUEST_HW_HCALL \
 	-e CONFIG_KVM_GUEST_HW_PV \
 	-e CONFIG_KVM_SHADOW_PT \
-	|| exit 1
-}
-conf_guest()
-{
+	|| exit 1;
 	# Bug 129401 workaround: disable i2c/spi in guest (this also disables rtc/sclkr)
-	conf_kvm_pv_guest;
-	conf_virtio;
 	$conf_script $OPTFILE \
 	-e CONFIG_HVC_L \
 	-e CONFIG_EARLY_VIRTIO_CONSOLE \
@@ -350,29 +218,18 @@ conf_guest()
 	-d CONFIG_L_SPI_CONTROLLER \
 	|| exit 1
 }
-conf_power_efficient()
-{
-	$conf_script $OPTFILE \
-	-e CONFIG_WQ_POWER_EFFICIENT_DEFAULT \
-	|| exit 1
-}
-conf_rt()
-{
-	$conf_script $OPTFILE \
-	-d CONFIG_PREEMPT_VOLUNTARY -e CONFIG_PREEMPT_RT \
-	-d CONFIG_NO_HZ_IDLE -e CONFIG_HZ_PERIODIC \
-	|| exit 1;
-}
-e2k_nort()  { conf_hardware_virt; }
-e2k_rt()    { conf_hardware_virt; conf_rt; }
-e2k_nn()    { conf_hardware_virt; conf_nn; }
-e2k_nnrt()  { conf_hardware_virt; conf_nn; conf_rt; }
-e2k_host()  { conf_host; }
-e2k_guest() { conf_guest; }
-e1cp_nort() { conf_e1cp; conf_power_efficient; }
-e1cp_rt()   { conf_e1cp; conf_power_efficient; conf_rt; }
-e1cp_host() { conf_e1cp; conf_power_efficient; conf_host; }
-e1cp_guest(){ conf_e1cp; conf_power_efficient; conf_guest; }
+e2k_nort()  { true; } # Should be same as `make defconfig`
+e2k_rt()    { true; } # RT config is added below (see mcst_rt.config)
+e2k_nn()    { conf_nn; }
+e2k_nnrt()  { conf_nn; }
+e2k_host()  { conf_pv_host; }
+e2k_guest() { conf_pv_guest; }
+v6_nort()   { conf_v6; }
+v6_nn()     { conf_v6; conf_nn; }
+e1cp_nort() { conf_e1cp; }
+e1cp_rt()   { conf_e1cp; }
+e1cp_host() { conf_e1cp; conf_pv_host; }
+e1cp_guest(){ conf_e1cp; conf_pv_guest; }
 e4c_nort()  { e2s_nort; }
 e4c_rt()    { e2s_rt; }
 e4c_nn()    { e2s_nn; }
@@ -381,47 +238,47 @@ e4c_host()  { e2s_host; }
 e4c_guest() { e2s_guest; }
 e4c_nort_debug()  { e2s_nort_debug; }
 e2s_nort()  { conf_e2s; }
-e2s_rt()    { conf_e2s; conf_rt; }
+e2s_rt()    { conf_e2s; }
 e2s_nn()    { conf_e2s; conf_nn; }
-e2s_nnrt()  { conf_e2s; conf_nn; conf_rt; }
-e2s_host()  { conf_e2s; conf_host; }
-e2s_guest() { conf_e2s; conf_guest; }
+e2s_nnrt()  { conf_e2s; conf_nn; }
+e2s_host()  { conf_e2s; conf_pv_host; }
+e2s_guest() { conf_e2s; conf_pv_guest; }
 e2s_nort_debug()  { conf_e2s; }
 e8c_nort()  { conf_e8c; }
-e8c_rt()    { conf_e8c; conf_rt; }
+e8c_rt()    { conf_e8c; }
 e8c_nn()    { conf_e8c; conf_nn; }
-e8c_nnrt()  { conf_e8c; conf_nn; conf_rt; }
-e8c_host()  { conf_e8c; conf_host; }
-e8c_guest() { conf_e8c; conf_guest; }
+e8c_nnrt()  { conf_e8c; conf_nn; }
+e8c_host()  { conf_e8c; conf_pv_host; }
+e8c_guest() { conf_e8c; conf_pv_guest; }
 e8c_nort_debug() { conf_e8c; }
 e8c2_nort() { conf_e8c2; }
-e8c2_rt()   { conf_e8c2; conf_rt; }
+e8c2_rt()   { conf_e8c2; }
 e8c2_nn()   { conf_e8c2; conf_nn; }
-e8c2_nnrt() { conf_e8c2; conf_nn; conf_rt; }
-e8c2_host() { conf_e8c2; conf_host; }
-e8c2_guest(){ conf_e8c2; conf_guest; }
+e8c2_nnrt() { conf_e8c2; conf_nn; }
+e8c2_host() { conf_e8c2; conf_pv_host; }
+e8c2_guest(){ conf_e8c2; conf_pv_guest; }
 e8c2_nort_debug() { conf_e8c2; }
-e16c_nort() { conf_e16c; conf_hardware_virt; }
-e16c_rt()   { conf_e16c; conf_hardware_virt; conf_rt; conf_mgb_rt; }
-e16c_nn()   { conf_e16c; conf_hardware_virt; conf_nn; }
-e16c_nnrt() { conf_e16c; conf_hardware_virt; conf_nn; conf_rt; conf_mgb_rt; }
-e12c_nort() { conf_e12c; conf_hardware_virt; }
-e12c_rt()   { conf_e12c; conf_hardware_virt; conf_rt; conf_mgb_rt; }
-e12c_nn()   { conf_e12c; conf_hardware_virt; conf_nn; }
-e12c_nnrt() { conf_e12c; conf_hardware_virt; conf_nn; conf_rt; }
-e2c3_nort() { conf_e2c3; conf_hardware_virt; conf_power_efficient; conf_nn; }
-e2c3_rt()   { conf_e2c3; conf_hardware_virt; conf_power_efficient; conf_nn; conf_rt; conf_mgb_rt; }
-e48c_nort() { conf_e48c; conf_hardware_virt; }
-e48c_rt()   { conf_e48c; conf_hardware_virt; conf_rt; conf_mgb_rt; }
-e48c_nn()   { conf_e48c; conf_hardware_virt; conf_nn; }
-e48c_nnrt() { conf_e48c; conf_hardware_virt; conf_nn; conf_rt; conf_mgb_rt; }
-e8v7_nort() { conf_e8v7; conf_hardware_virt; conf_nn; }
-e8v7_rt()   { conf_e8v7; conf_hardware_virt; conf_nn; conf_rt; conf_mgb_rt; }
-e12c_proto(){ conf_e12c; conf_hardware_virt; conf_prototype; }
-e16c_proto(){ conf_e16c; conf_hardware_virt; conf_prototype; }
-e2c3_proto(){ conf_e2c3; conf_hardware_virt; conf_prototype; conf_power_efficient; conf_nn; }
-e48c_proto(){ conf_e48c; conf_hardware_virt; conf_prototype; conf_spi_eth; }
-e8v7_proto(){ conf_e8v7; conf_hardware_virt; conf_prototype; }
+e16c_nort() { conf_e16c; }
+e16c_rt()   { conf_e16c; }
+e16c_nn()   { conf_e16c; conf_nn; }
+e16c_nnrt() { conf_e16c; conf_nn; }
+e12c_nort() { conf_e12c; }
+e12c_rt()   { conf_e12c; }
+e12c_nn()   { conf_e12c; conf_nn; }
+e12c_nnrt() { conf_e12c; conf_nn; }
+e2c3_nort() { conf_e2c3; conf_nn; }
+e2c3_rt()   { conf_e2c3; conf_nn; }
+e48c_nort() { conf_e48c; }
+e48c_rt()   { conf_e48c; }
+e48c_nn()   { conf_e48c; conf_nn; }
+e48c_nnrt() { conf_e48c; conf_nn; }
+e8v7_nort() { conf_e8v7; conf_nn; }
+e8v7_rt()   { conf_e8v7; conf_nn; }
+e12c_proto(){ conf_e12c; conf_prototype; }
+e16c_proto(){ conf_e16c; conf_prototype; }
+e2c3_proto(){ conf_e2c3; conf_prototype; conf_nn; }
+e48c_proto(){ conf_e48c; conf_prototype; conf_spi_eth; }
+e8v7_proto(){ conf_e8v7; conf_prototype; }
 ###############################################################################
 trap "cleanup" 1 2 3 6 15 EXIT
 OUTPUT_DIR=.

@@ -38,8 +38,6 @@ typedef u32 instr_syl_t;	/* instruction syllable */
 /*
  * Order of fixed syllables of instruction
  */
-typedef u32 instr_syl_t;
-
 #define	E2K_INSTR_HS_NO		0	/* header syllable */
 #define E2K_INSTR_SS_NO		1	/* stubs syllable (if present) */
 
@@ -150,18 +148,33 @@ typedef union instr_ss {
 
 typedef union {
 	union {
-		struct {
-			u32 dst		: 8;	/* [ 7: 0] destination */
-			u32 src2	: 8;	/* [15: 8] source register #2 */
-			u32 opce	: 8;	/* [23:16] opcode extension */
-			u32 cop		: 7;	/* [30:24] code of operation */
-			u32 spec	: 1;	/*    [31] speculative mode */
-		};
-		struct {
-			u32		: 24;
-			u32 opc		: 8;
-		};
-	} alf2;
+		union {
+			struct {
+				u32 dst		: 8;	/* [ 7: 0] destination */
+				u32 src2	: 8;	/* [15: 8] source register #2 */
+				u32 opce	: 8;	/* [23:16] opcode extension */
+				u32 cop		: 7;	/* [30:24] code of operation */
+				u32 spec	: 1;	/*    [31] speculative mode */
+			};
+			struct {
+				u32		: 24;
+				u32 opc		: 8;
+			};
+		} alf2;
+		union {
+			struct {
+				u32 src3	: 8;	/* [ 7: 0] source #3 */
+				u32 src2	: 8;	/* [15: 8] source #2 */
+				u32 src1	: 8;	/* [23:16] source #1 */
+				u32 cop		: 7;	/* [30:24] code of operation */
+				u32 spec	: 1;	/*    [31] speculative mode */
+			};
+			struct {
+				u32		: 24;
+				u32 opc		: 8;
+			};
+		} alf3; /* type with highest srcs amount. For SoftPM covers all other types */
+	};
 	e2k_reg_t;		/* as entire syllable   */
 } instr_als_t;
 

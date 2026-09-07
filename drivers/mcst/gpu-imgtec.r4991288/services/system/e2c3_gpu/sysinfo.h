@@ -56,6 +56,9 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define DEVICES_WATCHDOG_POWER_OFF_SLEEP_TIMEOUT (3600000)
 #define WAIT_TRY_COUNT                           (20000)
 
+#if defined(CONFIG_MCST)
+#define SYS_RGX_DEV_NAME "e2c3_gpu_rogue_499"
+#else
 #define SYS_RGX_DEV_NAME "e2c3_gpu_rogue"
-
+#endif
 #endif /* !defined(__SYSINFO_H__) */

@@ -164,7 +164,7 @@ static unsigned long exit_to_user_mode_loop(struct pt_regs *regs,
 		if (ti_work & _TIF_NEED_RESCHED_MASK)
 			schedule();
 
-#if defined(CONFIG_E2K) && defined(E2K_DELAYED_SIGNALS)
+#if defined(CONFIG_E2K) && defined(CONFIG_E2K_DELAYED_SIGNALS)
 		if (unlikely(current->forced_info.si_signo)) {
 			struct task_struct *t = current;
 			force_sig_info(&t->forced_info);

@@ -1579,6 +1579,9 @@ static const struct file_operations vfio_device_fops = {
 	.write		= vfio_device_fops_write,
 	.unlocked_ioctl	= vfio_device_fops_unl_ioctl,
 	.compat_ioctl	= compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	= vfio_device_fops_unl_ioctl,
+#endif
 	.mmap		= vfio_device_fops_mmap,
 };
 

@@ -1023,6 +1023,9 @@ static const struct proto_ops rfcomm_sock_ops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= rfcomm_sock_compat_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	= rfcomm_sock_ioctl
+#endif
 };
 
 static const struct net_proto_family rfcomm_sock_family_ops = {

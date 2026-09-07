@@ -62,7 +62,7 @@ struct thread_info {
 #ifdef CONFIG_SMP
 	u32			cpu;		/* current CPU */
 #endif
-#ifdef CONFIG_MCST
+#ifdef SHOW_WOKEN_TIME
 	long long		irq_enter_clk;	/* CPU clock when irq enter was */
 #endif
 };

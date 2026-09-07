@@ -1884,6 +1884,10 @@ static const struct tty_operations tty3270_ops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = tty3270_compat_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl = tty3270_ioctl,
+#endif
+
 	.set_termios = tty3270_set_termios
 };
 

@@ -15,6 +15,7 @@
 #include <linux/mm.h>
 #include <linux/pgtable.h>
 #include <linux/ratelimit.h>
+#include <linux/sched/debug.h>
 #include <linux/sizes.h>
 #include <linux/slab.h>
 
@@ -556,7 +557,7 @@ bool arch_vma_access_permitted(struct vm_area_struct *vma,
 	return true;
 }
 
-#ifdef CONFIG_HALF_SPEC_LOADS_INJECTION
+#ifdef CONFIG_SEMI_SPEC_LOADS_INJECTION
 #include <asm/trace-defs.h>
 #include <linux/moduleparam.h>
 static unsigned long hs_inject_address, hs_inject_size, hs_inject_step = 0x1000;
@@ -644,7 +645,7 @@ static void check_single_addr(unsigned long address)
 	tracing_off();
 }
 
-void debug_inject_half_spec_loads(bool check)
+void debug_inject_semi_spec_loads(bool check)
 {
 	static atomic_t ratelimit = ATOMIC_INIT(0);
 	unsigned long addr;
@@ -659,7 +660,7 @@ void debug_inject_half_spec_loads(bool check)
 		for (addr = hs_inject_address;
 		     addr < hs_inject_address + hs_inject_size;
 		     addr += hs_inject_step) {
-			E2K_HALF_SPEC_LOAD(addr);
+			E2K_SEMI_SPEC_LOAD(addr);
 		}
 
 		if (check) {
@@ -673,38 +674,38 @@ void debug_inject_half_spec_loads(bool check)
 
 	if (hs_inject_default) {
 		for (addr = 0; addr < ULL(0x80000); addr += 4 * PAGE_SIZE) {
-			E2K_HALF_SPEC_LOAD(addr);
+			E2K_SEMI_SPEC_LOAD(addr);
 			if (check)
 				check_single_addr(addr);
 		}
 
 		for (addr = KERNEL_VPTB_BASE_ADDR; addr < ULL(0x1000000000000);
 		     addr += 1UL << 36) {
-			E2K_HALF_SPEC_LOAD(addr);
+			E2K_SEMI_SPEC_LOAD(addr);
 			if (check)
 				check_single_addr(addr);
 		}
 
-		E2K_HALF_SPEC_LOAD(0xffffc0000000UL);
+		E2K_SEMI_SPEC_LOAD(0xffffc0000000UL);
 		if (check)
 			check_single_addr(0xffffc0000000UL);
-		E2K_HALF_SPEC_LOAD(0xffffffe00000UL);
+		E2K_SEMI_SPEC_LOAD(0xffffffe00000UL);
 		if (check)
 			check_single_addr(0xffffffe00000UL);
-		E2K_HALF_SPEC_LOAD(0xfffffffff000UL);
+		E2K_SEMI_SPEC_LOAD(0xfffffffff000UL);
 		if (check)
 			check_single_addr(0xfffffffff000UL);
 	}
 }
 
-static int test_half_spec_mode(void)
+static int test_semi_spec_mode(void)
 {
-	debug_inject_half_spec_loads(false);
+	debug_inject_semi_spec_loads(false);
 	return 0;
 }
 
-late_initcall(test_half_spec_mode);
-#endif /* CONFIG_HALF_SPEC_LOADS_INJECTION */
+late_initcall(test_semi_spec_mode);
+#endif /* CONFIG_SEMI_SPEC_LOADS_INJECTION */
 
 /* Since CTX_FIRST_VERSION > 0 and after that last_mmu_context
  * only increases, we know that this variable is never 0.  And
@@ -713,29 +714,22 @@ late_initcall(test_half_spec_mode);
  * compare contexts versions without comparing the context with 0
  * in get_mmu_pid_irqs_off()). */
 DEFINE_PER_CPU(u64, last_mmu_context) = CTX_FIRST_VERSION;
-/* This is the current context value - i.e. the value that
- * should go into %pid before trying to access userspace. */
-DEFINE_PER_CPU(u64, current_mmu_context) = E2K_KERNEL_CONTEXT;
-EXPORT_PER_CPU_SYMBOL(current_mmu_context);
-/* User PT base cached for fast retrieval in uaccess_enable() */
-DEFINE_PER_CPU(u64, u_root_ptb) = ULL(-1);
-EXPORT_PER_CPU_SYMBOL(u_root_ptb);
 
 /*
  * Get process new MMU context. This is needed when the page table
  * pointer is changed or when the CONTEXT of the current process is updated
  * This function is called under closed interrupts (including NMIs).
  */
-u64 get_new_mmu_pid_irqs_off(mm_context_t *context, int cpu)
+u64 __sched get_new_mmu_pid_irqs_off(mm_context_t *context)
 {
 	u64 ctx, next;
 
-	debug_inject_half_spec_loads(false);
+	debug_inject_semi_spec_loads(false);
 
 	/* Otherwise there is a possibility that a half.-speculative load
-	 * between flush_TLB_all() and later set_MMU_CONT() will create
+	 * between flush_TLB_all() and later WRITE_MMU_PID() will create
 	 * an invalid DTLB entry for current context. */
-	VM_BUG_ON(READ_MMU_PID() != E2K_KERNEL_CONTEXT);
+	VM_BUG_ON(!cpu_has(CPU_FEAT_SVSC) && READ_MMU_PID() != E2K_KERNEL_CONTEXT);
 
 	ctx = raw_cpu_read(last_mmu_context);
 	next = ctx + 1;
@@ -744,22 +738,53 @@ u64 get_new_mmu_pid_irqs_off(mm_context_t *context, int cpu)
 		++next;
 		flush_TLB_all();
 		flush_ICACHE_all();
-		if (unlikely(CTX_VERSION(next) < CTX_FIRST_VERSION)) {
-			next = CTX_FIRST_VERSION;
-			if (CTX_HARDWARE(next) == E2K_KERNEL_CONTEXT)
-				++next;
-		}
 	}
 
 	/* Another CPU might have written 0 to our cpu's mm context
 	 * while we were getting the next context. But it is OK since
 	 * we are changing the context anyway, and if this happens we
 	 * will just rewrite that 0 with the new context. */
-	context->cpumsk[cpu] = next;
+	context->cpumsk[raw_smp_processor_id()] = next;
 	raw_cpu_write(last_mmu_context, next);
 
 	return next;
 }
+
+
+e2k_mmu_cr_t svsc_save(void)
+{
+	e2k_mmu_cr_t old_mmu_cr, new_mmu_cr;
+	unsigned long flags;
+
+	if (!cpu_has(CPU_FEAT_SVSC)) {
+		return (e2k_mmu_cr_t) { .word = 0 };
+	}
+
+	raw_all_irq_save(flags);
+	old_mmu_cr = get_MMU_CR();
+	new_mmu_cr = old_mmu_cr;
+	new_mmu_cr.svsc = 0;
+	set_MMU_CR(new_mmu_cr);
+	__E2K_WAIT(_all_c);
+	raw_all_irq_restore(flags);
+
+	return old_mmu_cr;
+}
+
+void svsc_restore(e2k_mmu_cr_t mmu_cr)
+{
+	unsigned long flags;
+
+	if (!cpu_has(CPU_FEAT_SVSC)) {
+		return;
+	}
+
+	raw_all_irq_save(flags);
+	set_MMU_CR(mmu_cr);
+	__E2K_WAIT(_all_c);
+	raw_all_irq_restore(flags);
+}
+
 
 #ifdef CONFIG_DEBUG_FS
 static void tlb_contents_show_entry(struct seq_file *seq, u64 line, u64 set)
@@ -889,6 +914,81 @@ static int __init tlb_contents_create(void)
 			    arch_debugfs_dir, NULL, &tlb_contents_fops);
 	return 0;
 }
-
 late_initcall(tlb_contents_create);
+
+# ifdef CONFIG_CLW_ENABLE
+/* Make this variable per-cpu because it is read often and modified rarely */
+DEFINE_PER_CPU(bool, clw_enabled);
+
+static ssize_t read_clw_enabled(struct file *file, char __user *user_buf,
+				size_t count, loff_t *ppos)
+{
+	char buf[3];
+
+	if (this_cpu_read(clw_enabled))
+		buf[0] = '1';
+	else
+		buf[0] = '0';
+	buf[1] = '\n';
+	buf[2] = '\0';
+
+	return simple_read_from_buffer(user_buf, count, ppos, buf, 2);
+}
+
+/* Should be called with proper synchronization via the spinlock 'clw_enabled_modify_lock' */
+static void set_clw_enabled(bool enable)
+{
+	int cpu;
+
+	for_each_possible_cpu(cpu)
+		per_cpu(clw_enabled, cpu) = enable;
+}
+
+/* Spinlock for synchronization of concurrent calls to write_clw_enabled() */
+static DEFINE_SPINLOCK(clw_enabled_modify_lock);
+
+static ssize_t write_clw_enabled(struct file *file, const char __user *user_buf,
+				 size_t count, loff_t *ppos)
+{
+	bool enable;
+	int ret;
+
+	ret = kstrtobool_from_user(user_buf, count, &enable);
+	if (ret)
+		return ret;
+
+	spin_lock(&clw_enabled_modify_lock);
+
+	if (enable && !this_cpu_read(clw_enabled)) {
+		set_clw_enabled(true);
+		pr_info("CLW globally enabled\n");
+	} else if (!enable && this_cpu_read(clw_enabled)) {
+		set_clw_enabled(false);
+		pr_info("CLW globally disabled\n");
+	}
+
+	spin_unlock(&clw_enabled_modify_lock);
+
+	return count;
+}
+
+
+static const struct file_operations clw_enabled_fops = {
+	.read =		read_clw_enabled,
+	.write =	write_clw_enabled,
+	.open =		simple_open,
+	.llseek =	default_llseek,
+};
+
+static int __init clw_enabled_create(void)
+{
+	/* Omit synchronization because we are the only users of 'clw_enabled' at the moment */
+	set_clw_enabled(!cpu_has(CPU_HWBUG_CLW));
+
+	debugfs_create_file("clw_enabled", 0600, arch_debugfs_dir, NULL, &clw_enabled_fops);
+
+	return 0;
+}
+late_initcall(clw_enabled_create);
+# endif /* CONFIG_CLW_ENABLE */
 #endif /* CONFIG_DEBUG_FS */

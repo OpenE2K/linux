@@ -162,6 +162,15 @@ void apply_alternatives(struct alt_instr *start, struct alt_instr *end);
 	ALTINSTR_ENTRY(facility, 1)					\
 	".popsection\n"
 
+/*
+ * Order of checks:
+ *	if (facility2)
+ *		altinstr2;
+ *	else if (facility1)
+ *		altinstr1;
+ *	else
+ *		oldinstr;
+ */
 #define ALTERNATIVE_2(oldinstr, altinstr1, facility1, altinstr2, facility2)\
 	".pushsection .altinstr_replacement, \"ax\"\n"			\
 	ALTINSTR_REPLACEMENT(altinstr1, 1)				\
@@ -183,12 +192,21 @@ void apply_alternatives(struct alt_instr *start, struct alt_instr *end);
  * longer. altinstr is padded with jump and nops at run-time during patching.
  */
 #define alternative(oldinstr, altinstr, _facility, clobbers...) \
-	_Pragma("no_asm_inline") \
+	__no_asm_inline \
 	asm volatile (ALTERNATIVE(oldinstr, altinstr, %[facility]) \
 			:: [facility] "i" (_facility) : clobbers)
 
+/*
+ * Order of checks:
+ *	if (facility2)
+ *		altinstr2;
+ *	else if (facility1)
+ *		altinstr1;
+ *	else
+ *		oldinstr;
+ */
 #define alternative_2(oldinstr, altinstr1, _facility1, altinstr2, _facility2) \
-	_Pragma("no_asm_inline") \
+	__no_asm_inline \
 	asm volatile (ALTERNATIVE_2(oldinstr, altinstr1, %[facility1], \
 				    altinstr2, %[facility2]) \
 			: \

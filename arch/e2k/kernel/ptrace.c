@@ -24,6 +24,7 @@
 #include <linux/compat.h>
 #include <linux/task_work.h>
 
+#include <asm/check_hw_ctx.h>
 #include <asm/compat.h>
 #include <asm/gregs.h>
 #include <linux/uaccess.h>
@@ -332,6 +333,11 @@ static inline int get_user_regs_struct_size(struct user_regs_struct __user *ureg
 		*size = val;
 		if (val < offsetof(struct user_regs_struct, idr))
 			ret = -EPERM;
+
+		/* do not allow to set arrays gext_v5 and gext_tag_v5 partially */
+		if (val > offsetof(struct user_regs_struct, gext_v5[0]) &&
+		    val < offsetofend(struct user_regs_struct, gext_tag_v5[31]))
+			ret = -EPERM;
 	}
 
 	if (!ret)
@@ -409,7 +415,7 @@ void core_pt_regs_to_user_regs(struct pt_regs *pt_regs,
 	long size = sizeof(struct user_regs_struct);
 	int i;
 	struct thread_info *ti = current_thread_info();
-	struct e2k_global_regs gregs;
+	volatile struct global_gregs g_gregs;
 	e2k_aau_t aau_regs;
 	e2k_aasr_t aasr;
 
@@ -417,15 +423,9 @@ void core_pt_regs_to_user_regs(struct pt_regs *pt_regs,
 
 	memset(user_regs, 0, size);
 
-	machine.save_gregs(&gregs);
-	copy_k_gregs_to_gregs(&gregs, &ti->k_gregs);
-	GET_GREGS_FROM_THREAD(user_regs->g, user_regs->gtag, gregs.g);
-	for (i = 0; i < 32; i++)
-		user_regs->gext[i] = (u16) gregs.g[i].ext;
-	if (machine.native_iset_ver >= E2K_ISET_V5)
-		GET_GREGS_FROM_THREAD(user_regs->gext_v5,
-				      user_regs->gext_tag_v5, &gregs.g[0].ext);
-	user_regs->bgr = AW(gregs.bgr);
+	machine.save_global_gregs((struct global_gregs *) &g_gregs);
+	get_gregs_from_thread(user_regs, (struct global_gregs *) &g_gregs,
+			      &current->thread.u_gregs);
 
 	user_regs->upsr = AW(ti->upsr);
 
@@ -440,18 +440,12 @@ void core_pt_regs_to_user_regs(struct pt_regs *pt_regs,
 	user_regs->fpcr = AW(read_FPCR_reg());
 	user_regs->fpsr = AW(read_FPSR_reg());
 
-	user_regs->cs_lo = READ_CS_LO_REG_VALUE();
-	user_regs->cs_hi = READ_CS_HI_REG_VALUE();
-	user_regs->ds_lo = READ_DS_LO_REG_VALUE();
-	user_regs->ds_hi = READ_DS_HI_REG_VALUE();
-	user_regs->es_lo = READ_ES_LO_REG_VALUE();
-	user_regs->es_hi = READ_ES_HI_REG_VALUE();
-	user_regs->fs_lo = READ_FS_LO_REG_VALUE();
-	user_regs->fs_hi = READ_FS_HI_REG_VALUE();
-	user_regs->gs_lo = READ_GS_LO_REG_VALUE();
-	user_regs->gs_hi = READ_GS_HI_REG_VALUE();
-	user_regs->ss_lo = READ_SS_LO_REG_VALUE();
-	user_regs->ss_hi = READ_SS_HI_REG_VALUE();
+	user_regs->cs = (e2k_qreg_t) { .lo = READ_CS_LO_REG_VALUE(), .hi = READ_CS_HI_REG_VALUE() };
+	user_regs->ds = (e2k_qreg_t) { .lo = READ_DS_LO_REG_VALUE(), .hi = READ_DS_HI_REG_VALUE() };
+	user_regs->es = (e2k_qreg_t) { .lo = READ_ES_LO_REG_VALUE(), .hi = READ_ES_HI_REG_VALUE() };
+	user_regs->fs = (e2k_qreg_t) { .lo = READ_FS_LO_REG_VALUE(), .hi = READ_FS_HI_REG_VALUE() };
+	user_regs->gs = (e2k_qreg_t) { .lo = READ_GS_LO_REG_VALUE(), .hi = READ_GS_HI_REG_VALUE() };
+	user_regs->ss = (e2k_qreg_t) { .lo = READ_SS_LO_REG_VALUE(), .hi = READ_SS_HI_REG_VALUE() };
 
 	memset(&aau_regs, 0, sizeof(aau_regs));
 
@@ -465,28 +459,19 @@ void core_pt_regs_to_user_regs(struct pt_regs *pt_regs,
 	machine.save_aaldi(user_regs->aaldi);
 	SAVE_AALDA(user_regs->aalda);
 
-	for (i = 0; i < 32; i++) {
-		user_regs->aad[i] = aau_regs.aads[i];
-	}
+	BUILD_BUG_ON(AADS_REGS_NUM != 32 || AAINDS_REGS_NUM != 16 ||
+		     AAINCRS_REGS_NUM != 8 || AALDIS_REGS_NUM != 64 ||
+		     AALDAS_REGS_NUM != 64 || AASTIS_REGS_NUM != 16);
+
+	memcpy(user_regs->aad, aau_regs.aads, sizeof(aau_regs.aads));
+	memcpy(user_regs->aaind, aau_regs.aainds, sizeof(aau_regs.aainds));
+	memcpy(user_regs->aasti, aau_regs.aastis, sizeof(aau_regs.aastis));
 
 	if (machine.native_iset_ver < E2K_ISET_V5) {
-		for (i = 0; i < 16; i++)
-			user_regs->aaind[i] = (u32) aau_regs.aainds[i];
-
-		for (i = 0; i < 8; i++)
+		for (i = 0; i < AAINCRS_REGS_NUM; i++)
 			user_regs->aaincr[i] = (u32) aau_regs.aaincrs[i];
-
-		for (i = 0; i < 16; i++)
-			user_regs->aasti[i] = (u32) aau_regs.aastis[i];
 	} else {
-		for (i = 0; i < 16; i++)
-			user_regs->aaind[i] = aau_regs.aainds[i];
-
-		for (i = 0; i < 8; i++)
-			user_regs->aaincr[i] = aau_regs.aaincrs[i];
-
-		for (i = 0; i < 16; i++)
-			user_regs->aasti[i] = aau_regs.aastis[i];
+		memcpy(user_regs->aaincr, aau_regs.aaincrs, sizeof(aau_regs.aaincrs));
 	}
 
 	user_regs->aaldv = AW(aau_regs.aaldv);
@@ -500,30 +485,30 @@ void core_pt_regs_to_user_regs(struct pt_regs *pt_regs,
 	user_regs->dibcr = AW(read_DIBCR_reg());
 	user_regs->ddbcr = READ_DDBCR_REG_VALUE();
 	user_regs->dibsr = AW(read_DIBSR_reg());
-	user_regs->dibar[0] = read_DIBAR0_reg_value();
-	user_regs->dibar[1] = read_DIBAR1_reg_value();
-	user_regs->dibar[2] = read_DIBAR2_reg_value();
-	user_regs->dibar[3] = read_DIBAR3_reg_value();
-	user_regs->ddbar[0] = READ_DDBAR0_REG_VALUE();
-	user_regs->ddbar[1] = READ_DDBAR1_REG_VALUE();
-	user_regs->ddbar[2] = READ_DDBAR2_REG_VALUE();
-	user_regs->ddbar[3] = READ_DDBAR3_REG_VALUE();
+	user_regs->dibar[0] = read_DIBAR0_reg();
+	user_regs->dibar[1] = read_DIBAR1_reg();
+	user_regs->dibar[2] = read_DIBAR2_reg();
+	user_regs->dibar[3] = read_DIBAR3_reg();
+	user_regs->ddbar[0] = READ_DDBAR0_REG();
+	user_regs->ddbar[1] = READ_DDBAR1_REG();
+	user_regs->ddbar[2] = READ_DDBAR2_REG();
+	user_regs->ddbar[3] = READ_DDBAR3_REG();
 	user_regs->dimcr = AW(read_DIMCR_reg());
 	user_regs->ddmcr = READ_DDMCR_REG_VALUE();
 	if (machine.native_iset_ver >= E2K_ISET_V7) {
 		user_regs->ddmcr1 = READ_DDMCR1_REG_VALUE();
-		user_regs->ddmar2 = READ_DDMAR2_REG_VALUE();
-		user_regs->ddmar3 = READ_DDMAR3_REG_VALUE();
+		user_regs->ddmar2 = READ_DDMAR2_REG();
+		user_regs->ddmar3 = READ_DDMAR3_REG();
 		if (!cpu_has(CPU_HWBUG_DIMCR1)) {
 			user_regs->dimcr1 = AW(read_DIMCR1_reg());
-			user_regs->dimar2 = read_DIMAR2_reg_value();
-			user_regs->dimar3 = read_DIMAR3_reg_value();
+			user_regs->dimar2 = read_DIMAR2_reg();
+			user_regs->dimar3 = read_DIMAR3_reg();
 		}
 	}
-	user_regs->dimar[0] = read_DIMAR0_reg_value();
-	user_regs->dimar[1] = read_DIMAR1_reg_value();
-	user_regs->ddmar[0] = READ_DDMAR0_REG_VALUE();
-	user_regs->ddmar[1] = READ_DDMAR1_REG_VALUE();
+	user_regs->dimar[0] = read_DIMAR0_reg();
+	user_regs->dimar[1] = read_DIMAR1_reg();
+	user_regs->ddmar[0] = READ_DDMAR0_REG();
+	user_regs->ddmar[1] = READ_DDMAR1_REG();
 	user_regs->ddbsr = READ_DDBSR_REG_VALUE();
 
 	user_regs->dimtp = read_DIMTP_reg();
@@ -534,8 +519,8 @@ void core_pt_regs_to_user_regs(struct pt_regs *pt_regs,
 	/*   DAM  */
 	save_dam(user_regs, current);
 
-	user_regs->chain_stack_base = (unsigned long long) GET_PCS_BASE(&ti->u_hw_stack);
-	user_regs->proc_stack_base = (unsigned long long) GET_PS_BASE(&ti->u_hw_stack);
+	*((void __priv **)&user_regs->chain_stack_base) = GET_PCS_BASE(&ti->u_hw_stack);
+	*((void __priv **)&user_regs->proc_stack_base) = GET_PS_BASE(&ti->u_hw_stack);
 
 	user_regs->idr = AW(read_IDR_reg());
 	user_regs->core_mode = AW(read_CORE_MODE_reg());
@@ -561,10 +546,8 @@ void core_pt_regs_to_user_regs(struct pt_regs *pt_regs,
 	user_regs->cr0 = pt_regs->crs.cr0;
 	user_regs->cr1 = pt_regs->crs.cr1;
 
-	/*
-	 *  new ip - the crash ip
-	 *  Gdb shows last command from chain
-	 */
+	user_regs->ip = get_cr0_ip(pt_regs->crs.cr0);
+
 	user_regs->pcsp = pt_regs->stacks.pcsp;
 	user_regs->pcshtp = AW(pt_regs->stacks.pcshtp);
 
@@ -627,22 +610,25 @@ void core_pt_regs_to_user_regs(struct pt_regs *pt_regs,
 		user_regs->arg5     = pt_regs->dargs[4];
 		user_regs->arg6     = pt_regs->dargs[5];
 #ifdef CONFIG_PROTECTED_MODE
-		if (pt_regs->kernel_entry == 8) {
+		if (pt_regs->kernel_entry == 8
+			&& (size >= offsetofend(struct user_regs_struct, arg12))) {
 			user_regs->arg7     = pt_regs->dargs[6];
 			user_regs->arg8     = pt_regs->dargs[7];
 			user_regs->arg9     = pt_regs->dargs[8];
 			user_regs->arg10    = pt_regs->dargs[9];
 			user_regs->arg11    = pt_regs->dargs[10];
 			user_regs->arg12    = pt_regs->dargs[11];
-			user_regs->arg_tags = pt_regs->tags;
-			user_regs->sys_rval_lo = pt_regs->rval1;
-			user_regs->sys_rval_hi = pt_regs->rval2;
-			user_regs->sys_rval_tag = pt_regs->rv1_tag |
-						  (pt_regs->rv2_tag << 4);
-			user_regs->flags = TASK_IS_PROTECTED(current) ?
-					   USER_REGS_FLAG_PROTECTED_MODE : 0;
-			if (pt_regs->return_desk)
-				user_regs->flags |= USER_REGS_FLAG_RETURN_DESCRIPTOR;
+			if (size >= offsetofend(struct user_regs_struct, flags)) {
+				user_regs->flags = USER_REGS_FLAG_PROTECTED_MODE;
+				user_regs->arg_tags = pt_regs->tags;
+				if (pt_regs->return_desk) {
+					user_regs->sys_rval_lo = pt_regs->rval1;
+					user_regs->sys_rval_hi = pt_regs->rval2;
+					user_regs->sys_rval_tag = pt_regs->rv1_tag |
+								(pt_regs->rv2_tag << 4);
+					user_regs->flags |= USER_REGS_FLAG_RETURN_DESCRIPTOR;
+				}
+			}
 		}
 #endif /* CONFIG_PROTECTED_MODE */
 		user_regs->sys_rval = pt_regs->sys_rval;
@@ -831,7 +817,9 @@ static int pt_regs_to_user_regs(struct task_struct *child,
 	e2k_aau_t *aau_regs;
 	int i;
 
-	memset(user_regs, 0, size);
+	/* just in case clear the whole structure (not first 'size' bytes) */
+	memset(user_regs, 0, sizeof(struct user_regs_struct));
+
 	DebugTRACE("%s: current->pid=%d(%s) child->pid=%d\n",
 		   __func__, current->pid, current->comm, child->pid);
 
@@ -839,18 +827,10 @@ static int pt_regs_to_user_regs(struct task_struct *child,
 		return -1;
 
 	aau_regs = pt_regs->aau_context;
-
 	trap = pt_regs->trap;
 
-	copy_k_gregs_to_gregs(&sw_regs->gregs, &ti->k_gregs);
-	GET_GREGS_FROM_THREAD(user_regs->g, user_regs->gtag, sw_regs->gregs.g);
-	for (i = 0; i < 32; i++)
-		user_regs->gext[i] = (u16) sw_regs->gregs.g[i].ext;
-	if (machine.native_iset_ver >= E2K_ISET_V5) {
-		GET_GREGS_FROM_THREAD(user_regs->gext_v5, user_regs->gext_tag_v5,
-				      &sw_regs->gregs.g[0].ext);
-	}
-	user_regs->bgr = AW(sw_regs->gregs.bgr);
+	get_gregs_from_thread(user_regs, &sw_regs->u_gregs,
+			      &child->thread.u_gregs);
 
 	user_regs->upsr = AW(ti->upsr);
 
@@ -875,57 +855,39 @@ static int pt_regs_to_user_regs(struct task_struct *child,
 	user_regs->cr0 = pt_regs->crs.cr0;
 	user_regs->cr1 = pt_regs->crs.cr1;
 
+	user_regs->ip = get_cr0_ip(pt_regs->crs.cr0);
+
 	user_regs->pcsp = pt_regs->stacks.pcsp;
 	user_regs->pcshtp = AW(pt_regs->stacks.pcshtp);
 
-	user_regs->cs_lo = sw_regs->cs_lo;
-	user_regs->cs_hi = sw_regs->cs_hi;
-	user_regs->ds_lo = sw_regs->ds_lo;
-	user_regs->ds_hi = sw_regs->ds_hi;
-	user_regs->es_lo = sw_regs->es_lo;
-	user_regs->es_hi = sw_regs->es_hi;
-	user_regs->fs_lo = sw_regs->fs_lo;
-	user_regs->fs_hi = sw_regs->fs_hi;
-	user_regs->gs_lo = sw_regs->gs_lo;
-	user_regs->gs_hi = sw_regs->gs_hi;
-	user_regs->ss_lo = sw_regs->ss_lo;
-	user_regs->ss_hi = sw_regs->ss_hi;
+	user_regs->cs = sw_regs->cs;
+	user_regs->ds = sw_regs->ds;
+	user_regs->es = sw_regs->es;
+	user_regs->fs = sw_regs->fs;
+	user_regs->gs = sw_regs->gs;
+	user_regs->ss = sw_regs->ss;
 
 	user_regs->aasr = AW(pt_regs->aasr);
 	if (aau_regs) {
-		for (i = 0; i < 32; i++) {
-			user_regs->aad[i] = aau_regs->aads[i];
-		}
+		BUILD_BUG_ON(AADS_REGS_NUM != 32 || AAINDS_REGS_NUM != 16 ||
+			     AAINCRS_REGS_NUM != 8 || AALDIS_REGS_NUM != 64 ||
+			     AALDAS_REGS_NUM != 64 || AASTIS_REGS_NUM != 16);
+
+		memcpy(user_regs->aad, aau_regs->aads, sizeof(aau_regs->aads));
+		memcpy(user_regs->aaind, aau_regs->aainds, sizeof(aau_regs->aainds));
+		memcpy(user_regs->aaldi, aau_regs->aaldi, sizeof(aau_regs->aaldi));
+		memcpy(user_regs->aasti, aau_regs->aastis, sizeof(aau_regs->aastis));
 
 		if (machine.native_iset_ver < E2K_ISET_V5) {
-			for (i = 0; i < 16; i++)
-				user_regs->aaind[i] = (u32) aau_regs->aainds[i];
-
-			for (i = 0; i < 8; i++)
+			for (i = 0; i < AAINCRS_REGS_NUM; i++)
 				user_regs->aaincr[i] = (u32) aau_regs->aaincrs[i];
-
-			for (i = 0; i < 64; i++)
-				user_regs->aaldi[i] = (u32) aau_regs->aaldi[i];
-
-			for (i = 0; i < 16; i++)
-				user_regs->aasti[i] = (u32) aau_regs->aastis[i];
 		} else {
-			for (i = 0; i < 16; i++)
-				user_regs->aaind[i] = aau_regs->aainds[i];
-
-			for (i = 0; i < 8; i++)
-				user_regs->aaincr[i] = aau_regs->aaincrs[i];
-
-			for (i = 0; i < 64; i++)
-				user_regs->aaldi[i] = aau_regs->aaldi[i];
-
-			for (i = 0; i < 16; i++)
-				user_regs->aasti[i] = aau_regs->aastis[i];
+			memcpy(user_regs->aaincr, aau_regs->aaincrs, sizeof(aau_regs->aaincrs));
 		}
 
 		user_regs->aaldv = AW(aau_regs->aaldv);
 
-		for (i = 0; i < 64; i++)
+		for (i = 0; i < AALDAS_REGS_NUM; i++)
 			user_regs->aalda[i] = AW(ti->aalda[i]);
 
 		user_regs->aaldm = AW(aau_regs->aaldm);
@@ -1041,23 +1003,25 @@ static int pt_regs_to_user_regs(struct task_struct *child,
 		user_regs->arg5    = pt_regs->dargs[4];
 		user_regs->arg6    = pt_regs->dargs[5];
 #ifdef CONFIG_PROTECTED_MODE
-		if (pt_regs->kernel_entry == 8) {
+		if ((pt_regs->kernel_entry == 8)
+			&& (size >= offsetofend(struct user_regs_struct, arg12))) {
 			user_regs->arg7     = pt_regs->dargs[6];
 			user_regs->arg8     = pt_regs->dargs[7];
 			user_regs->arg9     = pt_regs->dargs[8];
 			user_regs->arg10    = pt_regs->dargs[9];
 			user_regs->arg11    = pt_regs->dargs[10];
 			user_regs->arg12    = pt_regs->dargs[11];
-
-			user_regs->arg_tags = pt_regs->tags;
-			user_regs->sys_rval_lo = pt_regs->rval1;
-			user_regs->sys_rval_hi = pt_regs->rval2;
-			user_regs->sys_rval_tag = pt_regs->rv1_tag |
-						  (pt_regs->rv2_tag << 4);
-			user_regs->flags = TASK_IS_PROTECTED(child) ?
-					   USER_REGS_FLAG_PROTECTED_MODE : 0;
-			if (pt_regs->return_desk)
-				user_regs->flags |= USER_REGS_FLAG_RETURN_DESCRIPTOR;
+			if (size >= offsetofend(struct user_regs_struct, flags)) {
+				user_regs->flags = USER_REGS_FLAG_PROTECTED_MODE;
+				user_regs->arg_tags = pt_regs->tags;
+				if (pt_regs->return_desk) {
+					user_regs->sys_rval_lo = pt_regs->rval1;
+					user_regs->sys_rval_hi = pt_regs->rval2;
+					user_regs->sys_rval_tag = pt_regs->rv1_tag |
+								(pt_regs->rv2_tag << 4);
+					user_regs->flags |= USER_REGS_FLAG_RETURN_DESCRIPTOR;
+				}
+			}
 		}
 #endif /* CONFIG_PROTECTED_MODE */
 		user_regs->sys_rval = pt_regs->sys_rval;
@@ -1067,8 +1031,8 @@ static int pt_regs_to_user_regs(struct task_struct *child,
 	/*   DAM  */
 	save_dam(user_regs, child);
 
-	user_regs->proc_stack_base = (unsigned long long) GET_PS_BASE(&ti->u_hw_stack);
-	user_regs->chain_stack_base = (unsigned long long) GET_PCS_BASE(&ti->u_hw_stack);
+	*((void __priv **)&user_regs->chain_stack_base) = GET_PCS_BASE(&ti->u_hw_stack);
+	*((void __priv **)&user_regs->proc_stack_base) = GET_PS_BASE(&ti->u_hw_stack);
 
 	/*
 	 * gdb uses (sizeof_struct != 0) check to test for
@@ -1103,37 +1067,6 @@ static bool is_priv_or_inv_ctpr(e2k_ctpr_t ctpr, e2k_cud_t oscud)
 	/* All other ctpr must not be privileged descriptors */
 	if (ctpr.ta_base >= USER_ADDR_MAX &&
 	    (ta_tag == CTPLL_CT_TAG || ta_tag == CTPPL_CT_TAG || ta_tag == CTPNL_CT_TAG))
-		return true;
-
-	return false;
-}
-
-/*
- * Check that it val_lo, val_hi, tag don't constitute
- * descriptor pointing to a privileged area.
- */
-static bool is_priv_desc(u64 val_lo, u64 val_hi, u32 tag)
-{
-	u64 desc_base, desc_size, func_base;
-	e2k_ap_t ptr_desc = {
-		.lo = val_lo,
-		.hi = val_hi
-	};
-
-	e2k_pl_t pl_desc = {
-		.lo = val_lo,
-		.hi = val_hi
-	};
-
-	desc_base = AP_BASE(ptr_desc);
-	desc_size = AP_SIZE(ptr_desc);
-	func_base = pl_desc.target;
-
-	if (IS_AP(ptr_desc, tag) && (desc_base >= USER_ADDR_MAX ||
-			desc_base + desc_size >= USER_ADDR_MAX))
-		return true;
-
-	if (IS_PL(pl_desc, tag) && func_base >= USER_ADDR_MAX)
 		return true;
 
 	return false;
@@ -1224,13 +1157,9 @@ static int check_permissions(const struct user_regs_struct *user_regs)
 	 * Check, that there are no privileged descriptors in global regs
 	 * (descriptors, which point to kernel space)
 	 */
-	for (i = 0; i < 32; i += 2) {
-		if (is_priv_desc(user_regs->g[i],
-				user_regs->g[i + 1],
-				user_regs->gtag[i] |
-				(user_regs->gtag[i + 1] << 4)))
-			return -EPERM;
-	}
+	ret = check_user_gregs(E2K_MAXGR_d, user_regs->g, user_regs->gtag);
+	if (ret)
+		return ret;
 
 	aasr.word = user_regs->aasr;
 	aasr = aasr_parse(aasr);
@@ -1259,13 +1188,14 @@ static int user_regs_to_pt_regs(struct user_regs_struct *user_regs,
 {
 	struct thread_info *ti = task_thread_info(child);
 	struct pt_regs *pt_regs = ti->pt_regs;
-	struct trap_pt_regs *trap;
+	struct trap_pt_regs *trap = (pt_regs) ? pt_regs->trap : NULL;
 	struct sw_regs *sw_regs = &child->thread.sw_regs;
 	e2k_aau_t *aau_regs;
 	e2k_aasr_t aasr;
 	e2k_cr0_t cr0;
 	e2k_cr1_t cr1;
-	int ret, i;
+	int ret;
+	bool copy_ext;
 
 	DebugTRACE("%s: current->pid=%d(%s) child->pid=%d BINCO(child) is %s\n",
 		__func__, current->pid, current->comm, child->pid,
@@ -1283,37 +1213,25 @@ static int user_regs_to_pt_regs(struct user_regs_struct *user_regs,
 	if (ret)
 		return ret;
 
-	/* FIXME: guest kernel sw_regs have not right values of global */
-	/* registers. Right values save/restore/keep host into gthread_info */
-	/* structure for this guest process */
-	/* FIXME: it need implement for guest, but why do copying of */
-	/* separate word, extention, tag so complex, using LDRD operations */
-	SET_GREGS_TO_THREAD(sw_regs->gregs.g, user_regs->g, user_regs->gtag);
-	for (i = 0; i < 32; i++)
-		sw_regs->gregs.g[i].ext = (u64) user_regs->gext[i];
-	if (machine.native_iset_ver >= E2K_ISET_V5) {
-		unsigned long long tmp_gext_v5[32] = {};
-		unsigned char tmp_gext_tag_v5[32] = {};
-
-		/* Fill temporary arrays with previous values */
-		GET_GREGS_FROM_THREAD(tmp_gext_v5, tmp_gext_tag_v5, &sw_regs->gregs.g[0].ext);
-
-		/*
-		 * Modify only those elements within temporary arrays whose indices
-		 * do not exceed 'size'.
-		 */
-		for (i = 0; i < 32; i++) {
-			CHECK_SIZE_AND_COPY_FIELD(tmp_gext_v5[i], user_regs, gext_v5[i], size);
-			CHECK_SIZE_AND_COPY_FIELD(tmp_gext_tag_v5[i], user_regs,
-						  gext_tag_v5[i], size);
-		}
-
-		/* Set modified temporary arrays */
-		SET_GREGS_TO_THREAD(&sw_regs->gregs.g[0].ext, tmp_gext_v5, tmp_gext_tag_v5);
-	}
-	get_k_gregs_from_gregs(&ti->k_gregs, &sw_regs->gregs);
-
-	AW(sw_regs->gregs.bgr) = user_regs->bgr;
+	/*
+	 * Parameter 'copy_ext' specifies whether set_gregs_to_thread() should
+	 * set values from arrays gext_v5 and gext_tag_v5 or not.
+	 *
+	 * 1) For the case of PTRACE_SETREGS, an attempt to change only a part
+	 *    of an array will be declined by the check in get_user_regs_struct_size(),
+	 *    so 'size' values between offsetof(struct user_regs_struct, gext_v5[0]) and
+	 *    offsetofend(struct user_regs_struct, gext_tag_v5[31]) are impossible.
+	 *    If 'size' <= offsetof(struct user_regs_struct, gext_v5[0]), copy_ext
+	 *    will be false and values from arrays gext_v5 and gext_tag_v5 will not be set
+	 *    in set_gregs_to_thread() even on v5+ cpus.
+	 *
+	 * 2) For the case of PTRACE_SETREGSET, changing a part of arrays gext_v5
+	 *    and gext_tag_v5 is OK: these arrays are unconditionally prefilled
+	 *    in pt_regs_to_user_regs() with current values, so it is safe to set them
+	 *    entirely if 'size' > offsetof(struct user_regs_struct, gext_v5[0]).
+	 */
+	copy_ext = size > offsetof(struct user_regs_struct, gext_v5[0]);
+	set_gregs_to_thread(&sw_regs->u_gregs, &child->thread.u_gregs, user_regs, copy_ext);
 
 	AW(ti->upsr) = user_regs->upsr;
 
@@ -1328,18 +1246,12 @@ static int user_regs_to_pt_regs(struct user_regs_struct *user_regs,
 	AW(sw_regs->fpu.fpcr) = user_regs->fpcr;
 	AW(sw_regs->fpu.fpsr) = user_regs->fpsr;
 
-	sw_regs->cs_lo = user_regs->cs_lo;
-	sw_regs->cs_hi = user_regs->cs_hi;
-	sw_regs->ds_lo = user_regs->ds_lo;
-	sw_regs->ds_hi = user_regs->ds_hi;
-	sw_regs->es_lo = user_regs->es_lo;
-	sw_regs->es_hi = user_regs->es_hi;
-	sw_regs->fs_lo = user_regs->fs_lo;
-	sw_regs->fs_hi = user_regs->fs_hi;
-	sw_regs->gs_lo = user_regs->gs_lo;
-	sw_regs->gs_hi = user_regs->gs_hi;
-	sw_regs->ss_lo = user_regs->ss_lo;
-	sw_regs->ss_hi = user_regs->ss_hi;
+	sw_regs->cs = user_regs->cs;
+	sw_regs->ds = user_regs->ds;
+	sw_regs->es = user_regs->es;
+	sw_regs->fs = user_regs->fs;
+	sw_regs->gs = user_regs->gs;
+	sw_regs->ss = user_regs->ss;
 
 	AW(sw_regs->dimcr) = user_regs->dimcr;
 	AW(sw_regs->ddmcr) = user_regs->ddmcr;
@@ -1395,23 +1307,18 @@ static int user_regs_to_pt_regs(struct user_regs_struct *user_regs,
 	 * Skip copying aaldi/aalda since they are recalculated anyway
 	 */
 	if (aau_has_state(aasr) && aau_regs) {
-		for (i = 0; i < 32; i++) {
-			aau_regs->aads[i] = user_regs->aad[i];
-		}
+		BUILD_BUG_ON(AADS_REGS_NUM != 32 || AAINDS_REGS_NUM != 16 ||
+			     AAINCRS_REGS_NUM != 8 || AASTIS_REGS_NUM != 16);
 
-		for (i = 0; i < 16; i++)
-			aau_regs->aainds[i] = user_regs->aaind[i];
-
-		for (i = 0; i < 8; i++)
-			aau_regs->aaincrs[i] = user_regs->aaincr[i];
+		memcpy(aau_regs->aads, user_regs->aad, sizeof(aau_regs->aads));
+		memcpy(aau_regs->aainds, user_regs->aaind, sizeof(aau_regs->aainds));
+		memcpy(aau_regs->aaincrs, user_regs->aaincr, sizeof(aau_regs->aaincrs));
+		memcpy(aau_regs->aastis, user_regs->aasti, sizeof(aau_regs->aastis));
 
 		AW(aau_regs->aaldv) = user_regs->aaldv;
 		AW(aau_regs->aaldm) = user_regs->aaldm;
 
 		aau_regs->aafstr = user_regs->aafstr;
-
-		for (i = 0; i < 16; i++)
-			aau_regs->aastis[i] = user_regs->aasti[i];
 	}
 
 	AW(pt_regs->wd) = user_regs->wd;
@@ -1436,7 +1343,6 @@ static int user_regs_to_pt_regs(struct user_regs_struct *user_regs,
 		CHECK_SIZE_AND_COPY_FIELD(pt_regs->ilcr1, user_regs, ilcr1, size);
 	}
 
-	trap = pt_regs->trap;
 	/* NB> The stuff below can be set ONLY IN REGULAR MODE */
 	if (!trap && !TASK_IS_PROTECTED(child)) {
 		pt_regs->dargs[0]   = user_regs->arg1;
@@ -1665,129 +1571,134 @@ static int arch_ptrace_poke(struct task_struct *child,
 }
 
 
-/* This is PEEKUSER if (peek_reg==true); POKEUSER otherwise */
-static int arch_ptrace_peek_poke_user(struct task_struct *child,
-				      unsigned long offset, unsigned long data,
-				      bool peek_reg)
+/**
+ * peek_user - read the word in the USER area.
+ */
+static int peek_user(struct task_struct *child, unsigned long offset, unsigned long data)
 {
 	struct thread_info *ti = task_thread_info(child);
-	struct pt_regs *pt_regs = ti->pt_regs;
-
-#define MIN_USER_AREA_OFFSET offsetof(struct user, regs.g[0])
-#define MAX_USER_AREA_OFFSET offsetof(struct user, regs.arg12)
-#define END_OF_REGS_USER_AREA_OFFSET U_TSIZE_UAREA_OFFSET
-#define U_TSIZE_UAREA_OFFSET offsetof(struct user, u_tsize)
-#define REGS_ARGX_SIZE (sizeof(((struct user *)NULL)->regs.arg1))
+	struct pt_regs *regs = ti->pt_regs;
+	unsigned long value;
 
 	DebugTRACE("%s  current->pid=%d(%s) child->pid=%d\n",
 		   __func__, current->pid, current->comm, child->pid);
 
-	if (!pt_regs)
+	if (!regs)
 		return -EIO;
 
-	if (unlikely(offset < MIN_USER_AREA_OFFSET) ||
-			offset > END_OF_REGS_USER_AREA_OFFSET)
+	switch (offset) {
+	case offsetof(struct user, regs.ip):
+		value = get_cr0_ip(regs->crs.cr0);
+		break;
+	case offsetof(struct user, regs.upsr):
+		value = AW(ti->upsr);
+		break;
+
+	case offsetof(struct user, regs.usbr):
+		value = regs->stacks.top;
+		break;
+	case offsetof(struct user, regs.usd.lo):
+		value = regs->stacks.usd.lo;
+		break;
+	case offsetof(struct user, regs.usd.hi):
+		value = regs->stacks.usd.hi;
+		break;
+	case offsetof(struct user, regs.psp.lo):
+		value = regs->stacks.psp.lo;
+		break;
+	case offsetof(struct user, regs.psp.hi):
+		value = regs->stacks.psp.hi;
+		break;
+	case offsetof(struct user, regs.pshtp):
+		value = AW(regs->stacks.pshtp);
+		break;
+	case offsetof(struct user, regs.pcsp.lo):
+		value = regs->stacks.pcsp.lo;
+		break;
+	case offsetof(struct user, regs.pcsp.hi):
+		value = regs->stacks.pcsp.hi;
+		break;
+	case offsetof(struct user, regs.pcshtp):
+		value = AW(regs->stacks.pcshtp);
+		break;
+	case offsetof(struct user, regs.cr0.lo):
+		value = regs->crs.cr0.lo;
+		break;
+	case offsetof(struct user, regs.cr0.hi):
+		value = regs->crs.cr0.hi;
+		break;
+	case offsetof(struct user, regs.cr1.lo):
+		value = regs->crs.cr1.lo;
+		break;
+	case offsetof(struct user, regs.cr1.hi):
+		value = regs->crs.cr1.hi;
+		break;
+
+	case offsetof(struct user, regs.sys_rval):
+		value = regs->sys_rval;
+		break;
+	case offsetof(struct user, regs.sys_num):
+		value = regs->sys_num;
+		break;
+
+	case offsetof(struct user, regs.arg1):
+	case offsetof(struct user, regs.arg2):
+	case offsetof(struct user, regs.arg3):
+	case offsetof(struct user, regs.arg4):
+	case offsetof(struct user, regs.arg5):
+	case offsetof(struct user, regs.arg6):
+		value = regs->dargs[(offset - offsetof(struct user, regs.arg1)) / 8];
+		break;
+#ifdef CONFIG_PROTECTED_MODE
+	case offsetof(struct user, regs.arg7):
+	case offsetof(struct user, regs.arg8):
+	case offsetof(struct user, regs.arg9):
+	case offsetof(struct user, regs.arg10):
+	case offsetof(struct user, regs.arg11):
+	case offsetof(struct user, regs.arg12):
+		value = regs->dargs[(offset - offsetof(struct user, regs.arg7)) / 8 + 6];
+		break;
+#endif /* CONFIG_PROTECTED_MODE */
+	default:
+		return -EIO;
+	}
+
+	return put_user(value, (unsigned long __user *) data);
+}
+
+/**
+ * poke_user - write the word in the USER area
+ */
+static int poke_user(struct task_struct *child, unsigned long offset, unsigned long data)
+{
+	struct thread_info *ti = task_thread_info(child);
+	struct pt_regs *regs = ti->pt_regs;
+
+	DebugTRACE("%s  current->pid=%d(%s) child->pid=%d\n",
+		   __func__, current->pid, current->comm, child->pid);
+
+	if (!regs)
 		return -EIO;
 
 	switch (offset) {
 	case offsetof(struct user, regs.upsr):
-		if (peek_reg)
-			return put_user(AW(ti->upsr), (unsigned long __user *)data);
 		AW(ti->upsr) = data;
 		return 0;
-	case offsetof(struct user, regs.usbr):
-		if (peek_reg)
-			return put_user(pt_regs->stacks.top, (unsigned long __user *)data);
-		return -EIO;
-	case offsetof(struct user, regs.usd.lo):
-		if (peek_reg)
-			return put_user(LO(pt_regs->stacks.usd), (unsigned long __user *)data);
-		return -EIO;
-	case offsetof(struct user, regs.usd.hi):
-		if (peek_reg)
-			return put_user(HI(pt_regs->stacks.usd), (unsigned long __user *)data);
-		return -EIO;
-
 	case offsetof(struct user, regs.sys_rval):
-		if (peek_reg)
-			return put_user(pt_regs->sys_rval, (unsigned long __user *)data);
-		pt_regs->sys_rval = data;
+		if (TASK_IS_PROTECTED(child))
+			return -EPERM;
+
+		regs->sys_rval = data;
 		return 0;
 	case offsetof(struct user, regs.sys_num):
-		if (peek_reg)
-			return put_user(pt_regs->sys_num, (unsigned long __user *)data);
-		pt_regs->sys_num = data;
-		return 0;
+		if (TASK_IS_PROTECTED(child))
+			return -EPERM;
 
-	case offsetof(struct user, regs.arg1):
-		if (peek_reg)
-			return put_user(pt_regs->dargs[0], (unsigned long __user *)data);
-		else
-			/* NB> We don't allow updating protected syscall arguments */
-			break;
+		regs->sys_num = data;
 		return 0;
-	case offsetof(struct user, regs.arg2):
-		if (peek_reg)
-			return put_user(pt_regs->dargs[1], (unsigned long __user *)data);
-		else
-			break;
-	case offsetof(struct user, regs.arg3):
-		if (peek_reg)
-			return put_user(pt_regs->dargs[2], (unsigned long __user *)data);
-		else
-			break;
-	case offsetof(struct user, regs.arg4):
-		if (peek_reg)
-			return put_user(pt_regs->dargs[3], (unsigned long __user *)data);
-		else
-			break;
-	case offsetof(struct user, regs.arg5):
-		if (peek_reg)
-			return put_user(pt_regs->dargs[4], (unsigned long __user *)data);
-		else
-			break;
-	case offsetof(struct user, regs.arg6):
-		if (peek_reg)
-			return put_user(pt_regs->dargs[5], (unsigned long __user *)data);
-		else
-			break;
-
-#ifdef CONFIG_PROTECTED_MODE
-		/* NB> We don't allow updating protected syscall arguments */
-	case offsetof(struct user, regs.arg7):
-		if (peek_reg)
-			return put_user(pt_regs->dargs[6], (unsigned long __user *)data);
-		else
-			break;
-	case offsetof(struct user, regs.arg8):
-		if (peek_reg)
-			return put_user(pt_regs->dargs[7], (unsigned long __user *)data);
-		else
-			break;
-	case offsetof(struct user, regs.arg9):
-		if (peek_reg)
-			return put_user(pt_regs->dargs[8], (unsigned long __user *)data);
-		else
-			break;
-	case offsetof(struct user, regs.arg10):
-		if (peek_reg)
-			return put_user(pt_regs->dargs[9], (unsigned long __user *)data);
-		else
-			break;
-	case offsetof(struct user, regs.arg11):
-		if (peek_reg)
-			return put_user(pt_regs->dargs[10], (unsigned long __user *)data);
-		else
-			break;
-	case offsetof(struct user, regs.arg12):
-		if (peek_reg)
-			return put_user(pt_regs->dargs[11], (unsigned long __user *)data);
-		else
-			break;
-#endif /* CONFIG_PROTECTED_MODE */
+	default:
+		return -EIO;
 	}
-
-	return -EIO;
 }
 
 long common_ptrace(struct task_struct *child, long request, unsigned long addr,
@@ -1816,14 +1727,12 @@ long common_ptrace(struct task_struct *child, long request, unsigned long addr,
 		ret = arch_ptrace_poke(child, addr, data, 0);
 		break;
 
-	/* read the word at location addr in the USER area. */
 	case PTRACE_PEEKUSR:
-		ret = arch_ptrace_peek_poke_user(child, addr, data, true);
+		ret = peek_user(child, addr, data);
 		break;
 
-	case PTRACE_POKEUSR: /* write the word at location addr in the */
-			     /* USER area */
-		ret = arch_ptrace_peek_poke_user(child, addr, data, false);
+	case PTRACE_POKEUSR:
+		ret = poke_user(child, addr, data);
 		break;
 
 	case PTRACE_PEEKTAG:
@@ -2119,7 +2028,7 @@ long common_ptrace(struct task_struct *child, long request, unsigned long addr,
 			ret = -EPERM;
 			break;
 		}
-		/* Fall through.  */
+		fallthrough;
 	}
 
 	default:
@@ -2167,7 +2076,7 @@ static int e2k_user_regs_get(struct task_struct *target, const struct user_regse
 
 	if (target == current) {
 		/* The case of core dump */
-		core_pt_regs_to_user_regs(task_pt_regs(target), &user_regs);
+		core_pt_regs_to_user_regs(current_pt_regs(), &user_regs);
 		membuf_write(&to, &user_regs, sizeof(struct user_regs_struct));
 		return 0;
 	}

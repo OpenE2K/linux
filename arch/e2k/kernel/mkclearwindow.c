@@ -19,7 +19,7 @@ enum {
 	TYPE_SETBN
 };
 
-
+static int rndpr_restored = 0;
 static int return_printed;
 static void print_header(int wsz, int rbs, int rsz, int type)
 {
@@ -32,7 +32,10 @@ static void print_header(int wsz, int rbs, int rsz, int type)
 		return_printed = 1;
 		printf(B "return %%%%ctpr3" E);
 	}
-	printf(B "rwd %%[rndpr], %%%%rndpr" E);
+	if (!rndpr_restored) {
+		printf(B "rwd %%[rndpr], %%%%rndpr" E);
+		rndpr_restored = 1;
+	}
 	if (type == TYPE_SYSCALL_PROT) {
 		printf(B "puttagd %%[_r2], %%[_tag2], %%%%dr2" E);
 		printf(B "puttagd %%[_r3], %%[_tag3], %%%%dr3" E);
@@ -75,7 +78,7 @@ static void print_clear_macro(char *name, int regs, int type)
 	default:
 		exit(1);
 	}
-
+	printf("/* %s regs = %d, type = %d */\n", name, regs, type);
 	printf("#define %s(", name);
 	for (i = 0; i < keep; i++)
 		printf("r%d%s", i, (i + 1 != keep) ? ", " : "");
@@ -87,6 +90,7 @@ static void print_clear_macro(char *name, int regs, int type)
 		"do { \\\n"
 		"\tasm volatile ( \\\n");
 
+	rndpr_restored = 0;
 	for (i = 0; i < regs; i++) {
 		if (i == 0) {
 			bn = 0;
@@ -158,7 +162,7 @@ int main(void)
 			  DO_SIGRETURN_SIZE, TYPE_SYSCALL);
 	print_clear_macro("CLEAR_DO_SIGRETURN_SYSCALL_PROT",
 			  DO_SIGRETURN_SIZE, TYPE_SYSCALL_PROT);
-#ifdef CONFIG_KVM_HOST_MODE
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	print_clear_macro("CLEAR_RETURN_PV_VCPU_TRAP_WINDOW",
 			  RETURN_PV_VCPU_TRAP_SIZE, TYPE_INTERRUPT);
 	print_clear_macro("CLEAR_HANDLE_PV_VCPU_SYS_CALL_WINDOW",

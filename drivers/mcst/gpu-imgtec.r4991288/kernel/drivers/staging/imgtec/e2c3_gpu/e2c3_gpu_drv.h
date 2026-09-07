@@ -52,6 +52,17 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <linux/pci.h>
 #include <linux/device.h>
 
+#if defined(CONFIG_MCST)
+int e2c3_gpu_enable_4991288(struct device *dev);
+void e2c3_gpu_disable_4991288(struct device *dev);
+
+int e2c3_gpu_enable_interrupt_4991288(struct device *dev);
+int e2c3_gpu_disable_interrupt_4991288(struct device *dev);
+
+int e2c3_gpu_set_interrupt_handler_4991288(struct device *dev,
+				   void (*handler_function)(void *),
+				   void *handler_data);
+#else
 int e2c3_gpu_enable(struct device *dev);
 void e2c3_gpu_disable(struct device *dev);
 
@@ -61,9 +72,13 @@ int e2c3_gpu_disable_interrupt(struct device *dev);
 int e2c3_gpu_set_interrupt_handler(struct device *dev,
 				   void (*handler_function)(void *),
 				   void *handler_data);
+#endif
 
+#if defined(CONFIG_MCST)
+#define E2C3_GPU_DEVICE_NAME_ROGUE "e2c3_gpu_rogue_499"
+#else
 #define E2C3_GPU_DEVICE_NAME_ROGUE "e2c3_gpu_rogue"
-
+#endif
 #define E2C3_GPU_RGX_REG_REGION_SIZE (0x7FFFF)
 
 #endif /* _E2C3_GPU_DRV_H */

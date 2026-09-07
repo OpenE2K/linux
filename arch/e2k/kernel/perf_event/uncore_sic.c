@@ -204,11 +204,7 @@ static void set_sic_str_cfg(struct e2k_uncore *uncore,
 
 		if (config.l3_select_cpu && cpu_present(cpu)) {
 			mcr_reg.mcnmo = 0;
-#if 1
-BUG();
-#else
-			mcr_reg.mcn = default_cpu_present_to_apicid(cpu);
-#endif
+			mcr_reg.mcn = cpu_to_cpuid(cpu);
 		} else {
 			mcr_reg.mcnmo = 1;
 		}

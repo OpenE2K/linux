@@ -1,6 +1,6 @@
 /*
- * SPDX-License-Identifier: GPL-2.0-only
- * Copyright(c) 2024 MCST.
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2024 MCST.
  */
 
 #include <linux/kernel.h>

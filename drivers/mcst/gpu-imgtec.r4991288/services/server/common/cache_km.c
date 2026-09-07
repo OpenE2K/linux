@@ -1413,7 +1413,7 @@ static INLINE PVRSRV_ERROR CacheOpValidateVAOffset(PMR *psPMR,
 		}
 #endif
 
-		pud = pud_offset((pgd_t*)p4d, (uintptr_t)pvAddress);
+		pud = pud_offset((p4d_t*)p4d, (uintptr_t)pvAddress);
 		if (pud_none(*pud) || unlikely(pud_bad(*pud)))
 		{
 			eError = PVRSRV_ERROR_INVALID_CPU_ADDR;

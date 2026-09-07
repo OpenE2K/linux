@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
 #include <linux/interrupt.h>
 #include <linux/irq.h>
 #include <linux/irqchip.h>
@@ -11,27 +16,55 @@
 #include "io_epic_regs.h"
 
 
-
-static int epic_dying_cpu(unsigned int cpu)
+/* Write 0 to CEPIC_ESR before reading it */
+void epic_smp_error_interrupt(void)
 {
-	union cepic_ctrl reg_ctrl;
-	unsigned long flags;
+	union cepic_esr reg;
 
-	local_irq_save(flags);
+	epic_write_w(CEPIC_ESR, 0);
+	reg.raw = epic_read_w(CEPIC_ESR);
 
-	/* Disable CEPIC */
-	reg_ctrl.raw = epic_read_w(CEPIC_CTRL);
-	reg_ctrl.soft_en = 0;
-	epic_write_w(CEPIC_CTRL, reg_ctrl.raw);
+	pr_err("EPIC error on CPU%d: 0x%x", smp_processor_id(), reg.raw);
 
-	local_irq_restore(flags);
-	return 0;
+	if (reg.rq_addr_err)
+		pr_cont(" : Illegal regsiter address");
+
+	if (reg.rq_virt_err)
+		pr_cont(" : Illegal virt request (virt disabled)");
+
+	if (reg.rq_cop_err)
+		pr_cont(" : Illegal opcode");
+
+	if (reg.ms_gstid_err)
+		pr_cont(" : Illegal guest id");
+
+	if (reg.ms_virt_err)
+		pr_cont(" : Illegal virt message (virt disabled)");
+
+	if (reg.ms_err)
+		pr_cont(" : Illegal message");
+
+	if (reg.ms_icr_err)
+		pr_cont(" : Illegal write to CEPIC_ICR");
+
+	pr_cont("\n");
 }
+
+void epic_smp_spurious_interrupt(void)
+{
+	pr_info("Spurious EPIC interrupt on CPU#%d\n", smp_processor_id());
+}
+
+
+static int spurious_interrupts_vector;
+static int error_interrupts_vector;
 
 static int epic_starting_cpu(unsigned int cpu)
 {
-	union cepic_ctrl reg_ctrl;
 	unsigned long flags;
+	union cepic_ctrl reg_ctrl;
+	union cepic_svr reg_svr = {};
+	union cepic_esr2 reg_esr2 = {};
 
 	local_irq_save(flags);
 
@@ -40,17 +73,35 @@ static int epic_starting_cpu(unsigned int cpu)
 	reg_ctrl.soft_en = 1;
 	epic_write_w(CEPIC_CTRL, reg_ctrl.raw);
 
+	/* Set up spurious IRQ vector */
+	if (spurious_interrupts_vector >= 0) {
+		reg_svr.vect = spurious_interrupts_vector;
+		epic_write_w(CEPIC_SVR, reg_svr.raw);
+	}
+
+	/* Set up Error Status Register */
+	if (error_interrupts_vector >= 0) {
+		reg_esr2.vect = error_interrupts_vector;
+		epic_write_w(CEPIC_ESR2, reg_esr2.raw);
+	}
+
 	local_irq_restore(flags);
 	return 0;
 }
 
-int __init epic_init(struct device_node *np)
+int __init epic_init(struct device_node *np, struct pic_params *p)
 {
 	int ret;
 
-	ret = cpuhp_setup_state(CPUHP_AP_IRQ_E2K_EPIC_STARTING,
+	spurious_interrupts_vector = p->spurious_interrupts_vector;
+	error_interrupts_vector = p->error_interrupts_vector;
+
+	/*
+	 * Don't disable EPIC soft_en on cpu dying: we need ipc sending in cpuhp_report_idle_dead()
+	 */
+	ret = cpuhp_setup_state(CPUHP_AP_IRQ_E2K_PIC_STARTING,
 			"epic/:starting",
-			epic_starting_cpu, epic_dying_cpu);
+			epic_starting_cpu, NULL);
 
 	if (WARN(ret < 0, "%pOF: Failed to setup hotplug state: %d\n", np, ret))
 		return ret;
@@ -84,25 +135,10 @@ static void epic_ack_edge(struct irq_data *irqd)
 	epic_ack_irq(irqd);
 }
 
-static inline void get_io_epic_msi(int node, u32 *lo, u32 *hi)
-{
-	if (node < 0)
-		node = 0;
-	/* FIXME SIC reads with mas 0x13 aren't supported by hypervisor */
-	if (paravirt_enabled()) {
-		*lo = early_sic_read_node_nbsr_reg(node, SIC_rt_msi);
-		*hi = early_sic_read_node_nbsr_reg(node, SIC_rt_msi_h);
-	} else {
-		*lo = sic_read_node_nbsr_reg(node, SIC_rt_msi);
-		*hi = sic_read_node_nbsr_reg(node, SIC_rt_msi_h);
-	}
-}
-
 static void epic_msi_compose_msg(struct irq_data *irqd,
 				       struct msi_msg *msg)
 {
 	struct irq_cfg *cfg = irqd_cfg(irqd);
-	struct pic_chip_data *picd = pic_chip_data(irqd);
 	union IO_EPIC_MSG_ADDR_LOW lo;
 	union IO_EPIC_MSG_DATA data;
 	u32 hi = 0;
@@ -110,7 +146,7 @@ static void epic_msi_compose_msg(struct irq_data *irqd,
 	memset(msg, 0, sizeof(*msg));
 	lo.raw = 0;
 	BUG_ON(!cpu_has_epic());
-	get_io_epic_msi(irq_data_get_node(irqd), &lo.raw, &hi);
+	get_io_pic_msi(irq_data_get_node(irqd), &lo.raw, &hi);
 
 	lo.dst = cepic_id_short_to_full(cfg->dest_apicid);
 

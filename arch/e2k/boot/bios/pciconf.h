@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
 #ifndef PCI_CONF_REG_INDEX
 // These are defined in the PCI spec, and hence are theoretically
 // inclusive of ANYTHING that uses a PCI bus. 

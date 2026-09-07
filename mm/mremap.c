@@ -661,6 +661,11 @@ static unsigned long move_vma(struct vm_area_struct *vma,
 		err = vma->vm_ops->mremap(new_vma);
 	}
 
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+	if (likely(!err) && (vm_flags & VM_PAGESVALID))
+		err = make_vma_pages_valid(new_vma, new_addr, new_addr + new_len);
+#endif
+
 	if (unlikely(err)) {
 		/*
 		 * On error, move entries back from new area to old,
@@ -674,10 +679,6 @@ static unsigned long move_vma(struct vm_area_struct *vma,
 		old_addr = new_addr;
 		new_addr = err;
 	} else {
-#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
-		if ((vm_flags & VM_PAGESVALID))
-			BUG_ON(make_vma_pages_valid(new_vma, new_addr, new_addr + new_len));
-#endif
 		mremap_userfaultfd_prep(new_vma, uf);
 	}
 

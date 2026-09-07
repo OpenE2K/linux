@@ -83,7 +83,9 @@ struct jfs_inode_info {
 			union {
 				struct {
 					/* 128: inline symlink */
-					unchar _inline[128];
+					/* CONFIG_E2K: `_inline` is interpreted as `inline`
+					 * when using -fms-extensions clang option.*/
+					unchar _inline_start[128];
 					/* 128: inline extended attr */
 					unchar _inline_ea[128];
 				};
@@ -101,7 +103,8 @@ struct jfs_inode_info {
 #define i_imap u.file._imap
 #define i_dirtable u.dir._table
 #define i_dtroot u.dir._dtroot
-#define i_inline u.link._inline
+/* CONFIG_E2K: see comment before _inline_start */
+#define i_inline u.link._inline_start
 #define i_inline_ea u.link._inline_ea
 #define i_inline_all u.link._inline_all
 

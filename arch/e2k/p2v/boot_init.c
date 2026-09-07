@@ -84,7 +84,6 @@ static atomic_t __initdata_recv boot_pv_ops_switched = ATOMIC_INIT(0);
  */
 int phys_nodes_num;
 unsigned long phys_nodes_map;
-int phys_mem_nodes_num;
 unsigned long phys_mem_nodes_map;
 
 static __init void boot_reserve_bootinfo_areas(boot_info_t *boot_info);
@@ -131,60 +130,6 @@ static int __init boot_node_mem_set(char *cmd)
 	return 0;
 }
 __boot_setup("nodemem", boot_node_mem_set);
-
-static int __init boot_set_mmu_pt_v6(char *cmd)
-{
-#ifdef CONFIG_E2K_MACHINE
-	do_boot_printk("set_pt_v6 is supported only on !CONFIG_E2K_MACHINE kernels\n");
-#else
-	if (!IS_ENABLED(CONFIG_MMU_PT_V6))
-		do_boot_printk("CONFIG_MMU_PT_V6 is disabled, so MMU PT_V6 cannot be set\n");
-	else
-		boot_mmu_features.mmu_pt_v6 = true;
-#endif
-
-	return 0;
-}
-__boot_setup("set_pt_v6", boot_set_mmu_pt_v6);
-
-static int __init boot_reset_mmu_pt_v6(char *cmd)
-{
-#ifdef CONFIG_E2K_MACHINE
-	do_boot_printk("reset_pt_v6 is supported only on !CONFIG_E2K_MACHINE kernels\n");
-#else
-	if (!IS_ENABLED(CONFIG_MMU_PT_V6))
-		do_boot_printk("CONFIG_MMU_PT_V6 is disabled, so MMU PT_V6 cannot be reset\n");
-	else
-		boot_mmu_features.mmu_pt_v6 = false;
-#endif
-
-	return 0;
-}
-__boot_setup("reset_pt_v6", boot_reset_mmu_pt_v6);
-
-static int __init boot_set_mmu_separate_pt(char *cmd)
-{
-#ifdef CONFIG_E2K_MACHINE
-	do_boot_printk("CONFIG_E2K_MACHINE is enabled so MMU SEPARATE_PT cannot be set\n");
-#else
-	boot_mmu_features.mmu_separate_pt = true;
-#endif
-
-	return 0;
-}
-__boot_setup("set_sep_pt", boot_set_mmu_separate_pt);
-
-static int __init boot_reset_mmu_separate_pt(char *cmd)
-{
-#ifdef CONFIG_E2K_MACHINE
-	do_boot_printk("CONFIG_E2K_MACHINE is enabled so MMU SEPARATE_PT cannot be reset\n");
-#else
-	boot_mmu_features.mmu_separate_pt = false;
-#endif
-
-	return 0;
-}
-__boot_setup("reset_sep_pt", boot_reset_mmu_separate_pt);
 
 /*
  * Disabling caches setup
@@ -286,111 +231,92 @@ static inline void boot_native_set_l2_crc_state(bool enable)
  * <----------------------------------->
  */
 
-static bank_info_t *__init_recv boot_do_get_next_node_bank(int node,	/* only for node # info */
-							   bank_info_t *node_banks_info,
-							   bank_info_t *node_banks_info_ex,
-							   int *node_banks_ind_p,
-							   int *node_banks_ind_ex_p)
+struct bank_iterator {
+	int node;
+	size_t index;
+	size_t ex_index;
+};
+
+static inline struct bank_iterator bootblock_bank_iter_init(int node, const boot_info_t *bootblock)
 {
-	bank_info_t *bank_info;
-	e2k_size_t bank_size;
-	int bank = 0;
+	int cur_node = 0;
+	size_t i;
 
-	if (node_banks_info == NULL || node_banks_ind_p == NULL) {
-		/* no more main banks on node, switch to extended partition */
-		/* of nodes banks info */
-		DebugLoHi("no main banks info, it need at once\n"
-			  "switch to extended partition of banks info\n");
-	} else if ((bank = *node_banks_ind_p) < L_MAX_NODE_PHYS_BANKS_FUSTY) {
-		bank_info = &node_banks_info[bank];
-		bank_size = bank_info->size;
-		if (bank_size == 0) {
-			DebugLoHi("Node #%d empty main bank #%d: no more banks on node\n",
-				node, bank);
-			return NULL;	/* no more banks on node */
-		}
+	for (i = 0; i < ARRAY_SIZE(bootblock->banks_ex); i++) {
+		if (cur_node == node)
+			break;
 
-		DebugLoHi("Node #%d main bank #%d: address 0x%lx, size 0x%lx\n",
-			  node, bank, bank_info->address, bank_size);
-
-		/* return current main bank and increment index to point */
-		/* to next bank of node */
-		*node_banks_ind_p = bank + 1;
-		return bank_info;
-	} else {
-		/* main banks info is completed, switch to extended partition */
-		/* of nodes banks info */
-		DebugLoHi("main banks info is completed,\n"
-			  " so switch to extended partition of banks info\n");
+		/* Zero-sized banks separate nodes */
+		if (bootblock->banks_ex[i].size == 0)
+			cur_node += 1;
 	}
 
-	if (unlikely(node_banks_info_ex == NULL || node_banks_ind_ex_p == NULL)) {
-		BOOT_BUG("No extended partition of phys. memory banks info\n");
-	} else if ((node = *node_banks_ind_ex_p) < L_MAX_PHYS_BANKS_EX) {
-		bank_info = &node_banks_info_ex[bank];
-		bank_size = bank_info->size;
-		if (bank_size == 0) {
-			DebugLoHi("Node #%d empty extended bank #%d: no more \n"
-				  "banks on node\n", node, bank);
-			/* skip empty bank and set index of extended */
-			/* partition to next bank from which starts extended */
-			/* partition of new node */
-			*node_banks_ind_ex_p = bank + 1;
-			return NULL;	/* no more banks on node */
+	return (struct bank_iterator) {
+		.node = node,
+		.index = 0,
+		.ex_index = i,
+	};
+}
+
+static inline bank_info_t *bootblock_bank_iter_next(struct bank_iterator *iter,
+		boot_info_t *bootblock)
+{
+	/* First go over usual per-node banks */
+	if (iter->index < ARRAY_SIZE(bootblock->nodes_mem[iter->node].banks)) {
+		bank_info_t *bank = &bootblock->nodes_mem[iter->node].banks[iter->index];
+		if (bank->size) {
+			iter->index += 1;
+			return bank;
 		}
-
-		DebugLoHi("Node #%d extended bank #%d: address 0x%lx, size 0x%lx\n",
-			  node, bank, bank_info->address, bank_size);
-
-		/* return current extended bank and increment index to point */
-		/* to next extended bank of node */
-		*node_banks_ind_ex_p = bank + 1;
-		return bank_info;
-	} else {
-		/* extended partition of banks info is completed */
-		/* so cannot be any new banks info for this and other nodes */
-		DebugLoHi("extended partition of banks info is completed,\n"
-			  " so no more any phys. memory banks\n");
+	} else if (iter->ex_index < ARRAY_SIZE(bootblock->banks_ex)) {
+		/* Then go over `banks_ex` where all nodes are mixed
+		 * together and entries with size==0 are used as
+		 * separators.  Note that `banks_ex` can be used
+		 * only after filling `nodes_mem.banks`. */
+		bank_info_t *bank = &bootblock->banks_ex[iter->ex_index];
+		if (bank->size) {
+			iter->ex_index += 1;
+			return bank;
+		}
 	}
 
 	return NULL;
 }
 
-static inline bank_info_t *__init_recv
-boot_has_node_banks_info(boot_info_t *bootblock, int node)
-{
-	int node_banks_ind = 0;
+/**
+ * for_each_node_bank - iterate over all banks of node from bootblock
+ * @bank: pointer to bank_info_t will be returned here
+ * @iter: temporary of `struct bank_iterator` type
+ * @node: consider only banks from this node
+ * @bootblock: bios_info_t pointer
+ */
+#define for_each_node_bank(bank, iter, node, bootblock) \
+	for ((iter) = bootblock_bank_iter_init((node), (bootblock)), \
+			(bank) = bootblock_bank_iter_next(&(iter), (bootblock)); \
+			(bank) != NULL; \
+			(bank) = bootblock_bank_iter_next(&(iter), (bootblock)))
 
-	return boot_do_get_next_node_bank(node,
-					  bootblock->nodes_mem[node].banks,
-					  NULL, &node_banks_ind, NULL);
-}
 
-static inline bank_info_t *__init_recv
-boot_get_next_node_bank(boot_info_t *bootblock, int node,
-			int *node_banks_ind_p, int *node_banks_ind_ex_p)
+static bank_info_t * __init_recv boot_get_first_node_bank(boot_info_t *bootblock, int node)
 {
-	return boot_do_get_next_node_bank(node,
-					  bootblock->nodes_mem[node].banks,
-					  bootblock->banks_ex,
-					  node_banks_ind_p,
-					  node_banks_ind_ex_p);
+	struct bank_iterator iter;
+	bank_info_t *bank;
+
+	for_each_node_bank(bank, iter, node, bootblock) {
+		/* Return with first found bank */
+		break;
+	}
+
+	return bank;
 }
 
 bool __init boot_has_node_low_memory(int node, boot_info_t *bootblock)
 {
-	bank_info_t *bank_info;
-	int banks_ind = 0;
-	int banks_ind_ex = 0;
+	struct bank_iterator iter;
+	bank_info_t *bank;
 
-	while (bank_info = boot_get_next_node_bank(bootblock, node,
-						   &banks_ind, &banks_ind_ex),
-	       bank_info != NULL) {
-		e2k_addr_t bank_start, bank_end;
-
-		bank_start = bank_info->address;
-		bank_end = bank_start + bank_info->size;
-		if (is_addr_from_low_memory(bank_end - 1))
+	for_each_node_bank(bank, iter, node, bootblock) {
+		if (is_addr_from_low_memory(bank->address + bank->size - 1))
 			/* found low memory bank */
 			return true;
 	}
@@ -399,18 +325,11 @@ bool __init boot_has_node_low_memory(int node, boot_info_t *bootblock)
 
 bool __init_recv boot_has_node_high_memory(int node, boot_info_t *bootblock)
 {
-	bank_info_t *bank_info;
-	int banks_ind = 0;
-	int banks_ind_ex = 0;
+	struct bank_iterator iter;
+	bank_info_t *bank;
 
-	while (bank_info = boot_get_next_node_bank(bootblock, node,
-						   &banks_ind, &banks_ind_ex),
-	       bank_info != NULL) {
-		e2k_addr_t bank_start, bank_end;
-
-		bank_start = bank_info->address;
-		bank_end = bank_start + bank_info->size;
-		if (is_addr_from_high_memory(bank_start))
+	for_each_node_bank(bank, iter, node, bootblock) {
+		if (is_addr_from_high_memory(bank->address))
 			/* found high memory bank */
 			return true;
 	}
@@ -424,7 +343,7 @@ bool __init_recv boot_has_high_memory(boot_info_t *bootblock)
 	for (node = 0; node < L_MAX_MEM_NUMNODES; node++) {
 		bank_info_t *node_bank;
 
-		node_bank = boot_has_node_banks_info(bootblock, node);
+		node_bank = boot_get_first_node_bank(bootblock, node);
 		if (node_bank == NULL)
 			continue;	/* node has not memory */
 		if (boot_has_node_high_memory(node, bootblock))
@@ -589,9 +508,8 @@ void __init_recv boot_add_new_phys_bank(int node, node_phys_mem_t *node_mem,
 			}
 			next_phys_bank = &node_mem->banks[node_mem->first_bank];
 			node_mem->start_pfn = new_bank_start >> PAGE_SHIFT;
-			node_mem->pfns_num +=
-			    ((next_phys_bank->base_addr -
-			      new_bank_start) >> PAGE_SHIFT);
+			node_mem->pfns_num += (next_phys_bank->base_addr - new_bank_start) >>
+								PAGE_SHIFT;
 			node_start = new_bank_start;
 			DebugBank("Node #%d : added bunk #%d is at the head of node,\n"
 				  " next bank #%d, node start 0x%lx end 0x%lx pfns 0x%lx\n",
@@ -1071,89 +989,53 @@ short __init boot_create_phys_bank_part(int node_id, node_phys_mem_t *node_mem,
 	return old_bank;
 }
 
-static int __init
-boot_bios_probe_node_memory(boot_info_t *bootblock, int node,
-			       node_phys_mem_t *node_mem,
-			       e2k_size_t phys_memory_size,
-			       int *node_banks_ind_ex_p,
-			       e2k_size_t *bank_memory_size_p)
+static int __init boot_bios_probe_node_memory(boot_info_t *bootblock, int node,
+			node_phys_mem_t *node_mem, e2k_size_t *phys_memory_size)
 {
-	int node_banks_ind = 0;
 	bank_info_t *bank_info;
+	struct bank_iterator iter;
 	e2k_phys_bank_t *phys_banks = node_mem->banks;
-	e2k_size_t bank_memory_size = *bank_memory_size_p;
+	e2k_size_t node_memory_size = 0;
 	int bank_num = 0;
-	int bank = 0;
 
 	node_mem->first_bank = -1;	/* initial state: empty list */
 
-	while (bank_info = boot_get_next_node_bank(bootblock, node,
-						   &node_banks_ind,
-						   node_banks_ind_ex_p),
-	       bank_info != NULL) {
+	for_each_node_bank(bank_info, iter, node, bootblock) {
 		e2k_size_t bank_size;
 		e2k_addr_t bank_start;
 		e2k_phys_bank_t *new_phys_bank;
 		short new_bank_ind;
 
-		if (bank >= L_MAX_NODE_PHYS_BANKS) {
-			BOOT_WARNING("Node #%d number of phys banks %d exceeds permissible limit, ignored",
-				node, bank);
-			bank++;
-			continue;
-		}
-
-		if ((phys_memory_size + bank_memory_size) >= boot_mem_limit) {
-			BOOT_WARNING("Node #%d bank #%d: total memory size 0x%lx exceeds permissible limit 0x%lx, ignored",
-				     node, bank,
-				     phys_memory_size + bank_memory_size,
+		if (*phys_memory_size + node_memory_size >= boot_mem_limit) {
+			BOOT_WARNING("Node #%d: total memory size 0x%lx exceeds permissible limit 0x%lx, ignored",
+				     node, *phys_memory_size + node_memory_size,
 				     boot_mem_limit);
-			bank++;
 			continue;
 		}
-		if (bank_memory_size >= boot_node_mem_limit) {
-			BOOT_WARNING("Node #%d bank #%d memory size 0x%lx exceeds permissible node limit 0x%lx, ignored",
-				     node, bank,
-				     bank_memory_size, boot_node_mem_limit);
-			bank++;
+		if (node_memory_size >= boot_node_mem_limit) {
+			BOOT_WARNING("Node #%d bank memory size 0x%lx exceeds permissible node limit 0x%lx, ignored",
+				     node, node_memory_size, boot_node_mem_limit);
 			continue;
 		}
 
 		bank_start = bank_info->address;
 		bank_size = bank_info->size;
 
-		if (bank_size == 0) {
-			BOOT_BUG("Node #%d empty bank #%d", node, bank);
-			bank_info = NULL;
-			break;
+		if (!PAGE_ALIGNED(bank_start) || !PAGE_ALIGNED(bank_size)) {
+			BOOT_BUG("Node #%d: phys bank 0x%lx+0x%lx is not page aligned",
+				node, bank_start, bank_size);
 		}
 
-		if ((bank_size & (PAGE_SIZE - 1)) != 0) {
-			BOOT_BUG("Node #%d: phys bank #%d size 0x%lx is not page aligned",
-				node, bank, bank_size);
-			bank_size &= ~(PAGE_SIZE - 1);
+		if (*phys_memory_size + node_memory_size + bank_size > boot_mem_limit) {
+			bank_size = boot_mem_limit - (*phys_memory_size + node_memory_size);
+			boot_printk("Node #%d: phys bank size is reduced to 0x%lx bytes\n",
+				node, bank_size);
 		}
 
-		if ((bank_start & (PAGE_SIZE - 1)) != 0) {
-			BOOT_BUG("Node #%d: phys bank #%d base address 0x%lx s not page aligned",
-				node, bank, bank_start);
-			bank_size += (bank_start & (PAGE_SIZE - 1));
-			bank_start &= ~(PAGE_SIZE - 1);
-		}
-
-		if ((phys_memory_size + bank_memory_size + bank_size) >
-		    boot_mem_limit) {
-			bank_size -= phys_memory_size + bank_memory_size +
-			    bank_size - boot_mem_limit;
-			boot_printk("Node #%d: phys bank #%d size is reduced to 0x%lx bytes\n",
-				node, bank, bank_size);
-		}
-
-		if ((bank_memory_size + bank_size) > boot_node_mem_limit) {
-			bank_size -= bank_memory_size + bank_size -
-			    boot_node_mem_limit;
-			boot_printk("Node #%d: phys bank #%d size is reduced to 0x%lx bytes\n",
-				node, bank, bank_size);
+		if (node_memory_size + bank_size > boot_node_mem_limit) {
+			bank_size = boot_node_mem_limit - node_memory_size;
+			boot_printk("Node #%d: phys bank size is reduced to 0x%lx bytes\n",
+				node, bank_size);
 		}
 
 		new_bank_ind = boot_create_new_phys_bank(node, node_mem,
@@ -1165,15 +1047,14 @@ boot_bios_probe_node_memory(boot_info_t *bootblock, int node,
 		}
 		new_phys_bank = &phys_banks[new_bank_ind];
 		bank_num++;
-		bank_memory_size += bank_size;
-		boot_printk("Node #%d: phys bank #%d (list index %d) address 0x%lx, size 0x%lx pages (0x%lx bytes)\n",
-			    node, bank, new_bank_ind,
+		node_memory_size += bank_size;
+		boot_printk("Node #%d: phys bank (list index %d) address 0x%lx, size 0x%lx pages (0x%lx bytes)\n",
+			    node, new_bank_ind,
 			    new_phys_bank->base_addr, new_phys_bank->pages_num,
 			    new_phys_bank->pages_num * PAGE_SIZE);
-		bank++;
 	}
 
-	*bank_memory_size_p = bank_memory_size;
+	*phys_memory_size += node_memory_size;
 
 	return bank_num;
 }
@@ -1184,17 +1065,10 @@ boot_bios_probe_node_memory(boot_info_t *bootblock, int node,
  * It is better to merge contiguous memory banks for allocation goals.
  * Base address of a bank should be page aligned.
  */
-
-int __init
-boot_bios_probe_memory(node_phys_mem_t *nodes_phys_mem,
-			  boot_info_t *bootblock)
+void __init boot_bios_probe_memory(node_phys_mem_t *nodes_phys_mem, boot_info_t *bootblock)
 {
-	node_phys_mem_t *node_mem = nodes_phys_mem;
-	int nodes_banks_ind_ex = 0;
 	unsigned long nodes_map = 0;
-	int nodes_num = 0;
-	unsigned long node_mask = 0x1UL;
-	int boot_bank_num;
+	unsigned long node_mask;
 	int bank_num = 0;
 	int node;
 	e2k_size_t phys_memory_size = 0;
@@ -1204,67 +1078,50 @@ boot_bios_probe_memory(node_phys_mem_t *nodes_phys_mem,
 	boot_phys_nodes_map = 0x1;
 #endif /* CONFIG_SMP */
 
-	for (node = 0; node < L_MAX_MEM_NUMNODES; node++) {
+	for (node_mask = 0x1UL, node = 0; node < L_MAX_MEM_NUMNODES; node_mask <<= 1, node++) {
+		node_phys_mem_t *node_mem = &nodes_phys_mem[node];
 		bank_info_t *node_bank;
-		e2k_size_t bank_memory_size = 0;
-		int node_bank_num = 0;
 
 		if (phys_memory_size >= boot_mem_limit)
 			break;
 
-		node_bank = boot_has_node_banks_info(bootblock, node);
-		if (!(boot_phys_nodes_map & node_mask) &&
-		    BOOT_HAS_MACHINE_L_SIC) {
-			if (node_bank != NULL) {
-				BOOT_WARNING("Node #%d is not online but has not empty memory bank address 0x%lx, size 0x%lx, ignored",
-					     node, node_bank->address,
-					     node_bank->size);
-			}
-			goto next_node;
-		}
+		node_bank = boot_get_first_node_bank(bootblock, node);
 		if (node_bank == NULL)
 			goto next_node;	/* node has not memory */
+
+		if (!(boot_phys_nodes_map & node_mask) && BOOT_HAS_MACHINE_L_SIC) {
+			BOOT_WARNING("Node #%d is not online but has not empty memory bank address 0x%lx, size 0x%lx, ignored",
+				     node, node_bank->address,
+				     node_bank->size);
+			goto next_node;
+		}
 		if ((!BOOT_HAS_MACHINE_E2K_FULL_SIC) && node != 0) {
 			BOOT_WARNING("Machine can have only one node #0, but memory node #%d has not empty phys bank address 0x%lx, size 0x%lx, ignored",
 				     node, node_bank->address, node_bank->size);
 			goto next_node;
 		}
 
-		nodes_num++;
 		nodes_map |= node_mask;
 
-		node_bank_num = boot_bios_probe_node_memory(bootblock, node,
-							       node_mem,
-							       phys_memory_size,
-							       &nodes_banks_ind_ex,
-							       &bank_memory_size);
-
-		phys_memory_size += bank_memory_size;
-		bank_num += node_bank_num;
-		boot_printk("Node #%d: banks num %d, first bank index %d start pfn 0x%lx, size 0x%lx pfns\n",
-			    node,
-			    node_mem->banks_num, node_mem->first_bank,
-			    node_mem->start_pfn, node_mem->pfns_num);
+		bank_num += boot_bios_probe_node_memory(bootblock, node, node_mem,
+					&phys_memory_size);
 
 next_node:
-		boot_printk("Node #%d: phys memory total size is %d Mgb\n",
-			    node, bank_memory_size / (1024 * 1024));
-		node_mem++;
-		node_mask <<= 1;
+		boot_printk("Node #%d: banks num %d, first bank index %d start pfn 0x%lx, size 0x%lx pfns, current phys memory total size is %d MiB\n",
+			node, node_mem->banks_num, node_mem->first_bank,
+			node_mem->start_pfn, node_mem->pfns_num,
+			phys_memory_size / (1024 * 1024));
 	}
-
-	boot_bank_num = bootblock->num_of_banks;
 
 	if (boot_mem_limit != -1UL && boot_node_mem_limit != -1UL &&
-	    boot_bank_num != 0 && boot_bank_num != bank_num) {
+		bootblock->num_of_banks != 0 && bootblock->num_of_banks != bank_num) {
 		BOOT_WARNING("Number of banks of physical memory passed by boot loader %d is not the same as banks at boot_info structure %d",
-			     boot_bank_num, bank_num);
+			bootblock->num_of_banks, bank_num);
 	}
-	if (nodes_num == 0) {
+	if (nodes_map == 0) {
 		BOOT_BUG("Empty online nodes map passed by boot loader at boot_info structure");
 	}
-	if (boot_phys_nodes_map && ((boot_phys_nodes_map & nodes_map)
-				    != nodes_map)) {
+	if (boot_phys_nodes_map && ((boot_phys_nodes_map & nodes_map) != nodes_map)) {
 		BOOT_BUG("Calculated map of nodes with memory 0x%lx contains node(s) out of total nodes map 0x%lx",
 			 nodes_map, boot_phys_nodes_map);
 	}
@@ -1274,140 +1131,102 @@ next_node:
 			     (1 << L_MAX_MEM_NUMNODES) - 1);
 	}
 
-	boot_phys_mem_nodes_num = nodes_num;
 	boot_phys_mem_nodes_map = nodes_map;
 	boot_totalram_real_pages = phys_memory_size / PAGE_SIZE;
 	boot_printk("Phys memory total size is %d Mgb\n",
 		    phys_memory_size / (1024 * 1024));
-	return bank_num;
 }
 
-static inline int __init
-boot_romloader_probe_memory(node_phys_mem_t *nodes_phys_mem,
-			    boot_info_t *bootblock)
-{
-	return boot_bios_probe_memory(nodes_phys_mem, bootblock);
-}
-
-int __init
-boot_native_loader_probe_memory(node_phys_mem_t *nodes_phys_mem,
+void __init boot_native_loader_probe_memory(node_phys_mem_t *nodes_phys_mem,
 				boot_info_t *bootblock)
 {
-	int bank_num = 0;
-
-	if (bootblock->signature == BOOTBLOCK_ROMLOADER_SIGNATURE)
-		bank_num = boot_romloader_probe_memory(nodes_phys_mem, bootblock);
-	else if (bootblock->signature == BOOTBLOCK_BOOT_SIGNATURE)
-		bank_num = boot_bios_probe_memory(nodes_phys_mem, bootblock);
-	else
+	if (bootblock->signature != BOOTBLOCK_ROMLOADER_SIGNATURE &&
+	    bootblock->signature != BOOTBLOCK_BOOT_SIGNATURE) {
 		BOOT_BUG("Unknown type of Boot information structure");
+	}
 
-	return bank_num;
+	boot_bios_probe_memory(nodes_phys_mem, bootblock);
 }
 
 static void __init boot_probe_memory(boot_info_t *boot_info)
 {
 	node_phys_mem_t *all_phys_banks = NULL;
-	int bank_num = 0;
 
 	all_phys_banks = boot_vp_to_pp((node_phys_mem_t *) nodes_phys_mem);
 	boot_fast_memset(all_phys_banks, 0x00, sizeof(*all_phys_banks));
 
-	bank_num = boot_loader_probe_memory(all_phys_banks, boot_info);
+	boot_loader_probe_memory(all_phys_banks, boot_info);
 }
 
 #ifdef	CONFIG_ONLY_HIGH_PHYS_MEM
 
-static bank_info_t *__init_recv
-boot_find_low_pa_bank(e2k_addr_t lo_pa,
-		      boot_info_t *bootblock, int node,
-		      int *node_banks_ind_ex_p)
+static bank_info_t * __init_recv boot_find_low_pa_bank(
+		e2k_addr_t lo_pa, boot_info_t *bootblock, int node)
 {
-	bank_info_t *bank_info;
-	int node_banks_ind = 0;
+	struct bank_iterator iter;
+	bank_info_t *bank;
 
-	while (bank_info = boot_get_next_node_bank(bootblock, node,
-						   &node_banks_ind,
-						   node_banks_ind_ex_p),
-	       bank_info != NULL) {
-		e2k_addr_t bank_start;
-		e2k_addr_t bank_end;
+	for_each_node_bank(bank, iter, node, bootblock) {
+		u64 bank_start = bank->address;
+		u64 bank_end = bank_start + bank->size;
 
-		bank_start = bank_info->address;
-		bank_end = bank_start + bank_info->size;
-
+		/* Check for low address bank */
 		if (lo_pa >= bank_start && lo_pa < bank_end)
-			/* low address bank is found */
-			return bank_info;
-
+			return bank;
 	}
+
 	return NULL;
 }
 
-static bank_info_t *__init_recv boot_find_high_pa_bank(bank_info_t *lo_bank_info, bool above,	/* else below */
-						       boot_info_t *bootblock,
-						       int node,
-						       int node_banks_ind_ex)
+static bank_info_t * __init_recv boot_find_high_pa_bank(bank_info_t *low_bank,
+		bool above, boot_info_t *bootblock, int node)
 {
-	bank_info_t *bank_info;
-	int banks_ind = 0;
-	int banks_ind_ex = node_banks_ind_ex;
-	e2k_addr_t lo_start = lo_bank_info->address;
-	e2k_addr_t lo_end = lo_start + lo_bank_info->size;
+	u64 low_start = low_bank->address;
+	u64 low_end = low_start + low_bank->size;
+	struct bank_iterator iter;
+	bank_info_t *bank;
 
-	while (bank_info = boot_get_next_node_bank(bootblock, node,
-						   &banks_ind, &banks_ind_ex),
-	       bank_info != NULL) {
-		e2k_addr_t bank_start, bank_end;
-		e2k_addr_t lo_addr, hi_addr;
+	for_each_node_bank(bank, iter, node, bootblock) {
+		u64 bank_start = bank->address;
+		u64 bank_end = bank_start + bank->size;
 
-		bank_start = bank_info->address;
-		bank_end = bank_start + bank_info->size;
 		if (is_addr_from_low_memory(bank_end - 1))
 			/* it is low memory bank, ignore */
 			continue;
 
+		/* Check for high address bank */
 		if (above) {
 			/* contiguity should be from low end to high start */
-			hi_addr = bank_start;
-			lo_addr = lo_end;
+			if (bank_start == (low_end | (bank_start & ~LOW_PHYS_MEM_MASK)))
+				return bank;
 		} else {
 			/* contiguity should be from high end to low start */
-			hi_addr = bank_end;
-			lo_addr = lo_start;
+			if (bank_end == (low_start | (bank_end & ~LOW_PHYS_MEM_MASK)))
+				return bank;
 		}
-		lo_addr |= (hi_addr & ~LOW_PHYS_MEM_MASK);
-		if (lo_addr == hi_addr)
-			/* high address bank is found */
-			return bank_info;
 	}
+
 	return NULL;
 }
 
-static inline bank_info_t *__init_recv
-boot_find_above_high_pa_bank(bank_info_t *lo_bank_info,
-			     boot_info_t *bootblock, int node,
-			     int node_banks_ind_ex)
+static inline bank_info_t * __init_recv boot_find_above_high_pa_bank(
+		bank_info_t *low_bank, boot_info_t *bootblock, int node)
 {
-	return boot_find_high_pa_bank(lo_bank_info, true,	/* i.e. above */
-				      bootblock, node, node_banks_ind_ex);
+	return boot_find_high_pa_bank(low_bank, true /* i.e. above */,
+				      bootblock, node);
 }
 
-static inline bank_info_t *__init_recv
-boot_find_below_high_pa_bank(bank_info_t *lo_bank_info,
-			     boot_info_t *bootblock, int node,
-			     int node_banks_ind_ex)
+static inline bank_info_t * __init_recv boot_find_below_high_pa_bank(
+		bank_info_t *low_bank, boot_info_t *bootblock, int node)
 {
-	return boot_find_high_pa_bank(lo_bank_info, false,	/* i.e. below */
-				      bootblock, node, node_banks_ind_ex);
+	return boot_find_high_pa_bank(low_bank, false /* i.e. below */,
+				      bootblock, node);
 }
 
 static e2k_addr_t __init_recv
 boot_node_pa_to_high_pa(e2k_addr_t pa, boot_info_t *bootblock)
 {
-	int nodes_banks_ind_ex = 0;
 	bank_info_t *lo_bank_info = NULL;
-	int node_lo_banks_ind_ex;
 	bank_info_t *below_hi_bank_info;
 	bank_info_t *above_hi_bank_info;
 	e2k_addr_t lo_pa_offset;
@@ -1417,13 +1236,11 @@ boot_node_pa_to_high_pa(e2k_addr_t pa, boot_info_t *bootblock)
 	for (node = 0; node < L_MAX_MEM_NUMNODES; node++) {
 		bank_info_t *node_bank;
 
-		node_bank = boot_has_node_banks_info(bootblock, node);
+		node_bank = boot_get_first_node_bank(bootblock, node);
 		if (node_bank == NULL)
 			continue;	/* node has not memory */
 
-		node_lo_banks_ind_ex = nodes_banks_ind_ex;
-		lo_bank_info = boot_find_low_pa_bank(pa, bootblock, node,
-						     &nodes_banks_ind_ex);
+		lo_bank_info = boot_find_low_pa_bank(pa, bootblock, node);
 		if (lo_bank_info != NULL)
 			/* low address bank is found */
 			break;
@@ -1434,15 +1251,13 @@ boot_node_pa_to_high_pa(e2k_addr_t pa, boot_info_t *bootblock)
 	lo_pa_offset = pa - lo_bank_info->address;
 
 	below_hi_bank_info = boot_find_below_high_pa_bank(lo_bank_info,
-							  bootblock, node,
-							  node_lo_banks_ind_ex);
-	above_hi_bank_info =
-	    boot_find_above_high_pa_bank(lo_bank_info, bootblock, node,
-					 node_lo_banks_ind_ex);
-	if (below_hi_bank_info == NULL && above_hi_bank_info == NULL)
+							  bootblock, node);
+	above_hi_bank_info = boot_find_above_high_pa_bank(lo_bank_info, bootblock, node);
+	if (below_hi_bank_info == NULL && above_hi_bank_info == NULL) {
 		/* could not find high memory bank from which low area */
 		/* was cut out */
 		return -1;
+	}
 	if (below_hi_bank_info == NULL) {
 		/* low area was cut out from the very beginning of high bank */
 		hi_pa = above_hi_bank_info->address - lo_bank_info->size + lo_pa_offset;
@@ -1564,18 +1379,16 @@ bool __init boot_has_lo_bank_remap_to_hi(boot_phys_bank_t * phys_bank,
 
 #endif /* CONFIG_ONLY_HIGH_PHYS_MEM */
 
-e2k_size_t __init boot_native_get_bootblock_size(boot_info_t * bblock)
+e2k_size_t __init boot_native_get_bootblock_size(const boot_info_t *bblock)
 {
-	e2k_size_t area_size = 0;
-
-	if (bblock->signature == BOOTBLOCK_ROMLOADER_SIGNATURE)
-		area_size = sizeof(bootblock_struct_t);
-	else if (bblock->signature == BOOTBLOCK_BOOT_SIGNATURE)
-		area_size = sizeof(bootblock_struct_t);
-	else
+	switch (bblock->signature) {
+	case BOOTBLOCK_ROMLOADER_SIGNATURE:
+	case BOOTBLOCK_BOOT_SIGNATURE:
+		return sizeof(bootblock_struct_t);
+		break;
+	default:
 		BOOT_BUG("Unknown type of Boot information structure");
-
-	return area_size;
+	}
 }
 
 static void __init boot_reserve_0_phys_page(bool bsp, boot_info_t * boot_info)
@@ -1589,7 +1402,8 @@ static void __init boot_reserve_0_phys_page(bool bsp, boot_info_t * boot_info)
 		boot_reserve_physmem("0-page", area_base, area_size,
 				     hw_reserved_mem_type,
 				     BOOT_NOT_IGNORE_BUSY_BANK |
-				     BOOT_IGNORE_BANK_NOT_FOUND);
+				     BOOT_IGNORE_BANK_NOT_FOUND |
+				     BOOT_CAN_BE_INTERSECTIONS);
 		boot_fast_memset((void *)0, 0x00, PAGE_SIZE);
 		boot_printk("The 0-page reserved area: "
 			    "base addr 0x%lx size 0x%lx page size 0x%x\n",
@@ -1699,30 +1513,24 @@ static void __init boot_reserve_low_io_mem(bool bsp)
 		e2k_addr_t area_base = VGA_VRAM_PHYS_BASE;	/* VGA ... */
 		e2k_size_t area_size = VGA_VRAM_SIZE;
 		boot_delete_physmem("Deleted low VGAMEM", area_base, area_size);
-		boot_hw_phys_base = area_base;
-		boot_hw_size = area_size;
 	}
 }
 
 /*
  * Reserve boot information records.
  */
-void __init boot_reserve_bootblock(bool bsp, boot_info_t * boot_info)
+void __init boot_reserve_bootblock(bool bsp, boot_info_t *boot_info)
 {
-	e2k_addr_t area_base;
-	e2k_size_t area_size;
+	unsigned long area_base;
+	size_t area_size;
 
 	if (!BOOT_IS_BSP(bsp))
 		return;
 
-	area_base = boot_bootinfo_phys_base;	/* cmdline ... */
-	area_size = 0;
+	area_base = (unsigned long) boot_info;
 	area_size = boot_get_bootblock_size(boot_info);
 	boot_reserve_physmem("bootblock", area_base, area_size,
 			     boot_loader_mem_type, BOOT_CAN_BE_INTERSECTIONS);
-
-	boot_bootinfo_phys_base = area_base;
-	boot_bootinfo_size = area_size;
 
 	boot_printk("The BOOTINFO reserved area: base addr 0x%lx size 0x%lx page size 0x%x\n",
 	     area_base, area_size, E2K_BOOTINFO_PAGE_SIZE);
@@ -1753,7 +1561,8 @@ static void __init boot_reserve_boot_memory(bool bsp, boot_info_t * boot_info)
 		boot_reserve_physmem("BIOS data", area_base, area_size,
 				     boot_loader_mem_type,
 				     BOOT_IGNORE_BUSY_BANK |
-				     BOOT_CAN_BE_INTERSECTIONS);
+				     BOOT_CAN_BE_INTERSECTIONS |
+				     BOOT_IGNORE_BANK_NOT_FOUND);
 	}
 }
 
@@ -1810,7 +1619,6 @@ void __init boot_native_reserve_all_bootmem(bool bsp, boot_info_t * boot_info)
 	boot_reserve_boot_memory(bsp, boot_info);
 }
 
-#ifdef	CONFIG_L_IO_APIC
 /*
  * Reserve the needed memory from MP - tables
  */
@@ -1821,7 +1629,7 @@ static void __init boot_reserve_mp_table(boot_info_t * bblock)
 	e2k_size_t area_size;
 	struct intel_mp_floating *mpf;
 
-	if (bblock->mp_table_base == (e2k_addr_t) 0UL)
+	if (!bblock->mp_table_base)
 		return;
 
 	/*
@@ -1832,8 +1640,6 @@ static void __init boot_reserve_mp_table(boot_info_t * bblock)
 	boot_reserve_physmem("MP floating table", area_base, area_size,
 			     boot_loader_mem_type,
 			     BOOT_IGNORE_BUSY_BANK | BOOT_CAN_BE_INTERSECTIONS);
-	boot_mpf_phys_base = area_base;
-	boot_mpf_size = area_size;
 
 	mpf = (struct intel_mp_floating *)bblock->mp_table_base;
 	if (DEBUG_BOOT_MODE) {
@@ -1847,21 +1653,15 @@ static void __init boot_reserve_mp_table(boot_info_t * bblock)
 	/*
 	 * MP configuration table
 	 */
-	if (mpf->mpf_physptr != (e2k_addr_t) 0UL) {
-		area_base = mpf->mpf_physptr;
-		area_size = E2K_MPT_PAGE_SIZE;
-		boot_reserve_physmem("MP configuration table", area_base,
-				     area_size, boot_loader_mem_type,
-				     BOOT_IGNORE_BUSY_BANK |
-				     BOOT_CAN_BE_INTERSECTIONS);
-		boot_mpc_phys_base = area_base;
-		boot_mpc_size = area_size;
+	if (mpf->mpf_physptr) {
+		boot_reserve_physmem("MP configuration table",
+				mpf->mpf_physptr, E2K_MPT_PAGE_SIZE,
+				boot_loader_mem_type,
+				BOOT_IGNORE_BUSY_BANK | BOOT_CAN_BE_INTERSECTIONS);
 	} else {
-		boot_mpc_size = 0;
 		boot_printk("The MP configuration table: is absent\n");
 	}
 }
-#endif /* CONFIG_L_IO_APIC */
 
 /*
  * Reserve the needed memory from boot-info used by boot-time initialization.
@@ -1898,10 +1698,8 @@ static void __init boot_reserve_bootinfo_areas(boot_info_t * boot_info)
 	/*
 	 * Reserve MP configuration table
 	 */
-#ifdef	CONFIG_L_IO_APIC
 	if (boot_info->mp_table_base != (e2k_addr_t) 0UL)
 		boot_reserve_mp_table(boot_info);
-#endif /* CONFIG_L_IO_APIC */
 
 	/*
 	 * kexec puts new cmdline not in boot reserved area, so this area should be reserved for
@@ -1916,24 +1714,19 @@ static void __init boot_reserve_bootinfo_areas(boot_info_t * boot_info)
 
 static int __init boot_is_pfn_valid(e2k_size_t pfn)
 {
+	unsigned long *nodes_map = &boot_phys_mem_nodes_map;
 	node_phys_mem_t *all_nodes_mem = NULL;
-	int nodes_num;
-	int cur_nodes_num = 0;
 	int node;
 	short bank;
 
 	all_nodes_mem = boot_vp_to_pp((node_phys_mem_t *) boot_phys_mem);
-	nodes_num = boot_phys_mem_nodes_num;
-	for (node = 0; node < L_MAX_MEM_NUMNODES; node++) {
+	for_each_set_bit(node, nodes_map, L_MAX_MEM_NUMNODES) {
 		node_phys_mem_t *node_mem = &all_nodes_mem[node];
 		boot_phys_bank_t *node_banks;
 
-		if (cur_nodes_num >= nodes_num)
-			break;	/* no more nodes with memory */
 		if (node_mem->pfns_num == 0)
 			continue;	/* node has not memory */
 		node_banks = node_mem->banks;
-		cur_nodes_num++;
 		bank = node_mem->first_bank;
 		while (bank >= 0) {
 			boot_phys_bank_t *phys_bank = &node_banks[bank];
@@ -1941,8 +1734,8 @@ static int __init boot_is_pfn_valid(e2k_size_t pfn)
 
 			if (phys_bank->pages_num == 0) {
 				/* bank in the list has not pages */
-				BOOT_BUG("Node #%d bank #%d at the list "
-					 "has not memory pages", node, bank);
+				BOOT_BUG("Node #%d bank #%d at the list has not memory pages",
+					node, bank);
 			}
 			bank_pfn = phys_bank->base_addr >> PAGE_SHIFT;
 			if (pfn >= bank_pfn &&
@@ -1950,8 +1743,6 @@ static int __init boot_is_pfn_valid(e2k_size_t pfn)
 				return 1;
 			bank = phys_bank->next;
 		}
-		if (cur_nodes_num >= nodes_num)
-			break;	/* no more nodes with memory */
 	}
 	return 0;
 }
@@ -2220,199 +2011,49 @@ void __init boot_native_map_all_bootmem(bool bsp, boot_info_t * boot_info)
 	boot_map_kernel_boot_stacks();
 }
 
-#ifdef	CONFIG_L_IO_APIC
-/*
- * Map the needed memory from MP - tables
- */
-
-static void __init boot_map_mp_table(boot_info_t * boot_info)
-{
-	e2k_addr_t area_phys_base;
-	e2k_addr_t area_virt_base;
-	e2k_size_t area_size;
-	e2k_size_t area_offset;
-	e2k_addr_t area_pfn;
-
-	if (boot_info->mp_table_base == (e2k_addr_t) 0UL)
-		return;
-
-	/*
-	 * MP floating specification table
-	 */
-
-	area_phys_base = ALIGN_DOWN(boot_mpf_phys_base, E2K_MPT_PAGE_SIZE);
-	area_pfn = boot_vpa_to_pa(area_phys_base) >> PAGE_SHIFT;
-	area_offset = boot_mpf_phys_base - area_phys_base;
-	area_size = boot_mpf_size + area_offset;
-	area_virt_base = (e2k_addr_t) __boot_va(boot_vpa_to_pa(area_phys_base));
-	if (!boot_is_pfn_valid(area_pfn)) {
-		boot_map_phys_area("MP floating table", area_phys_base, area_size, area_virt_base,
-				   PAGE_MPT, E2K_MPT_PAGE_SIZE,
-				   false, /* not ignore if data mapping virtual  area is busy */
-				   false);	/* populate map on host? */
-	}
-	boot_printk("The MP floating table: base addr 0x%lx size 0x%lx "
-		    "is mapped to virtual base addr 0x%lx\n",
-		    area_phys_base, area_size, area_virt_base);
-
-	/*
-	 * MP configuration table
-	 */
-
-	if (boot_mpc_size == 0)
-		return;
-
-	area_phys_base = ALIGN_DOWN(boot_mpc_phys_base, E2K_MPT_PAGE_SIZE);
-	area_pfn = boot_vpa_to_pa(area_phys_base) >> PAGE_SHIFT;
-	area_offset = boot_mpc_phys_base - area_phys_base;
-	area_size = boot_mpc_size + area_offset;
-	area_virt_base = (e2k_addr_t) __boot_va(boot_vpa_to_pa(area_phys_base));
-	if (!boot_is_pfn_valid(area_pfn)) {
-		boot_map_phys_area("MP configuration table", area_phys_base, area_size,
-				   area_virt_base, PAGE_MPT, E2K_MPT_PAGE_SIZE,
-				   true,	/* ignore if data mapping virtual  area is busy */
-				   false);	/* populate map on host? */
-	}
-	boot_printk("The MP configuration table : base addr 0x%lx size 0x%lx "
-		    "is mapped to virtual base addr 0x%lx\n",
-		    area_phys_base, area_size, area_virt_base);
-}
-#endif /* CONFIG_L_IO_APIC */
-
 /*
  * Map into the virtual space all needed physical areas from boot-info.
  * All the mapped areas enumerate below. If a some new area will be used,
  * then it should be added to the list of already known ones.
  */
-void __init boot_map_all_bootinfo_areas(boot_info_t * boot_info)
+void __init boot_map_all_bootinfo_areas(boot_info_t *boot_info)
 {
-	e2k_addr_t area_phys_base;
-	e2k_size_t area_size;
-	e2k_size_t area_offset;
 	e2k_addr_t area_pfn;
-	e2k_addr_t area_virt_base;
-	e2k_addr_t symtab_phys_base;
-	e2k_addr_t symtab_virt_base;
-	e2k_size_t symtab_size;
-	e2k_addr_t strtab_phys_base;
-	e2k_addr_t strtab_virt_base;
-	e2k_size_t strtab_size;
 
 	/*
-	 * Map the bootinfo structure.
+	 * Check the bootinfo structure.
 	 */
-	area_phys_base = ALIGN_DOWN(boot_bootinfo_phys_base, E2K_BOOTINFO_PAGE_SIZE);
-	area_pfn = boot_vpa_to_pa(area_phys_base) >> PAGE_SHIFT;
-	area_offset = boot_bootinfo_phys_base - area_phys_base;
-	area_size = boot_bootinfo_size + area_offset;
-	area_virt_base = (e2k_addr_t) __boot_va(boot_vpa_to_pa(area_phys_base));
-
-	if (!boot_is_pfn_valid(area_pfn)) {
-		boot_map_phys_area("bootinfo", area_phys_base, area_size, area_virt_base,
-				   PAGE_BOOTINFO, E2K_BOOTINFO_PAGE_SIZE,
-				   false, /* not ignore if data mapping virtual  area is busy */
-				   false);	/* populate map on host? */
-	}
+	area_pfn = boot_vpa_to_pa((unsigned long) boot_info) >> PAGE_SHIFT;
+	BOOT_BUG_ON(!boot_is_pfn_valid(area_pfn), "bootinfo not in RAM");
 	boot_bootblock_virt = (bootblock_struct_t *)
-	    __boot_va(boot_vpa_to_pa(boot_bootinfo_phys_base));
-	boot_printk("The BOOTINFO structure pages: base addr 0x%lx size 0x%lx "
-		    "is mapped to virtual base addr 0x%lx\n", area_phys_base,
-		    area_size, area_virt_base);
+			__boot_va(boot_vpa_to_pa((unsigned long) boot_bootblock_phys));
 
 #ifdef CONFIG_BLK_DEV_INITRD
 	/*
 	 * Map the memory of initial ramdisk (initrd).
 	 */
-
-	area_phys_base = boot_initrd_phys_base;	/* INITRD_BASE and */
-	area_size = boot_initrd_size;	/* INITRD_SIZE */
-	/* comes from Loader */
-	area_pfn = boot_vpa_to_pa(area_phys_base) >> PAGE_SHIFT;
-	if (area_size && !boot_is_pfn_valid(area_pfn)) {
-		area_virt_base =
-		    (e2k_addr_t) __boot_va(boot_vpa_to_pa(area_phys_base));
-		boot_map_phys_area("initrd", area_phys_base, area_size, area_virt_base,
-				   PAGE_INITRD, E2K_INITRD_PAGE_SIZE,
-				   false, /* not ignore if data mapping virtual  area is busy */
-				   false);	/* populate map on host? */
-	}
+	area_pfn = boot_vpa_to_pa(boot_initrd_phys_base) >> PAGE_SHIFT;
+	BOOT_BUG_ON(boot_initrd_size && !boot_is_pfn_valid(area_pfn), "initrd not in RAM");
 #endif /* CONFIG_BLK_DEV_INITRD */
 
-	boot_map_mp_table(boot_info);
+	if (boot_info->mp_table_base) {
+		struct intel_mp_floating *mpf = (void *) boot_info->mp_table_base;
 
-	/*
-	 * Map the kernel SYMTAB (symbols table).
-	 */
-	symtab_phys_base = boot_symtab_phys_base;
-	symtab_size = boot_symtab_size;
+		/*
+		 * Check MP floating specification table
+		*/
+		area_pfn = boot_vpa_to_pa(boot_info->mp_table_base) >> PAGE_SHIFT;
+		BOOT_BUG_ON(!boot_is_pfn_valid(area_pfn), "MP floating table not in RAM");
 
-	strtab_phys_base = boot_strtab_phys_base;
-	strtab_size = boot_strtab_size;
-	if (symtab_size != 0 || strtab_size != 0)
-		area_virt_base = E2K_KERNEL_NAMETAB_AREA_BASE;
-	else
-		area_virt_base = (e2k_addr_t) NULL;
-
-	if (symtab_size == 0) {
-		symtab_virt_base = (e2k_addr_t) NULL;
-	} else {
-		symtab_phys_base = ALIGN_DOWN(symtab_phys_base, E2K_NAMETAB_PAGE_SIZE);
-		symtab_size += (boot_symtab_phys_base - symtab_phys_base);
-	}
-	if (strtab_size == 0) {
-		strtab_virt_base = (e2k_addr_t) NULL;
-	} else {
-		strtab_phys_base = ALIGN_DOWN(strtab_phys_base, E2K_NAMETAB_PAGE_SIZE);
-		strtab_size += (boot_strtab_phys_base - strtab_phys_base);
-	}
-	if (symtab_size != 0 && strtab_size != 0) {
-		if (symtab_phys_base <= strtab_phys_base) {
-			symtab_virt_base = area_virt_base;
-			strtab_virt_base =
-			    symtab_virt_base + (strtab_phys_base - symtab_phys_base);
-		} else {
-			strtab_virt_base = area_virt_base;
-			symtab_virt_base =
-			    strtab_virt_base + (symtab_phys_base - strtab_phys_base);
+		/*
+		 * Check MP configuration table
+		*/
+		if (mpf->mpf_physptr) {
+			area_pfn = boot_vpa_to_pa(mpf->mpf_physptr) >> PAGE_SHIFT;
+			BOOT_BUG_ON(!boot_is_pfn_valid(area_pfn),
+					"MP configuration table not in RAM");
 		}
-	} else if (symtab_size == 0) {
-		symtab_virt_base = (e2k_addr_t) NULL;
-		strtab_virt_base = area_virt_base;
-	} else {
-		strtab_virt_base = (e2k_addr_t) NULL;
-		symtab_virt_base = area_virt_base;
 	}
-
-	if (symtab_size) {
-		boot_map_phys_area("symtab", symtab_phys_base, symtab_size, symtab_virt_base,
-				   PAGE_KERNEL_NAMETAB, E2K_NAMETAB_PAGE_SIZE,
-				   false, /* not ignore if sym table mapping virtual area busy */
-				   false);	/* populate map on host? */
-	} else {
-		boot_printk("The kernel symbols table is empty\n");
-	}
-	boot_symtab_virt_base = symtab_virt_base;
-
-	if (strtab_size) {
-		boot_map_phys_area("strtab", strtab_phys_base, strtab_size, strtab_virt_base,
-				   PAGE_KERNEL_NAMETAB, E2K_NAMETAB_PAGE_SIZE,
-				   true, /* ignore if strings table mapping virtual  area busy */
-				   false);	/* populate map on host? */
-	} else {
-		boot_printk("The kernel strings table is empty\n");
-	}
-	boot_strtab_virt_base = strtab_virt_base;
-
-	boot_kernel_symtab = (void *)(symtab_virt_base +
-				      (boot_symtab_phys_base & (E2K_NAMETAB_PAGE_SIZE - 1)));
-	boot_kernel_symtab_size = boot_symtab_size;
-	boot_printk("The kernel symbols table: addr 0x%lx size 0x%lx\n",
-		    boot_kernel_symtab, boot_kernel_symtab_size);
-	boot_kernel_strtab = (void *)(strtab_virt_base +
-				      (boot_strtab_phys_base & (E2K_NAMETAB_PAGE_SIZE - 1)));
-	boot_kernel_strtab_size = boot_strtab_size;
-	boot_printk("The kernel strings table: addr 0x%lx size 0x%lx\n",
-		    boot_kernel_strtab, boot_kernel_strtab_size);
 }
 
 /* 
@@ -2727,8 +2368,6 @@ boot_mem_init(bool bsp, int cpuid, boot_info_t *boot_info)
 	e2k_size_t pages_num;
 
 	if (BOOT_IS_BSP(bsp)) {
-		int nid = numa_node_id();
-
 		/*
 		 * Probe the system memory and fill the structures
 		 * 'nodes_phys_mem' of physical memory configuration.
@@ -2740,8 +2379,7 @@ boot_mem_init(bool bsp, int cpuid, boot_info_t *boot_info)
 		 * simple boot-time memory allocator.
 		 */
 		pages_num = boot_create_physmem_maps(boot_info);
-		boot_printk("The physical memory size is 0x%lx "
-			    "pages * 0x%x = 0x%lx bytes\n",
+		boot_printk("The physical memory size is 0x%lx pages * 0x%x = 0x%lx bytes\n",
 			    pages_num, PAGE_SIZE, pages_num * PAGE_SIZE);
 
 		/*

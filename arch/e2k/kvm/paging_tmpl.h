@@ -877,10 +877,6 @@ static inline void FNAME(protect_clean_gpte)(unsigned *access, unsigned gpte)
 {
 	unsigned mask;
 
-	/* dirty bit is not supported, so no need to track it */
-	if (!PT_GUEST_DIRTY_MASK)
-		return;
-
 	BUILD_BUG_ON(PT_WRITABLE_MASK != ACC_WRITE_MASK);
 
 	mask = (unsigned)~ACC_WRITE_MASK;
@@ -927,7 +923,7 @@ static bool FNAME(prefetch_invalid_gpte)(struct kvm_vcpu *vcpu,
 		goto no_present;
 
 	/* if accessed bit is not supported prefetch non accessed gpte */
-	if (PT_GUEST_ACCESSED_MASK && !(gpte & PT_GUEST_ACCESSED_MASK))
+	if (!(gpte & PT_GUEST_ACCESSED_MASK))
 		goto no_present;
 
 	return false;
@@ -1006,10 +1002,6 @@ static int update_accessed_dirty_bits(struct kvm_vcpu *vcpu,
 	pgprotval_t __user *ptep_user;
 	gfn_t table_gfn;
 	int ret;
-
-	/* dirty/accessed bits are not supported, so no need to update them */
-	if (!PT_GUEST_DIRTY_MASK)
-		return 0;
 
 	for (level = walker->max_level; level >= walker->level; --level) {
 		gpt_entry = get_walk_addr_gpte_level(gpt_walker, level);
@@ -1490,6 +1482,7 @@ static gpte_state_t gpte_changed(struct kvm_vcpu *vcpu, gpt_walker_t *gpt_walker
 }
 #endif	/* CHECK_GPTE_CHANGED */
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 /*
  * Walk a shadow PT levels up to the all present levels in the paging hierarchy.
  */
@@ -1534,6 +1527,7 @@ static int walk_shadow_pts(struct kvm_vcpu *vcpu, gva_t addr,
 	}
 	return it.level;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 /*
  * Fetch a shadow PT levels up to the specified level in the paging hierarchy.
@@ -3367,21 +3361,21 @@ static pf_res_t allocate_shadow_level(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 				pt_access,
 				is_shadow_valid_pte(vcpu->kvm, *spt_pte_hva));
 		if (!sp) {
-			DebugSYNC("Allocation of shadow page for spte 0x%lx"
-				" failed\n", spt_pte_hva);
+			DebugSYNC("Allocation of shadow page for spte 0x%px failed\n",
+					spt_pte_hva);
 			return PFRES_ERR;
 		}
 
 		link_shadow_page(vcpu, gmm, spt_pte_hva, sp);
 		DebugSYNC("allocated new shadow page with hpa 0x%llx, guest"
 			" table gfn 0x%llx, on level #%d, linked to spte"
-			" with hpa 0x%llx, hva 0x%lx on level #%d\n",
+			" with hpa 0x%llx, hva 0x%px on level #%d\n",
 			pgprot_val(*spt_pte_hva) & _PAGE_PFN_V3, table_gfn,
 			level, __pa(spt_pte_hva), spt_pte_hva, level + 1);
 	} else {
 		DebugSYNC("present shadow page with hpa 0x%llx, guest table"
 			" gfn 0x%llx, on level #%d, linked to spte with"
-			" hpa 0x%llx, hva 0x%lx on level #%d\n",
+			" hpa 0x%llx, hva 0x%px on level #%d\n",
 			pgprot_val(*spt_pte_hva) & _PAGE_PFN_V3, table_gfn,
 			level, __pa(spt_pte_hva), spt_pte_hva, level + 1);
 	}
@@ -3631,7 +3625,7 @@ static pf_res_t sync_shadow_pte_range(struct kvm_vcpu *vcpu,
 	spt_walker->index = pte_index;
 	spt_walker->sptep = spt_pte_hva;
 
-	DebugSYNC("shadow level hpa 0x%llx, hva 0x%lx, level #%d, idx %d\n",
+	DebugSYNC("shadow level hpa 0x%llx, hva 0x%px, level #%d, idx %d\n",
 		spt_table_hpa, spt_table_hva, level, pte_index);
 
 	gva = start_gva;
@@ -3685,18 +3679,17 @@ static pf_res_t sync_shadow_pte_range(struct kvm_vcpu *vcpu,
 
 		if (unlikely(level == PT_PAGE_TABLE_LEVEL && !gpt_copied)) {
 			gpa_t start_gpa;
+			gpte_state_t gpte_state;
 
 			/* Copy gptes atomic from guest table */
 			start_gpa = gpt_entry->gpt_base +
-					gpt_entry->start_index *
-						sizeof(pgprotval_t);
-			ret = copy_addr_range_gptes_atomic(vcpu,
-					gva, end_gva, start_gpa,
-					gpt_walker, level);
-			if (unlikely(ret != 0)) {
+				    gpt_entry->start_index * sizeof(pgprotval_t);
+			gpte_state = copy_addr_range_gptes_atomic(vcpu, gva,
+					end_gva, start_gpa, gpt_walker, level);
+			if (unlikely(gpte_state != same_gpte_state)) {
 				spin_unlock(&kvm->mmu_lock);
-				if (ret < 0) {
-					return ret;
+				if (gpte_state < 0) {
+					return (int) gpte_state;
 				} else {
 					pr_err("%s(); failed atomic copy, will run "
 						"again with next addr 0x%lx\n",
@@ -3738,7 +3731,7 @@ static pf_res_t sync_shadow_pte_range(struct kvm_vcpu *vcpu,
 		 * Mark spte as only valid too.
 		 */
 		if (is_only_valid_gpte(vcpu, guest_pte)) {
-			DebugSYNCV("gpte with gpa 0x%llx hva 0x%lx,"
+			DebugSYNCV("gpte with gpa 0x%llx hva 0x%px,"
 				" gva 0x%lx, level #%d is only valid, mark"
 				" it as only valid in shadow page table and"
 				" go to next pte on this level\n",
@@ -3763,9 +3756,7 @@ static pf_res_t sync_shadow_pte_range(struct kvm_vcpu *vcpu,
 			/* then skip it */
 			if (likely(is_shadow_unmapped_pte(kvm,
 							  *spt_pte_hva))) {
-				DebugSYNCV("gpte with gpa 0x%llx hva 0x%lx,"
-					" gva 0x%lx, level #%d is not present, go"
-					" to next gpte on this level\n",
+				DebugSYNCV("gpte with gpa 0x%llx hva 0x%px, gva 0x%lx, level #%d is not present, go to next gpte on this level\n",
 					guest_pte_gpa, guest_pte_hva, gva, level);
 				if (unlikely(trace_kvm_sync_shadow_gva_enabled())) {
 					trace_kvm_sync_gpte(gva, spt_pte_hva,
@@ -3795,9 +3786,7 @@ static pf_res_t sync_shadow_pte_range(struct kvm_vcpu *vcpu,
 					guest_pte, level);
 
 		if (unlikely(is_rsvd_bits_set(mmu, guest_pte, level))) {
-			DebugSYNCV("guest pt entry gpa 0x%llx hva 0x%lx,"
-				" gva 0x%lx, level #%d is reserved, go to"
-				" next pte on this level\n",
+			DebugSYNCV("guest pt entry gpa 0x%llx hva 0x%px, gva 0x%lx, level #%d is reserved, go to next pte on this level\n",
 				guest_pte_gpa, guest_pte_hva, gva, level);
 			goto next_pte;
 		}
@@ -3820,8 +3809,7 @@ static pf_res_t sync_shadow_pte_range(struct kvm_vcpu *vcpu,
 		guest_walker->pte_access = pte_access;
 		guest_walker->pte_cui = FNAME(gpte_cui)(guest_pte);
 
-		DebugSYNC("correct gpte with gpa 0x%llx hva 0x%lx,"
-			" gpte val 0x%lx, gva 0x%lx, level #%d %s\n",
+		DebugSYNC("correct gpte with gpa 0x%llx hva 0x%px, gpte val 0x%lx, gva 0x%lx, level #%d %s\n",
 			guest_pte_gpa, guest_pte_hva, guest_pte, gva, level,
 			is_huge_page ? "huge page" : "");
 

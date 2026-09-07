@@ -2284,6 +2284,9 @@ static const struct file_operations fops = {
 	.flush		= usbtmc_flush,
 	.unlocked_ioctl	= usbtmc_ioctl,
 	.compat_ioctl	= compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = usbtmc_ioctl,
+#endif
 	.fasync         = usbtmc_fasync,
 	.poll           = usbtmc_poll,
 	.llseek		= default_llseek,

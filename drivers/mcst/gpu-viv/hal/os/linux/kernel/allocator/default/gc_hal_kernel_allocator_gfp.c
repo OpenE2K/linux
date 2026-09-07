@@ -1224,8 +1224,11 @@ _GFPMapKernel(
         pgprot = pgprot_noncached(PAGE_KERNEL);
 #endif
     }
-
+#ifdef CONFIG_MCST
+    addr = vmap(pages, numPages, VM_MAP, pgprot);
+#else
     addr = vmap(pages, numPages, 0, pgprot);
+#endif
 
     if (free)
     {

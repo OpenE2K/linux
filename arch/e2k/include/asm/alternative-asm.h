@@ -110,6 +110,14 @@ NONTARGET_LABEL(774)	.pushsection .altinstructions,"a"
 
 /*
  * Define an alternative between three instructions.
+ *
+ * Order of checks:
+ *	if (feature2)
+ *		newinstr2;
+ *	else if (feature1)
+ *		newinstr1;
+ *	else
+ *		oldinstr;
  */
 .macro ALTERNATIVE_2 oldinstr, newinstr1, feature1, newinstr2, feature2
 	.pushsection .altinstr_replacement,"ax"

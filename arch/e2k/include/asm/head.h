@@ -203,11 +203,12 @@
  * Area dedicated for kernel resident image virtual space and virtual space
  * to allocate and load kernel modules.
  *
- * Both this areas should be within 2 ** 30 bits of virtual adresses to provide
+ * Both this areas should be within 2 ** 30 bits of virtual addresses to provide
  * call of extern functions based on literal displacement DISP
  *
- * Modules and kernel are put into different PGDs because kernel image is
- * duplicated across NUMA nodes and modules are not.
+ * Modules and kernel are put into different PGDs: kernel image is always
+ * duplicated across NUMA nodes, while modules are duplicated only when
+ * CONFIG_E2K_MODULES_DUPLICATION is enabled.
  *
  * 0xe1ff c000 0000 - 0xe200 0000 0000 area to load modules
  * 0xe200 0000 0000 - 0xe200 0xxx x000 kernel image area
@@ -222,25 +223,6 @@
 #define	E2K_MODULES_END	  round_down(E2K_KERNEL_IMAGE_AREA_BASE, PGDIR_SIZE)
 #define E2K_MODULES_START round_up(KERNEL_END - (1UL << 30), E2K_LARGE_PAGE_SIZE)
 #define	E2K_KERNEL_AREAS_SIZE		0x0000000040000000UL	/* 2 ** 30 */
-
-/*
- * Usermode trampolines for returning from signal handlers and coroutines.
- * Choose address that won't conflict with future expansions of physical
- * address space.
- *
- * IMPORTANT! This value is part of kernel ABI and must not be changed for
- * CRIU to work correctly.
- */
-#define E2K_TRAMPOLINES_END		0xff8000000000UL
-#define E2K_TRAMPOLINES_SIZE		PAGE_SIZE
-#define E2K_TRAMPOLINES_START		(E2K_TRAMPOLINES_END - E2K_TRAMPOLINES_SIZE)
-
-#ifndef __ASSEMBLY__
-static inline bool is_trampoline(unsigned long ip)
-{
-	return ip >= E2K_TRAMPOLINES_START && ip < E2K_TRAMPOLINES_END;
-}
-#endif
 
 #define	KERNEL_CODES_INDEX		0UL	/* kernel CUI */
 /* bug 114501: use 0 index for all unprotected executables */

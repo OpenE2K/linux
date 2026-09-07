@@ -138,7 +138,11 @@ SysDmaAcquireKernelAddress(struct page *psPage, IMG_UINT64 ui64Size, void *pvOSD
 
 	/* Remap pages into VMALLOC space */
 #if !defined(CONFIG_64BIT) || defined(PVRSRV_FORCE_SLOWER_VMAP_ON_64BIT_BUILDS)
+#ifdef CONFIG_MCST
+	pvVirtAddr = vmap(pagearray, ui32PgCount, VM_MAP, prot);
+#else
 	pvVirtAddr = vmap(pagearray, ui32PgCount, VM_READ | VM_WRITE, prot);
+#endif
 #else
 	pvVirtAddr = vm_map_ram(pagearray, ui32PgCount, -1);
 #endif

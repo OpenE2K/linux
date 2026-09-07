@@ -414,11 +414,19 @@ EXPORT_SYMBOL(dma_get_sgtable_attrs);
  */
 pgprot_t dma_pgprot(struct device *dev, pgprot_t prot, unsigned long attrs)
 {
-	if (dev_is_dma_coherent(dev))
-		return prot;
+#ifdef CONFIG_E2K /* check WC first */
 #ifdef CONFIG_ARCH_HAS_DMA_WRITE_COMBINE
 	if (attrs & DMA_ATTR_WRITE_COMBINE)
 		return pgprot_writecombine(prot);
+#endif
+#endif
+	if (dev_is_dma_coherent(dev))
+		return prot;
+#ifndef CONFIG_E2K
+#ifdef CONFIG_ARCH_HAS_DMA_WRITE_COMBINE
+	if (attrs & DMA_ATTR_WRITE_COMBINE)
+		return pgprot_writecombine(prot);
+#endif
 #endif
 	return pgprot_dmacoherent(prot);
 }
@@ -711,10 +719,7 @@ int dma_mmap_noncontiguous(struct device *dev, struct vm_area_struct *vma,
 }
 EXPORT_SYMBOL_GPL(dma_mmap_noncontiguous);
 
-#ifndef CONFIG_MCST
-static
-#endif
-int dma_supported(struct device *dev, u64 mask)
+static int dma_supported(struct device *dev, u64 mask)
 {
 	const struct dma_map_ops *ops = get_dma_ops(dev);
 

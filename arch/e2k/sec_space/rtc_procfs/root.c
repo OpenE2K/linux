@@ -43,15 +43,16 @@ static void __init rtcfs_clean_kmemcache(void)
 }
 
 static const struct inode_operations rtcfs_root_inode_operations = {
-	.lookup     = rtcfs_root_lookup,
-	.getattr    = rtcfs_proc_getattr,
+	.lookup		= rtcfs_root_lookup,
+	.getattr	= rtcfs_proc_getattr,
 };
 
 static const struct file_operations rtcfs_root_operations = {
 	.open		= rtcfs_proc_open,
 	.read		= generic_read_dir,
-	.iterate_shared = rtcfs_pid_readdir,
-	.llseek         = generic_file_llseek,
+	.iterate_shared	= rtcfs_pid_readdir,
+	.llseek		= generic_file_llseek,
+	.release	= rtcfs_proc_release,
 };
 
 static struct inode *rtcfs_alloc_inode(struct super_block *sb)

@@ -401,6 +401,9 @@ static const struct file_operations vfio_fops = {
 	.release	= vfio_fops_release,
 	.unlocked_ioctl	= vfio_fops_unl_ioctl,
 	.compat_ioctl	= compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = vfio_fops_unl_ioctl,
+#endif
 };
 
 struct vfio_container *vfio_container_from_file(struct file *file)

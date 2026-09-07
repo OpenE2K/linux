@@ -30,6 +30,9 @@ static inline void DBG_func(const char *fmt, ...)
 #define DBG(fmt, ...)
 #endif
 
+extern int xfer_ring_sz;
+extern int ibi_ring_sz;
+extern int mipi_verbose;
 #else /* CONFIG_E2K */
 
 /* Handy logging macro to save on line length */

@@ -154,7 +154,6 @@ int net_rxq_init_q(mxgbe_priv_t *priv, int qn)
 	int i;
 	mxgbe_rx_buff_t *rxq_buff;
 	struct mxgbe_queue *q = &priv->rxq[qn];
-	bool xdp_enabled = !!READ_ONCE(priv->xdp_prog);
 
 	/* Create page pool first */
 	err =  mxgbe_rx_page_pool_create(priv, qn);
@@ -983,7 +982,6 @@ static int mxgbe_ioctl_private(struct net_device *ndev, struct ifreq *rq,
 static int mxgbe_ioctl(struct net_device *ndev, struct ifreq *rq, int cmd)
 {
 	int rc = 0;
-	mxgbe_priv_t *priv = netdev_priv(ndev);
 
 	switch (cmd) {
 	default:
@@ -1408,7 +1406,7 @@ int mxgbe_net_register(mxgbe_priv_t *priv)
 	/* link off */
 	netif_carrier_off(ndev);
 
-	if (ret = mxgbe_mdio_register(priv)) {
+	if ((ret = mxgbe_mdio_register(priv))) {
 		dev_err(&priv->pdev->dev,
 			"Cannot register mdio bus, aborting\n");
 		goto err_out_free_rxq;
@@ -1419,7 +1417,7 @@ int mxgbe_net_register(mxgbe_priv_t *priv)
 
 	priv->carrier = (u32)-1;
 
-	if (ret = register_netdev(ndev)) {
+	if ((ret = register_netdev(ndev))) {
 		dev_err(&priv->pdev->dev,
 			"Cannot register net device, aborting\n");
 		goto err_out_mdiobus;

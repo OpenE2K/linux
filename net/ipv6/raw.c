@@ -1220,6 +1220,9 @@ struct proto rawv6_prot = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	   = compat_rawv6_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	   = rawv6_ioctl,
+#endif
 	.diag_destroy	   = raw_abort,
 };
 
@@ -1297,6 +1300,9 @@ const struct proto_ops inet6_sockraw_ops = {
 	.sendpage	   = sock_no_sendpage,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	   = inet6_compat_ioctl,
+#endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	   = inet6_ioctl,
 #endif
 };
 

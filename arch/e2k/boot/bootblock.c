@@ -14,7 +14,7 @@ extern u64 __kernel_size;
 #if !defined(CONFIG_E2K_MACHINE)
 # define TARGET_MDL		0
 # define TARGET_ISET_MIN	CONFIG_CPU_ISET_MIN
-# define TARGET_ISET_MAX	E2K_ISET_V7
+# define TARGET_ISET_MAX	CONFIG_CPU_ISET_MAX
 #else
 # define TARGET_ISET_MIN	0
 # define TARGET_ISET_MAX	0
@@ -41,8 +41,6 @@ extern u64 __kernel_size;
 # endif
 #endif
 
-__visible const char gap[256] = {0};
-
 __visible const struct bootblock_struct boot_block =
 {
 	.info = {
@@ -52,7 +50,8 @@ __visible const struct bootblock_struct boot_block =
 		.target_iset_max = TARGET_ISET_MAX,	/* target maximum iset version */
 		.kernel_size = (u64)&__kernel_size,	/* kernel size */
 #ifdef CONFIG_CMDLINE
-		.kernel_args_string = CONFIG_CMDLINE,	/* kernel command line */
+		.kernel_args_string = KERNEL_ARGS_STRING_EX_SIGNATURE,
+		.kernel_args_string_ex = CONFIG_CMDLINE, /* kernel command line */
 #endif
 
 		.s3_info = {

@@ -67,17 +67,8 @@ DECLARE_EARLY_PER_CPU_READ_MOSTLY(u16, cpu_to_picid);
 #ifdef CONFIG_NUMA
 extern s16 __apicid_to_node[NR_CPUS];
 
-extern int e2k_early_cpu_to_node(int cpu);
+extern int is_duplicated_code(unsigned long ip);
 extern int is_duplicated_address(unsigned long addr);
-
-static inline int is_duplicated_code(unsigned long ip)
-{
-	/* Code is not yet duplicated this early in the boot process */
-	if (system_state == SYSTEM_BOOTING)
-		return 0;
-
-	return ip >= (unsigned long) _stext && ip < (unsigned long) _etext;
-}
 
 # define topology_physical_package_id(cpu)	cpu_to_node(cpu)
 
@@ -86,7 +77,6 @@ static inline int is_duplicated_code(unsigned long ip)
 				 cpumask_of_node(pcibus_to_node(bus)))
 
 #else /* ! CONFIG_NUMA */
-# define e2k_early_cpu_to_node(cpu)	0
 
 static inline int is_duplicated_address(unsigned long addr) { return false; }
 static inline int is_duplicated_code(unsigned long ip) { return false; }

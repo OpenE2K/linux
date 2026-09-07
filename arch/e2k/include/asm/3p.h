@@ -61,7 +61,7 @@ struct global_store_trace_record {
 	e2k_addr_t	old_address;
 	unsigned long	word1;         /*the first word of SAP */
 	unsigned long	word2;         /*the second word of SAP */
-        e2k_addr_t      sbr;
+	e2k_addr_t      sbr;
 	/* 
 	 * just to care about perhaps I need to store the LOCAL here
 	 * as a backup.

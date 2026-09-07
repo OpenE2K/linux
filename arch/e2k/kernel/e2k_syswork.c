@@ -66,10 +66,6 @@ extern int task_statm(struct mm_struct *, int *, int *, int *, int *);
 int jtag_stop_var;
 EXPORT_SYMBOL(jtag_stop_var);
 
-void	*kernel_symtab;
-long	kernel_symtab_size;
-void	*kernel_strtab;
-long	kernel_strtab_size;
 #ifdef E2K_DEBUG_CPU_REGS
 int zero_debug = 0; /* to panic in places where lcc not allows to use printk */
 EXPORT_SYMBOL(zero_debug);
@@ -362,9 +358,6 @@ static void copy_trap_stack_regs(const struct pt_regs *limit_regs,
 	struct pt_regs *trap_pt_regs;
 	int i;
 
-	if (!regs->show_trap_regs)
-		return;
-
 	trap_pt_regs = find_trap_host_regs(current_thread_info()->pt_regs);
 
 	while (trap_pt_regs && limit_regs &&
@@ -632,6 +625,7 @@ noinline void copy_stack_regs(struct task_struct *task, const struct pt_regs *li
 #endif
 
 	if (task == current) {
+		struct pt_regs *top_regs;
 		unsigned long flags;
 
 		raw_all_irq_save(flags);
@@ -658,8 +652,14 @@ noinline void copy_stack_regs(struct task_struct *task, const struct pt_regs *li
 						 native_read_CR1_reg().wbs * EXT_4_NR_SZ);
 		}
 
-		get_all_user_glob_regs(&regs->gregs);
-		regs->gregs_valid = 1;
+		top_regs = current_pt_regs();
+		if (!WARN_ON_ONCE(!top_regs) && user_mode(top_regs)) {
+			machine.save_global_gregs(&regs->g_gregs);
+			tagged_memcpy_8(&regs->l_gregs.g, &current->thread.u_gregs.g,
+					sizeof(regs->l_gregs.g));
+			regs->l_gregs.bgr = current->thread.u_gregs.bgr;
+			regs->gregs_valid = 1;
+		}
 
 		copy_trap_stack_regs(limit_regs, regs);
 
@@ -726,7 +726,7 @@ noinline void copy_stack_regs(struct task_struct *task, const struct pt_regs *li
 	src = (void *)(PCSP_PTR(regs->pcsp) - sz);
 	if (unlikely(((long)dst & 0x7) || ((long)src & 0x7) ||
 		     ((long)sz & 0x7) || (u64) src < PAGE_OFFSET)) {
-		pr_alert("Bad chain registers: src %lx, dst %lx, sz %llx\n",
+		pr_alert("Bad chain registers: src %px, dst %px, sz %llx\n",
 			 src, dst, sz);
 		goto out;
 	}
@@ -754,7 +754,7 @@ noinline void copy_stack_regs(struct task_struct *task, const struct pt_regs *li
 	src = (void *)(PSP_PTR(regs->psp) - sz);
 	if (unlikely(((long)dst & 0x7) || ((long)src & 0x7) ||
 		     ((long)sz & 0x7) || (u64) src < PAGE_OFFSET)) {
-		pr_alert("Bad psp registers: src %lx, dst %lx, sz %llx\n",
+		pr_alert("Bad psp registers: src %px, dst %px, sz %llx\n",
 			 src, dst, sz);
 		/* We can still print chain stack */
 		regs->base_psp_stack = NULL;
@@ -903,7 +903,7 @@ static void print_reg_window(u64 window_base, int window_size,
 	u64 *rw = (u64 *)window_base;
 	u64 qreg_lo, qreg_hi, ext_lo, ext_hi;
 	u8 tag_lo, tag_hi, tag_ext_lo, tag_ext_hi;
-	char brX0_name[6], brX1_name[6];
+	char brX0_name[7], brX1_name[7];
 	u64 rbs, rsz, rcur;
 
 	rbs = cr1.rbs;
@@ -1189,40 +1189,40 @@ void print_pt_regs(const pt_regs_t *regs)
 		print_all_TC(trap->tcellar, trap->tc_count);
 		if (exceptions & exc_data_debug_mask) {
 			pr_info("ddbar0 0x%llx, ddbar1 0x%llx, ddbar2 0x%llx, ddbar3 0x%llx\n",
-				READ_DDBAR0_REG_VALUE(), READ_DDBAR1_REG_VALUE(),
-				READ_DDBAR2_REG_VALUE(), READ_DDBAR3_REG_VALUE());
+				READ_DDBAR0_REG(), READ_DDBAR1_REG(),
+				READ_DDBAR2_REG(), READ_DDBAR3_REG());
 			if (cpu_has(CPU_FEAT_ISET_V7)) {
 				pr_info("ddbcr 0x%llx, ddmcr 0x%llx, ddmcr1 0x%llx, ddbsr 0x%llx\n",
 					READ_DDBCR_REG_VALUE(), READ_DDMCR_REG_VALUE(),
 					READ_DDMCR1_REG_VALUE(), READ_DDBSR_REG_VALUE());
 				pr_info("ddmar0 0x%llx, ddmar1 0x%llx, ddmar2 0x%llx, ddmar3 0x%llx\n",
-					READ_DDMAR0_REG_VALUE(), READ_DDMAR1_REG_VALUE(),
-					READ_DDMAR2_REG_VALUE(), READ_DDMAR3_REG_VALUE());
+					READ_DDMAR0_REG(), READ_DDMAR1_REG(),
+					READ_DDMAR2_REG(), READ_DDMAR3_REG());
 			} else {
 				pr_info("ddbcr 0x%llx, ddmcr 0x%llx, ddbsr 0x%llx\n",
 					READ_DDBCR_REG_VALUE(), READ_DDMCR_REG_VALUE(),
 					READ_DDBSR_REG_VALUE());
 				pr_info("ddmar0 0x%llx, ddmar1 0x%llx\n",
-					READ_DDMAR0_REG_VALUE(), READ_DDMAR1_REG_VALUE());
+					READ_DDMAR0_REG(), READ_DDMAR1_REG());
 			}
 		}
 		if (exceptions & exc_instr_debug_mask) {
 			pr_info("dibar0 0x%llx, dibar1 0x%llx, dibar2 0x%llx, dibar3 0x%llx\n",
-				read_DIBAR0_reg_value(), read_DIBAR1_reg_value(),
-				read_DIBAR2_reg_value(), read_DIBAR3_reg_value());
+				read_DIBAR0_reg(), read_DIBAR1_reg(),
+				read_DIBAR2_reg(), read_DIBAR3_reg());
 			if (cpu_has(CPU_FEAT_ISET_V7) && !cpu_has(CPU_HWBUG_DIMCR1)) {
 				pr_info("dibcr 0x%x, dimcr 0x%llx, dimcr1 0x%llx, dibsr 0x%x\n",
 					AW(read_DIBCR_reg()), AW(read_DIMCR_reg()),
 					AW(read_DIMCR1_reg()), AW(read_DIBSR_reg()));
 				pr_info("dimar0 0x%llx, dimar1 0x%llx, dimar2 0x%llx, dimar3 0x%llx\n",
-					read_DIMAR0_reg_value(), read_DIMAR1_reg_value(),
-					read_DIMAR2_reg_value(), read_DIMAR3_reg_value());
+					read_DIMAR0_reg(), read_DIMAR1_reg(),
+					read_DIMAR2_reg(), read_DIMAR3_reg());
 			} else {
 				pr_info("dibcr 0x%x, dimcr 0x%llx, dibsr 0x%x\n",
 					AW(read_DIBCR_reg()), AW(read_DIMCR_reg()),
 					AW(read_DIBSR_reg()));
 				pr_info("dimar0 0x%llx, dimar1 0x%llx\n",
-					read_DIMAR0_reg_value(), read_DIMAR1_reg_value());
+					read_DIMAR0_reg(), read_DIMAR1_reg());
 			}
 		}
 	}
@@ -1255,9 +1255,8 @@ void notrace arch_trigger_cpumask_backtrace(const cpumask_t *mask,
 			continue;
 
 		/* Always show trap regs for user threads and
-		 * skip by default fo kernel threads to make
+		 * skip by default for kernel threads to make
 		 * panic's stacks more robust. */
-		stack_regs->show_trap_regs = debug_trap || !(current->flags & PF_KTHREAD);
 		stack_regs->show_user_regs = debug_userstack;
 # ifdef CONFIG_DATA_STACK_WINDOW
 		stack_regs->show_k_data_stack = debug_datastack;
@@ -1660,10 +1659,6 @@ print_stack_frames(struct task_struct *task, const struct pt_regs *pt_regs,
 		pr_alert("  %d: print stack: works already on cpu %d\n",
 				task_pid_nr(current), cpu);
 	} else {
-		/* Always show trap regs for user threads and
-		 * skip by default fo kernel threads to make
-		 * panic's stacks more robust. */
-		stack_regs->show_trap_regs = debug_trap || !(current->flags & PF_KTHREAD);
 		stack_regs->show_user_regs = debug_userstack;
 #ifdef CONFIG_DATA_STACK_WINDOW
 		stack_regs->show_k_data_stack = debug_datastack;
@@ -1676,8 +1671,10 @@ print_stack_frames(struct task_struct *task, const struct pt_regs *pt_regs,
 		print_chain_stack(stack_regs, show_reg_window);
 	}
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	/* if task is host of guest VM or VCPU, then print guest stacks */
 	print_guest_stack(task, stack_regs, show_reg_window);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	stack_regs->used = 0;
 
@@ -2001,8 +1998,7 @@ void print_chain_stack(struct stack_regs *regs, int show_reg_window)
 		if (show_reg_window) {
 			psp_ind -= crs.cr1.wbs * EXT_4_NR_SZ;
 
-			if (regs->show_trap_regs && trap_num < MAX_USER_TRAPS &&
-			    regs->trap[trap_num].valid &&
+			if (trap_num < MAX_USER_TRAPS && regs->trap[trap_num].valid &&
 			    regs->trap[trap_num].frame ==
 					orig_chain_base + cr_ind) {
 				if (machine.native_iset_ver >= E2K_ISET_V6) {
@@ -2151,34 +2147,31 @@ void print_chain_stack(struct stack_regs *regs, int show_reg_window)
 	if (show_reg_window && regs->show_user_regs && regs->gregs_valid) {
 		int i;
 
-		pr_alert("  Global registers: bgr.cur = %d, bgr.val = 0x%x\n",
-			 regs->gregs.bgr.cur, regs->gregs.bgr.val);
+		pr_alert("  User global registers: bgr.cur = %d, bgr.val = 0x%x\n",
+			 regs->l_gregs.bgr.cur, regs->l_gregs.bgr.val);
 		for (i = 0; i < 32; i += 2) {
-			u64 val_lo, val_hi;
-			u8 tag_lo, tag_hi;
+			struct e2k_greg *greg = (i < GLOBAL_GREGS_NUM) ?
+					&regs->g_gregs.g[i] :
+					&regs->l_gregs.g[i - GLOBAL_GREGS_NUM];
+			e2k_qreg_t data;
+			u8 tag;
 
-			load_value_and_tagd(&regs->gregs.g[i + 0].base,
-					    &val_lo, &tag_lo);
-			load_value_and_tagd(&regs->gregs.g[i + 1].base,
-					    &val_hi, &tag_hi);
+			load_qvalue_and_tagq(&greg->base, &data, &tag, 16);
 
 			if (machine.native_iset_ver < E2K_ISET_V5) {
 				pr_alert("       g%-3d: %hhx %016llx %04hx      g%-3d: %hhx %016llx %04hx\n",
-					 i, tag_lo, val_lo, (u16) regs->gregs.g[i].ext,
-					 i + 1, tag_hi, val_hi, (u16) regs->gregs.g[i + 1].ext);
+					 i, tag & 0xf, data.lo, (u16) greg[0].ext,
+					 i + 1, tag >> 4, data.hi, (u16) greg[1].ext);
 			} else {
-				u64 ext_lo_val, ext_hi_val;
-				u8 ext_lo_tag, ext_hi_tag;
+				e2k_qreg_t data_ext;
+				u8 tag_ext;
 
-				load_value_and_tagd(&regs->gregs.g[i + 0].ext,
-						    &ext_lo_val, &ext_lo_tag);
-				load_value_and_tagd(&regs->gregs.g[i + 1].ext,
-						    &ext_hi_val, &ext_hi_tag);
+				load_qvalue_and_tagq(&greg->ext, &data_ext, &tag_ext, 16);
 
 				pr_alert("       g%-3d: %hhx %016llx   ext: %hhx %016llx\n",
-					 i, tag_lo, val_lo, ext_lo_tag, ext_lo_val);
+					 i, tag & 0xf, data.lo, tag_ext & 0xf, data_ext.lo);
 				pr_alert("       g%-3d: %hhx %016llx   ext: %hhx %016llx\n",
-					 i + 1, tag_hi, val_hi, ext_hi_tag, ext_hi_val);
+					 i + 1, tag >> 4, data.hi, tag_ext >> 4, data_ext.hi);
 			}
 		}
 	}
@@ -2539,7 +2532,7 @@ static int __read_current_chain_stack(e2k_mem_crs_t *frame, unsigned long real_f
 	/* Always mark kernel's service frames as privileged even
 	 * if they actually are not; useful for JITs to distinguish
 	 * frames with actual user data. */
-	read_frame.cr1.pm = is_trampoline(get_cr0_ip(frame->cr0));
+	read_frame.cr1.pm = is_trampoline(current->mm, get_cr0_ip(frame->cr0));
 
 	if (args->buf_is_user) {
 		if (copy_to_user((void __user *) args->buf, &read_frame, SZ_OF_CR))
@@ -2710,7 +2703,7 @@ static int __copy_current_proc_stack(e2k_mem_crs_t *frame, unsigned long real_fr
 
 	len = copy_top - copy_bottom;
 	if (!args->write) {
-		DebugACCVM("Reading 0x%lx bytes from 0x%lx to 0x%llx\n",
+		DebugACCVM("Reading 0x%lx bytes from 0x%px to 0x%llx\n",
 			   len, p_stack + size - len, buf + size - len);
 
 		if (spilled_size) {
@@ -2745,7 +2738,7 @@ static int __copy_current_proc_stack(e2k_mem_crs_t *frame, unsigned long real_fr
 		}
 	} else {
 		/* Writing user frames to stack */
-		DebugACCVM("Writing 0x%lx bytes from 0x%llx to 0x%lx\n",
+		DebugACCVM("Writing 0x%lx bytes from 0x%llx to 0x%px\n",
 			   len, buf + size - len, p_stack + size - len);
 		if (spilled_size) {
 			s64 copy_size = min((s64) len, spilled_size);
@@ -2924,10 +2917,12 @@ static long do_access_hw_stacks(unsigned long mode,
 		if (cpu_has(CPU_FEAT_V7_CPU_REGS)) {
 			return -EPERM;
 		}
+		fallthrough;
 	case E2K_READ_CHAIN_STACK_EX:
 		if (cpu_has(CPU_FEAT_V7_CPU_REGS)) {
 			v6_app = 1;
 		}
+		fallthrough;
 	case E2K_READ_CHAIN_STACK_NATIVE:
 		if (!access_ok(buf, buf_size))
 			return -EFAULT;
@@ -2952,6 +2947,7 @@ static long do_access_hw_stacks(unsigned long mode,
 		if (cpu_has(CPU_FEAT_V7_CPU_REGS)) {
 			return -EPERM;
 		}
+		fallthrough;
 	case E2K_READ_PROCEDURE_STACK_EX:
 		if (!access_ok(buf, buf_size))
 			return -EFAULT;
@@ -3037,8 +3033,7 @@ COMPAT_SYSCALL_DEFINE5(access_hw_stacks, unsigned long, mode,
 /*
  * sys_e2k_syswork() is to run different system work from user
  */
-asmlinkage long
-sys_e2k_syswork(long syswork, long arg2, long arg3, long arg4, long arg5)
+SYSCALL_DEFINE3(e2k_syswork, long, syswork, long, arg2, long, arg3)
 {
 
 	long rval = 0;
@@ -3061,7 +3056,7 @@ sys_e2k_syswork(long syswork, long arg2, long arg3, long arg4, long arg5)
 		 * Force stacks dump kernel thread to run as soon as we yield:
 		 * to do core dump all stacks
 		 */
-                show_state();
+		show_state();
 		break;
 	case PRINT_REGS:
 		DbgESW("PRINT_PT_REGS\n");

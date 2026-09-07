@@ -1354,6 +1354,9 @@ static const struct file_operations vhost_vdpa_fops = {
 	.release	= vhost_vdpa_release,
 	.write_iter	= vhost_vdpa_chr_write_iter,
 	.unlocked_ioctl	= vhost_vdpa_unlocked_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = vhost_vdpa_unlocked_ioctl,
+#endif
 #ifdef CONFIG_MMU
 	.mmap		= vhost_vdpa_mmap,
 #endif /* CONFIG_MMU */

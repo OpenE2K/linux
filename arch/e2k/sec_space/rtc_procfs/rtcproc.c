@@ -205,7 +205,7 @@ static bool rtcfs_map_files_actor(struct dir_context *ctx, const char *name,
 	return c->proc_ctx->actor(c->proc_ctx, buf, namelen, offset, ino, d_type);
 }
 
-int rtcfs_map_files_readdir(struct file *file, struct dir_context *ctx)
+static int rtcfs_map_files_readdir(struct file *file, struct dir_context *ctx)
 {
 	struct inode *proc_inode, *inode;
 	struct file *proc_file;
@@ -406,6 +406,14 @@ static const struct file_operations cpuinfo_ops = {
 	.release		= seq_release,
 };
 
+static const struct file_operations misc_ops = {
+	.open			= rtcfs_misc_open,
+	.llseek			= rtcfs_proc_llseek,
+	.read_iter		= rtcfs_proc_read_iter,
+	.release		= rtcfs_proc_release,
+};
+
+
 /* Allocating objects for /rtc_proc/pid/ and /rtc_proc/pid/task/tid if exists */
 static void rtcfs_tid_obj_ops_by_name(const char *name,
 				const struct file_operations **fop,
@@ -516,6 +524,9 @@ struct dentry *rtcfs_root_lookup(struct inode *dir, struct dentry *dentry,
 	if (!strcmp(dentry->d_name.name, "cpuinfo"))
 		return rtcfs_allocate_object(dentry, &file_path,
 					&cpuinfo_ops, &rtcfs_def_inode_ops);
+	if (!strcmp(dentry->d_name.name, "misc"))
+		return rtcfs_allocate_object(dentry, &file_path,
+					&misc_ops, &rtcfs_def_inode_ops);
 
 	ns = RTCFS_NS(dentry->d_sb);
 	tsk = rtcfs_get_proc_task(file_path.dentry->d_name.name, ns);

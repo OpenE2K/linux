@@ -82,7 +82,7 @@ do {								\
 	if (cpu_has(CPU_FEAT_ISET_V7))				\
 		colored_page_copy((to), (from));		\
 	else							\
-		__tagged_memcpy_8((to), (from), PAGE_SIZE);	\
+		copy_tagged_page((to), (from));	\
 } while (0)
 
 #define copy_user_page(to, from, vaddr, page)	copy_page(to, from)

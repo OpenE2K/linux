@@ -272,11 +272,16 @@ void ddk768_swI2CSCL(unsigned char value)
         pokeRegisterDWord(g_i2cClkGPIODataDirReg, ulGPIODirection);
     }
 }
+#ifndef CONFIG_CC_IS_CLANG
 #pragma GCC push_options
 #pragma GCC optimize("O0")
+#endif
 /*
  *  This function sends ACK signal
  */
+#ifdef CONFIG_CC_IS_CLANG
+__attribute__((optnone))
+#endif
 static void swI2CAck(unsigned char ack)
 {
         if(ack)
@@ -309,6 +314,9 @@ static void swI2CAck(unsigned char ack)
 /*
  *  This function sends the start command to the slave device
  */
+#ifdef CONFIG_CC_IS_CLANG
+__attribute__((optnone))
+#endif
 void ddk768_swI2CStart(void)
 {
     /* Start I2C */
@@ -320,6 +328,9 @@ void ddk768_swI2CStart(void)
 /*
  *  This function sends the stop command to the slave device
  */
+#ifdef CONFIG_CC_IS_CLANG
+__attribute__((optnone))
+#endif
 void ddk768_swI2CStop(void)
 {
     /* Stop the I2C */
@@ -328,6 +339,9 @@ void ddk768_swI2CStop(void)
     swI2CSDA(1, g_i2cDataGPIO);
 }
 
+#ifdef CONFIG_CC_IS_CLANG
+__attribute__((optnone))
+#endif
 void ddk768_swI2CClean(void)
 {
     swI2CSCL(0, g_i2cClockGPIO);
@@ -346,6 +360,9 @@ void ddk768_swI2CClean(void)
  *       0   - Success
  *      -1   - Fail to write byte
  */
+#ifdef CONFIG_CC_IS_CLANG
+__attribute__((optnone))
+#endif
 long ddk768_swI2CWriteByte(unsigned char data) 
 {
     unsigned char value = data;
@@ -404,7 +421,9 @@ long ddk768_swI2CWriteByte(unsigned char data)
         return (-1);
 }
 
+#ifndef CONFIG_CC_IS_CLANG
 #pragma GCC pop_options
+#endif
 
 long ddk768_swI2CSetGPIO(
     unsigned char i2cClkGPIO,

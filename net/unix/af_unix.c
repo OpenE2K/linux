@@ -836,6 +836,9 @@ static const struct proto_ops unix_stream_ops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl =	unix_compat_ioctl,
 #endif
+#if defined CONFIG_E2K && defined CONFIG_PROTECTED_MODE
+	.ptr128_ioctl =	unix_ioctl,
+#endif
 	.listen =	unix_listen,
 	.shutdown =	unix_shutdown,
 	.sendmsg =	unix_stream_sendmsg,
@@ -862,6 +865,9 @@ static const struct proto_ops unix_dgram_ops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl =	unix_compat_ioctl,
 #endif
+#if defined CONFIG_E2K && defined CONFIG_PROTECTED_MODE
+	.ptr128_ioctl =	unix_ioctl,
+#endif
 	.listen =	sock_no_listen,
 	.shutdown =	unix_shutdown,
 	.sendmsg =	unix_dgram_sendmsg,
@@ -886,6 +892,9 @@ static const struct proto_ops unix_seqpacket_ops = {
 	.ioctl =	unix_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl =	unix_compat_ioctl,
+#endif
+#if defined CONFIG_E2K && defined CONFIG_PROTECTED_MODE
+	.ptr128_ioctl =	unix_ioctl,
 #endif
 	.listen =	unix_listen,
 	.shutdown =	unix_shutdown,

@@ -880,9 +880,19 @@ static inline u64 kvm_get_guest_vcpu_OSR0(struct kvm_vcpu *vcpu)
 	return CPU_GET_DSREG(vcpu, OSR0);
 }
 
+static inline u64 kvm_get_guest_vcpu_OSR1(struct kvm_vcpu *vcpu)
+{
+	return CPU_GET_DSREG(vcpu, OSR1);
+}
+
 static inline void kvm_set_guest_vcpu_OSR0(struct kvm_vcpu *vcpu, u64 osr0)
 {
 	CPU_SET_DSREG(vcpu, OSR0, osr0);
+}
+
+static inline void kvm_set_guest_vcpu_OSR1(struct kvm_vcpu *vcpu, u64 osr1)
+{
+	CPU_SET_DSREG(vcpu, OSR1, osr1);
 }
 
 static inline unsigned int

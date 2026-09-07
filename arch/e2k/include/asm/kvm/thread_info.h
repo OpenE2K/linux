@@ -91,6 +91,7 @@ typedef struct gpt_regs {
 					/* guest kernel activation */
 } gpt_regs_t;
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 typedef struct vcpu_l_gregs {
 	local_gregs_t	gregs;		/* guest user "local" global */
 					/* registers to save updated on page */
@@ -99,6 +100,7 @@ typedef struct vcpu_l_gregs {
 					/* global registers (see above) */
 	bool		valid;		/* gregs is valid */
 } vcpu_l_gregs_t;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 typedef struct kvm_signal_context {
 	/* signal stack area is used to store interrupted context */
@@ -114,6 +116,7 @@ typedef struct kvm_signal_context {
 				/* work, actual only for guest */
 } kvm_signal_context_t;
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 /*
  * Guest kernel thread info structure
  */
@@ -559,6 +562,7 @@ extern void kvm_pv_guest_thread_info_reset(struct kvm *kvm);
 extern void kvm_pv_guest_thread_info_free(struct kvm *kvm);
 extern void kvm_pv_guest_thread_info_destroy(struct kvm *kvm);
 extern void kvm_pv_clear_guest_thread_info(gthread_info_t *gthread_info);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #else /* !CONFIG_VIRTUALIZATION */
 

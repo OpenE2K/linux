@@ -3024,6 +3024,27 @@ static noinline int mmc_ioctl_cdrom_read_audio(struct cdrom_device_info *cdi,
 		};
 	} else
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#include <asm/e2k_ptypes.h>
+	if (in_ptr128_syscall()) {
+		struct ptr128_cra {
+			union cdrom_addr	addr;
+			u8			addr_format;
+			int			nframes;
+			e2k_ap_t		buf;
+		};
+		e2k_ap_t ap;
+		int tag;
+		if (copy_from_user(&ra, (struct cdrom_read_audio __user *)arg,
+				   sizeof(ra)))
+			return -EFAULT;
+		if (get_user_tagged_16(ap.qword, tag, &((struct ptr128_cra __user *)arg)->buf) ||
+					!IS_AP(ap, tag))
+			return -EFAULT;
+		set_ap_u_border(ap);
+		ra.buf = (char __user *)AP_PTR(ap);
+	} else
+#endif
 	{
 		if (copy_from_user(&ra, (struct cdrom_read_audio __user *)arg,
 				   sizeof(ra)))

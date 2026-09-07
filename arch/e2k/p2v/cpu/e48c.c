@@ -11,8 +11,6 @@ void boot_e48c_setup_arch(void)
 {
 	boot_e2k_sic_setup_arch();
 
-	boot_mmu_features.mmu_pt_v6 = IS_ENABLED(CONFIG_MMU_PT_V6);
-	boot_mmu_features.mmu_separate_pt = IS_ENABLED(CONFIG_MMU_SEP_VIRT_SPACE);
 	boot_machine.native_iset_ver = ELBRUS_48C_ISET;
 	boot_machine.L3_enable = true;
 	boot_machine.max_nr_node_cpus = E48C_MAX_NR_NODE_CPUS;

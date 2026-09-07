@@ -1813,4 +1813,7 @@ const struct file_operations fw_device_ops = {
 	.release	= fw_device_op_release,
 	.poll		= fw_device_op_poll,
 	.compat_ioctl	= compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = fw_device_op_ioctl,
+#endif
 };

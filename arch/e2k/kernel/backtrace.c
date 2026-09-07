@@ -15,7 +15,7 @@
 
 static int is_privileged_return(u64 ip)
 {
-	return ip == sys_backtrace_return;
+	return ip == backtrace_return(current->mm);
 }
 
 struct get_backtrace_args {
@@ -32,6 +32,7 @@ static int get_backtrace_fn(e2k_mem_crs_t *frame, unsigned long real_frame_addr,
 	struct get_backtrace_args *args = (struct get_backtrace_args *) arg;
 	void __user *buf = args->buf;
 	int step = args->step;
+	const struct mm_struct *mm = current->mm;
 	u64 ip;
 
 	if (args->nr_read >= args->count)
@@ -39,8 +40,8 @@ static int get_backtrace_fn(e2k_mem_crs_t *frame, unsigned long real_frame_addr,
 
 	ip = get_cr0_ip(frame->cr0);
 
-	/* Skip kernel frames */
-	if (!is_privileged_return(ip) && ip >= TASK_SIZE)
+	/* Skip service frames */
+	if (!is_privileged_return(ip) && is_trampoline(mm, ip))
 		return 0;
 
 	if (args->skip) {
@@ -164,6 +165,7 @@ static int set_backtrace_fn(e2k_mem_crs_t *frame, unsigned long real_frame_addr,
 	int step = args->step;
 	struct vm_area_struct *vma = args->cached_vma;
 	struct vm_area_struct *pvma = args->cached_pvma;
+	struct mm_struct *mm = current->mm;
 	u64 prev_ip, ip;
 
 	if (args->nr_written >= args->count)
@@ -171,8 +173,8 @@ static int set_backtrace_fn(e2k_mem_crs_t *frame, unsigned long real_frame_addr,
 
 	prev_ip = get_cr0_ip(frame->cr0);
 
-	/* Skip kernel frames */
-	if (!is_privileged_return(prev_ip) && prev_ip >= TASK_SIZE)
+	/* Skip service frames */
+	if (!is_privileged_return(prev_ip) && is_trampoline(mm, prev_ip))
 		return 0;
 
 	if (args->skip) {
@@ -186,11 +188,11 @@ static int set_backtrace_fn(e2k_mem_crs_t *frame, unsigned long real_frame_addr,
 
 	/* Special case of "just return" function */
 	if (step == 8 && ip == -1ULL || step != 8 && ip == 0xffffffffULL)
-		ip = sys_backtrace_return;
+		ip = backtrace_return(mm);
 
 	if (!is_privileged_return(prev_ip) && (!pvma || pvma->vm_start > prev_ip ||
 			pvma->vm_end <= prev_ip)) {
-		pvma = find_vma(current->mm, prev_ip);
+		pvma = find_vma(mm, prev_ip);
 		if (!pvma || prev_ip < pvma->vm_start)
 			return -ESRCH;
 		args->cached_pvma = pvma;
@@ -204,7 +206,7 @@ static int set_backtrace_fn(e2k_mem_crs_t *frame, unsigned long real_frame_addr,
 			if (ip >= pvma->vm_start && ip < pvma->vm_end) {
 				vma = pvma;
 			} else {
-				vma = find_vma(current->mm, ip);
+				vma = find_vma(mm, ip);
 				if (!vma || ip < vma->vm_start)
 					return -ESRCH;
 			}

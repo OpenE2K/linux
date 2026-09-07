@@ -355,21 +355,6 @@
 	DebugGREGS("clear gregs_valid %d\n",				\
 		gti->gregs_valid);					\
 })
-#define	SAVE_PV_VCPU_GLOBAL_REGISTERS(gthread_info)			\
-do {									\
-	gthread_info_t *gti = (gthread_info);				\
-	e2k_global_regs_t *gregs = &gti->sw_regs.gregs;			\
-									\
-	machine.save_gregs_dirty_bgr(gregs);				\
-} while (false)
-
-#define	RESTORE_PV_VCPU_GLOBAL_REGISTERS(gthread_info)			\
-do {									\
-	gthread_info_t *gti = (gthread_info);				\
-	e2k_global_regs_t *gregs = &gti->sw_regs.gregs;			\
-									\
-	machine.restore_gregs(gregs);					\
-} while (false)
 
 #endif /* CONFIG_VIRTUALIZATION */
 
@@ -380,6 +365,8 @@ do {									\
 		NATIVE_RESTORE_USER_CUT_REGS(ti, regs)
 #elif	defined(CONFIG_KVM_HOST_MODE)
 /* it is native host kernel with virtualization support */
+
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 #define	HOST_RESTORE_USER_CUT_REGS(ti, regs, in_syscall)	\
 do { \
 	e2k_cutd_t cutd; \
@@ -408,6 +395,10 @@ do { \
 } while (false)
 #define	RESTORE_USER_CUT_REGS(ti, regs, in_syscall)	\
 		HOST_RESTORE_USER_CUT_REGS(ti, regs, in_syscall)
+#else
+#define	RESTORE_USER_CUT_REGS(ti, regs, in_syscall) /* CUTD is already set */
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
+
 #elif	defined(CONFIG_KVM_GUEST_KERNEL)
 /* it is pure guest kernel (not paravrtualized) */
 #include <asm/kvm/guest/regs_state.h>

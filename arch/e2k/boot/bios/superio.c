@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
 #include <asm/mas.h>
 
 #include "bios.h"
@@ -182,16 +187,16 @@ void set_irq_pin(void)
 	bios_outb(0x55, 0x3f0);
 
 	write_sio(0x07, 0x08);
-        write_sio(0x30, 0x00);
-        write_sio(0xc0, 0x03);
-        write_sio(0xcc, (1<<3)); // irq12
-        write_sio(0xd0, (1<<3)); // irq1
-        write_sio(0xd1, (1<<3)); // irq3
-        write_sio(0xd2, (1<<3)); // irq4
-        write_sio(0xd3, (1<<3)); // irq5
-        write_sio(0xd4, (1<<3)); // irq6
-        write_sio(0xd5, (1<<3)); // irq7
-        write_sio(0x30, 0x01);
+	write_sio(0x30, 0x00);
+	write_sio(0xc0, 0x03);
+	write_sio(0xcc, (1<<3)); // irq12
+	write_sio(0xd0, (1<<3)); // irq1
+	write_sio(0xd1, (1<<3)); // irq3
+	write_sio(0xd2, (1<<3)); // irq4
+	write_sio(0xd3, (1<<3)); // irq5
+	write_sio(0xd4, (1<<3)); // irq6
+	write_sio(0xd5, (1<<3)); // irq7
+	write_sio(0x30, 0x01);
 	
 	bios_outb(0xAA, 0x3f0);
 }

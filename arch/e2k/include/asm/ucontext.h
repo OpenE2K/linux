@@ -36,6 +36,29 @@ struct ucontext_prot {
 	struct extra_ucontext	  uc_extra; /* for compatibility */
 };
 
+/*
+ * To avoid breaking backwards compatiblity we cannot add an extra
+ * field to ucontext for coroutine's key, because application can
+ * be compiled with older headers without the new field.  Instead
+ * we store the key in a field that makes no sense for a [fast]
+ * system call.
+ */
+static __always_inline u64 __user *uc_coroutine_key_32(const struct ucontext_32 __user *ucp)
+{
+	return (u64 __user *) &ucp->uc_mcontext.nr_TIRs;
+}
+static __always_inline u64 __user *uc_coroutine_key_64(const struct ucontext __user *ucp)
+{
+	return (u64 __user *) &ucp->uc_mcontext.nr_TIRs;
+}
+#ifdef CONFIG_PROTECTED_MODE
+static __always_inline u64 __user *uc_coroutine_key_128(const struct ucontext_prot __user *ucp)
+{
+	/* No uc_mcontext.nr_TIRs in protected mode so use newer field */
+	return (u64 __user *) &ucp->uc_extra.ctpr1;
+}
+#endif	/* CONFIG_PROTECTED_MODE */
+
 typedef struct rt_sigframe {
 	u64 __pad_args[8]; /* Reserve space in data stack for the handler */
 	union {
@@ -59,6 +82,6 @@ typedef struct rt_sigframe {
 	u64 orig_return_ip;
 } rt_sigframe_t;
 
-extern int restore_rt_frame(rt_sigframe_t __user *frame, struct k_sigaction *);
+extern int restore_rt_frame(const rt_sigframe_t __user *, struct k_sigaction *);
 
 #endif	/* ! _E2K_UCONTEXT_H */

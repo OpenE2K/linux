@@ -1,0 +1,54 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
+#ifndef NODES
+# define NODES 1
+# define IOHUB2_0
+#endif
+#define CELLS 2
+
+#define E8C2
+
+/ {
+	#address-cells = <CELLS>;
+	#size-cells = <CELLS>;
+
+#define NODE 0
+#include <e2k/e2k-v5.dtsi>
+
+#include <e2k/e2k-v5-uncore.dtsi>
+#ifdef IOHUB2_0
+#include <e2k/iohub2.dtsi>
+#endif /* IOHUB2_0 */
+#undef NODE
+
+#if NODES > 1
+# define NODE 1
+#include <e2k/e2k-v5-uncore.dtsi>
+#ifdef IOHUB2_1
+#include <e2k/iohub2.dtsi>
+#endif /* IOHUB2_1 */
+# undef NODE
+#endif
+
+#if NODES > 2
+# define NODE 2
+#include <e2k/e2k-v5-uncore.dtsi>
+#ifdef IOHUB2_2
+#include <e2k/iohub2.dtsi>
+#endif /* IOHUB2_2 */
+# undef NODE
+#endif
+
+#if NODES > 3
+# define NODE 3
+#include <e2k/e2k-v5-uncore.dtsi>
+#ifdef IOHUB2_3
+#include <e2k/iohub2.dtsi>
+#endif /* IOHUB2_3 */
+# undef NODE
+#endif
+
+};

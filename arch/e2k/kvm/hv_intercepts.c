@@ -18,7 +18,7 @@
 #include <asm/cpu_regs.h>
 #include <asm/trap_table.h>
 #include <asm/traps.h>
-#include <asm/mmu_regs_types.h>
+#include <asm/mmu_regs_access.h>
 #include <asm/system.h>
 #include <asm/kvm/cpu_hv_regs_types.h>
 #include <asm/kvm/cpu_hv_regs_access.h>
@@ -28,7 +28,6 @@
 #include <asm/kvm/runstate.h>
 #include <asm/kvm/switch.h>
 #include <asm/kvm/guest/tlb_regs_types.h>
-#include <asm/kvm/mmu_regs_access.h>
 #include <asm/kvm/async_pf.h>
 #include <asm/kvm/trace_kvm.h>
 #include <asm/kvm/trace_kvm_hv.h>
@@ -98,16 +97,6 @@
 #define	DebugINTR(fmt, args...)						\
 ({									\
 	if (DEBUG_EXC_INTERRUPT_MODE)					\
-		pr_info("%s(): " fmt, __func__, ##args);		\
-})
-
-#undef	DEBUG_INTC_CU_ENTRY_MODE
-#undef	DebugCUEN
-#define	DEBUG_INTC_CU_ENTRY_MODE	0	/* CPU intercept entries */
-						/* debug mode */
-#define	DebugCUEN(fmt, args...)						\
-({									\
-	if (DEBUG_INTC_CU_ENTRY_MODE)					\
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
@@ -225,10 +214,6 @@
 })
 
 static void print_intc_ctxt(struct kvm_vcpu *vcpu);
-static intc_info_cu_entry_t *find_cu_info_entry(struct kvm_vcpu *vcpu,
-						intc_info_cu_t *cu,
-						info_cu_event_code_t code,
-						cu_reg_no_t reg_no);
 
 static noinline notrace int
 do_unsupported_intc(struct kvm_vcpu *vcpu, struct pt_regs *regs)
@@ -754,7 +739,6 @@ static int do_data_page_intc_mu(struct kvm_vcpu *vcpu,
 	gva_t address;
 	tc_cond_t cond;
 	tc_fault_type_t ftype;
-	int ret;
 
 	gpa = intc_info_mu->gpa;
 	address = intc_info_mu->gva;
@@ -772,13 +756,7 @@ static int do_data_page_intc_mu(struct kvm_vcpu *vcpu,
 
 	address = nonpaging_gva_to_gpa(vcpu, gpa, ACC_ALL, NULL, NULL);
 
-	ret = mmu_pt_hv_page_fault(vcpu, regs, intc_info_mu);
-	if (ret != PFRES_NO_ERR && ret != PFRES_TRY_MMIO) {
-		pr_info("%s(): could not handle intercept on data page fault\n",
-			__func__);
-		E2K_KVM_BUG_ON(true);
-	}
-	return ret;
+	return mmu_pt_hv_page_fault(vcpu, regs, intc_info_mu);
 }
 
 static int do_shadow_data_page_intc_mu(struct kvm_vcpu *vcpu,
@@ -1527,182 +1505,14 @@ static void print_intc_ctxt(struct kvm_vcpu *vcpu)
 	print_all_TIRs(intc_ctxt->TIRs, intc_ctxt->nr_TIRs);
 }
 
-static int do_read_cu_idr(struct kvm_vcpu *vcpu, intc_info_cu_t *cu)
+static void rr_idr_handler(struct kvm_vcpu *vcpu, intc_info_cu_entry_t *entry)
 {
-	kvm_guest_info_t *guest_info = &vcpu->kvm->arch.guest_info;
-	intc_info_cu_entry_t *rr_event;
-	e2k_idr_t idr;
-
-	rr_event = find_cu_info_entry(vcpu, cu, ICE_READ_CU, IDR_cu_reg_no);
-	if (rr_event == NULL) {
-		pr_err("%s(): could not find INTC_INFO_CU event with IDR\n",
-		       __func__);
-		print_intc_ctxt(vcpu);
-		E2K_KVM_BUG_ON(true);
-		return -EINVAL;
-	}
-
-	idr = kvm_vcpu_get_idr(vcpu);
-
-	if (guest_info->is_stranger ||
-			cpu_has(CPU_FEAT_V7_CPU_REGS) && !vcpu_descr_v7(vcpu)) {
-		rr_event->hi = AW(idr);
-		kvm_set_intc_info_cu_is_updated(vcpu);
-		DebugINTC_IDR("IDR replaced with value 0x%llx\n", idr.word);
-	}
-
-	return 0;
+	e2k_idr_t idr = kvm_vcpu_get_idr(vcpu);
+	entry->hi = AW(idr);
+	DebugINTC_IDR("IDR replaced with value 0x%llx\n", idr.word);
 }
 
-static int read_reg_intc_cu(struct kvm_vcpu *vcpu,
-			    intc_info_cu_t *intc_info_cu, pt_regs_t *regs)
-{
-	u64 rr_events = intc_info_cu->header.evn_c;
-	int ret = 0, r;
-
-	if (rr_events & intc_cu_evn_c_rr_idr_mask) {
-		r = do_read_cu_idr(vcpu, intc_info_cu);
-		if (r != 0)
-			ret |= r;
-		rr_events &= ~intc_cu_evn_c_rr_idr_mask;
-	}
-
-	if (rr_events != 0) {
-		pr_err("%s(): some events were not handled: 0x%llx\n",
-		       __func__, rr_events);
-	}
-
-	return ret;
-}
-
-#ifdef CONFIG_SCLKR_CLOCKSOURCE
-static void do_write_cu_sclk_reg(struct kvm_vcpu *vcpu, intc_info_cu_t * cu,
-				 cu_reg_no_t reg_no)
-{
-	intc_info_cu_entry_t *rw_event;
-
-	rw_event = find_cu_info_entry(vcpu, cu, ICE_WRITE_CU, reg_no);
-	if (rw_event)
-		kvm_delete_intc_info_cu(vcpu, rw_event);
-}
-
-static void do_write_cu_sclk_regs(struct kvm_vcpu *vcpu, intc_info_cu_t *cu)
-{
-	do_write_cu_sclk_reg(vcpu, cu, SCLKR_cu_reg_no);
-	do_write_cu_sclk_reg(vcpu, cu, SCLKM1_cu_reg_no);
-	do_write_cu_sclk_reg(vcpu, cu, SCLKM2_cu_reg_no);
-}
-
-static void do_write_cu_sclkm3(struct kvm_vcpu *vcpu, intc_info_cu_t *cu)
-{
-	struct kvm_arch *ka = &vcpu->kvm->arch;
-	unsigned long flags;
-
-	do_write_cu_sclk_reg(vcpu, cu, SCLKM3_cu_reg_no);
-
-	if (cpu_has(CPU_HWBUG_VIRT_SCLKM3_INTC)) {
-		raw_spin_lock_irqsave(&ka->sh_sclkr_lock, flags);
-		write_SH_SCLKM3_reg_value(ka->hst_t_off);
-		raw_spin_unlock_irqrestore(&ka->sh_sclkr_lock, flags);
-	}
-}
-#endif
-
-/* Bug 127993: to ignore guest's CU write, delete it from INTC_INFO_CU */
-static int write_reg_intc_cu(struct kvm_vcpu *vcpu,
-			     intc_info_cu_t *intc_info_cu, pt_regs_t *regs)
-{
-	u64 rw_events = intc_info_cu->header.evn_c;
-
-#ifdef CONFIG_SCLKR_CLOCKSOURCE
-	/* Ignore guest's writes to sclkr, sclkm1, sclkm2 */
-	if (rw_events & intc_cu_evn_c_rw_sclkr_mask) {
-		do_write_cu_sclk_regs(vcpu, intc_info_cu);
-		rw_events &= ~intc_cu_evn_c_rw_sclkr_mask;
-	}
-
-	/* Ignore guest's writes to sclkm3 */
-	if (rw_events & intc_cu_evn_c_rw_sclkm3_mask) {
-		do_write_cu_sclkm3(vcpu, intc_info_cu);
-		rw_events &= ~intc_cu_evn_c_rw_sclkm3_mask;
-	}
-#endif
-
-	if (rw_events != 0) {
-		pr_err("%s(): some events were not handled: 0x%llx\n",
-		       __func__, rw_events);
-	}
-
-	return 0;
-}
-
-static unsigned long long do_hcem_intc(struct kvm_vcpu *vcpu, intc_info_cu_t *cu)
-{
-	intc_info_cu_entry_t *entry;
-
-	entry = find_cu_info_entry(vcpu, cu, ICE_MASKED_HCALL, -1);
-	if (entry == NULL) {
-		pr_err
-		    ("%s(): could not find INTC_INFO_CU event ICE_MASKED_HCALL\n",
-		     __func__);
-		return 0;
-	}
-
-	return entry->hi;
-}
-
-static int handle_cu_cond_events(struct kvm_vcpu *vcpu, intc_info_cu_t *cu, pt_regs_t *regs)
-{
-	intc_info_cu_hdr_t header = cu->header;
-	int r, ret = 0;
-
-	if (header.evn_c_rr_mask) {
-		r = read_reg_intc_cu(vcpu, cu, regs);
-		if (r != 0)
-			ret |= r;
-		header.evn_c_rr_mask = 0;
-	}
-	if (header.evn_c_rw_mask) {
-		r = write_reg_intc_cu(vcpu, cu, regs);
-		if (r != 0)
-			ret |= r;
-		header.evn_c_rw_mask = 0;
-	}
-	if (header.hret_last_wish) {
-		r = do_hret_last_wish_intc(vcpu, regs);
-		if (r < 0) {
-			pr_err("%s(): conditional event HRET last wish intercept handler failed, error %d\n",
-			       __func__, r);
-			E2K_KVM_BUG_ON(true);
-		} else if (r != 0) {
-			/* it need return to user space to handle */
-			/* intercept (exit) reason */
-			ret |= 1;
-		}
-		header.hret_last_wish = 0;
-	}
-	if (header.virt) {
-		pr_err("%s(): unexpected intercept on virtualization resources access, ignore\n",
-			__func__);
-		print_intc_ctxt(vcpu);
-		header.virt = 0;
-	}
-	if (header.hcem) {
-		pr_err("%s(): unexpected hypercall type %llx\n", __func__,
-		       do_hcem_intc(vcpu, cu));
-		print_intc_ctxt(vcpu);
-		E2K_KVM_BUG_ON(true);
-		header.hcem = 0;
-	}
-	if (header.evn_c == 0)
-		return ret;
-
-	panic("%s(): is not yet implemented, events: 0x%llx\n",
-	      __func__, (u64) header.evn_c);
-	return ret;
-}
-
-static void wait_trap_intc_cu(struct kvm_vcpu *vcpu, pt_regs_t *regs)
+static void intc_wait_trap(struct kvm_vcpu *vcpu, pt_regs_t *regs)
 {
 	/* Go to scheduler to wait for a wake up event. */
 	DebugWTR("VCPU #%d interception on wait trap, block and wait for wake up\n",
@@ -1717,25 +1527,56 @@ static void wait_trap_intc_cu(struct kvm_vcpu *vcpu, pt_regs_t *regs)
 static int handle_cu_rr(struct kvm_vcpu *vcpu, intc_info_cu_entry_t *entry)
 {
 	switch (entry->reg_num) {
+	case SCLKR_cu_reg_no:
+		kvm_sclkr_read(vcpu, entry);
+		return 0;
+	case SCLKM1_cu_reg_no:
+		kvm_sclkm1_read(vcpu, entry);
+		return 0;
+	case SCLKM2_cu_reg_no:
+		kvm_sclkm2_read(vcpu, entry);
+		return 0;
+	case IDR_cu_reg_no:
+		rr_idr_handler(vcpu, entry);
+		return 0;
 	case CU_HW0_cu_reg_no:
-		/* Allow guest to see real CU_HW0 value */
+	case CU_HW1_cu_reg_no:
+		/* Allow guest to see real CU_HW0/CU_HW1 value */
 		return 0;
 	default:
 		pr_err("kvm: register 0x%x read is not allowed\n", entry->reg_num);
-		return -EINVAL;
+		return -ENOTSUPP;
 	}
 }
 
 static int handle_cu_rw(struct kvm_vcpu *vcpu, intc_info_cu_entry_t *entry)
 {
 	switch (entry->reg_num) {
+	case SCLKR_cu_reg_no:
+		kvm_sclkr_write(vcpu, entry);
+		return 0;
+	case SCLKM1_cu_reg_no:
+		kvm_sclkm1_write(vcpu, entry);
+		return 0;
+	case SCLKM2_cu_reg_no:
+		kvm_sclkm2_write(vcpu, entry);
+		return 0;
+	case SCLKM3_cu_reg_no:
+		kvm_sclkm3_write(vcpu, entry);
+		return 0;
 	case CU_HW0_cu_reg_no:
-		/* Do not allow guest to change CU_HW0 value, this
+	case CU_HW1_cu_reg_no:
+		/* Do not allow guest to change CU_HW{0/1} value, this
 		 * register is not intended to be changed dynamically */
-		entry->hi = AW(read_CU_HW0_reg());
-		kvm_set_intc_info_cu_is_updated(vcpu);
+		entry->event_code = ICE_FORCED;
+		return 0;
+	case CU_PMGR0_cu_reg_no:
+		if (!cpu_has(CPU_FEAT_ISET_V7))
+			goto error;
+		entry->event_code = ICE_FORCED;
 		return 0;
 	default:
+error:
 		pr_err("kvm: register 0x%x write is not allowed\n", entry->reg_num);
 		return -EINVAL;
 	}
@@ -1777,168 +1618,8 @@ static void kvm_pass_coredump_to_vm(struct kvm_vcpu *vcpu, struct pt_regs *regs)
 		    HI(tir), LO(tir));
 }
 
-static int handle_cu_uncond_events(struct kvm_vcpu *vcpu,
-			intc_info_cu_t *cu, pt_regs_t *regs)
-{
-	intc_info_cu_hdr_t header = cu->header;;
-	int ret;
-
-	if (header.hv_int || header.hv_nm_int) {
-		/* should be already handled, so ignore here */
-		header.hv_int = 0;
-		header.hv_nm_int = 0;
-	}
-	if (header.wait_trap) {
-		header.wait_trap =  0;
-		wait_trap_intc_cu(vcpu, regs);
-	}
-	if (header.dbg) {
-		/* May be sent by:
-		 * - simulator, with -bI option
-		 * - JTAG, when manually switching to hypervisor mode after
-		 *   stop_hard in guest
-		 */
-		header.dbg = 0;;
-		coredump_in_future();
-		kvm_pass_coredump_to_vm(vcpu, regs);
-	}
-	if (header.exc_mem_error) {
-		header.exc_mem_error = 0;
-		do_mem_error(regs);
-	}
-	if (header.g_tmr) {
-		/* Ignore G_PREEMPT_TMR */
-		header.g_tmr = 0;
-	}
-
-	if (header.rr) {
-		int i, cu_num = vcpu->arch.intc_ctxt.cu_num;
-		for (i = 0; i < cu_num; i++) {
-			intc_info_cu_entry_t *entry = &cu->entry[i];
-			if (entry->event_code == ICE_READ_CU) {
-				ret = handle_cu_rr(vcpu, entry);
-				if (ret)
-					return ret;
-			}
-		}
-		header.rr = 0;
-	}
-
-	if (header.rw) {
-		int i, cu_num = vcpu->arch.intc_ctxt.cu_num;
-		for (i = 0; i < cu_num; i++) {
-			intc_info_cu_entry_t *entry = &cu->entry[i];
-			if (entry->event_code == ICE_WRITE_CU) {
-				ret = handle_cu_rw(vcpu, entry);
-				if (ret)
-					return ret;
-			}
-		}
-		header.rw = 0;
-	}
-
-	if (header.evn_u) {
-		pr_err("%s(): is not yet implemented, events: 0x%x\n",
-			__func__, header.evn_u);
-	}
-
-	return 0;
-}
-
-static intc_info_cu_entry_t *find_cu_info_entry(struct kvm_vcpu *vcpu,
-						intc_info_cu_t *cu,
-						info_cu_event_code_t code,
-						cu_reg_no_t reg_no)
-{
-	u64 entry_handled = vcpu->arch.intc_ctxt.cu_entry_handled;
-	unsigned cu_num = vcpu->arch.intc_ctxt.cu_num;
-	int no;
-
-	/* all info intries should be already handled */
-	for (no = 0; no < cu_num; no++) {
-		intc_info_cu_entry_t *cu_entry = &cu->entry[no];
-		int event = cu_entry->event_code;
-		u64 mask = (1ULL << no);
-
-		if (event != code) {
-			continue;
-		}
-		if (code == ICE_READ_CU || code == ICE_WRITE_CU) {
-			if (cu_entry->reg_num != reg_no) {
-				continue;
-			}
-		}
-		if (entry_handled & mask) {
-			/* entry was already handled */
-			pr_err("%s(): event #%d code %d was already handled\n",
-			       __func__, no, event);
-		}
-		return cu_entry;
-	}
-	DebugCUREG("%s(): could not found entry: event code %d\n",
-		   __func__, code);
-	return NULL;
-}
-
-static void check_cu_info_entries(struct kvm_vcpu *vcpu,
-				  intc_info_cu_t *cu, int entries_num)
-{
-	u64 entry_handled = vcpu->arch.intc_ctxt.cu_entry_handled;
-	int no;
-
-	/* all info intries should be already handled */
-	for (no = 0; no < entries_num;
-	     no += (sizeof(intc_info_cu_entry_t) / sizeof(u64))) {
-		intc_info_cu_entry_t *cu_entry = &cu->entry[no];
-		int event = cu_entry->event_code;
-		u64 mask = (1ULL << no);
-
-		if (event == ICE_FORCED) {
-			/* Guest event - leave its handling to guest */
-			if (entry_handled & mask) {
-				DebugCUEN("entry[%d]: has been converted "
-					  "to empty\n", no);
-			} else {
-				DebugCUEN("entry[%d]: empty\n", no);
-			}
-			continue;
-		}
-		if (event == ICE_READ_CU) {
-			/* read from CPU system register */
-			DebugCUEN("entry[%d]: read register #%d, channel #%d, "
-				  "dst 0x%x mask 0x%x\n"
-				  "          data: 0x%llx\n",
-				  no, cu_entry->reg_num, cu_entry->ch_code,
-				  cu_entry->dst, cu_entry->vm_dst,
-				  HI(*cu_entry));
-			continue;
-		} else if (event == ICE_WRITE_CU) {
-			/* write to CPU system register */
-			DebugCUEN("entry[%d]: write register #%d, channel #%d\n"
-				  "          data: 0x%llx\n",
-				  no, cu_entry->reg_num, cu_entry->ch_code,
-				  HI(*cu_entry));
-			continue;
-		} else if (event == ICE_MASKED_HCALL) {
-			/* hypercall is not alowed */
-			DebugCUEN("entry[%d]: masked HCALL\n", no);
-			continue;
-		} else {
-			pr_err("%s(): unknown event code %d at INTC_INFO_CU[%d]\n",
-			       __func__, event, INTC_INFO_CU_HDR_MAX + no);
-			E2K_KVM_BUG_ON(true);
-		}
-		if (entry_handled & mask)
-			/* entry was handled */
-			continue;
-		pr_err("%s(): INTC_INFO_CU[%d] entry was not handled, event code %d\n",
-		       __func__, INTC_INFO_CU_HDR_MAX + no, event);
-		KVM_WARN_ON(true);
-	}
-}
-
 static int handle_cu_cond_exceptions(struct kvm_vcpu *vcpu,
-				     intc_info_cu_t * cu, pt_regs_t * regs)
+				     intc_info_cu_t *cu, pt_regs_t *regs)
 {
 	kvm_intc_cpu_context_t *intc_ctxt = &vcpu->arch.intc_ctxt;
 	u64 tir_exc = intc_ctxt->exceptions;
@@ -1949,7 +1630,8 @@ static int handle_cu_cond_exceptions(struct kvm_vcpu *vcpu,
 	exc_intc_handler_t handler;
 	int exc_no;
 	u64 cond_exc_mask, tir_exc_mask;
-	int r, ret = 0;
+	int r;
+	bool exit_ioctl = false;
 
 	exc_to_intc = vcpu->arch.hw_ctxt.virt_ctrl_cu.exc_c;
 
@@ -1975,27 +1657,18 @@ static int handle_cu_cond_exceptions(struct kvm_vcpu *vcpu,
 				/* pass to guest */
 				if (cond_exc == 0 && cond_evn == 0 &&
 							uncond_evn == 0) {
-					pr_err("%s(): unexpected conditional "
-						"exception #%d (0x%llx) %s "
-						"occured, but did not "
-						"intercepted, expected "
-						"mask 0x%llx, so it is trap "
-						"of guest and will be passed "
-						"to guest\n",
+					pr_err("%s(): unexpected conditional exception #%d (0x%llx) %s occured, but did not intercepted, expected mask 0x%llx, so it is trap of guest and will be passed to guest\n",
 						__func__, exc_no, cond_exc_mask,
 						kvm_cond_exc_no_to_exc_name(vcpu, exc_no),
-							exc_to_intc);
+						exc_to_intc);
 				}
 				kvm_pass_cond_exc_to_vcpu(vcpu, exc_no);
 				continue;
 			}
-			pr_err("%s(): expected conditional exception #%d "
-				"(0x%llx) %s occured, but did not intercepted, "
-				"expected mask 0x%llx, so will be passed "
+			pr_err("%s(): expected conditional exception #%d (0x%llx) %s occured, but did not intercepted, expected mask 0x%llx, so will be passed "
 				"to guest\n",
 				__func__, exc_no, cond_exc_mask,
-				kvm_cond_exc_no_to_exc_name(vcpu, exc_no),
-				exc_to_intc);
+				kvm_cond_exc_no_to_exc_name(vcpu, exc_no), exc_to_intc);
 			kvm_pass_cond_exc_to_vcpu(vcpu, exc_no);
 			continue;
 		}
@@ -2004,33 +1677,22 @@ static int handle_cu_cond_exceptions(struct kvm_vcpu *vcpu,
 		DebugINTCEXC("INTC CU exception #%d\n", exc_no);
 		E2K_KVM_BUG_ON(tir_exc_mask == 0);
 		if (unlikely((exc_to_intc & cond_exc_mask) == 0)) {
-			pr_err("%s(): unexpected intercept of conditional "
-				"exception #%d (0x%llx), "
+			pr_err("%s(): unexpected intercept of conditional exception #%d (0x%llx), "
 				"expected mask 0x%llx\n",
 				__func__, exc_no, cond_exc_mask, exc_to_intc);
 			if (tir_exc_mask & tir_exc) {
 				kvm_pass_cond_exc_to_vcpu(vcpu, exc_no);
-				pr_err("%s(): unexpected exception %s is "
-					"detected in the TIRs, so will be "
-					"passed to guest\n",
-					__func__,
-					kvm_cond_exc_no_to_exc_name(vcpu, exc_no));
+				pr_err("%s(): unexpected exception %s is detected in the TIRs, so will be passed to guest\n",
+					__func__, kvm_cond_exc_no_to_exc_name(vcpu, exc_no));
 			} else {
-				pr_err("%s(): unexpected exception %s is not "
-					"detected in the TIRs, so will be "
-					"ignored\n",
-					__func__,
-					kvm_cond_exc_no_to_exc_name(vcpu, exc_no));
+				pr_err("%s(): unexpected exception %s is not detected in the TIRs, so will be ignored\n",
+					__func__, kvm_cond_exc_no_to_exc_name(vcpu, exc_no));
 			}
 			continue;
 		}
 		if (unlikely((tir_exc_mask & tir_exc) == 0)) {
 			/* but exception did not occur */
-			pr_err("%s(): there is intercept of expected "
-				"conditional exception #%d (0x%llx) %s, "
-				"but exception did not occur, "
-				"mask of all TIRs exceptions 0x%llx, "
-				"so will be ignored\n",
+			pr_err("%s(): there is intercept of expected conditional exception #%d (0x%llx) %s, but exception did not occur, mask of all TIRs exceptions 0x%llx, so will be ignored\n",
 				__func__, exc_no, cond_exc_mask,
 				kvm_cond_exc_no_to_exc_name(vcpu, exc_no),
 				tir_exc);
@@ -2039,19 +1701,16 @@ static int handle_cu_cond_exceptions(struct kvm_vcpu *vcpu,
 		handler = kvm_get_cond_exc_handler(vcpu, exc_no);
 		r = handler(vcpu, regs);
 		if (r < 0) {
-			pr_err("%s(): conditional exception #%d %s intercept "
-				"handler %pF failed, error %d\n",
-				__func__, exc_no,
-				kvm_cond_exc_no_to_exc_name(vcpu, exc_no),
+			pr_err("%s(): conditional exception #%d %s intercept handler %pF failed, error %d\n",
+				__func__, exc_no, kvm_cond_exc_no_to_exc_name(vcpu, exc_no),
 				handler, r);
-			E2K_KVM_BUG_ON(true);
+			return r;
 		} else if (r != 0) {
-			/* it need return to user space to handle */
-			/* intercept (exit) reason */
-			ret |= 1;
+			/* Return to user space */
+			exit_ioctl = true;
 		}
 	}
-	return ret;
+	return exit_ioctl ? 1 : 0;
 }
 
 /*
@@ -2370,7 +2029,7 @@ static void handle_pending_virqs(struct kvm_vcpu *vcpu, pt_regs_t *regs)
 	}
 }
 
-static int handle_cu_exceptions(struct kvm_vcpu *vcpu,
+static void handle_cu_exceptions(struct kvm_vcpu *vcpu,
 				intc_info_cu_t *cu, pt_regs_t *regs)
 {
 	kvm_intc_cpu_context_t *intc_ctxt = &vcpu->arch.intc_ctxt;
@@ -2384,7 +2043,7 @@ static int handle_cu_exceptions(struct kvm_vcpu *vcpu,
 	to_create = intc_ctxt->exc_to_create;
 	to_pass = intc_ctxt->exc_to_pass;
 	if (tir_exc == 0 && to_pass == 0 && to_delete == 0 && to_create == 0) {
-		return 0;
+		return;
 	}
 	if (unlikely((to_pass & tir_exc) != to_pass)) {
 		pr_err("%s(): not all exceptions to pass 0x%llx are present at TIRs 0x%llx\n",
@@ -2441,65 +2100,152 @@ static int handle_cu_exceptions(struct kvm_vcpu *vcpu,
 	}
 	DebugTIRs("intercept TIRs of %d num total exc mask 0x%llx, will be passed to guest\n",
 		  kvm_get_vcpu_intc_TIRs_num(vcpu), new_tir_exc);
-
-	return 0;
 }
 
-static int handle_cu_intercepts(struct kvm_vcpu *vcpu, pt_regs_t * regs)
+static int handle_cu_intercepts(struct kvm_vcpu *vcpu, struct pt_regs *regs)
 {
 	kvm_intc_cpu_context_t *intc_ctxt = &vcpu->arch.intc_ctxt;
 	intc_info_cu_t *cu = &intc_ctxt->cu;
-	intc_info_cu_hdr_t cu_hdr = cu->header;
-	u64 exceptions = intc_ctxt->exceptions;
+	intc_info_cu_hdr_t header = cu->header;
 	int cu_num = intc_ctxt->cu_num;
-	int r, ret = 0;
+	int ret = 0;
+	bool exit_ioctl = false;
 
-	E2K_KVM_BUG_ON(cu_num < 0);
-
-	/* handle intercepts on conditional events */
-	if (cu_hdr.evn_c != 0) {
-		r = handle_cu_cond_events(vcpu, cu, regs);
-		if (r < 0) {
-			ret = r;
-			goto out;
-		} else if (r == 1) {
-			/* it need return to user space to continue handling */
-			ret |= 1;
-		} else if (r != 0) {
-			ret = r;
-		}
+	if (cu_num < 0) {
+		WARN_ON_ONCE(cu_num != -1);
+		handle_cu_exceptions(vcpu, cu, regs);
+		return 0;
 	}
 
-	/* handle intercepts on unconditional events */
-	if (cu_hdr.evn_u != 0) {
-		r = handle_cu_uncond_events(vcpu, cu, regs);
-		if (r != 0) {
-			ret = r;
-			goto out;
+	if (header.hret_last_wish) {
+		ret = intc_hret_last_wish(vcpu, regs);
+		if (ret < 0) {
+			pr_err("%s [%d]: conditional event HRET last wish intercept handler failed, error %d\n",
+				current->comm, current->pid, ret);
+			return ret;
+		}
+		if (ret > 0) {
+			/* Return to user space to handle intercept (exit) reason */
+			ret = 0;
+			exit_ioctl = true;
+		}
+		header.hret_last_wish = 0;
+	}
+
+	if (header.virt) {
+		pr_err("%s [%d]: unexpected virtualization resources access\n",
+			current->comm, current->pid);
+		print_intc_ctxt(vcpu);
+		return -EINVAL;
+	}
+
+	if (header.hv_int || header.hv_nm_int) {
+		/* Should be handled already so ignore here */
+		header.hv_int = 0;
+		header.hv_nm_int = 0;
+	}
+
+	if (header.wait_trap) {
+		intc_wait_trap(vcpu, regs);
+		header.wait_trap = 0;
+	}
+
+	if (header.dbg) {
+		/*
+		 * Can be sent by:
+		 * - simulator, with -bI option
+		 * - JTAG, when manually switching to hypervisor mode after
+		 *   stop_hard in guest
+		 */
+		coredump_in_future();
+		kvm_pass_coredump_to_vm(vcpu, regs);
+		header.dbg = 0;
+	}
+
+	if (header.exc_mem_error) {
+		header.exc_mem_error = 0;
+		do_mem_error(regs);
+		return -EFAULT;
+	}
+
+	if (header.g_tmr) {
+		/* Ignore G_PREEMPT_TMR */
+		header.g_tmr = 0;
+	}
+
+	/* Handle intercepted events */
+	for (int i = 0; i < cu_num; i++) {
+		intc_info_cu_entry_t *entry = &cu->entry[i];
+
+		switch (entry->event_code) {
+		case ICE_FORCED:
+			/* Nothing to handle */
+			ret = 0;
+			break;
+		case ICE_READ_CU:
+			ret = handle_cu_rr(vcpu, entry);
+			break;
+		case ICE_WRITE_CU:
+			ret = handle_cu_rw(vcpu, entry);
+			break;
+		case ICE_MASKED_HCALL:
+		case ICE_GLAUNCH:
+		case ICE_HRET:
+			/* Inform just in case but do not terminate guest: guest's
+			 * user must not be able to terminate guest's kernel. */
+			pr_err_ratelimited("%s [%d]: unexpected INTC_INFO_CU entry %llx:%llx\n",
+					current->comm, current->pid, entry->lo, entry->hi);
+			ret = 0;
+			break;
+		default:
+			pr_err_ratelimited("%s [%d]: unknown event code %d at INTC_INFO_CU[%d]\n",
+					current->comm, current->pid, entry->event_code, i);
+			ret = -EINVAL;
+		}
+		if (ret)
+			return ret;
+	}
+	header.rr = 0;
+	header.rw = 0;
+	header.hcem = 0;
+	header.rr_idr = 0;
+	header.rr_sclkr = 0;
+	header.rw_sclkr = 0;
+	header.rw_sclkm3 = 0;
+
+	if (header.evn_u || header.evn_c) {
+		pr_err_ratelimited("%s [%d]: CU intercept is not implemented, evn_c=0x%x evn_u=0x%x\n",
+				current->comm, current->pid, header.evn_c, header.evn_u);
+		return -ENOTSUPP;
+	}
+
+	if (cpu_has(CPU_HWBUG_INTC_INFO_CU_0)) {
+		int i = 0;
+
+		while (i < cu_num) {
+			intc_info_cu_entry_t *entry = &cu->entry[i];
+
+			if (entry->event_code != ICE_FORCED) {
+				i += 1;
+			} else {
+				memmove(entry, &cu->entry[i + 1],
+					(cu_num - i - 1) * sizeof(*entry));
+				cu_num -= 1;
+			}
 		}
 	}
 
 	/* handle intercepts on conditional exceptions */
-	if (cu_hdr.exc_c != 0 || exceptions != 0) {
-		r = handle_cu_cond_exceptions(vcpu, cu, regs);
-		if (r != 0) {
-			ret = r;
-			goto out;
-		}
+	if (header.exc_c || intc_ctxt->exceptions) {
+		ret = handle_cu_cond_exceptions(vcpu, cu, regs);
+	} else {
+		ret = 0;
 	}
 
-	/* check additional info entries to precise events */
-	if (cu_num > 0) {
-		check_cu_info_entries(vcpu, cu, cu_num);
-	}
-
-out:
 	/* handle guest CU exceptions to pass to guest */
-	r = handle_cu_exceptions(vcpu, cu, regs);
-	if (r != 0)
-		ret = r;
+	handle_cu_exceptions(vcpu, cu, regs);
 
-	return ret;
+	return ret < 0 ? ret : !!exit_ioctl;
 }
 
 static int soft_reexecute_mu_one_intercept(struct kvm_vcpu *vcpu,
@@ -2623,21 +2369,18 @@ static int handle_mu_one_intercept(struct kvm_vcpu *vcpu,
 	}
 
 	ret = handler(vcpu, mu_event, regs);
-	if (ret != PFRES_NO_ERR && ret != PFRES_TRY_MMIO) {
-		pr_err("%s(): could not handle MMU intercept event %d %s (err %d)\n",
-			__func__, event, kvm_get_mu_event_name(vcpu, event), ret);
-		if (event == IME_GPA_INSTR &&
-			vcpu->arch.intc_ctxt.mu_num >= 2) {
-			pr_err("%s(): ignoring guest trap handler preload\n",
-				__func__);
-			ret = 0;
-		} else {
-			pr_alert("%s():\n", __func__);
-			print_pt_regs(regs);
-			print_intc_ctxt(vcpu);
-			E2K_KVM_BUG_ON(true);
-		}
+	if (ret == 0 || ret == PFRES_TRY_MMIO)
+		return ret;
+
+	pr_err("%s(): could not handle MMU intercept event %d %s (err %d)\n",
+		__func__, event, kvm_get_mu_event_name(vcpu, event), ret);
+
+	if (event == IME_GPA_INSTR && vcpu->arch.intc_ctxt.mu_num >= 2) {
+		pr_err("%s(): ignoring guest trap handler preload\n", __func__);
+		return 0;
 	}
+
+	vcpu->arch.exit_reason = EXIT_REASON_VM_PANIC;
 
 	return ret;
 }
@@ -2800,7 +2543,6 @@ int parse_INTC_registers(struct kvm_vcpu_arch *vcpu)
 	trap.ignore_user_tc = 0;
 	trap.tc_called = 0;
 	trap.is_intc = false;
-	trap.from_sigreturn = 0;
 	trap.tc_count = 0;
 	trap.flags = 0;
 
@@ -2884,7 +2626,6 @@ int parse_INTC_registers(struct kvm_vcpu_arch *vcpu)
 	intc_ctxt->exc_to_delete = 0;
 	intc_ctxt->exc_to_pass = 0;
 	intc_ctxt->exc_IP_to_create = 0;
-	intc_ctxt->cu_entry_handled = 0;
 
 	if (cu_num != -1) {
 		cu_hdr = cu->header;
@@ -2991,10 +2732,7 @@ int parse_INTC_registers(struct kvm_vcpu_arch *vcpu)
 	/*
 	 * 7) Handle CU interceptions
 	 */
-	if (cu_num != -1)
-		ret_cu = handle_cu_intercepts(arch_to_vcpu(vcpu), &regs);
-	else
-		ret_cu = handle_cu_exceptions(arch_to_vcpu(vcpu), cu, &regs);
+	ret_cu = handle_cu_intercepts(arch_to_vcpu(vcpu), &regs);
 	if (ret == 0)
 		ret = ret_cu;
 

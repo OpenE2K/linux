@@ -96,6 +96,7 @@ static inline void atomic64_set_mask(unsigned long mask, unsigned long *value)
 	__api_atomic_op(mask, value, d, "ord", RELAXED_MB);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline bool kvm_is_sv_vm_available(void)
 {
 	return kvm_vm_types_available & KVM_E2K_SV_VM_TYPE_MASK;
@@ -105,6 +106,18 @@ static inline bool kvm_is_sw_pv_vm_available(void)
 {
 	return kvm_vm_types_available & KVM_E2K_SW_PV_VM_TYPE_MASK;
 }
+#else
+static inline bool kvm_is_sv_vm_available(void)
+{
+	return false;
+}
+
+static inline bool kvm_is_sw_pv_vm_available(void)
+{
+	return false;
+}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
+
 
 static inline bool kvm_is_hv_vm_available(void)
 {
@@ -114,6 +127,11 @@ static inline bool kvm_is_hv_vm_available(void)
 static inline bool kvm_is_hw_pv_vm_available(void)
 {
 	return kvm_vm_types_available & KVM_E2K_HW_PV_VM_TYPE_MASK;
+}
+
+static inline bool kvm_is_sic_nbsr_iset_available(void)
+{
+	return true;
 }
 
 /* memory slots that does not exposed to userspace */
@@ -613,8 +631,10 @@ typedef struct kvm_mmu_pt_ops {
 				struct kvm_memory_slot *slot, u64 gfn);
 	void (*account_shadowed)(struct kvm *kvm, struct kvm_mmu_page *sp);
 	void (*unaccount_shadowed)(struct kvm *kvm, struct kvm_mmu_page *sp);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	int (*walk_shadow_pts)(struct kvm_vcpu *vcpu, gva_t addr,
 				struct kvm_shadow_trans *st, hpa_t spt_root);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	pf_res_t (*nonpaging_page_fault)(struct kvm_vcpu *vcpu, gva_t gva,
 				u32 error_code, bool prefault,
 				gfn_t *gfnp, kvm_pfn_t *pfnp);
@@ -686,7 +706,6 @@ typedef struct kvm_mmu_pt_ops {
 	void (*kvm_init_mmu_pt_structs)(struct kvm *kvm);
 	void (*kvm_init_nonpaging_pt_structs)(struct kvm *kvm, hpa_t root);
 	void (*setup_shadow_pt_structs)(struct kvm_vcpu *vcpu);
-	void (*setup_tdp_pt_structs)(struct kvm_vcpu *vcpu);
 	void (*kvm_init_mmu_spt_context)(struct kvm_vcpu *vcpu,
 						struct kvm_mmu *context);
 	void (*kvm_init_mmu_tdp_context)(struct kvm_vcpu *vcpu,
@@ -799,31 +818,14 @@ typedef struct kvm_sw_cpu_context {
 	e2k_usd_t usd;
 	e2k_sbr_t sbr;
 	e2k_usincr_t usincr;
+	/* Save free space here when entering hypercall so that we
+	 * can restore hypervisor's USD.size on hypercall return.
+	 * Note that when CORE_MODE.descr_v7=1 can rely on USFS instead. */
+	size_t usd_size_v6;
 
 	e2k_fpcr_t fpcr;
 	e2k_fpsr_t fpsr;
 	e2k_pfpfr_t pfpfr;
-
-#ifdef CONFIG_CPU_HAS_OSR1
-	/*
-	 * Ugly hack.  %osr1 is used for `current` when available for
-	 * new ldosr instructions support (this simplifies system
-	 * calls greatly), but hypercalls also need to get `current`
-	 * and only %osr0 is suitable (it is switched by HCALL).
-	 *
-	 * So put `current` into %osr0 before entering guest and save
-	 * original host's value here.
-	 */
-	u64 host_osr0;
-#endif
-
-	u64 osr1;
-
-	struct to_save {
-		bool valid;
-		e2k_usd_t usd;
-		e2k_sbr_t sbr;
-	} saved;
 
 	/*
 	 * Host VCPU local data stack pointer registers state (to save/restore).
@@ -840,23 +842,19 @@ typedef struct kvm_sw_cpu_context {
 
 	long ret_value;		/* return value from hypercall to guest */
 
-	/*
-	 * Here goes stuff that can be not switched on hypercalls
-	 * since we do not support calling QEMU from them
-	 */
 	e2k_upsr_t upsr;
 
 	/*
 	 * Guest has own global registers context (vcpu) different
 	 * from QEMU (host).
 	 *
-	 * Gregs used by kernel are switched just before guest
-	 * enter and after guest exit.  Other gregs are switched
+	 * `local_gregs` used by kernel are switched just before guest
+	 * enter and after guest exit.  Other `global_gregs` are switched
 	 * in vcpu_load()/vcpu_put().
 	 */
-	e2k_global_regs_t gregs;
-	kernel_gregs_t vcpu_k_gregs;
-	kernel_gregs_t host_k_gregs;
+	struct global_gregs g_gregs;
+	struct local_gregs host_l_gregs;
+	struct local_gregs vcpu_l_gregs;
 
 	e2k_cutd_t cutd;
 
@@ -867,23 +865,52 @@ typedef struct kvm_sw_cpu_context {
 					/* trap cellar */
 	mmu_reg_t	trap_count;
 
+	mmu_reg_t	mtrr_deftype;
+	mmu_reg_t	mtrr_fix_64k_00000;
+	mmu_reg_t	mtrr_fix_16k_80000;
+	mmu_reg_t	mtrr_fix_16k_a0000;
+	mmu_reg_t	mtrr_fix_4k_c0000;
+	mmu_reg_t	mtrr_fix_4k_c8000;
+	mmu_reg_t	mtrr_fix_4k_d0000;
+	mmu_reg_t	mtrr_fix_4k_d8000;
+	mmu_reg_t	mtrr_fix_4k_e0000;
+	mmu_reg_t	mtrr_fix_4k_e8000;
+	mmu_reg_t	mtrr_fix_4k_f0000;
+	mmu_reg_t	mtrr_fix_4k_f8000;
+	mmu_reg_t	mtrr_physbase0;
+	mmu_reg_t	mtrr_physbase1;
+	mmu_reg_t	mtrr_physbase2;
+	mmu_reg_t	mtrr_physbase3;
+	mmu_reg_t	mtrr_physbase4;
+	mmu_reg_t	mtrr_physbase5;
+	mmu_reg_t	mtrr_physbase6;
+	mmu_reg_t	mtrr_physbase7;
+	mmu_reg_t	mtrr_physmask0;
+	mmu_reg_t	mtrr_physmask1;
+	mmu_reg_t	mtrr_physmask2;
+	mmu_reg_t	mtrr_physmask3;
+	mmu_reg_t	mtrr_physmask4;
+	mmu_reg_t	mtrr_physmask5;
+	mmu_reg_t	mtrr_physmask6;
+	mmu_reg_t	mtrr_physmask7;
+
+	/*
+	 * Here goes stuff that can be not switched on hypercalls.
+	 */
+
 	e2k_aau_t aau_context;
 	e2k_aasr_t aasr;
 
-	u64 cs_lo;
-	u64 cs_hi;
-	u64 ds_lo;
-	u64 ds_hi;
-	u64 es_lo;
-	u64 es_hi;
-	u64 fs_lo;
-	u64 fs_hi;
-	u64 gs_lo;
-	u64 gs_hi;
-	u64 ss_lo;
-	u64 ss_hi;
+	e2k_qreg_t cs;
+	e2k_qreg_t ds;
+	e2k_qreg_t es;
+	e2k_qreg_t fs;
+	e2k_qreg_t gs;
+	e2k_qreg_t ss;
 	e2k_rpr_t rpr;
 	u64 tcd;
+	e2k_sclkm1_t gs_sclkm1;
+	e2k_sclkm2_t gs_sclkm2;
 
 #ifdef CONFIG_CLW_ENABLE
 	mmu_reg_t us_cl_d;
@@ -916,8 +943,6 @@ typedef struct kvm_intc_cpu_context {
 	intc_mu_state_t mu_state[INTC_INFO_MU_ITEM_MAX];
 	bool mu_updated;	/* the mu info was updated, so need restote */
 				/* on the registers */
-	bool cu_updated;	/* the cu info was updated, so need restore */
-				/* on the registers */
 	s8 nr_TIRs;
 	u64 exceptions;		/* source mask of all exceptions in the TIRs */
 				/* at the interception moment */
@@ -933,7 +958,6 @@ typedef struct kvm_intc_cpu_context {
 	e2k_tir_t TIRs[TIR_NUM];
 	u64 sbbp[SBBP_ENTRIES_NUM];
 	u64 intc_mu_to_move;
-	u64 cu_entry_handled;
 } kvm_intc_cpu_context_t;
 
 struct kvm_epic_page;
@@ -975,6 +999,9 @@ typedef struct kvm_hw_cpu_context {
 	e2k_cutd_t sh_oscutd;
 	e2k_cuir_t sh_oscuir;
 	u64 sh_osr0;
+#ifdef CONFIG_CPU_HAS_OSR1
+	u64 sh_osr1;
+#endif
 	e2k_core_mode_t sh_core_mode;
 
 	virt_ctrl_cu_t virt_ctrl_cu;
@@ -1084,11 +1111,13 @@ struct kvm_vcpu_arch {
 
 	bu_hw_stack_t hypv_backup;	/* backup hardware stacks */
 	vcpu_boot_stack_t boot_stacks;	/* guest boot-time stacks */
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	guest_hw_stack_t guest_stacks;	/* guest hardware stacks state */
 					/* to emulate harware supported */
 					/* HCALLs */
 	gthread_info_t *gti;		/* host agent of current active guest */
 					/* thread/process */
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	/*
 	 * Paging state of the vcpu
@@ -1432,13 +1461,7 @@ struct kvm_arch {
 	struct swait_queue_head mmu_wq;
 #endif	/* KVM_ARCH_WANT_MMU_NOTIFIER */
 
-	/* lock to update num_sclkr_run and common vcpus_idl_tm
-	 * for all vcpu-s of the guest */
-	raw_spinlock_t sh_sclkr_lock;
-	int num_sclkr_run;
 	s64 hst_t_off;		/* for esclkr (the same as sclkm3) */
-	s64 hst_t_leave;	/* to get vcpus_idl_tm, hst_t_off */
-	s64 vcpus_idl_tm;	/* time sum while all vcpus out of cpu */
 
 	/* CEPIC timer frequency (Hz) */
 	unsigned long cepic_freq;
@@ -1446,6 +1469,9 @@ struct kvm_arch {
 	/* Multiplier for watchdog timer prescaler (allows to slow down
 	 * its frequency) */
 	unsigned long wd_prescaler_mult;
+
+	/* Offset from raw monotonic clock to time of guest start */
+	s64 raw_clock_offset;
 
 #ifdef KVM_HAVE_LEGACY_VGA_PASSTHROUGH
 	/* Directly map legacy VGA area (0xa0000-0xbffff) to guest */
@@ -1605,6 +1631,14 @@ static inline void kvm_init_cepic_idle_timer(struct kvm_vcpu *vcpu) { }
 static inline void kvm_epic_start_idle_timer(struct kvm_vcpu *vcpu) { }
 static inline void kvm_epic_stop_idle_timer(struct kvm_vcpu *vcpu) { }
 #endif /* CONFIG_KVM_HW_VIRTUALIZATION && !CONFIG_KVM_GUEST_KERNEL */
+
+extern void kvm_sclkr_read(struct kvm_vcpu *, intc_info_cu_entry_t *);
+extern void kvm_sclkm1_read(struct kvm_vcpu *, intc_info_cu_entry_t *);
+extern void kvm_sclkm2_read(struct kvm_vcpu *, intc_info_cu_entry_t *);
+extern void kvm_sclkr_write(struct kvm_vcpu *, intc_info_cu_entry_t *);
+extern void kvm_sclkm1_write(struct kvm_vcpu *, intc_info_cu_entry_t *);
+extern void kvm_sclkm2_write(struct kvm_vcpu *, intc_info_cu_entry_t *);
+extern void kvm_sclkm3_write(struct kvm_vcpu *, intc_info_cu_entry_t *);
 
 extern struct work_struct kvm_dump_stacks;
 extern void wait_for_print_all_guest_stacks(struct work_struct *work);

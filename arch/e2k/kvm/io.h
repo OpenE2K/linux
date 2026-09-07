@@ -36,7 +36,7 @@ extern int vcpu_mmio_write(struct kvm_vcpu *vcpu, gpa_t addr, int len,
 extern int vcpu_mmio_read(struct kvm_vcpu *vcpu, gpa_t addr, int len, void *v);
 
 extern int kvm_prefetch_mmio_areas(struct kvm_vcpu *vcpu);
-extern int kvm_hv_io_page_fault(struct kvm_vcpu *vcpu, gpa_t gpa,
+extern pf_res_t kvm_hv_io_page_fault(struct kvm_vcpu *vcpu, gpa_t gpa,
 				intc_info_mu_t *intc_info_mu);
 
 static inline kvm_pfn_t mmio_prefixed_gfn_to_pfn(struct kvm *kvm, gfn_t gfn)

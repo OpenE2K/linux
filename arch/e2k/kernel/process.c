@@ -268,11 +268,14 @@ static unsigned long *__alloc_thread_stack_node(int node, const void *caller)
 	}
 #endif
 
+	if (!address)
+		return NULL;
+
 	/* For hardware stacks uninitialized data usage is impossible
 	 * so clear data stack only */
 	clear_memory_8(address + KERNEL_C_STACK_OFFSET, KERNEL_C_STACK_SIZE, ETAGEWD);
 
-	if (cpu_has(CPU_HWBUG_FALSE_SS) && address)
+	if (cpu_has(CPU_HWBUG_FALSE_SS))
 		clean_pc_stack_zero_frame_kernel(address + KERNEL_PC_STACK_OFFSET);
 
 	return address;
@@ -403,7 +406,7 @@ static void __priv *alloc_user_hard_stack(size_t stack_size,
 	 */
 	if (type == HW_STACK_TYPE_PCS)
 		user_stacks_base = max_t(unsigned long, user_stacks_base,
-				GET_PCS_BASE(u_hw_stacks));
+				(unsigned long) GET_PCS_BASE(u_hw_stacks));
 
 	ts_flags = set_ts_flag(TS_MMAP_PRIVILEGED | TS_KERNEL_SYSCALL |
 			((type == HW_STACK_TYPE_PS) ? TS_MMAP_PS : TS_MMAP_PCS));
@@ -871,7 +874,7 @@ int create_cut_entry(int tcount,
 			goto out_put;
 		DebugCUI("created cui=%d code 0x%llx[0x%llx] glob 0x%llx[0x%llx]\n",
 			 free_cui, code_base, code_sz, glob_base, glob_sz);
-  	}
+	}
 
 	atomic_add_return(tcount, &mm->context.tstart);
 	if (TASK_IS_PROTECTED(current)) {
@@ -973,7 +976,7 @@ void start_thread(struct pt_regs *regs, unsigned long entry, unsigned long sp)
 
 	sp = round_down(sp, (protected) ? E2K_ALIGN_PUSTACK_SIZE : E2K_ALIGN_USTACK_SIZE);
 
-#ifdef	CONFIG_KVM_HOST_MODE
+#if defined CONFIG_KVM_HOST_MODE && defined CONFIG_KVM_PARAVIRTUALIZATION
 	if (ti->gthread_info) {
 		/* It is guest thread: clear from old process */
 		kvm_pv_clear_guest_thread_info(ti->gthread_info);
@@ -1131,10 +1134,6 @@ void start_thread(struct pt_regs *regs, unsigned long entry, unsigned long sp)
 
 	native_write_RPR_reg(INITIAL_ZEROED_RPR);
 
-	/* Set global registers to empty state to prevent other user
-	 * or kernel current pointers access */
-	INIT_G_REGS(true);
-
 	regs->stacks = stacks;
 	regs->crs = crs;
 	regs->wd.psize = 0;
@@ -1169,14 +1168,14 @@ static void save_binco_regs(struct sw_regs *sw_regs)
 {
 
 	/* Save intel regs from processor. For binary compiler. */
-	NATIVE_SAVE_INTEL_REGS(sw_regs);
+	NATIVE_SAVE_BINCO_REGS(sw_regs);
 }
 #else /* !CONFIG_SECONDARY_SPACE_SUPPORT: */
 static inline void save_binco_regs(struct sw_regs *sw_regs) { }
 #endif /* CONFIG_SECONDARY_SPACE_SUPPORT */
 
-void init_sw_user_regs(struct sw_regs *sw_regs,
-		       bool save_gregs, bool save_binco_regs_needed)
+void init_sw_user_regs(struct sw_regs *sw_regs, bool save_global_gregs,
+		       bool save_binco_regs_needed)
 {
 	/*
 	 * New process will start with interrupts disabled.
@@ -1186,7 +1185,7 @@ void init_sw_user_regs(struct sw_regs *sw_regs,
 	if (IS_IRQ_MASK_GLOBAL()) {
 		/* global IRQs mask is placed in PSR */
 		sw_regs->psr	= E2K_KERNEL_PSR_GLOB_IRQ_DISABLED;
-		sw_regs->upsr	= E2K_KERNEL_INITIAL_UPSR_GLOB_IRQ;
+		sw_regs->upsr	= E2K_KERNEL_UPSR_GLOB_IRQ_DISABLED;
 	} else {
 		/* global IRQs mask is placed in UPSR */
 		sw_regs->upsr	= E2K_KERNEL_UPSR_LOC_IRQ_DISABLED;
@@ -1206,8 +1205,11 @@ void init_sw_user_regs(struct sw_regs *sw_regs,
 			sw_regs->madmr = (e2k_madmr_t) { .word = 0L };
 		}
 	}
-	if (save_gregs) {
-		machine.save_gregs(&sw_regs->gregs);
+
+	if (save_global_gregs) {
+		machine.save_global_gregs(&sw_regs->u_gregs);
+	} else {
+		memset(&sw_regs->u_gregs, 0, sizeof(sw_regs->u_gregs));
 	}
 
 	if (save_binco_regs_needed)
@@ -1216,8 +1218,10 @@ void init_sw_user_regs(struct sw_regs *sw_regs,
 	sw_regs->idr = read_IDR_reg();
 }
 
-static void set_default_registers(struct task_struct *new_task, bool save_gregs)
+static void set_default_registers(struct task_struct *new_task,
+		bool save_global_gregs, bool save_local_gregs)
 {
+	struct local_gregs *new_l_gregs;
 	struct sw_regs *new_sw_regs = &new_task->thread.sw_regs;
 	struct thread_info *new_ti = task_thread_info(new_task);
 	unsigned long addr = (unsigned long) new_task->stack;
@@ -1228,6 +1232,8 @@ static void set_default_registers(struct task_struct *new_task, bool save_gregs)
 	       sizeof(new_task->thread.debug.regs));
 
 	clear_ptrace_hw_breakpoint(new_task);
+
+	new_sw_regs->uaccess_max = user_addr_max();
 
 	/*
 	 * Calculate kernel stacks registers
@@ -1248,14 +1254,23 @@ static void set_default_registers(struct task_struct *new_task, bool save_gregs)
 	new_sw_regs->psp = new_ti->k_psp;
 	new_sw_regs->pcsp = new_ti->k_pcsp;
 
-	init_sw_user_regs(new_sw_regs, save_gregs, TASK_IS_BINCO(current));
+	new_l_gregs = &new_task->thread.u_gregs;
+	if (save_local_gregs) {
+		tagged_memcpy_8(&new_l_gregs->g, &current->thread.u_gregs.g,
+				sizeof(new_l_gregs->g));
+		new_l_gregs->bgr = current->thread.u_gregs.bgr;
+	} else {
+		memset(&new_l_gregs->g, 0, sizeof(new_l_gregs->g));
+		new_l_gregs->bgr = E2K_INITIAL_BGR;
+	}
+
+	init_sw_user_regs(new_sw_regs, save_global_gregs, TASK_IS_BINCO(current));
 }
 
 asmlinkage pid_t sys_clone_thread(unsigned long clone_flags, unsigned long stack_base,
 		unsigned long long stack_size, int __user *parent_tidptr,
 		int __user *child_tidptr, unsigned long tls)
 {
-	struct pt_regs *regs = current_pt_regs();
 	long flags = clone_flags;
 	struct kernel_clone_args args = {};
 
@@ -1669,22 +1684,20 @@ static int prepare_ret_from_fork(struct task_struct *new_task,
 /*
  * Set a new TLS for the child thread.
  */
-static void set_new_tls(struct sw_regs *new_sw_regs, unsigned long tls,
+static void set_new_tls(struct global_gregs *g_gregs, unsigned long tls,
 			const struct pt_regs *regs)
 {
 	if (!TASK_IS_PROTECTED(current)) {
-		new_sw_regs->gregs.g[13].base = tls;
+		g_gregs->g[13].base = tls;
 	} else {
-		u64 tls_lo = regs->dargs[8];
-		u64 tls_hi = regs->dargs[9];
+		e2k_qreg_t tls = { .lo = regs->dargs[8], .hi = regs->dargs[9] };
 		u32 tls_tag = (regs->tags >> (4 * 10)) & 0xff;
 
-		if (regs->kernel_entry != 8)
+		if (regs->kernel_entry != 8) {
 			pr_info_ratelimited("Unknown entry (%d) in tls copy\n",
 					    regs->kernel_entry);
-		__NATIVE_STORE_TAGGED_QWORD(&new_sw_regs->gregs.g[12].base,
-					    tls_lo, tls_hi, tls_tag,
-					    tls_tag >> 4, 16);
+		}
+		store_tagged_qword(&g_gregs->g[12].base, tls, tls_tag, 16);
 	}
 }
 
@@ -1697,12 +1710,14 @@ int copy_thread(struct task_struct *new_task, const struct kernel_clone_args *ar
 	struct thread_info *new_ti = task_thread_info(new_task);
 	struct sw_regs *new_sw_regs = &new_task->thread.sw_regs;
 	struct pt_regs *childregs, *regs = current_thread_info()->pt_regs;
+	bool save_global_gregs = (args->fn == NULL);
+	bool save_local_gregs = (args->fn == NULL && !(clone_flags & CLONE_VM));
 	int ret;
 
 	ktimes_account_copy_thread(new_ti);
 
 	/* Initialize sw_regs with default values */
-	set_default_registers(new_task, true);
+	set_default_registers(new_task, save_global_gregs, save_local_gregs);
 
 	/* Set __ret_from_fork frame to be called right after __switch_to() */
 	ret = prepare_ret_from_fork(new_task, args);
@@ -1739,7 +1754,7 @@ int copy_thread(struct task_struct *new_task, const struct kernel_clone_args *ar
 	new_ti->pt_regs = childregs;
 
 	if (clone_flags & CLONE_SETTLS)
-		set_new_tls(new_sw_regs, tls, regs);
+		set_new_tls(&new_sw_regs->u_gregs, tls, regs);
 
 	/*
 	 * Update data stack if needed
@@ -1769,7 +1784,11 @@ int copy_thread(struct task_struct *new_task, const struct kernel_clone_args *ar
 
 		childregs->crs.cr1 = set_cr1_ussz(childregs->crs.cr1,
 					(cpu_has(CPU_FEAT_V7_CPU_REGS)) ? 0 : stack_size);
-
+	} else {
+		/* We are executing on the same data stacks, so copy their info */
+		ret = copy_getsp_adj(new_ti, current_thread_info());
+		if (ret)
+			return ret;
 	}
 
 	if (clone_flags & CLONE_VM) {
@@ -1784,6 +1803,7 @@ int copy_thread(struct task_struct *new_task, const struct kernel_clone_args *ar
 							regs, new_sw_regs, new_ti, clone_flags);
 		if (ret)
 			return ret;
+
 		/*
 		 * New thread will use different signal stack
 		 */
@@ -1804,10 +1824,6 @@ int copy_thread(struct task_struct *new_task, const struct kernel_clone_args *ar
 			return ret;
 
 		ret = copy_old_u_pcs_list(new_ti, current_thread_info());
-		if (ret)
-			return ret;
-
-		ret = copy_getsp_adj(new_ti, current_thread_info());
 		if (ret)
 			return ret;
 
@@ -1842,7 +1858,7 @@ void native_deactivate_mm(struct task_struct *dead_task, struct mm_struct *mm)
 	if (!mm)
 		return;
 
-	DebugEX("entered for task 0x%px %d [%s], mm 0x%lx\n",
+	DebugEX("entered for task 0x%px %d [%s], mm 0x%px\n",
 		dead_task, dead_task->pid, dead_task->comm, mm);
 	BUG_ON(dead_task != current);
 
@@ -2014,6 +2030,10 @@ void flush_thread(void)
 {
 	DebugP("flush_thread entered.\n");
 
+	NATIVE_SET_GREGS_EMPTY(true, false);
+	memset(&current->thread.u_gregs.g, 0, sizeof(current->thread.u_gregs.g));
+	current->thread.u_gregs.bgr = E2K_INITIAL_BGR;
+
 #ifdef CONFIG_SECONDARY_SPACE_SUPPORT
 	current_thread_info()->last_ic_flush_cpu = -1;
 #endif
@@ -2023,6 +2043,8 @@ void flush_thread(void)
 	preempt_disable();
 	native_clear_user_only_regs();
 	preempt_enable();
+
+	set_max_u_border();
 
 	DebugP("flush_thread exited.\n");
 }
@@ -2134,7 +2156,7 @@ static __always_inline void flush_ic_on_switch(void) { }
  */
 notrace noinline
 __interrupt /* just to have USFS == 0 for v7 when real switch */
-struct task_struct *__switch_to(struct task_struct *prev,
+struct task_struct *__sched __switch_to(struct task_struct *prev,
 				    struct task_struct *next)
 {
 #ifndef CONFIG_MMU_SEP_VIRT_SPACE_ONLY
@@ -2185,14 +2207,10 @@ int find_cui_by_ip(unsigned long ip)
 	e2k_cute_t __priv *cut = (e2k_cute_t __priv *) USER_CUT_AREA_BASE;
 	int i, cui = -ESRCH;
 
-	if (!TASK_IS_PROTECTED(current))
-		return USER_CODES_UNPROT_INDEX(current);
-
 	ip &= E2K_VA_MASK; /* we need only address part of ip over here */
 
-	/* Trampolines in kernel space use kernel's CUI */
-	if (is_trampoline(ip))
-		return KERNEL_CODES_INDEX;
+	if (!TASK_IS_PROTECTED(current) || is_trampoline(mm, ip))
+		return USER_CODES_UNPROT_INDEX(current);
 
 	down_write(&mm->context.cut_mask_lock);
 
@@ -2248,7 +2266,7 @@ SYSCALL_DEFINE5(arch_prctl, int, option,
 		error = current->mm->context.pm_sc_debug_mode;
 		current->mm->context.pm_sc_debug_mode = arg2;
 		/* RM-18187 */
-		if (current->mm->context.pm_sc_debug_mode & PM_MM_FREE_PTR_MODE_MASK == 0)
+		if ((current->mm->context.pm_sc_debug_mode & PM_MM_FREE_PTR_MODE_MASK) == 0)
 			current->mm->context.pm_sc_debug_mode |= PM_MM_DEFAULT_FREE_PTR_MODE;
 		/* RM-18187 */
 		break;
@@ -2260,7 +2278,7 @@ SYSCALL_DEFINE5(arch_prctl, int, option,
 		error = current->mm->context.pm_sc_debug_mode;
 		current->mm->context.pm_sc_debug_mode &= ~arg2;
 		/* RM-18187 */
-		if (current->mm->context.pm_sc_debug_mode & PM_MM_FREE_PTR_MODE_MASK == 0)
+		if ((current->mm->context.pm_sc_debug_mode & PM_MM_FREE_PTR_MODE_MASK) == 0)
 			current->mm->context.pm_sc_debug_mode |= PM_MM_DEFAULT_FREE_PTR_MODE;
 		/* RM-18187 */
 		break;
@@ -2381,6 +2399,17 @@ void do_softirq_own_stack(void)
 	if (cpu_has(CPU_FEAT_V7_CPU_REGS)) {
 		prev_stacks.usd = incr_usd_ind(prev_stacks.usd, read_USFS_reg());
 	}
+	raw_all_irq_restore(flags);
+
+	/* Trap for warning in __parse_chain_stack() */
+	u64 pcs_ind = PCSP_IND(prev_stacks.pcsp);
+	struct pt_regs *regs = current_pt_regs();
+	unsigned long spilled_to_kernel = (regs) ? regs->stacks.pcshtp.ind
+						 : min_t(u64, pcs_ind, SZ_OF_CR);
+	WARN_ON_ONCE(spilled_to_kernel > pcs_ind);
+
+	raw_all_irq_save(flags);
+	NATIVE_FLUSHCPU;
 
 	next_stacks.pcsp = new_pcsp(base + KERNEL_PC_STACK_OFFSET,
 				    KERNEL_PC_STACK_SIZE, 0);

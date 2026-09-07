@@ -497,6 +497,30 @@ int __pte_alloc_kernel(pmd_t *pmd)
 	return 0;
 }
 
+#ifdef CONFIG_E2K_MODULES_DUPLICATION
+/*
+ * Allocate pte page table on a specified node.
+ * This function is a clone of __pte_alloc_kernel().
+ */
+int __pte_alloc_kernel_node(int node, pmd_t *pmd)
+{
+	pte_t *new = pte_alloc_one_kernel_node(&init_mm, node);
+	if (!new)
+		return -ENOMEM;
+
+	spin_lock(&init_mm.page_table_lock);
+	if (likely(pmd_none(*pmd))) {	/* Has another populated it ? */
+		smp_wmb(); /* See comment in pmd_install() */
+		pmd_populate_kernel(&init_mm, pmd, new);
+		new = NULL;
+	}
+	spin_unlock(&init_mm.page_table_lock);
+	if (new)
+		pte_free_kernel(&init_mm, new);
+	return 0;
+}
+#endif /* CONFIG_E2K_MODULES_DUPLICATION */
+
 static inline void init_rss_vec(int *rss)
 {
 	memset(rss, 0, sizeof(int) * NR_MM_COUNTERS);
@@ -5480,6 +5504,29 @@ int __p4d_alloc(struct mm_struct *mm, pgd_t *pgd, unsigned long address)
 	spin_unlock(&mm->page_table_lock);
 	return 0;
 }
+
+# ifdef CONFIG_E2K_MODULES_DUPLICATION
+/*
+ * Allocate p4d page table on a specified node.
+ * This function is a clone of __p4d_alloc().
+ */
+int __p4d_alloc_node(int node, struct mm_struct *mm, pgd_t *pgd, unsigned long address)
+{
+	p4d_t *new = p4d_alloc_one_node(node, mm, address);
+	if (!new)
+		return -ENOMEM;
+
+	spin_lock(&mm->page_table_lock);
+	if (pgd_present(*pgd)) {	/* Another has populated it */
+		p4d_free(mm, new);
+	} else {
+		smp_wmb(); /* See comment in pmd_install() */
+		pgd_populate(mm, pgd, new);
+	}
+	spin_unlock(&mm->page_table_lock);
+	return 0;
+}
+# endif /* CONFIG_E2K_MODULES_DUPLICATION */
 #endif /* __PAGETABLE_P4D_FOLDED */
 
 #ifndef __PAGETABLE_PUD_FOLDED
@@ -5503,6 +5550,29 @@ int __pud_alloc(struct mm_struct *mm, p4d_t *p4d, unsigned long address)
 	spin_unlock(&mm->page_table_lock);
 	return 0;
 }
+
+# ifdef CONFIG_E2K_MODULES_DUPLICATION
+/*
+ * Allocate pud page table on a specified node.
+ * This function is a clone of __pud_alloc().
+ */
+int __pud_alloc_node(int node, struct mm_struct *mm, p4d_t *p4d)
+{
+	pud_t *new = pud_alloc_one_node(mm, node);
+	if (!new)
+		return -ENOMEM;
+
+	spin_lock(&mm->page_table_lock);
+	if (!p4d_present(*p4d)) {
+		mm_inc_nr_puds(mm);
+		smp_wmb(); /* See comment in pmd_install() */
+		p4d_populate_kernel_numa(mm, p4d, new);
+	} else	/* Another has populated it */
+		pud_free(mm, new);
+	spin_unlock(&mm->page_table_lock);
+	return 0;
+}
+# endif /* CONFIG_E2K_MODULES_DUPLICATION */
 #endif /* __PAGETABLE_PUD_FOLDED */
 
 #ifndef __PAGETABLE_PMD_FOLDED
@@ -5528,6 +5598,31 @@ int __pmd_alloc(struct mm_struct *mm, pud_t *pud, unsigned long address)
 	spin_unlock(ptl);
 	return 0;
 }
+
+# ifdef CONFIG_E2K_MODULES_DUPLICATION
+/*
+ * Allocate pud page table on a specified node.
+ * This function is a clone of __pud_alloc().
+ */
+int __pmd_alloc_node(int node, struct mm_struct *mm, pud_t *pud)
+{
+	spinlock_t *ptl;
+	pmd_t *new = pmd_alloc_one_node(mm, node);
+	if (!new)
+		return -ENOMEM;
+
+	ptl = pud_lock(mm, pud);
+	if (!pud_present(*pud)) {
+		mm_inc_nr_pmds(mm);
+		smp_wmb(); /* See comment in pmd_install() */
+		pud_populate(mm, pud, new);
+	} else {	/* Another has populated it */
+		pmd_free(mm, new);
+	}
+	spin_unlock(ptl);
+	return 0;
+}
+# endif /* CONFIG_E2K_MODULES_DUPLICATION */
 #endif /* __PAGETABLE_PMD_FOLDED */
 
 /**

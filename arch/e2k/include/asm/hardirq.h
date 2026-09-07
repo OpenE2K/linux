@@ -35,9 +35,15 @@ static inline bool is_from_wait_trap(const struct pt_regs *regs)
 	return is_from_C1_wait_trap(regs) || is_from_C3_wait_trap(regs);
 }
 extern void handle_wtrap(struct pt_regs *regs);
+#ifdef CONFIG_SMP
+extern void l_kstat_incr_nmi(void);
+#else
+# define l_kstat_incr_nmi() do {} while (0)
+#endif
+
 #define arch_nmi_enter() \
 do { \
-	inc_irq_stat(__nmi_count); \
+	l_kstat_incr_nmi(); \
 	if (is_from_wait_trap(regs)) \
 		handle_wtrap(regs); \
 } while (0)

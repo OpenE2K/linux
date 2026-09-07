@@ -37,6 +37,7 @@
 #include <asm/e2k-iommu.h>
 #include <asm/e2k_debug.h>
 #include <asm/pic.h>
+#include <asm/sclkr.h>
 #include <asm/kvm.h>
 #include <asm/kvm_host.h>
 #include <asm/kvm/cpu_hv_regs_access.h>
@@ -57,9 +58,12 @@ host_machdep_t host_machine __ro_after_init;
 #ifdef	CONFIG_KVM_HOST_MODE
 
 #define CREATE_TRACE_POINTS
-#include <asm/kvm/trace_kvm.h>
-#include <asm/kvm/trace_kvm_pv.h>
-#include <asm/kvm/trace_kvm_hv.h>
+# include "trace-gmm.h"
+# include <asm/kvm/trace_kvm.h>
+# include <asm/kvm/trace_kvm_hv.h>
+# ifdef CONFIG_KVM_PARAVIRTUALIZATION
+#  include <asm/kvm/trace_kvm_pv.h>
+# endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 #undef	CREATE_TRACE_POINTS
 
 #include "user_area.h"
@@ -75,7 +79,7 @@ host_machdep_t host_machine __ro_after_init;
 #include "time.h"
 #include "lt.h"
 #include "spmc.h"
-#include "gaccess.h"
+#include "paravirt_sw/gaccess.h"
 
 #undef	DEBUG_KVM_MODE
 #undef	DebugKVM
@@ -182,7 +186,9 @@ static int kvm_reset_error = 0;
 
 static int kvm_arch_pv_vcpu_init(struct kvm_vcpu *vcpu);
 static void kvm_arch_pv_vcpu_uninit(struct kvm_vcpu *vcpu);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static int kvm_arch_pv_vcpu_setup(struct kvm_vcpu *vcpu);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 static int kvm_arch_hv_vcpu_init(struct kvm_vcpu *vcpu);
 static void kvm_arch_hv_vcpu_uninit(struct kvm_vcpu *vcpu);
 static int kvm_arch_hv_vcpu_setup(struct kvm_vcpu *vcpu);
@@ -268,18 +274,6 @@ static bool kvm_cpu_hv_disabled(void)
 	return false;
 }
 
-static bool kvm_is_guest_hv_vm(void)
-{
-	e2k_core_mode_t CORE_MODE;
-
-	CORE_MODE = read_CORE_MODE_reg();
-	if (CORE_MODE.gmi) {
-		DebugKVM("KVM: it is hardware virtualized guest VM\n");
-		return true;
-	}
-	return false;
-}
-
 static bool kvm_is_hv_enable(void)
 {
 	if (!kvm_cpu_has_hv_support()) {
@@ -290,7 +284,7 @@ static bool kvm_is_hv_enable(void)
 		pr_err("KVM: hardware virtualization extentions are disabled\n");
 		return false;
 	}
-	if (kvm_is_guest_hv_vm()) {
+	if (cpu_has(CPU_FEAT_GUEST)) {
 		pr_err("KVM: hardware virtualized guest cannot run nested VM\n");
 		return false;
 	}
@@ -298,16 +292,17 @@ static bool kvm_is_hv_enable(void)
 }
 
 /* Set up CEPIC_EPIC_INT (IPI delivery to inactive guest) */
-static void kvm_setup_cepic_epic_int(void)
+static int kvm_setup_cepic_epic_int(void)
 {
 	int ret, vec = ~0;
 	union cepic_epic_int epic_int;
 	union cepic_ctrl2 ctrl2;
 
-	ret = pic_get_vector_by_name(NULL, "/kvm", "CEPIC EPIC interrupt", &vec);
-	if (ret)
+	ret = pic_get_vector_by_name(NULL, "/kvm", "CEPIC EPIC interrupts", &vec);
+	if (ret) {
 		pr_err("Failed to get cepic-epic vector: %d\n", ret);
-	BUG_ON(ret);
+		return ret;
+	}
 
 	epic_int.raw = 0;
 	epic_int.vect = vec;
@@ -319,6 +314,8 @@ static void kvm_setup_cepic_epic_int(void)
 	ctrl2.raw = epic_read_w(CEPIC_CTRL2);
 	ctrl2.int_hv = 1;
 	epic_write_w(CEPIC_CTRL2, ctrl2.raw);
+
+	return 0;
 }
 
 static cpumask_t kvm_e2k_hardware_enabled;
@@ -340,9 +337,25 @@ static void prepic_set_virt_en(bool on)
 		 (on) ? "Enabled" : "Disabled", epic_bgi_mode);
 }
 
-static void kvm_hardware_virt_enable(void)
+static int kvm_hardware_virt_enable(void)
 {
 	e2k_core_mode_t CORE_MODE;
+	int ret;
+
+	if (cpu_has(CPU_FEAT_EPIC)) {
+		bool was_disabled = cpumask_empty(&kvm_e2k_hardware_enabled);
+		if (was_disabled)
+			prepic_set_virt_en(true);
+
+		kvm_epic_timer_stop(true);
+
+		ret = kvm_setup_cepic_epic_int();
+		if (ret) {
+			if (was_disabled)
+				prepic_set_virt_en(false);
+			return ret;
+		}
+	}
 
 	/* set guest CORE_MODE register to allow of guest mode indicator */
 	/* for guest kernels, so any VM software can see guest mode */
@@ -352,36 +365,25 @@ static void kvm_hardware_virt_enable(void)
 	write_SH_CORE_MODE_reg(CORE_MODE);
 
 	DebugKVM("KVM: CPU #%d: set guest CORE_MODE to indicate guest mode on any VMs\n",
-	     raw_smp_processor_id());
+			smp_processor_id());
 
 	write_HCEM_reg_value(user_hcall_init());
 	write_HCEB_reg_value((unsigned long)__hypercalls_begin);
 
-	if (cpu_has(CPU_FEAT_EPIC)) {
-		if (cpumask_empty(&kvm_e2k_hardware_enabled))
-			prepic_set_virt_en(true);
+	cpumask_set_cpu(smp_processor_id(), &kvm_e2k_hardware_enabled);
 
-		kvm_epic_timer_stop(true);
-		kvm_setup_cepic_epic_int();
-	}
-
-	cpumask_set_cpu(raw_smp_processor_id(), &kvm_e2k_hardware_enabled);
+	return 0;
 }
 
 static void kvm_hardware_virt_disable(void)
 {
-	if (unlikely(!list_empty(&vm_list))) {
-		pr_warn_once("KVM: unable to disable E2K hardware virt extensions, while VMs are running\n");
-		return;
-	}
-
-	cpumask_clear_cpu(raw_smp_processor_id(), &kvm_e2k_hardware_enabled);
+	cpumask_clear_cpu(smp_processor_id(), &kvm_e2k_hardware_enabled);
 
 	write_HCEM_reg_value(0);
 	write_HCEB_reg_value(0);
 
-	if (cpu_has(CPU_FEAT_EPIC) && cpumask_empty(&kvm_e2k_hardware_enabled))
-		prepic_set_virt_en(false);
+	/* Since PREPIC might be in use right now, we cannot
+	 * call `prepic_set_virt_en(false)` here. */
 }
 #else /* ! CONFIG_KVM_HW_VIRTUALIZATION */
 static bool kvm_is_hv_enable(void)
@@ -390,9 +392,10 @@ static bool kvm_is_hv_enable(void)
 	return false;
 }
 
-static void kvm_hardware_virt_enable(void)
+static int kvm_hardware_virt_enable(void)
 {
 	pr_err("KVM: hardware virtualization mode is turned OFF at kernel config\n");
+	return -ENOTSUPP;
 }
 
 static void kvm_hardware_virt_disable(void)
@@ -444,7 +447,7 @@ int kvm_arch_vcpu_precreate(struct kvm *kvm, unsigned int id)
 int kvm_arch_hardware_enable(void)
 {
 	if (kvm_is_hv_vm_available() || kvm_is_hw_pv_vm_available())
-		kvm_hardware_virt_enable();
+		return kvm_hardware_virt_enable();
 	return 0;
 }
 
@@ -478,8 +481,6 @@ int kvm_arch_check_processor_compat(void *opaque)
 		return 0;
 }
 
-#ifdef	CONFIG_KVM_PARAVIRTUALIZATION
-
 static int create_vcpu_state(struct kvm_vcpu *vcpu)
 {
 	struct kvm *kvm = vcpu->kvm;
@@ -494,13 +495,18 @@ static int create_vcpu_state(struct kvm_vcpu *vcpu)
 	DebugKVM("started for VCPU %d\n", vcpu->vcpu_id);
 	npages = PAGE_ALIGN(sizeof(kvm_vcpu_state_t)) >> PAGE_SHIFT;
 	size = (npages << PAGE_SHIFT);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (vcpu->arch.is_pv) {
 		cut_size = sizeof(*cute_p) * MAX_GUEST_CODES_UNITS;
 		size += PAGE_ALIGN(cut_size);
 	} else {
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 		cut_size = 0;
 		vcpu->arch.guest_cut = NULL;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
+//TODO should not be needed on hv
 	guest_area = kvm_find_memory_region(kvm, -1, 0, size, guest_vram_mem_type);
 	if (guest_area == NULL) {
 		DebugKVM("guest memory regions is not created or empty\n");
@@ -637,20 +643,7 @@ static void free_vcpu_state(struct kvm_vcpu *vcpu)
 		user_area_free_chunk(guest_area, vcpu->arch.guest_cut);
 		vcpu->arch.guest_cut = NULL;
 	}
-
 }
-#else /* ! CONFIG_KVM_PARAVIRTUALIZATION */
-static int create_vcpu_state(struct kvm_vcpu *vcpu)
-{
-	VM_BUG_ON(vcpu->arch.is_pv);
-	return 0;
-}
-
-static void free_vcpu_state(struct kvm_vcpu *vcpu)
-{
-	VM_BUG_ON(vcpu->arch.is_pv);
-}
-#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 /*
  * Functions to create all kernel backup hardware stacks(PS & PCS)
@@ -1040,6 +1033,7 @@ static int init_vcpu_boot_stacks(struct kvm_vcpu *vcpu)
 	return 0;
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static int create_vcpu_host_context(struct kvm_vcpu *vcpu)
 {
 	kvm_host_context_t *host_ctxt = &vcpu->arch.host_ctxt;
@@ -1101,6 +1095,7 @@ static void destroy_vcpu_host_context(struct kvm_vcpu *vcpu)
 		host_ctxt->stack = NULL;
 	}
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static int kvm_arch_any_vcpu_init(struct kvm_vcpu *vcpu)
 {
@@ -1185,29 +1180,31 @@ static void kvm_arch_hv_vcpu_uninit(struct kvm_vcpu *vcpu)
 		return;
 
 	DebugKVM("started for VCPU #%d\n", vcpu->vcpu_id);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (vcpu->arch.is_pv)
 		/* paravirtualization support need free and disable */
 		kvm_arch_pv_vcpu_uninit(vcpu);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	vcpu->arch.is_hv = false;
 }
 
 static int kvm_arch_hv_vcpu_setup(struct kvm_vcpu *vcpu)
 {
-	int r;
-
 	if (!vcpu->arch.is_hv)
 		return 0;
 
 	DebugKVM("started for VCPU #%d\n", vcpu->vcpu_id);
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (vcpu->arch.is_pv) {
 		/* paravirtualization support need create and enable */
-		r = kvm_arch_pv_vcpu_setup(vcpu);
+		int r = kvm_arch_pv_vcpu_setup(vcpu);
 		if (r != 0) {
 			return r;
 		}
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	return 0;
 }
@@ -1275,12 +1272,6 @@ static void kvm_arch_pv_vcpu_uninit(struct kvm_vcpu *vcpu)
 {
 	VM_BUG_ON(vcpu->arch.is_pv);
 }
-
-static int kvm_arch_pv_vcpu_setup(struct kvm_vcpu *vcpu)
-{
-	VM_BUG_ON(vcpu->arch.is_pv);
-	return 0;
-}
 #endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static void kvm_arch_vcpu_ctxt_init(struct kvm_vcpu *vcpu)
@@ -1294,9 +1285,6 @@ static void kvm_arch_vcpu_ctxt_init(struct kvm_vcpu *vcpu)
 
 	if (vcpu->arch.is_hv) {
 		guest_hw_stack_t *boot_regs = &vcpu->arch.boot_stacks.regs;
-
-		/* set to initial state some fields */
-		sw_ctxt->saved.valid = false;
 
 		/* setup guest boot kernel local data stack */
 		sw_ctxt->usd = boot_regs->stacks.usd;
@@ -1382,6 +1370,10 @@ int kvm_vm_ioctl_check_extension(struct kvm *kvm, int ext)
 		} else {
 			r = kvm_is_shadow_pt_enable(kvm);
 		}
+		break;
+	case KVM_CAP_E2K_SIC_NBSR_ISET:
+		DebugKVM("ioctl is KVM_CAP_E2K_SIC_NBSR_ISET\n");
+		r = kvm_is_sic_nbsr_iset_available();
 		break;
 	case KVM_CAP_ENABLE_CAP_VM:
 		r = 1;
@@ -1607,6 +1599,7 @@ static int kvm_handle_exit(struct kvm_run *kvm_run, struct kvm_vcpu *vcpu)
 	return 0;
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static int pv_vcpu_run(struct kvm_vcpu *vcpu, struct kvm_run *kvm_run)
 {
 	int r;
@@ -1677,6 +1670,12 @@ vm_interrupted:
 	kvm_run->exit_reason = KVM_EXIT_INTR;
 	return r;
 }
+#else
+static int pv_vcpu_run(struct kvm_vcpu *vcpu, struct kvm_run *kvm_run)
+{
+	return -ENOTSUPP;
+}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static int hv_vcpu_run(struct kvm_vcpu *vcpu, struct kvm_run *kvm_run)
 {
@@ -1764,7 +1763,7 @@ static int kvm_complete_userspace_io(struct kvm_vcpu *vcpu, struct kvm_run *kvm_
 			frag_gpa += len;
 			frag_len -= len;
 
-			DebugKVMIO("Reexecuting MMIO: gpa 0x%llx data 0x%llx len %d is_write %d\n",
+			DebugKVMIO("Reexecuting MMIO: gpa 0x%llx data 0x%px len %d is_write %d\n",
 			     frag_gpa, frag_data, frag_len,
 			     vcpu->mmio_is_write);
 
@@ -1889,7 +1888,6 @@ static void setup_guest_features(struct kvm *kvm)
 static int kvm_setup_guest_info(struct kvm *kvm, void __user *user_info)
 {
 	kvm_guest_info_t *guest_info = &kvm->arch.guest_info;
-	int ret;
 
 	if (copy_from_user(guest_info, user_info, sizeof(*guest_info)))
 		return -EFAULT;
@@ -1922,14 +1920,16 @@ static int kvm_setup_guest_info(struct kvm *kvm, void __user *user_info)
 		}
 	}
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (guest_info->is_pv) {
 		/* guest is paravirtualized and cannot be run as bare  */
-		ret = kvm_disable_tdp_mode(kvm);
+		int ret = kvm_disable_tdp_mode(kvm);
 		if (ret)
 			return ret;
 		pr_info("%s(): guest is paravirtualized and  cannot be run in TDP mode, so mode is disabled\n",
 			__func__);
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	setup_guest_features(kvm);
 
@@ -1987,6 +1987,22 @@ static void kvm_free_passthrough(struct kvm *kvm)
 	kvm_free_legacy_vga_passthrough(kvm);
 }
 
+static void kvm_arch_init_vm_mmap(struct kvm *kvm)
+{
+	kvm->arch.shadow_pt_enable = true;
+#ifdef	CONFIG_KVM_PHYS_PT_ENABLE
+	kvm->arch.phys_pt_enable = kvm->arch.is_hv;
+#ifdef	CONFIG_KVM_TDP_ENABLE
+	kvm->arch.tdp_enable = kvm->arch.phys_pt_enable;
+#else /* ! CONFIG_KVM_TDP_ENABLE */
+	kvm->arch.tdp_enable = false;
+#endif /* CONFIG_KVM_TDP_ENABLE */
+#else /* ! CONFIG_KVM_PHYS_PT_ENABLE */
+	kvm->arch.phys_pt_enable = false;
+	kvm->arch.tdp_enable = false;
+#endif /* CONFIG_KVM_PHYS_PT_ENABLE */
+}
+
 int kvm_arch_init_vm(struct kvm *kvm, unsigned long vm_type)
 {
 	struct task_struct *p;
@@ -2003,8 +2019,10 @@ int kvm_arch_init_vm(struct kvm *kvm, unsigned long vm_type)
 
 	vm_type &= KVM_E2K_VM_TYPE_MASK;
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (kvm_is_sv_vm_available() || kvm_is_sw_pv_vm_available())
 		kvm->arch.is_pv = true;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	if (kvm_is_hv_vm_available() || kvm_is_hw_pv_vm_available())
 		kvm->arch.is_hv = true;
 
@@ -2014,11 +2032,14 @@ int kvm_arch_init_vm(struct kvm *kvm, unsigned long vm_type)
 			vm_type = KVM_E2K_HW_PV_VM_TYPE;
 		else if (kvm_is_hv_vm_available())
 			vm_type = KVM_E2K_HV_VM_TYPE;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 		else if (kvm_is_sw_pv_vm_available())
 			vm_type = KVM_E2K_SW_PV_VM_TYPE;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 		DebugKVM("will be created VM type %ld\n", vm_type);
 	} else {
 		switch (vm_type) {
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 		case KVM_E2K_SV_VM_TYPE:
 			if (!kvm_is_sv_vm_available())
 				return -EINVAL;
@@ -2029,10 +2050,13 @@ int kvm_arch_init_vm(struct kvm *kvm, unsigned long vm_type)
 				return -EINVAL;
 			kvm->arch.is_hv = false;
 			break;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 		case KVM_E2K_HV_VM_TYPE:
 			if (!kvm_is_hv_vm_available())
 				return -EINVAL;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 			kvm->arch.is_pv = false;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 			break;
 		case KVM_E2K_HW_PV_VM_TYPE:
 			if (!kvm_is_hw_pv_vm_available())
@@ -2057,6 +2081,7 @@ int kvm_arch_init_vm(struct kvm *kvm, unsigned long vm_type)
 		task_thread_info(p)->virt_machine = kvm;
 	rcu_read_unlock();
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (kvm->arch.is_pv && !kvm->arch.is_hv) {
 		err = kvm_pv_guest_thread_info_init(kvm);
 		if (err)
@@ -2066,6 +2091,7 @@ int kvm_arch_init_vm(struct kvm *kvm, unsigned long vm_type)
 		if (err)
 			goto error_gmm;
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	kvm_page_track_init(kvm);
 	kvm_mmu_init_vm(kvm);
@@ -2092,6 +2118,7 @@ int kvm_arch_init_vm(struct kvm *kvm, unsigned long vm_type)
 	kvm->arch.halted = false;
 	atomic_set(&kvm->arch.vcpus_to_reset, 0);
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	err = kvm_boot_spinlock_init(kvm);
 	if (err)
 		goto error_gmm;
@@ -2102,33 +2129,36 @@ int kvm_arch_init_vm(struct kvm *kvm, unsigned long vm_type)
 	if (err)
 		goto error_spinlock;
 
-	kvm->arch.num_sclkr_run = 0;
-	if (CURRENT_ISET == E2K_ISET_V7) {
-		kvm->arch.hst_t_off = read_SH_T_off_reg();
-	} else {
-		kvm->arch.hst_t_off = read_SH_SCLKM3_reg_value();
-	}
-	kvm->arch.vcpus_idl_tm = 0;
-	kvm->arch.hst_t_leave = 0;
-	raw_spin_lock_init(&kvm->arch.sh_sclkr_lock);
-
 	if (!kvm->arch.is_hv && kvm->arch.is_pv && capable(CAP_SYS_ADMIN)) {
 		set_kvm_mode_flag(kvm, KVMF_PRIV_HCALL_ENABLE);
 	} else {
 		clear_kvm_mode_flag(kvm, KVMF_PRIV_HCALL_ENABLE);
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
+
+	if (CURRENT_ISET == E2K_ISET_V7) {
+		kvm->arch.hst_t_off = read_SH_T_off_reg();
+	} else {
+		kvm->arch.hst_t_off = read_SH_SCLKM3_reg_value();
+	}
+
+	kvm->arch.raw_clock_offset = -(s64) ktime_get_raw_ns();
 
 	return 0;
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 error_spinlock:
 	kvm_guest_spinlock_destroy(kvm);
 error_boot_spinlock:
 	kvm_boot_spinlock_destroy(kvm);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 error_gmm:
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (kvm->arch.is_pv && !kvm->arch.is_hv) {
 		kvm_pv_guest_thread_info_destroy(kvm);
 	}
 error_gti:
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	rcu_read_lock();
 	for_each_thread(current, p)
 		task_thread_info(p)->virt_machine = NULL;
@@ -2146,6 +2176,7 @@ static void setup_kvm_features(struct kvm *kvm)
 		features |= (KVM_FEAT_HV_CPU_MASK | KVM_FEAT_HW_HCALL_MASK);
 		features |= KVM_FEAT_HV_MMU_MASK;
 	}
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (kvm->arch.is_pv) {
 		features |= KVM_FEAT_PV_CPU_MASK;
 	}
@@ -2153,6 +2184,7 @@ static void setup_kvm_features(struct kvm *kvm)
 		/* hypervisor (can) support only paravirtualization */
 		features |= (KVM_FEAT_PV_HCALL_MASK | KVM_FEAT_PV_MMU_MASK);
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	if (kvm_is_epic(kvm)) {
 		if (kvm->arch.is_hv && cpu_has(CPU_FEAT_EPIC))
 			features |= KVM_FEAT_HV_EPIC_MASK;
@@ -2168,15 +2200,14 @@ static void setup_kvm_features(struct kvm *kvm)
 
 static void kvm_setup_host_info(struct kvm *kvm)
 {
-	kvm->arch.kmap_host_info->mach_id = native_machine_id;
-	kvm->arch.kmap_host_info->cpu_rev = machine.native_rev;
-	kvm->arch.kmap_host_info->cpu_iset = machine.native_iset_ver;
-	kvm->arch.kmap_host_info->support_hw_hc =
-	    machine.native_iset_ver >= E2K_ISET_V6;
-	if (machine.native_iset_ver >= E2K_ISET_V6 && mmu_features.mmu_pt_v6)
-		kvm->arch.kmap_host_info->mmu_support_pt_v6 = true;
-	else
-		kvm->arch.kmap_host_info->mmu_support_pt_v6 = false;
+	kvm_host_info_t *info = kvm->arch.kmap_host_info;
+	info->mach_id = native_machine_id;
+	info->cpu_rev = machine.native_rev;
+	info->cpu_iset = machine.native_iset_ver;
+	info->support_hw_hc = machine.native_iset_ver >= E2K_ISET_V6;
+	info->mmu_support_pt_v6 = machine.native_iset_ver >= E2K_ISET_V6 &&
+				  cpu_has(CPU_FEAT_PAGE_TABLE_V6);
+
 	setup_kvm_features(kvm);
 	kvm_update_guest_time(kvm);
 }
@@ -2404,7 +2435,11 @@ long kvm_arch_vm_ioctl(struct file *filp, unsigned int ioctl, unsigned long arg)
 		break;
 	case KVM_CREATE_SIC_NBSR:
 		DebugKVMIOCTL("ioctl is KVM_CREATE_SIC_NBSR\n");
-		r = kvm_nbsr_init(kvm);
+		r = kvm_nbsr_init(kvm, E2K_ISET_V6);
+		break;
+	case KVM_CREATE_SIC_NBSR_ISET:
+		DebugKVMIOCTL("ioctl is KVM_CREATE_SIC_NBSR_ISET with param 0x%lx\n", arg);
+		r = kvm_nbsr_init(kvm, arg);
 		break;
 #ifdef KVM_HAVE_GET_SET_IRQCHIP
 	case KVM_GET_IRQCHIP:{
@@ -2495,13 +2530,13 @@ long kvm_arch_vm_ioctl(struct file *filp, unsigned int ioctl, unsigned long arg)
 		if (r)
 			goto out;
 
-			r = -EFAULT;
-			if (copy_to_user(argp, &nbsr,
-					 sizeof(struct kvm_guest_nbsr_state)))
-				goto out;
-			r = 0;
-			break;
-		}
+		r = -EFAULT;
+		if (copy_to_user(argp, &nbsr,
+					sizeof(struct kvm_guest_nbsr_state)))
+			goto out;
+		r = 0;
+		break;
+	}
 	default:
 		DebugKVM("ioctl is not supported\n");
 		;
@@ -2598,12 +2633,14 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 	if (r != 0)
 		goto free_backup;
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (!vcpu->arch.is_hv) {
 		/* create the host VCPU context for multi-threading */
 		r = create_vcpu_host_context(vcpu);
 		if (r != 0)
 			goto free_boot;
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	/* Now that stacks are allocated, we can set
 	 * initialize stack registers values for guest */
@@ -2645,8 +2682,10 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 mmu_destroy:
 	vcpu_mmu_destroy(vcpu);
 free_host:
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	destroy_vcpu_host_context(vcpu);
 free_boot:
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	free_vcpu_boot_stacks(vcpu);
 free_backup:
 	free_kernel_backup_stacks(vcpu, &vcpu->arch.hypv_backup);
@@ -2680,12 +2719,14 @@ int kvm_arch_vcpu_setup(struct kvm_vcpu *vcpu)
 
 	vcpu_load(vcpu);
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (vcpu->kvm->arch.vm_type == KVM_E2K_SV_VM_TYPE ||
 	    vcpu->kvm->arch.vm_type == KVM_E2K_SW_PV_VM_TYPE) {
 		r = kvm_arch_pv_vcpu_setup(vcpu);
 		if (r != 0)
 			goto error;
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	if (vcpu->kvm->arch.vm_type == KVM_E2K_HV_VM_TYPE ||
 	    vcpu->kvm->arch.vm_type == KVM_E2K_HW_PV_VM_TYPE) {
@@ -2731,6 +2772,7 @@ static void reset_guest_vcpu_state(struct kvm_vcpu *vcpu)
 
 	vcpu->arch.guest_vcpu_state = TO_GUEST_VCPU_STATE_PHYS_POINTER(vcpu);
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (vcpu->arch.is_pv)
 		kvm_reset_cpu_state_idr(vcpu);
 
@@ -2742,6 +2784,7 @@ static void reset_guest_vcpu_state(struct kvm_vcpu *vcpu)
 	kvm_reset_mmu_state(vcpu);
 
 out:
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	DebugKVM("VCPU #%d : setting host info structure at %px\n",
 		 vcpu->vcpu_id, host_info);
 }
@@ -2781,8 +2824,10 @@ void reset_cepic_state(struct kvm_vcpu *vcpu)
 	DebugKVM("started for VCPU %d\n", vcpu->vcpu_id);
 	if (vcpu->arch.epic)
 		kvm_cepic_reset(vcpu);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (vcpu->arch.is_pv)
 		kvm_reset_guest_cepic_virqs_num(vcpu);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 }
 
 void reset_lapic_state(struct kvm_vcpu *vcpu)
@@ -2876,9 +2921,9 @@ static int reset_guest_boot_cut(struct kvm_vcpu *vcpu)
 				sizeof(*vcpu_state)))
 		return -EFAULT;
 
-	DebugKVM("created guest CUT entry #%ld from 0x%lx size 0x%lx at %px\n",
+	DebugKVM("created guest CUT entry #%ld from 0x%llx size 0x%lx at %px\n",
 		 GUEST_CODES_INDEX,
-		 (void *)kvm_vcpu_hva_to_gpa(vcpu, (unsigned long)vcpu_state),
+		 kvm_vcpu_hva_to_gpa(vcpu, (unsigned long)vcpu_state),
 		 sizeof(*vcpu_state), cute_p);
 
 	return 0;
@@ -2886,18 +2931,18 @@ static int reset_guest_boot_cut(struct kvm_vcpu *vcpu)
 
 static int kvm_setup_vcpu_thread(struct kvm_vcpu *vcpu)
 {
-	int ret;
+	int ret = 0;
 
 	DebugKVM("started to start guest kernel on VCPU %d\n", vcpu->vcpu_id);
 
-	if (vcpu->arch.is_hv) {
-		ret = hv_vcpu_setup_thread(vcpu);
-	} else if (vcpu->arch.is_pv) {
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+	if (vcpu->arch.is_pv) {
 		ret = pv_vcpu_setup_thread(vcpu);
-	} else {
+	} else if (!vcpu->arch.is_hv) {
 		E2K_KVM_BUG_ON(true);
 		ret = -EINVAL;
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	kvm_init_clockdev(vcpu);
 
@@ -2912,8 +2957,10 @@ static int kvm_prepare_vcpu_start_stacks(struct kvm_vcpu *vcpu)
 
 	if (vcpu->arch.is_hv) {
 		ret = kvm_prepare_hv_vcpu_start_stacks(vcpu);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	} else if (vcpu->arch.is_pv) {
 		ret = kvm_prepare_pv_vcpu_start_stacks(vcpu);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	} else {
 		E2K_KVM_BUG_ON(true);
 		ret = -EINVAL;
@@ -2926,12 +2973,12 @@ static void init_vcpu_intc_ctxt(struct kvm_vcpu *vcpu)
 	if (vcpu->arch.is_hv) {
 		/* interceptions is supported by hardware */
 		init_hv_vcpu_intc_ctxt(vcpu);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	} else if (vcpu->arch.is_pv) {
 		/* interceptions is not supported by hardware */
 		/* but emulated by software paravirtualization */
 		init_pv_vcpu_intc_ctxt(vcpu);
-	} else {
-		E2K_KVM_BUG_ON(true);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	}
 }
 
@@ -2941,10 +2988,10 @@ static void write_hw_ctxt_to_vcpu_registers(struct kvm_vcpu *vcpu, const struct 
 {
 	if (vcpu->arch.is_hv) {
 		write_hw_ctxt_to_hv_vcpu_registers(vcpu, hw_ctxt, sw_ctxt);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	} else if (vcpu->arch.is_pv) {
 		write_hw_ctxt_to_pv_vcpu_registers(vcpu, hw_ctxt, sw_ctxt);
-	} else {
-		E2K_KVM_BUG_ON(true);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	}
 }
 
@@ -2991,10 +3038,10 @@ static void init_hw_ctxt(struct kvm_vcpu *vcpu)
 {
 	vcpu_boot_stack_t *boot_stacks = &vcpu->arch.boot_stacks;
 	guest_hw_stack_t *boot_regs = &boot_stacks->regs;
-	kvm_guest_info_t *guest_info = &vcpu->kvm->arch.guest_info;
 	struct kvm_hw_cpu_context *hw_ctxt = &vcpu->arch.hw_ctxt;
+	struct kvm_arch *kvm = &vcpu->kvm->arch;
 	epic_page_t *cepic = hw_ctxt->cepic;
-	virt_ctrl_cu_t cu;
+	virt_ctrl_cu_t virt_ctrl_cu;
 	union cepic_ctrl epic_reg_ctrl;
 	union cepic_esr2 epic_reg_esr2;
 	union cepic_timer_lvtt epic_reg_timer_lvtt;
@@ -3011,14 +3058,13 @@ static void init_hw_ctxt(struct kvm_vcpu *vcpu)
 	init_backup_hw_ctxt(vcpu);
 
 	/* set shadow WD state to initial value */
-	hw_ctxt->sh_wd = (e2k_wd_t) {
-	0};
+	hw_ctxt->sh_wd = (e2k_wd_t) { 0 };
 
 	/* MMU shadow context registers state */
 	hw_ctxt->sh_mmu_cr = vcpu->arch.mmu.init_sh_mmu_cr;
 	hw_ctxt->sh_pid = vcpu->arch.mmu.init_sh_pid;
 
-	hw_ctxt->gid = vcpu->kvm->arch.vmid.nr;
+	hw_ctxt->gid = kvm->vmid.nr;
 
 	/*
 	 * CPU shadow context
@@ -3028,30 +3074,41 @@ static void init_hw_ctxt(struct kvm_vcpu *vcpu)
 	/* physical base of guest kernel image
 	   oscud = kvm_get_guest_vcpu_OSCUD(vcpu);
 	 */
-	if (vcpu->arch.is_hv || vcpu->arch.is_pv) {
-		/* guest image state should be saved */
-		/* by kvm_set_hv_kernel_image() */
-		init_guest_image_hw_ctxt(vcpu, hw_ctxt);
-	} else {
-		E2K_KVM_BUG_ON(true);
-	}
+
+	/* guest image state should be saved */
+	/* by kvm_set_hv_kernel_image() */
+	init_guest_image_hw_ctxt(vcpu, hw_ctxt);
 
 	/* FIXME: guest now use paravirtualized register (in memory) */
 	/* so set shadow OSR0 to host current_thread_info() to enable */
 	/* host trap handler
 	   osr0 = kvm_get_guest_vcpu_OSR0_value(vcpu);
 	 */
+#ifdef CONFIG_CPU_HAS_OSR1
 	if (vcpu->arch.is_hv) {
 		hw_ctxt->sh_osr0 = 0;
+		hw_ctxt->sh_osr1 = 0;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+	} else if (vcpu->arch.is_pv) {
+		hw_ctxt->sh_osr0 = 0;
+		hw_ctxt->sh_osr1 = (u64) current_thread_info();
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
+	}
+#else
+	if (vcpu->arch.is_hv) {
+		hw_ctxt->sh_osr0 = 0;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	} else if (vcpu->arch.is_pv) {
 		hw_ctxt->sh_osr0 = (u64) current_thread_info();
-	} else {
-		E2K_KVM_BUG_ON(true);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	}
+#endif
 	if (vcpu->arch.is_hv) {
 		hw_ctxt->sh_core_mode = read_SH_CORE_MODE_reg();
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	} else if (vcpu->arch.is_pv) {
 		hw_ctxt->sh_core_mode = kvm_get_guest_vcpu_CORE_MODE(vcpu);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	} else {
 		E2K_KVM_BUG_ON(true);
 	}
@@ -3073,26 +3130,33 @@ static void init_hw_ctxt(struct kvm_vcpu *vcpu)
 	/*
 	 * VIRT_CTRL_* registers
 	 */
-	AW(cu) = 0;
-	if (guest_info->is_stranger) {
-		/* it need turn ON interceptions on IDR read */
-		cu.rr_idr = 1;
-	} else if (cpu_has(CPU_FEAT_V7_CPU_REGS) &&
-			(!vcpu_descr_v7(vcpu) || !vcpu_getsp_v7(vcpu))) {
-		/*
-		 * host has new format of descriptor-registers,
-		 * but guest has old format of ones.
-		 * turn ON interceptions on IDR read to emulate v6 for guest
-		 */
-		cu.rr_idr = 1;
+	AW(virt_ctrl_cu) = 0;
+	virt_ctrl_cu.rr_idr = 1; /* Must give proper core number */
+
+	/*
+	 * It is assumed that only guest's for iset<v7 are allowed
+	 * to use sclkr (newer guests must switch to esclk).
+	 *
+	 * Hypervisor | guest | rw_sclkr | rr_sclkr | sclk_v6 | rw_sclkm3
+	 * -----------+-------+----------+----------+---------+----------
+	 *      v6    | <=v6  |     1    |   !init  |    X    |    1
+	 *      v7    | <=v6  |     X    |     1    |    1    |    1
+	 *      v7    |   v7  |     X    |     0    |    0    |    1
+	 */
+	if (cpu_has(CPU_FEAT_ISET_V7)) {
+		bool guest_v7 = (kvm->guest_info.cpu_iset >= E2K_ISET_V7);
+		virt_ctrl_cu.since_v7.sclk_v6 = !guest_v7;
+		virt_ctrl_cu.rr_sclkr = !guest_v7;
+	} else {
+		virt_ctrl_cu.v6_only.rw_sclkr = 1;
+		virt_ctrl_cu.rr_sclkr = !use_sclk_sched_clock();
 	}
+	virt_ctrl_cu.rw_sclkm3 = 1;
 
-	cu.rw_sclkr = 1;
-	cu.rw_sclkm3 = 1;
-	cu.virt = 1;
-	cu.hcem = 1;
+	virt_ctrl_cu.virt = 1;
+	virt_ctrl_cu.hcem = 1;
 
-	hw_ctxt->virt_ctrl_cu = cu;
+	hw_ctxt->virt_ctrl_cu = virt_ctrl_cu;
 	hw_ctxt->virt_ctrl_mu = vcpu->arch.mmu.virt_ctrl_mu;
 	hw_ctxt->g_w_imask_mmu_cr = vcpu->arch.mmu.g_w_imask_mmu_cr;
 
@@ -3205,15 +3269,15 @@ static int kvm_start_vcpu_thread(struct kvm_vcpu *vcpu)
 	kvm_prefetch_mmio_areas(vcpu);
 
 	/* Set global registers to empty state as start state of guest */
-	INIT_G_REGS(true);
+	// FIXME	INIT_G_REGS(true);
 	/* Zeroing global registers used by kernel */
-	CLEAR_KERNEL_GREGS_COPY(current_thread_info());
+	// FIXME	CLEAR_KERNEL_GREGS_COPY(current_thread_info());
 	/* Setup guest type special globals registers */
 	if (test_kvm_mode_flag(vcpu->kvm, KVMF_LINTEL)) {
 		kvm_init_lintel_gregs(vcpu);
 	} else {
 		/* Set pointer to VCPU state to enable interface with guest */
-		INIT_HOST_VCPU_STATE_GREG_COPY(current_thread_info(), vcpu);
+		// FIXMEINIT_HOST_VCPU_STATE_GREG_COPY(current_thread_info(), vcpu);
 	}
 
 	vcpu_put(vcpu);
@@ -3247,6 +3311,7 @@ static int kvm_arch_ioctl_reset_vcpu(struct kvm_vcpu *vcpu)
 	vcpu_release_to_reboot(vcpu, order_no);
 
 	if (order_no == 1) {
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 		/* reset VM (common for all VM & VCPUs) */
 		err = kvm_boot_spinlock_init(kvm);
 		if (err)
@@ -3261,11 +3326,14 @@ static int kvm_arch_ioctl_reset_vcpu(struct kvm_vcpu *vcpu)
 			kvm_pv_guest_thread_info_reset(kvm);
 			kvm_guest_pv_mm_reset(kvm);
 		}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 		kvm->arch.halted = false;
 		kvm->arch.reboot = false;
 	}
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	vcpu_boot_spinlock_init(vcpu);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	err = reset_guest_boot_cut(vcpu);
 	if (err)
 		goto out_error;
@@ -3306,7 +3374,7 @@ static void kvm_set_vcpu_kernel_image(struct kvm_vcpu *vcpu,
 	vcpu->arch.guest_base = kernel_base;
 	vcpu->arch.guest_size = kernel_size;
 
-	DebugSHC("Guest kernel image: base 0x%lx, size 0x%lx\n",
+	DebugSHC("Guest kernel image: base 0x%px, size 0x%lx\n",
 		 vcpu->arch.guest_base, vcpu->arch.guest_size);
 
 }
@@ -3327,6 +3395,7 @@ static int kvm_arch_ioctl_vcpu_guest_startup(struct kvm_vcpu *vcpu,
 	kvm_set_vcpu_kernel_image(vcpu,
 				  guest_args.kernel_base,
 				  guest_args.kernel_size);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (vcpu->arch.is_hv) {
 		/* should be always ttable #0 */
 		trap_offset = 0;
@@ -3337,6 +3406,9 @@ static int kvm_arch_ioctl_vcpu_guest_startup(struct kvm_vcpu *vcpu,
 		E2K_KVM_BUG_ON(true);
 		trap_offset = 0;
 	}
+#else
+	trap_offset = 0;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	vcpu->arch.trap_offset = trap_offset;
 	vcpu->arch.trap_entry = vcpu->arch.guest_base + trap_offset;
 	DebugKVM("guest trap table entry  at %px\n", vcpu->arch.trap_entry);
@@ -3618,6 +3690,7 @@ static void master_vcpu_to_reboot(struct kvm_vcpu *vcpu)
 	/* the maseter VCPU releases main KVM structures */
 	kvm_arch_free_all_vcpus_virqs(kvm);
 	kvm_free_all_interrupts(kvm);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	kvm_boot_spinlock_destroy(kvm);
 	kvm_guest_spinlock_destroy(kvm);
 	kvm_guest_csd_lock_destroy(kvm);
@@ -3626,6 +3699,7 @@ static void master_vcpu_to_reboot(struct kvm_vcpu *vcpu)
 		kvm_pv_guest_thread_info_free(kvm);
 		vcpu_clear_signal_stack(vcpu);
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	mmu_free_roots(vcpu, flags);
 
 	kvm_mmu_destroy(kvm);
@@ -3635,9 +3709,11 @@ static void master_vcpu_to_reboot(struct kvm_vcpu *vcpu)
 
 static void slave_vcpu_to_reboot(struct kvm_vcpu *vcpu)
 {
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (unlikely(vcpu->arch.is_pv && !vcpu->arch.is_hv)) {
 		vcpu_clear_signal_stack(vcpu);
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	vcpu_mmu_destroy(vcpu);
 }
 
@@ -3671,9 +3747,11 @@ void kvm_arch_destroy_vm(struct kvm *kvm)
 	 * So PIC, LT, SPMC should be freed first
 	 * FIXME: PIC is currently freed later, in kvm_arch_free_all_vcpus()
 	 */
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (kvm->arch.is_pv && !kvm->arch.is_hv) {
 		kvm_guest_pv_mm_destroy(kvm);
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	kvm_arch_release_all_vcpus(kvm);
 	kvm_halt_all_host_vcpus(kvm);
 	kvm_free_host_info(kvm);
@@ -3681,9 +3759,11 @@ void kvm_arch_destroy_vm(struct kvm *kvm)
 	kvm_iopic_release(kvm);
 	kvm_free_passthrough(kvm);
 	kvm_free_epic_pages(kvm);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	kvm_boot_spinlock_destroy(kvm);
 	kvm_guest_spinlock_destroy(kvm);
 	kvm_guest_csd_lock_destroy(kvm);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	kvm_arch_free_all_vcpus(kvm);
 	kvm_mmu_uninit_vm(kvm);
 	kvm_page_track_cleanup(kvm);
@@ -3693,6 +3773,16 @@ void kvm_arch_destroy_vm(struct kvm *kvm)
 	for_each_thread(current, p)
 		task_thread_info(p)->virt_machine = NULL;
 	rcu_read_unlock();
+}
+
+static void kvm_switch_g_gregs(struct kvm_vcpu *vcpu)
+{
+	volatile struct global_gregs g_gregs;
+
+	machine.save_global_gregs((struct global_gregs *) &g_gregs);
+	machine.restore_global_gregs(&vcpu->arch.sw_ctxt.g_gregs);
+	tagged_memcpy_8(&vcpu->arch.sw_ctxt.g_gregs, (struct global_gregs *) &g_gregs,
+			sizeof(vcpu->arch.sw_ctxt.g_gregs));
 }
 
 void kvm_arch_vcpu_put(struct kvm_vcpu *vcpu, bool schedule)
@@ -3709,13 +3799,14 @@ void kvm_arch_vcpu_put(struct kvm_vcpu *vcpu, bool schedule)
 	if (vcpu->arch.is_hv)
 		machine.save_kvm_context(&vcpu->arch);
 
-	machine.save_gregs_dirty_bgr(&vcpu->arch.sw_ctxt.gregs);
-	machine.restore_gregs(&current->thread.sw_regs.gregs);
+	kvm_switch_g_gregs(vcpu);
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (!schedule && vcpu->arch.is_pv) {
-		/* switch VCPU guset context to host context */
+		/* switch VCPU guest context to host context */
 		pv_vcpu_exit_to_host(vcpu);
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	local_irq_restore(flags);
 
 	/* remember that this thread is thread of the kvm vcpu */
@@ -3766,16 +3857,18 @@ void kvm_arch_vcpu_load(struct kvm_vcpu *vcpu, int cpu, bool schedule)
 	trace_kvm_pid(FROM_VCPU_LOAD, vcpu->kvm->arch.vmid.nr, vcpu->vcpu_id,
 		      read_guest_PID_reg(vcpu));
 
-	machine.save_gregs_dirty_bgr(&current->thread.sw_regs.gregs);
-	machine.restore_gregs(&vcpu->arch.sw_ctxt.gregs);
+	kvm_switch_g_gregs(vcpu);
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (!schedule && vcpu->arch.is_pv) {
 		/* switch VCPU host context to guest context */
 		pv_vcpu_enter_to_guest(vcpu);
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	local_irq_restore(flags);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 void kvm_arch_vcpu_to_wait(struct kvm_vcpu *vcpu)
 {
 	clear_bit(KVM_REQ_KICK, (void *)&vcpu->requests);
@@ -3785,6 +3878,7 @@ void kvm_arch_vcpu_to_run(struct kvm_vcpu *vcpu)
 {
 	set_bit(KVM_REQ_KICK, (void *)&vcpu->requests);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static int kvm_vcpu_ioctl_get_lapic(struct kvm_vcpu *vcpu,
 				    struct kvm_lapic_state *s)
@@ -3841,7 +3935,9 @@ static void kvm_arch_vcpu_uninit(struct kvm_vcpu *vcpu)
 	free_kernel_backup_stacks(vcpu, &vcpu->arch.hypv_backup);
 	/* free VCPU booting stacks */
 	free_vcpu_boot_stacks(vcpu);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	destroy_vcpu_host_context(vcpu);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	kvm_free_local_pic(vcpu);
 	mmu_free_roots(vcpu, flags);
 	vcpu_mmu_destroy(vcpu);
@@ -4150,6 +4246,36 @@ int kvm_arch_prepare_memory_region(struct kvm *kvm,
 	return 0;
 }
 
+void kvm_arch_free_memory_region(struct kvm *kvm,
+				 struct kvm_memory_slot *memslot)
+{
+	unsigned long base_gfn = memslot->base_gfn;
+	unsigned long guest_start = memslot->userspace_addr;
+	unsigned long npages = memslot->npages;
+	unsigned long guest_end = guest_start + (npages << PAGE_SHIFT);
+	user_area_t *guest_area;
+
+	DebugKVM("slot base pfn 0x%lx guest virtual from 0x%lx to 0x%lx\n",
+		 base_gfn, guest_start, guest_end);
+	if (npages == 0)
+		return;
+	if (memslot->userspace_addr == 0) {
+		DebugKVM("slot base gfn 0x%lx size 0x%lx pages is not allocated by user so cannot be freed\n",
+			 base_gfn, npages);
+		return;
+	}
+	guest_area = memslot->arch.guest_areas.area;
+	if (guest_area == NULL) {
+		DebugKVM("slot base gfn 0x%lx guest virtual from 0x%lx to 0x%lx has not guest area support\n",
+			 base_gfn, guest_start, guest_end);
+		return;
+	}
+	user_area_release(guest_area);
+	memslot->arch.guest_areas.area = NULL;
+
+	return;
+}
+
 int kvm_gva_to_memslot_unaliased(struct kvm *kvm, gva_t gva)
 {
 	struct kvm_memslots *slots = kvm_memslots(kvm);
@@ -4209,8 +4335,6 @@ static user_area_t *kvm_do_find_memory_region(struct kvm *kvm,
 	struct kvm_memory_slot *memslot;
 	user_area_t *guest_area;
 	kvm_guest_mem_type_t guest_type;
-	gpa_t base_gpa;
-	e2k_size_t area_size;
 	int id, bkt, as_id, as_id_from, as_id_to;
 	int srcu_idx;
 
@@ -4254,9 +4378,10 @@ static user_area_t *kvm_do_find_memory_region(struct kvm *kvm,
 				continue;
 			}
 			guest_area = memslot->arch.guest_areas.area;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 			if (phys_mem) {
-				base_gpa = gfn_to_gpa(memslot->base_gfn);
-				area_size = guest_area->area_end -
+				gpa_t base_gpa = gfn_to_gpa(memslot->base_gfn);
+				e2k_size_t area_size = guest_area->area_end -
 						guest_area->area_start;
 				if (address < base_gpa ||
 					address + size >
@@ -4276,6 +4401,7 @@ static user_area_t *kvm_do_find_memory_region(struct kvm *kvm,
 				address = guest_area->area_start +
 						(address - base_gpa);
 			}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 			if (address != 0 &&
 				(address < guest_area->area_start ||
 					address >= guest_area->area_end)) {
@@ -4309,8 +4435,10 @@ static user_area_t *kvm_do_find_memory_region(struct kvm *kvm,
 				"at slot #%d\n",
 				guest_area->area_start, guest_area->area_end,
 				memslot->id);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 			if (phys_mem && virt_address != NULL)
 				*virt_address = address;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 			srcu_read_unlock(&kvm->srcu, srcu_idx);
 			return guest_area;
 		}
@@ -4330,6 +4458,7 @@ static user_area_t *kvm_find_memory_region(struct kvm *kvm,
 					 false, /* phys memory ? */ NULL, type);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static user_area_t *kvm_find_phys_memory_region(struct kvm *kvm,
 						int slot, gpa_t gpa,
 						e2k_size_t size,
@@ -4338,17 +4467,20 @@ static user_area_t *kvm_find_phys_memory_region(struct kvm *kvm,
 {
 	return kvm_do_find_memory_region(kvm, slot, gpa, size, true, virt_address, type);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static long kvm_arch_ioctl_alloc_guest_area(struct kvm *kvm,
 					    kvm_guest_area_alloc_t __user *what)
 {
 	kvm_guest_area_alloc_t guest_chunk;
 	user_area_t *guest_area;
-	e2k_addr_t region_addr;
 	e2k_addr_t size;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+	e2k_addr_t region_addr;
 	kvm_guest_mem_type_t type;
 	bool phys_mem = false;
 	unsigned long flags;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	void __user *chunk;
 	int ret = 0;
 
@@ -4362,6 +4494,7 @@ static long kvm_arch_ioctl_alloc_guest_area(struct kvm *kvm,
 		 (guest_chunk.type & guest_vram_mem_type) ? "VRAM" : "RAM",
 		 guest_chunk.align);
 	size = guest_chunk.size;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	type = guest_chunk.type;
 	if (type == 0)
 		type = guest_ram_mem_type;
@@ -4418,6 +4551,34 @@ static long kvm_arch_ioctl_alloc_guest_area(struct kvm *kvm,
 		chunk = user_area_get(guest_area, guest_chunk.start,
 				      guest_chunk.size, guest_chunk.align, flags);
 	}
+#else
+	if (guest_chunk.type || guest_chunk.region || guest_chunk.start ||
+			(guest_chunk.flags & ~KVM_ALLOC_AREA_LOW)) {
+		return -EINVAL;
+	}
+	if (test_kvm_mode_flag(kvm, KVMF_VCPU_STARTED)) {
+		/* VCPUs started and RAM is now allocated by guest */
+		return -ENOMEM;
+	}
+	/* FIXME: mutex cannot be locked here, because of following */
+	/* user_alloc_xxx() functions take this mutex too. */
+	/* Now memory slots only are created and deleted and not updated, */
+	/* so guest_area cannot be updated by someone else and slots_lock */
+	/* mutex can be not locked */
+	/* But some sychronization should be made to use of memory balloon */
+	/* functionality. Probably it can be get_xxx()/put_xxx() -> */
+	/* free_xxx() type mechanism to lock guest_area & memory slot */
+	/* updates */
+/*	mutex_lock(&kvm->slots_lock); */
+	guest_area = kvm_find_memory_region(kvm, -1, 0, size, guest_ram_mem_type);
+	if (guest_area == NULL) {
+		DebugKVM("could not find memory region\n");
+		ret = -EINVAL;
+		goto out_unlock;
+	}
+	chunk = user_area_get(guest_area, guest_chunk.start,
+			      guest_chunk.size, guest_chunk.align, 0);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	if (chunk == NULL) {
 		DebugKVM("could not allocate guest area size of 0x%lx\n",
 			 guest_chunk.size);
@@ -4467,10 +4628,10 @@ long kvm_arch_ioctl_get_guest_address(unsigned long __user *addr)
 	}
 	r = get_user(address, addr);
 	if (r) {
-		DebugKVM("get_user() failed for user address 0x%lx\n", addr);
+		DebugKVM("get_user() failed for user address 0x%px\n", addr);
 		return r;
 	}
-	DebugKVM("started for address 0x%lx\n", addr);
+	DebugKVM("started for address 0x%px\n", addr);
 	switch (address) {
 	case KVM_GUEST_PAGE_OFFSET:
 		DebugKVM("address is KVM_GUEST_PAGE_OFFSET\n");
@@ -4541,7 +4702,7 @@ long kvm_arch_ioctl_get_guest_address(unsigned long __user *addr)
 	DebugKVM("returns address 0x%lx\n", address);
 	r = put_user(address, addr);
 	if (r) {
-		DebugKVM("put_user() failed for user address 0x%lx\n", addr);
+		DebugKVM("put_user() failed for user address 0x%px\n", addr);
 	}
 	DebugKVM("returns with value %ld\n", r);
 	return r;
@@ -4867,25 +5028,25 @@ static int kvm_probe(struct platform_device *pdev)
 			return ret;
 	}
 
-	if (cpu_has_epic()) {
-		ret = of_irq_get_byname(np, "CEPIC EPIC interrupt");
+	if (cpu_has_epic() && !IS_HV_GM()) {
+		ret = of_irq_get_byname(np, "CEPIC EPIC interrupts");
 		if (WARN_ON(ret <= 0))
 			goto err;
 		irq = ret;
 		ret = request_percpu_irq(irq, cepic_epic_interrupt,
-				"CEPIC EPIC interrupt", &kvm_dummy_dev_id);
+				"CEPIC EPIC interrupts", &kvm_dummy_dev_id);
 		if (ret)
 			goto err;
 		cepic_epic_irq = irq;
 	}
 #ifdef CONFIG_KVM_ASYNC_PF
 	if (IS_HV_GM()) {
-		ret = of_irq_get_byname(np, "ASYNC PF WAKE interrupt");
+		ret = of_irq_get_byname(np, "ASYNC PF WAKE interrupts");
 		if (WARN_ON(ret <= 0))
 			goto err;
 		irq = ret;
 		ret = request_percpu_irq(irq, epic_pv_apf_wake,
-				"ASYNC PF WAKE interrupt", &kvm_dummy_dev_id);
+				"ASYNC PF WAKE interrupts", &kvm_dummy_dev_id);
 		if (ret)
 			goto err;
 		pv_apf_wake_irq = irq;

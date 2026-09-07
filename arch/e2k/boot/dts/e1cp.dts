@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: GPL-2.0
  * Copyright (c) 2023 MCST
  */
+
 /dts-v1/;
 /plugin/;
 
@@ -38,16 +39,12 @@
 
 
 &{/} {
-	version = "1.0_2023-07-14";
-	model = "Elbrus-generic";
-	compatible = "mcst,e1cp-generic";
-
 	#address-cells = <CELLS>;
 	#size-cells = <CELLS>;
 
 #define NODE 0
-#include "include/e2s.dtsi"
-#include "include/e2s-node.dtsi"
+#include "include/e2k-v3.dtsi"
+#include "include/e2k-v3-uncore.dtsi"
 
 	PIC: pic@NODE {
 		compatible = "mcst,ioapic";
@@ -84,6 +81,8 @@
 		linux,pci-domain = <NODE>;
 		numa-node-id = <NODE>;
 		msi-parent = <&lmsi>;
+		linux,pci-probe-only = <1>;
+
 		/* devices of bus 0 has no iommu */
 		/*rid-base,iommu,iommu-base,length*/
 		iommu-map = <0 &IOMMU 0 1> /* tranclate 00:00.0 device */,
@@ -152,11 +151,24 @@
 			};
 			pci@2,4 { /*GPIO-MPV controller*/
 				reg = <0x00001400 0 0 0 0>;
-				interrupts =    <6 IRQ_TYPE_LEVEL_HIGH>, /*Mpv_timers0*/
- 						<9 IRQ_TYPE_LEVEL_HIGH>, /*Mpv_timers12*/
- 						<7 IRQ_TYPE_LEVEL_HIGH>, /*GPIO0*/
+				#address-cells = <2>;
+				#size-cells = <1>;
+				/* ranges will added in gpio-mpv driver */
+				L_GPIO: gpio@0 {
+					compatible = "mcst,l-gpio";
+					reg = <0 /*bar 0*/ 0 32>;
+					interrupts =	<7 IRQ_TYPE_LEVEL_HIGH>, /*GPIO0*/
  						<11 IRQ_TYPE_LEVEL_HIGH>; /*GPIO1*/
-				interrupt-names = "mpv0", "mpv1", "gpio0", "gpio1";
+					interrupt-names = "gpio0", "gpio1";
+					ngpios = <32>;
+				};
+				mpv@0 {
+					reg = <1 /*bar 1*/ 0 128>;
+					compatible = "mcst,mpv";
+					interrupts =    < 6 IRQ_TYPE_LEVEL_HIGH>, /*Mpv_timers0*/
+ 						<9 IRQ_TYPE_LEVEL_HIGH>; /*Mpv_timers12*/
+					interrupt-names = "mpv0", "mpv1", "mpv2";
+				};
 			};
 			pci@3,0 { /*SATA controller*/
 				reg = <0x00001800 0 0 0 0>;

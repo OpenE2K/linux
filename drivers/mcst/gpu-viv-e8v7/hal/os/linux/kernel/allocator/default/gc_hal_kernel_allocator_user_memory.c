@@ -139,9 +139,17 @@ static int import_physical_map(gckOS Os, struct device *dev,
 
     if (Os->iommu) {
         dma_addr_t dmaHandle;
+#ifndef CONFIG_MCST
         size_t size = um->size + (phys & (~PAGE_MASK));
         unsigned long pfn = phys >> PAGE_SHIFT;
-
+#endif
+#ifdef CONFIG_MCST/*rm 30374*/
+	unsigned long pa = iommu_iova_to_phys(iommu_get_domain_for_dev(dev),
+					phys);
+	if (WARN_ON(pa == 0))
+		return gcvSTATUS_NOT_FOUND;
+	dmaHandle = phys;
+#else
         if (pfn_valid(pfn))
             dmaHandle = dma_map_page(dev, pfn_to_page(pfn),
                                      0, size, DMA_BIDIRECTIONAL);
@@ -153,10 +161,9 @@ static int import_physical_map(gckOS Os, struct device *dev,
             dmaHandle = dma_map_page(dev, pfn_to_page(pfn),
                                      0, size, DMA_BIDIRECTIONAL);
 #endif
-
         if (dma_mapping_error(dev, dmaHandle))
             return gcvSTATUS_OUT_OF_MEMORY;
-
+#endif /*CONFIG_MCST*/
         um->dmaHandle = dmaHandle;
     }
 
@@ -313,8 +320,11 @@ import_page_map(gckOS Os, struct device *dev, struct um_desc *um,
 
         if (Os->iommu)
             um->dmaHandle = sg_dma_address(um->sgt.sgl);
-
+#ifdef CONFIG_MCST
+        dma_sync_sg_for_cpu(dev, um->sgt.sgl, um->sgt.nents, DMA_TO_DEVICE);
+#else
         dma_sync_sg_for_cpu(dev, um->sgt.sgl, um->sgt.nents, DMA_FROM_DEVICE);
+#endif
     }
 
     um->type = UM_PAGE_MAP;
@@ -524,6 +534,7 @@ static void
 release_physical_map(gckOS Os, struct device *dev, struct um_desc *um)
 {
     if (Os->iommu) {
+#ifndef CONFIG_MCST/*rm 30374*/
         unsigned long pfn = um->physical >> PAGE_SHIFT;
         size_t size = um->size + um->offset;
 
@@ -535,7 +546,7 @@ release_physical_map(gckOS Os, struct device *dev, struct um_desc *um)
 #else
             dma_unmap_page(dev, um->dmaHandle, size, DMA_BIDIRECTIONAL);
 #endif
-
+#endif /*CONFIG_MCST rm 30374*/
         um->dmaHandle = 0;
     }
 }
@@ -547,11 +558,14 @@ release_page_map(gckOS Os, struct device *dev, struct um_desc *um)
 
     if (um->sgt.nents > 0) {
         dma_sync_sg_for_device(dev, um->sgt.sgl, um->sgt.nents, DMA_TO_DEVICE);
-
+#ifdef CONFIG_MCST
+        dma_sync_sg_for_cpu(dev, um->sgt.sgl, um->sgt.nents, DMA_TO_DEVICE);
+        dma_unmap_sg(dev, um->sgt.sgl, um->sgt.nents, DMA_TO_DEVICE);
+#else
         dma_sync_sg_for_cpu(dev, um->sgt.sgl, um->sgt.nents, DMA_FROM_DEVICE);
 
         dma_unmap_sg(dev, um->sgt.sgl, um->sgt.nents, DMA_FROM_DEVICE);
-
+#endif
         um->dmaHandle = 0;
 
 #if gcdUSE_LINUX_SG_TABLE_API
@@ -581,7 +595,11 @@ release_pfn_map(gckOS Os, struct device *dev, struct um_desc *um)
     int i;
 
     if (um->sgt.nents > 0) {
+#ifdef CONFIG_MCST
+        dma_unmap_sg(dev, um->sgt.sgl, um->sgt.nents, DMA_TO_DEVICE);
+#else
         dma_unmap_sg(dev, um->sgt.sgl, um->sgt.nents, DMA_FROM_DEVICE);
+#endif
 
 #if gcdUSE_LINUX_SG_TABLE_API
         sg_free_table(&um->sgt);

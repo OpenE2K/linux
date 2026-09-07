@@ -612,10 +612,17 @@ static unsigned long __thp_get_unmapped_area(struct file *filp,
 
 	if (!IS_ENABLED(CONFIG_64BIT) || in_compat_syscall())
 		return 0;
-
 	if (off_end <= off_align || (off_end - off_align) < size)
 		return 0;
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	if (cpu_has(CPU_FEAT_V7_CPU_REGS) && in_ptr128_syscall()) {
+		unsigned long align_mask = ap_align_mask(len);
+		if (align_mask + 1 > size) {
+			size = align_mask + 1;
+		}
+	}
+#endif
 	len_pad = len + size;
 	if (len_pad < len || (off + len_pad) < off)
 		return 0;

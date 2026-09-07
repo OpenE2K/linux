@@ -2646,6 +2646,9 @@ static const struct block_device_operations pktcdvd_ops = {
 	.release =		pkt_close,
 	.ioctl =		pkt_ioctl,
 	.compat_ioctl =		blkdev_compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl =		pkt_ioctl,
+#endif
 	.check_events =		pkt_check_events,
 	.devnode =		pkt_devnode,
 };

@@ -277,6 +277,25 @@ struct mpt3_ioctl_command {
 	uint8_t mf[1];
 };
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#include <asm/prot_compat.h>
+struct mpt3_ioctl_command128 {
+	struct mpt3_ioctl_header hdr;
+	uint32_t timeout;
+	e2k_ap_t reply_frame_buf_ptr;
+	e2k_ap_t data_in_buf_ptr;
+	e2k_ap_t data_out_buf_ptr;
+	e2k_ap_t sense_data_ptr;
+	uint32_t max_reply_bytes;
+	uint32_t data_in_size;
+	uint32_t data_out_size;
+	uint32_t max_sense_bytes;
+	uint32_t data_sge_offset;
+	uint8_t mf[1];
+};
+#define MPT3COMMAND128	_IOWR(MPT3_MAGIC_NUMBER, _IOC_NR(MPT3COMMAND), struct mpt3_ioctl_command128)
+#endif
+
 #ifdef CONFIG_COMPAT
 struct mpt3_ioctl_command32 {
 	struct mpt3_ioctl_header hdr;

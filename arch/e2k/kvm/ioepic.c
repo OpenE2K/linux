@@ -15,6 +15,7 @@
 #include <asm/page.h>
 #include <asm/current.h>
 #include <asm/e2k_debug.h>
+#include <asm/pic.h>
 #include <asm/sic_regs.h>
 #include <asm/sic_regs_access.h>
 #include <trace/events/kvm.h>
@@ -299,7 +300,7 @@ static int ioepic_passthrough_write(struct kvm *kvm, struct kvm_ioepic *ioepic, 
 		g_rt_msi = kvm->arch.nbsr->nodes[0].regs[offset_to_no(SIC_rt_msi_h)];
 		if (data != g_rt_msi)
 			invalid = true;
-		get_io_epic_msi(node, &rt_msi_lo, &rt_msi_hi);
+		get_io_pic_msi(node, &rt_msi_lo, &rt_msi_hi);
 		data = rt_msi_hi;
 		break;
 	case IOEPIC_TABLE_ADDR_LOW(0):
@@ -310,7 +311,7 @@ static int ioepic_passthrough_write(struct kvm *kvm, struct kvm_ioepic *ioepic, 
 		g_rt_msi = kvm->arch.nbsr->nodes[0].regs[offset_to_no(SIC_rt_msi)];
 		if (data >> E2K_SIC_ALIGN_RT_MSI != g_rt_msi >> E2K_SIC_ALIGN_RT_MSI)
 			invalid = true;
-		get_io_epic_msi(node, &rt_msi_lo, &rt_msi_hi);
+		get_io_pic_msi(node, &rt_msi_lo, &rt_msi_hi);
 		data = rt_msi_lo | (data & (E2K_SIC_SIZE_RT_MSI - 1));
 		break;
 	case IOEPIC_TABLE_INT_CTRL(0):

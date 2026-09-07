@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
 #include "main.h"
 
 /* Freq tables and corresponding f_pll value taken from pcs_freq_calc.xls file

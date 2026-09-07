@@ -1,9 +1,12 @@
 /*
  * SPDX-License-Identifier: GPL-2.0
  * Copyright (c) 2024 MCST
- *
+ */
+
+/*
  * This file contains implementation of esclk clocksource.
  */
+
 #include <linux/clocksource.h>
 #include <linux/cpuidle.h>
 #include <linux/delay.h>
@@ -31,7 +34,8 @@
 #define MASTER_CMD	0xc0000000LL
 
 static int redo_esclk_reset = 0;
-int esclkr_no = 0;
+static int esclkr_no = 0;
+bool esclk_initialized __ro_after_init = false;
 static unsigned long long esclk_step = 10 << 27;	/* hw default step for esclk_clk 100 MHz */
 
 static int __init esclkr_setup(char *s)
@@ -42,16 +46,6 @@ static int __init esclkr_setup(char *s)
 	return 1;
 }
 __setup("esclkr=", esclkr_setup);
-
-#ifndef CONFIG_SCLKR_CLOCKSOURCE
-int redpill = 1;	/* enable host time in guest by defualt */
-static int __init redpill_init(char *str)
-{
-	redpill = simple_strtol(str, NULL, 0);
-	return 0;
-}
-__setup("redpill=", redpill_init);
-#endif
 
 static u64 read_esclk(struct clocksource *cs)
 {
@@ -151,29 +145,34 @@ redo:	redo_esclk_reset = 0;
 	}
 }
 
-#define ESCLK_CSOUR_SHFT	20
-/*   ns = (cyc * mult) >> shift
- * for esclk cyc==ns then 1 = (1 * mult) >> shift */
 struct clocksource clocksource_esclk = {
 	.name		= "esclk",
 	.rating		= 400,
 	.read		= read_esclk,
 	.suspend	= NULL,
 	.resume		= resume_esclk,
-	.mask		= CLOCKSOURCE_MASK(64 - ESCLK_CSOUR_SHFT),
-	.shift		= ESCLK_CSOUR_SHFT,
-	.mult		= 1 << ESCLK_CSOUR_SHFT,
+	.mask		= CLOCKSOURCE_MASK(64),
 	.flags		= CLOCK_SOURCE_IS_CONTINUOUS,
 };
 
 #define DEBUG_ESCLKR_REGISTER	1
 
-static int __init esclk_init(void)
+static int __init esclk_timer_of_register(struct device_node *np)
 {
-	if (cpu_has(CPU_FEAT_ISET_NOT_V7) || esclkr_no)
+	if (IS_HV_GM() && !cpu_has(CPU_FEAT_ISET_V7)) {
+		/* Hardware prohibits esclkr on old guests,
+		 * see description of intc_rr_cu interception. */
+		pr_info("esclk is not supported on old guests\n");
 		return 0;
+	}
 
-	__clocksource_register(&clocksource_esclk);
+	if (esclkr_no) {
+		pr_info("esclk=no is set\n");
+		return 0;
+	}
+
+	clocksource_register_hz(&clocksource_esclk, NSEC_PER_SEC);
+	esclk_initialized = true;
 #if DEBUG_ESCLKR_REGISTER
 	unsigned long long esclk_abs;
 	struct timespec64 ts;
@@ -186,4 +185,11 @@ static int __init esclk_init(void)
 #endif
 	return 0;
 }
-arch_initcall(esclk_init);
+TIMER_OF_DECLARE(esclk_timer, "mcst,esclk-timer", esclk_timer_of_register);
+
+void cpuinfo_esclk(struct seq_file *m)
+{
+	if (use_esclk_sched_clock()) {
+		seq_printf(m, " esclk");
+	}
+}

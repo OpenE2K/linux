@@ -282,7 +282,7 @@ static inline void __iolinks_shift_left(iolinkmask_t *dstp,
 }
 
 /* FIXME: better would be to fix all architectures to never return
-          > MAX_NUMIOLINKS, then the silly min_ts could be dropped. */
+	  > MAX_NUMIOLINKS, then the silly min_ts could be dropped. */
 
 #define first_iolink(src) __first_iolink(&(src))
 static inline int __first_iolink(const iolinkmask_t *srcp)

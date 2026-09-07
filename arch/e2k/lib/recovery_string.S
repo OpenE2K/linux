@@ -3,8 +3,10 @@
  * Copyright (c) 2023 MCST
  */
 
+#include <asm-generic/export.h>
 #include <linux/linkage.h>
 #include <asm/e2k_api.h>
+
 
 .text
 
@@ -404,6 +406,7 @@ SYM_FUNC_START(__recovery_memcpy_8)
 		ct %ctpr3
 	}
 SYM_FUNC_END(__recovery_memcpy_8)
+EXPORT_SYMBOL_GPL(__recovery_memcpy_8)
 
 SYM_FUNC_START(recovery_memcpy_fault)
 	{

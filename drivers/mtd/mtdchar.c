@@ -1332,6 +1332,118 @@ static long mtdchar_compat_ioctl(struct file *file, unsigned int cmd,
 
 #endif /* CONFIG_COMPAT */
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#include <asm/e2k_ptypes.h>
+
+
+struct blkpg_128_ioctl_arg {
+	int op;
+	int flags;
+	int datalen;
+	e2k_ap_t data;
+};
+struct mtd_oob_buf128 {
+	u_int32_t start;
+	u_int32_t length;
+	e2k_ap_t  ptr;	/* unsigned char* */
+};
+
+#define MEMWRITEOOB128		_IOWR('M', 3, struct mtd_oob_buf128)
+#define MEMREADOOB128		_IOWR('M', 4, struct mtd_oob_buf128)
+
+static long mtdchar_ptr128_ioctl(struct file *file, unsigned int cmd,
+	unsigned long arg)
+{
+	struct mtd_file_info *mfi = file->private_data;
+	struct mtd_info *mtd = mfi->mtd;
+	struct mtd_info *master = mtd_get_master(mtd);
+	e2k_ap_t ap;
+	int tag;
+	int ret = 0;
+
+	mutex_lock(&master->master.chrdev_lock);
+
+	switch (cmd) {
+	case MEMWRITEOOB128:
+	{
+		struct mtd_oob_buf128 buf;
+		struct mtd_oob_buf128 __user *buf_user = (void __user *)arg;
+
+		if (!(file->f_mode & FMODE_WRITE)) {
+			ret = -EPERM;
+			break;
+		}
+
+		if (copy_from_user(&buf, buf_user, sizeof(buf))) {
+			ret = -EFAULT;
+			break;
+		}
+		if (get_user_tagged_16(ap.qword, tag, &buf_user->ptr) || !IS_AP(ap, tag) ||
+				AP_OBJ_SIZE(ap) < buf.length) {
+			ret = -EFAULT;
+			break;
+		}
+		set_u_border(MAX_U_BORDER);
+		ret = mtdchar_writeoob(file, mtd, buf.start,
+				buf.length, (void __user *)AP_PTR(ap),
+				&buf_user->length);
+		break;
+	}
+
+	case MEMREADOOB128:
+	{
+		struct mtd_oob_buf128 buf;
+		struct mtd_oob_buf128 __user *buf_user = (void __user *)arg;
+
+		/* NOTE: writes return length to buf->start */
+		if (copy_from_user(&buf, buf_user, sizeof(buf))) {
+			ret = -EFAULT;
+			break;
+		}
+		if (get_user_tagged_16(ap.qword, tag, &buf_user->ptr) || !IS_AP(ap, tag) ||
+				AP_OBJ_SIZE(ap) < buf.length) {
+			ret = -EFAULT;
+			break;
+		}
+		set_u_border(MAX_U_BORDER);
+		ret = mtdchar_readoob(file, mtd, buf.start,
+				buf.length, (void __user *)AP_PTR(ap),
+				&buf_user->start);
+		break;
+	}
+
+	case BLKPG:
+	{
+		struct  blkpg_128_ioctl_arg __user *uarg =
+					(struct  blkpg_128_ioctl_arg __user *)arg;
+		struct blkpg_ioctl_arg a;
+
+		if (copy_from_user(&a, uarg, sizeof(a))) {
+			ret = -EFAULT;
+			break;
+		}
+
+		if (get_user_tagged_16(ap.qword, tag, &uarg->data) || !IS_AP(ap, tag)) {
+			ret = -EFAULT;
+			break;
+		}
+		a.data = (void __user *)AP_PTR(ap);
+		set_ap_u_border(ap);
+
+		ret = mtdchar_blkpg_ioctl(mtd, &a);
+		break;
+	}
+
+	default:
+		ret = mtdchar_ioctl(file, cmd, arg);
+	}
+
+	mutex_unlock(&master->master.chrdev_lock);
+
+	return ret;
+}
+
+#endif /* CONFIG_COMPAT */
 /*
  * try to determine where a shared mapping can be made
  * - only supported for NOMMU at the moment (MMU can't doesn't copy private
@@ -1406,6 +1518,9 @@ static const struct file_operations mtd_fops = {
 	.unlocked_ioctl	= mtdchar_unlocked_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= mtdchar_compat_ioctl,
+#endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = mtdchar_ptr128_ioctl,
 #endif
 	.open		= mtdchar_open,
 	.release	= mtdchar_close,

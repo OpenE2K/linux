@@ -1,20 +1,20 @@
-/* SPDX-License-Identifier: GPL-2.0 */
-#ifndef _ASM_X86_APICDEF_H
-#define _ASM_X86_APICDEF_H
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
+#ifndef _ASM_L_APICDEF_H
+#define _ASM_L_APICDEF_H
 
 /*
- * Constants for various Intel APICs. (local APIC, IOAPIC, etc.)
- *
- * Alan Cox <Alan.Cox@linux.org>, 1995.
- * Ingo Molnar <mingo@redhat.com>, 1999, 2000
+ * Constants for various APICs. (local APIC, IOAPIC, etc.)
  */
 
 #define IO_APIC_DEFAULT_PHYS_BASE	0xfec00000UL
 #define	APIC_DEFAULT_PHYS_BASE		0xfee00000UL
 
 /*
- * This is the IO-APIC register space as specified
- * by Intel docs:
+ * This is the IO-APIC register space as specified by docs:
  */
 #define IO_APIC_SLOT_SIZE		1024
 
@@ -192,7 +192,7 @@
 #define X2APIC_ENABLE	(1UL << 10)
 
 /*
- * All x86-64 systems are xAPIC compatible.
+ * All systems are xAPIC compatible.
  * In the following, "apicid" is a physical APIC ID.
  */
 #define XAPIC_DEST_CPUS_SHIFT	4
@@ -473,4 +473,4 @@ enum apic_delivery_modes {
 	APIC_DELIVERY_MODE_EXTINT	= 7,
 };
 #endif	/* !(__ASSEMBLY__) */
-#endif /* _ASM_X86_APICDEF_H */
+#endif /* _ASM_L_APICDEF_H */

@@ -63,12 +63,6 @@ kvm_is_guest_kernel_gregs(struct thread_info *ti,
 
 #ifdef	CONFIG_KVM_GUEST_KERNEL
 
-static inline int
-guest_addr_to_host(void **addr, const pt_regs_t *regs)
-{
-	return native_guest_addr_to_host(addr);
-}
-
 static inline void __user *
 guest_ptr_to_host(void *ptr, bool is_write, int size, const pt_regs_t *regs)
 {

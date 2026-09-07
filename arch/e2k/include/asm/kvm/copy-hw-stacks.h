@@ -31,6 +31,8 @@
 })
 
 #ifdef	CONFIG_KVM_HOST_MODE
+
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline void
 prepare_pv_vcpu_inject_stacks(struct kvm_vcpu *vcpu, pt_regs_t *regs)
 {
@@ -396,14 +398,6 @@ pv_vcpu_user_hw_stacks_prepare(struct kvm_vcpu *vcpu, pt_regs_t *regs,
 	}
 }
 
-/* Same as for native kernel without virtualization support */
-static __always_inline int
-user_hw_stacks_copy(struct e2k_stacks *stacks,
-		    pt_regs_t *regs, u64 cur_window_q, bool copy_full)
-{
-	return native_user_hw_stacks_copy(stacks, regs, cur_window_q, copy_full);
-}
-
 static __always_inline void
 host_user_hw_stacks_prepare(struct e2k_stacks *stacks, pt_regs_t *regs,
 			    u64 cur_window_q, enum restore_caller from, int syscall)
@@ -420,6 +414,23 @@ host_user_hw_stacks_prepare(struct e2k_stacks *stacks, pt_regs_t *regs,
 	BUG_ON(vcpu == NULL);
 	pv_vcpu_user_hw_stacks_prepare(vcpu, regs, cur_window_q, from, syscall);
 }
+#else
+static __always_inline void
+host_user_hw_stacks_prepare(struct e2k_stacks *stacks, pt_regs_t *regs,
+			    u64 cur_window_q, enum restore_caller from, int syscall)
+{
+	native_user_hw_stacks_prepare(stacks, regs, cur_window_q, from, syscall);
+}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
+
+/* Same as for native kernel without virtualization support */
+static __always_inline int
+user_hw_stacks_copy(struct e2k_stacks *stacks,
+		    pt_regs_t *regs, u64 cur_window_q, bool copy_full)
+{
+	return native_user_hw_stacks_copy(stacks, regs, cur_window_q, copy_full);
+}
+
 #endif /* CONFIG_KVM_HOST_MODE */
 
 #ifdef	CONFIG_KVM_GUEST_KERNEL

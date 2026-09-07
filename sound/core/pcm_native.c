@@ -3992,7 +3992,9 @@ static int snd_pcm_fasync(int fd, struct file * file, int on)
 #else
 #define snd_pcm_ioctl_compat	NULL
 #endif
-
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#include "pcm_ptr128.c"
+#endif
 /*
  *  To be removed helpers to keep binary compatibility
  */
@@ -4147,6 +4149,9 @@ const struct file_operations snd_pcm_f_ops[2] = {
 		.poll =			snd_pcm_poll,
 		.unlocked_ioctl =	snd_pcm_ioctl,
 		.compat_ioctl = 	snd_pcm_ioctl_compat,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+		.ptr128_ioctl =		snd_pcm_ioctl_ptr128,
+#endif
 		.mmap =			snd_pcm_mmap,
 		.fasync =		snd_pcm_fasync,
 		.get_unmapped_area =	snd_pcm_get_unmapped_area,

@@ -943,12 +943,11 @@ TRACE_EVENT(kvm_pid,
 TRACE_EVENT(
 	generic_hcall,
 
-	TP_PROTO(unsigned long hcall_num, unsigned long arg1,
-		unsigned long arg2, unsigned long arg3,
-		unsigned long arg4, unsigned long arg5,
-		unsigned long arg6, unsigned long gsbr),
+	TP_PROTO(unsigned long hcall_num, unsigned long arg1, unsigned long arg2,
+			unsigned long arg3, unsigned long arg4,
+			unsigned long arg5, unsigned long arg6),
 
-	TP_ARGS(hcall_num, arg1, arg2, arg3, arg4, arg5, arg6, gsbr),
+	TP_ARGS(hcall_num, arg1, arg2, arg3, arg4, arg5, arg6),
 
 	TP_STRUCT__entry(
 		__field(	u64,	hcall_num	)
@@ -958,7 +957,6 @@ TRACE_EVENT(
 		__field(	u64,	arg4	)
 		__field(	u64,	arg5	)
 		__field(	u64,	arg6	)
-		__field(	u64,	gsbr	)
 	),
 
 	TP_fast_assign(
@@ -969,11 +967,10 @@ TRACE_EVENT(
 		__entry->arg4	= arg4;
 		__entry->arg5	= arg5;
 		__entry->arg6	= arg6;
-		__entry->gsbr	= gsbr;
 	),
 
 	TP_printk("nr %llu\n"
-		"Args: 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx; gsbr: 0x%llx"
+		"Args: 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx"
 		,
 		__entry->hcall_num,
 		__entry->arg1,
@@ -981,8 +978,7 @@ TRACE_EVENT(
 		__entry->arg3,
 		__entry->arg4,
 		__entry->arg5,
-		__entry->arg6,
-		__entry->gsbr)
+		__entry->arg6)
 );
 
 TRACE_EVENT(
@@ -1063,6 +1059,7 @@ TRACE_EVENT(
 	TP_printk("Light hypercall exit: %llu", __entry->ret)
 );
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 TRACE_EVENT(
 	guest_switch_to,
 
@@ -1129,6 +1126,7 @@ TRACE_EVENT(
 		__entry->mmu_pptb, __entry->mmu_pid, __entry->ctxt_pid
 	)
 );
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 TRACE_EVENT(
 	vcpu_put,

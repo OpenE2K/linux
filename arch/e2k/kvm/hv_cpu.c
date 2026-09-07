@@ -84,7 +84,6 @@ void prepare_bu_stacks_to_startup_vcpu(struct kvm_vcpu *vcpu)
 	e2k_mem_crs_t *pcs_frames;
 	e2k_mem_ps_t *ps_frames;
 	e2k_size_t ps_ind, pcs_ind;
-	e2k_psr_t psr;
 
 	DebugKVMSTUP("started on VCPU #%d\n", vcpu->vcpu_id);
 
@@ -99,7 +98,7 @@ void prepare_bu_stacks_to_startup_vcpu(struct kvm_vcpu *vcpu)
 
 	prepare_stacks_to_startup_vcpu(vcpu, ps_frames, pcs_frames,
 				       vcpu->arch.args, vcpu->arch.args_num,
-				       vcpu->arch.entry_point, psr,
+				       vcpu->arch.entry_point, E2K_RESET_PSR,
 				       GET_VCPU_BOOT_CS_SIZE(boot_stacks),
 				       &ps_ind, &pcs_ind, KERNEL_CODES_INDEX, 1);
 
@@ -123,15 +122,13 @@ void init_hv_vcpu_intc_ctxt(struct kvm_vcpu *vcpu)
 	kvm_clear_vcpu_intc_TIRs_num(vcpu);
 	kvm_update_vcpu_intc_TIR(vcpu, 1, TIR);
 
+	/* Clean INTC_INFO_MU before first GLAUNCH */
 	intc_ctxt->cu_num = -1;
 	intc_ctxt->mu_num = -1;
+	kvm_set_intc_info_mu_is_updated(vcpu);
 
 	/* set flag of first GLAUNCH VM */
 	intc_ctxt->start_gm = true;
-
-	/* Clean INTC_INFO_CU/MU before first GLAUNCH */
-	kvm_set_intc_info_mu_is_updated(vcpu);
-	kvm_set_intc_info_cu_is_updated(vcpu);
 }
 
 void kvm_reset_mmu_intc_mode(struct kvm_vcpu *vcpu)
@@ -198,12 +195,8 @@ void kvm_setup_mmu_intc_mode(struct kvm_vcpu *vcpu)
 	vcpu->arch.mmu.g_w_imask_mmu_cr = g_w_imask_mmu_cr;
 
 	/* MMU shadow registers initial state */
-	if (vcpu->arch.is_hv || vcpu->arch.is_pv) {
-		sh_mmu_cr = MMU_CR_KERNEL_OFF;
-		sh_pid = 0;	/* guest kernel should have PID == 0 */
-	} else {
-		E2K_KVM_BUG_ON(true);
-	}
+	sh_mmu_cr = MMU_CR_KERNEL_OFF;
+	sh_pid = 0;	/* guest kernel should have PID == 0 */
 	vcpu->arch.mmu.init_sh_mmu_cr = sh_mmu_cr;
 	vcpu->arch.mmu.init_sh_pid = sh_pid;
 
@@ -318,6 +311,7 @@ static void setup_mmu_tdp_context(struct kvm_vcpu *vcpu, unsigned flags)
 	/* setup user PID on hardware shadow register */
 	write_SH_PID_reg(vcpu->arch.mmu.pid);
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if ((flags & SEP_VIRT_ROOT_PT_FLAG) && vcpu->arch.is_pv) {
 		e2k_core_mode_t core_mode = read_SH_CORE_MODE_reg();
 
@@ -326,6 +320,7 @@ static void setup_mmu_tdp_context(struct kvm_vcpu *vcpu, unsigned flags)
 		vcpu->arch.hw_ctxt.sh_core_mode = core_mode;
 		write_guest_CORE_MODE_reg(vcpu, core_mode);
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	kvm_dump_mmu_tdp_context(vcpu, flags);
 }
@@ -459,7 +454,7 @@ void write_hw_ctxt_to_hv_vcpu_registers(struct kvm_vcpu *vcpu, const struct kvm_
 	write_SH_WD_reg(hw_ctxt->sh_wd);
 
 	/*
-	 * MMU shadow context 
+	 * MMU shadow context
 	 */
 	write_SH_MMU_CR_reg(hw_ctxt->sh_mmu_cr);
 	write_SH_PID_reg(hw_ctxt->sh_pid);
@@ -489,6 +484,10 @@ void write_hw_ctxt_to_hv_vcpu_registers(struct kvm_vcpu *vcpu, const struct kvm_
 
 	write_SH_OSR0_reg_value(hw_ctxt->sh_osr0);
 	DebugSHC("SH_OSR0: value 0x%llx\n", hw_ctxt->sh_osr0);
+#ifdef CONFIG_CPU_HAS_OSR1
+	write_SH_OSR1_reg_value(hw_ctxt->sh_osr1);
+	DebugSHC("SH_OSR1: value 0x%llx\n", hw_ctxt->sh_osr1);
+#endif
 
 	if (likely(cpu_has(CPU_FEAT_ISET_V7))) {
 		write_SH_T_off_reg(hw_ctxt->sh_t_off);
@@ -578,6 +577,46 @@ static inline bool calculate_g_th(const intc_info_cu_hdr_t *cu_hdr,
 	return g_th || coredump;
 }
 
+static void restore_sbbp(const u64 *sbbp)
+{
+	BUILD_BUG_ON(SBBP_ENTRIES_NUM != 32);
+	asm volatile (
+		"{rwd %[sbbp31], %%sbbp} {rwd %[sbbp30], %%sbbp}"
+		"{rwd %[sbbp29], %%sbbp} {rwd %[sbbp28], %%sbbp}"
+		"{rwd %[sbbp27], %%sbbp} {rwd %[sbbp26], %%sbbp}"
+		"{rwd %[sbbp25], %%sbbp} {rwd %[sbbp24], %%sbbp}"
+		"{rwd %[sbbp23], %%sbbp} {rwd %[sbbp22], %%sbbp}"
+		"{rwd %[sbbp21], %%sbbp} {rwd %[sbbp20], %%sbbp}"
+		"{rwd %[sbbp19], %%sbbp} {rwd %[sbbp18], %%sbbp}"
+		"{rwd %[sbbp17], %%sbbp} {rwd %[sbbp16], %%sbbp}"
+		"{rwd %[sbbp15], %%sbbp} {rwd %[sbbp14], %%sbbp}"
+		"{rwd %[sbbp13], %%sbbp} {rwd %[sbbp12], %%sbbp}"
+		"{rwd %[sbbp11], %%sbbp} {rwd %[sbbp10], %%sbbp}"
+		"{rwd %[sbbp9], %%sbbp}  {rwd %[sbbp8], %%sbbp}"
+		"{rwd %[sbbp7], %%sbbp}  {rwd %[sbbp6], %%sbbp}"
+		"{rwd %[sbbp5], %%sbbp}  {rwd %[sbbp4], %%sbbp}"
+		"{rwd %[sbbp3], %%sbbp}  {rwd %[sbbp2], %%sbbp}"
+		"{rwd %[sbbp1], %%sbbp}  {rwd %[sbbp0], %%sbbp}"
+		:
+		: [sbbp31] "r" (sbbp[31]), [sbbp30] "r" (sbbp[30]),
+		  [sbbp29] "r" (sbbp[29]), [sbbp28] "r" (sbbp[28]),
+		  [sbbp27] "r" (sbbp[27]), [sbbp26] "r" (sbbp[26]),
+		  [sbbp25] "r" (sbbp[25]), [sbbp24] "r" (sbbp[24]),
+		  [sbbp23] "r" (sbbp[23]), [sbbp22] "r" (sbbp[22]),
+		  [sbbp21] "r" (sbbp[21]), [sbbp20] "r" (sbbp[20]),
+		  [sbbp19] "r" (sbbp[19]), [sbbp18] "r" (sbbp[18]),
+		  [sbbp17] "r" (sbbp[17]), [sbbp16] "r" (sbbp[16]),
+		  [sbbp15] "r" (sbbp[15]), [sbbp14] "r" (sbbp[14]),
+		  [sbbp13] "r" (sbbp[13]), [sbbp12] "r" (sbbp[12]),
+		  [sbbp11] "r" (sbbp[11]), [sbbp10] "r" (sbbp[10]),
+		  [sbbp9] "r" (sbbp[9]), [sbbp8] "r" (sbbp[8]),
+		  [sbbp7] "r" (sbbp[7]), [sbbp6] "r" (sbbp[6]),
+		  [sbbp5] "r" (sbbp[5]), [sbbp4] "r" (sbbp[4]),
+		  [sbbp3] "r" (sbbp[3]), [sbbp2] "r" (sbbp[2]),
+		  [sbbp1] "r" (sbbp[1]), [sbbp0] "r" (sbbp[0]));
+}
+
+
 /*
  * There are TIR_NUM(19) tir regs. Bits 64 - 56 is current tir nr
  * After each NATIVE_READ_TIR_LO_REG() we will read next tir.
@@ -596,8 +635,12 @@ static int restore_SBBP_TIRs(u64 sbbp[], e2k_tir_t TIRs[], int TIRs_num,
 	virt_ctrl_cu.tir_rst = 1;
 	write_VIRT_CTRL_CU_reg(virt_ctrl_cu);
 
-	for (i = SBBP_ENTRIES_NUM - 1; i >= 0; i--)
-		native_write_SBBP_reg_value(sbbp[i]);
+	if (unlikely(kvm_debug)) {
+		/* Mark interception in guest's SBBP with magic number */
+		memmove(sbbp, &sbbp[1], (SBBP_ENTRIES_NUM - 1) * sizeof(sbbp[0]));
+		sbbp[0] = 0xbeef8888;
+	}
+	restore_sbbp(sbbp);
 
 	if (unlikely(coredump)) {
 		e2k_tir_t tir;
@@ -672,9 +715,24 @@ static bool kvm_vcpu_exit_request(struct kvm_vcpu *vcpu)
 		xfer_to_guest_mode_work_pending();
 }
 
+/**
+ * vcpu_enter_guest - handle single VCPU guest entry
+ *
+ * Checks whether VCPU can be run and then executes it.  Will
+ * return here only on intercepts which are then be handled by
+ * parse_INTC_registers().  Hypercalls are handled on separate
+ * stacks (%bu_psp/%bu_pcsp) by kvm_generic_hcalls() instead.
+ * The %usd data stack is shared between vcpu_enter_guest()
+ * and hypercalls.
+ *
+ * Returns 0 on success and non-zero code on error or when
+ * intercept must be handled by QEMU.
+ */
 int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 {
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	gthread_info_t *gti = current_thread_info()->gthread_info;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	intc_info_cu_t *cu = &vcpu->arch.intc_ctxt.cu;
 	intc_info_mu_t *mu = vcpu->arch.intc_ctxt.mu;
 	struct kvm_intc_cpu_context *intc_ctxt = &vcpu->arch.intc_ctxt;
@@ -686,7 +744,20 @@ int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 	if (unlikely(r))
 		return r;
 
+	/* Do not allow values forbidden by hardware. */
+	if (read_SH_PCSHTP_reg().ind < -32) {
+		pr_emerg("kvm: SH_PCSHTP value %d is too small, halting guest\n",
+			read_SH_PCSHTP_reg().ind);
+		vcpu->arch.exit_reason = EXIT_REASON_VM_PANIC;
+		return -EINVAL;
+	}
+
 	all_irq_disable();
+	if (unlikely(kvm_rebooting)) {
+		all_irq_enable();
+		vcpu->arch.exit_shutdown_terminate = KVM_EXIT_E2K_SHUTDOWN;
+		return 0;
+	}
 
 	/*
 	 * Ensure we set mode to IN_GUEST_MODE after we disable
@@ -741,8 +812,7 @@ int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 		modify_intc_info_mu_data(intc_ctxt->mu, intc_ctxt->mu_num);
 		restore_intc_info_mu(intc_ctxt->mu, intc_ctxt->mu_num);
 	}
-	if (kvm_get_intc_info_cu_is_updated(vcpu))
-		restore_intc_info_cu(&intc_ctxt->cu, intc_ctxt->cu_num);
+	restore_intc_info_cu(&intc_ctxt->cu, intc_ctxt->cu_num);
 
 	/* MMU intercepts were handled, clear state for new intercepts */
 	kvm_clear_intc_mu_state(vcpu);
@@ -752,20 +822,23 @@ int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 	intc_ctxt->mu_num = -1;
 	intc_ctxt->cur_mu = -1;
 	kvm_reset_intc_info_mu_is_updated(vcpu);
-	kvm_reset_intc_info_cu_is_updated(vcpu);
 
 	/* Switch IRQ control to PSR and disable MI/NMIs */
 	native_write_irq_barrier_PSR_reg(E2K_KERNEL_PSR_DISABLED_ALL);
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	/* the function should set initial UPSR state */
 	if (gti != NULL) {
 		KVM_RESTORE_GUEST_KERNEL_UPSR(current_thread_info());
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	launch_hv_vcpu(&vcpu->arch);
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	/* Guest can switch to other thread, so update guest thread info */
 	gti = current_thread_info()->gthread_info;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	save_intc_info_cu(cu, &vcpu->arch.intc_ctxt.cu_num);
 	save_intc_info_mu(mu, &vcpu->arch.intc_ctxt.mu_num);
@@ -804,6 +877,7 @@ int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 			print_all_TIRs(intc_ctxt->TIRs, intc_ctxt->nr_TIRs);
 	}
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	/* save current state of guest kernel UPSR */
 	if (gti != NULL) {
 		e2k_upsr_t guest_upsr;
@@ -811,6 +885,7 @@ int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 		guest_upsr = native_read_UPSR_reg();
 		DO_SAVE_GUEST_KERNEL_UPSR(gti, guest_upsr);
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	trace_hardirqs_off();
 	kvm_do_update_guest_vcpu_current_runstate(vcpu, RUNSTATE_in_intercept);
@@ -964,7 +1039,7 @@ void kvm_hv_epic_load(struct kvm_vcpu *vcpu)
 	kvm_epic_restore_pnmirr_startup_entry(vcpu);
 }
 
-enum hrtimer_restart kvm_epic_idle_timer_fn(struct hrtimer *hrtimer)
+static enum hrtimer_restart kvm_epic_idle_timer_fn(struct hrtimer *hrtimer)
 {
 	struct kvm_vcpu *vcpu =
 	    container_of(hrtimer, struct kvm_vcpu, arch.cepic_idle);

@@ -446,6 +446,9 @@ extern struct attribute_group blk_trace_attr_group;
 
 long blkdev_ioctl(struct file *file, unsigned cmd, unsigned long arg);
 long compat_blkdev_ioctl(struct file *file, unsigned cmd, unsigned long arg);
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+long ptr128_blkdev_ioctl(struct file *file, unsigned cmd, unsigned long arg);
+#endif
 
 extern const struct address_space_operations def_blk_aops;
 

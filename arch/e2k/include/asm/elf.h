@@ -16,6 +16,10 @@
 #include <asm/user.h>
 
 
+#define ARCH_HAS_SETUP_ADDITIONAL_PAGES
+struct linux_binprm;
+extern int arch_setup_additional_pages(struct linux_binprm *bprm, int uses_interp);
+
 #ifdef CONFIG_ELF_CORE
 struct vm_area_struct *coredump_next_vma(struct ma_state *mas, struct vm_area_struct *vma,
 					 struct vm_area_struct *gate_vma);
@@ -92,9 +96,15 @@ struct vm_area_struct *coredump_next_vma(struct ma_state *mas, struct vm_area_st
  */
 static inline bool elf_check_e2k_mtype(unsigned long mt, bool incompat)
 {
+	struct pt_regs *regs = current_pt_regs();
 	int iset = machine.native_iset_ver;
 
-	if (cpu_has(CPU_FEAT_E48C_MAKET) && mt != 26)
+	/*
+	 * Execute only e48c maket binaries (mt=26) on e48c maket.
+	 * Exclude this check for init_module and finit_module syscalls.
+	 */
+	if (cpu_has(CPU_FEAT_E48C_MAKET) && regs && regs->sys_num != 128 && regs->sys_num != 383 &&
+			mt != 26)
 		return false;
 
 	switch (mt) {
@@ -275,7 +285,7 @@ do {									\
 		}							\
 	} else	{							\
 		current->thread.flags &= ~(E2K_FLAG_PROTECTED_MODE |	\
-                                           E2K_FLAG_3P_ELF32);          \
+					   E2K_FLAG_3P_ELF32);          \
 	}								\
 	if ((ex).e_ident[EI_CLASS] == ELFCLASS32)                       \
 		current->thread.flags |= E2K_FLAG_32BIT;                \

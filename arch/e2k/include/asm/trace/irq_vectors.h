@@ -1,4 +1,8 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
 #undef TRACE_SYSTEM
 #define TRACE_SYSTEM irq_vectors
 
@@ -50,7 +54,7 @@ DEFINE_IRQ_VECTOR_EVENT(spurious_apic);
 DEFINE_IRQ_VECTOR_EVENT(error_apic);
 
 /*
- * l_platform_ipi - called when entering/exiting a x86 platform ipi interrupt
+ * l_platform_ipi - called when entering/exiting an e2k platform ipi interrupt
  * vector handler
  */
 DEFINE_IRQ_VECTOR_EVENT(l_platform_ipi);

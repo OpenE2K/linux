@@ -75,7 +75,11 @@ flat_send_IPI_mask_allbutself(const struct cpumask *cpumask, int vector)
 
 	_flat_send_IPI_mask(mask, vector);
 }
-static __no_sanitize_address notrace_on_host unsigned int flat_get_apic_id(unsigned long x)
+static
+#ifdef CONFIG_MCST
+__no_sanitize_address notrace_on_host
+#endif
+unsigned int flat_get_apic_id(unsigned long x)
 {
 	return (x >> 24) & 0xFF;
 }

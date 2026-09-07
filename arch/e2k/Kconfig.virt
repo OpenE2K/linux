@@ -7,7 +7,7 @@
 
 menuconfig VIRTUALIZATION
 	bool "Virtualization"
-	default n
+	default MMU_SEP_VIRT_SPACE
 	help
 	  Say Y here to get to see options for using your Linux host to run other
 	  operating systems inside virtual machines (guests).
