@@ -24,9 +24,6 @@
 #include <linux/compiler.h>
 #include <linux/audit.h>
 #include <linux/random.h>
-#ifdef CONFIG_MCST
-#include <linux/mcst_rt.h>
-#endif
 
 #include "tick-internal.h"
 #include "ntp_internal.h"
@@ -1327,13 +1324,6 @@ int do_settimeofday64(const struct timespec64 *ts)
 
 	if (!timespec64_valid_settod(ts))
 		return -EINVAL;
-#ifdef CONFIG_MCST_4RT
-	if (rts_act_mask & RTS_NO_SETTIME)
-		return -EPERM;
-
-	pr_warn("%s/-%d: settimeofday %lld s %ld ns\n",
-		current->comm, current->pid, ts->tv_sec, ts->tv_nsec);
-#endif
 	raw_spin_lock_irqsave(&timekeeper_lock, flags);
 	write_seqcount_begin(&tk_core.seq);
 
@@ -1513,9 +1503,6 @@ int timekeeping_notify(struct clocksource *clock)
 	tick_clock_notify();
 	return tk->tkr_mono.clock == clock ? 0 : -1;
 }
-#ifdef CONFIG_MCST
-EXPORT_SYMBOL(timekeeping_notify);
-#endif
 
 /**
  * ktime_get_raw_ts64 - Returns the raw monotonic time in a timespec

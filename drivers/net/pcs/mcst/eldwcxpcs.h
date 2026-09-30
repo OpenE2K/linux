@@ -1082,11 +1082,11 @@
 
 
 /* System: eioh_1g10gsyn_DWC_xpcs */
-#define map_PMA_MMD		(((0x01) << 18) | 0x0000)
-#define map_XS_PMA_MMD		(((0x01) << 18) | 0x8020)
-#define map_XS_PCS_MMD		(((0x03) << 18) | 0x0000)
-#define map_AN_MMD		(((0x07) << 18) | 0x0000)
-#define map_VS_MMD1		(((0x1E) << 18) | 0x0000)
-#define map_VS_MII_MMD		(((0x1F) << 18) | 0x0000)
+#define map_PMA_MMD		(((0x01) << 16) | 0x0000)
+#define map_XS_PMA_MMD		(((0x01) << 16) | 0x8020)
+#define map_XS_PCS_MMD		(((0x03) << 16) | 0x0000)
+#define map_AN_MMD		(((0x07) << 16) | 0x0000)
+#define map_VS_MMD1		(((0x1E) << 16) | 0x0000)
+#define map_VS_MII_MMD		(((0x1F) << 16) | 0x0000)
 
 #endif /* ELDWCXPCS_H__ */

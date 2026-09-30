@@ -12,6 +12,7 @@
 #include <linux/smp.h>
 
 #include <asm/apic.h>
+#include <asm-l/devtree.h>
 #include <asm/e2k_api.h>
 #include <asm/e2k.h>
 #include <asm/e2k_sic.h>
@@ -360,6 +361,10 @@ e2k_sic_init(void)
 		nodes_nbsr_phys_base[node] = phys_base;
 	}
 	create_nodes_io_config();
+
+	/* Now we know iohubs configuration */
+	e2k_apply_device_tree_patches();
+
 	return ret;
 }
 
@@ -545,7 +550,7 @@ static void __init create_nodes_io_config(void)
 		if (io_link.E2K_IOL_CSR_mode == IOHUB_IOL_MODE) {
 			node_set(node, node_iohub_map);
 			node_iohub_num ++;
-                        printk(" IO HUB controller");
+			printk(" IO HUB controller");
 			/* FIXME: IO link registers of SIC mutate to WLCC */
 			/* registers on legacy SIC */
 			/* now we assume IO link on node #0 connected to */

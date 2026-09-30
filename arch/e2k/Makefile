@@ -1,6 +1,6 @@
- # SPDX-License-Identifier: GPL-2.0
- # Copyright (c) 2023 MCST
- 
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2023 MCST
+
 #			 e2k/Makefile
 #
 # This file is included by the global makefile so that you can add your own
@@ -8,9 +8,6 @@
 # for "archclean" and "archdep" for cleaning up and making dependencies for
 # this architecture
 #
-# This file is subject to the terms and conditions of the GNU General Public
-# License.  See the file "COPYING" in the main directory of this archive
-# for more details.
 
 KBUILD_DEFCONFIG ?= defconfig
 
@@ -116,6 +113,8 @@ endif
 
 KBUILD_LDFLAGS	+= --relaxed-e2k-machine-check
 KBUILD_CFLAGS	+= $(cflags-y)
+
+drivers-$(CONFIG_OF)			+= arch/e2k/boot/dts/
 
 libs-y += arch/e2k/lib/
 core-y += arch/e2k/kernel/ arch/e2k/mm/ arch/e2k/p2v/ arch/e2k/fast_syscalls/

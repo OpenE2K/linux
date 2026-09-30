@@ -15,7 +15,18 @@
 #include <asm/cpu_regs.h>
 #include <asm/machdep.h>
 #include <asm-l/console.h>
-#include <asm/kvm/guest/console.h>
+
+#include <linux/types.h>
+#include <asm/kvm/hvc-console.h>
+
+static inline void
+kvm_virt_console_dump_putc(char c)
+{
+#if	defined(CONFIG_HVC_L) && defined(CONFIG_EARLY_VIRTIO_CONSOLE)
+	if (early_virtio_cons_enabled)
+		hvc_l_raw_putc(c);
+#endif	/* CONFIG_HVC_L && CONFIG_EARLY_VIRTIO_CONSOLE */
+}
 
 static inline void
 native_virt_console_dump_putc(char c)
@@ -31,17 +42,11 @@ native_virt_console_dump_putc(char c)
 extern void	init_bug(const char *fmt_v, ...);
 extern void	init_warning(const char *fmt_v, ...);
 
-#ifdef	CONFIG_KVM_GUEST_KERNEL
-/* it is virtualized guest kernel */
-#include <asm/kvm/guest/console.h>
-#else	/* !CONFIG_KVM_GUEST_KERNEL */
-/* native kernel without or with virtualization support */
 static inline void
 virt_console_dump_putc(char c)
 {
 	native_virt_console_dump_putc(c);
 }
-#endif	/* CONFIG_KVM_GUEST_KERNEL */
 
 #endif /* __ASSEMBLY__ */
 

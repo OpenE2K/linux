@@ -224,30 +224,21 @@ boot_delete_busy_area(int node, e2k_phys_bank_t *phys_bank,
 	if (prev_area == NULL) {
 		/* area should be at head of the list */
 		if (phys_bank->first_area != area_id) {
-			BOOT_BUG("Node #%d busy area #%d from 0x%lx to 0x%lx "
-				"should be at head, but head point to area #%d",
+			BOOT_BUG("Node #%d busy area #%d from 0x%lx to 0x%lx should be at head, but head point to area #%d",
 				node, area_id,
-				phys_bank->base_addr +
-					(busy_area->start_page << PAGE_SHIFT),
-				phys_bank->base_addr +
-					(busy_area->start_page +
-						busy_area->pages_num) <<
-								PAGE_SHIFT);
+				phys_bank->base_addr + (busy_area->start_page << PAGE_SHIFT),
+				phys_bank->base_addr + ((busy_area->start_page +
+							 busy_area->pages_num) << PAGE_SHIFT));
 		}
 		phys_bank->first_area = busy_area->next;
 	} else {
 		/* previous area should point to the deleted area */
 		if (prev_area->next != area_id) {
-			BOOT_BUG("Node #%d busy area #%d from 0x%lx to 0x%lx "
-				"should be pointed by previous area, "
-				"but it point to area #%d",
+			BOOT_BUG("Node #%d busy area #%d from 0x%lx to 0x%lx should be pointed by previous area, but it point to area #%d",
 				node, area_id,
-				phys_bank->base_addr +
-					(busy_area->start_page << PAGE_SHIFT),
-				phys_bank->base_addr +
-					(busy_area->start_page +
-						busy_area->pages_num) <<
-								PAGE_SHIFT,
+				phys_bank->base_addr + (busy_area->start_page << PAGE_SHIFT),
+				phys_bank->base_addr + ((busy_area->start_page +
+							 busy_area->pages_num) << PAGE_SHIFT),
 				prev_area->next);
 		}
 		prev_area->next = busy_area->next;

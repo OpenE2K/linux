@@ -166,5 +166,26 @@ static inline int ioepic_pin_to_irq_pic(unsigned int pin, struct pci_dev *dev)
 	return ioepic_pin_to_msi_ioapic_irq(pin, dev);
 }
 #endif	/* CONFIG_EPIC */
+
+struct seq_file;
+
+#ifdef CONFIG_EPIC
+extern void cpuinfo_epic(struct seq_file *);
+#else
+static inline void cpuinfo_epic(struct seq_file *m) { }
+#endif
+
+#ifdef CONFIG_L_LOCAL_APIC
+extern void cpuinfo_apic(struct seq_file *);
+#else
+static inline void cpuinfo_apic(struct seq_file *m) { }
+#endif
+
+static inline void cpuinfo_pic(struct seq_file *m)
+{
+	cpuinfo_epic(m);
+	cpuinfo_apic(m);
+}
+
 #endif	/* E2K_P2V */
 #endif	/* __ASM_E2K_PIC_H */

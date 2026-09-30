@@ -16,15 +16,13 @@
 #include <linux/spi/spi.h>
 #include <linux/delay.h>
 #ifdef CONFIG_MCST
-#include <linux/kthread.h>
-#include <linux/clocksource.h>
-# ifdef CONFIG_E2K
+# if defined CONFIG_E2K && defined CONFIG_SCLKR_CLOCKSOURCE
 #include <asm/sclkr.h>
 # endif
 #if defined(CONFIG_E90S)
+#include <linux/kthread.h>
 #include <asm-l/clk_rt.h>
 #endif
-#include <asm/bootinfo.h>
 #endif
 #if defined(CONFIG_MCST) && defined(CONFIG_NVRAM_PANIC)
 #include <linux/panic2nvram.h>
@@ -84,9 +82,6 @@
 struct spi_device *nvram_for_panic;
 #endif
 #define	       FLAG_EXITING		0
-#if defined(CONFIG_MCST)
-static atomic_t rtc4clk_src = ATOMIC_INIT(0); 
-#endif
 
 struct cy14b101p {
 	struct spi_device	*spi;
@@ -184,20 +179,26 @@ int cy14b101p_write_rtc(struct device *dev, u8 reg, u8 val)
 
 #define epoch	2000
 
+#if defined CONFIG_E2K && defined CONFIG_SCLKR_CLOCKSOURCE || defined CONFIG_E90S
+static bool used_for_clk(struct spi_device *spi)
+{
+	struct cy14b101p *cy14b101p = spi_get_drvdata(spi);
+	return READ_ONCE(clk_rtc) == cy14b101p->rtc;
+}
+#endif
+
 static int cy14b101p_set_time(struct device *dev, struct rtc_time *time)
 {
 	int ret;
 
-        dev_vdbg(dev, "%s secs=%d, mins=%d, "
-                "hours=%d, mday=%d, mon=%d, year=%d, wday=%d\n",
-                "write", time->tm_sec, time->tm_min,
-                time->tm_hour, time->tm_mday,
-                time->tm_mon, time->tm_year, time->tm_wday);
-#if defined(CONFIG_MCST)
-	//if (atomic_read(&rtc4clk_src) && dev->id == 0 &&  pps_debug & 1) {
-	if (atomic_read(&rtc4clk_src) &&  pps_debug & 1) {
-		pr_warn("cy14b101p_set_time while RTC is for clocksource. "
-			" %02d.%02d.%d %02d:%02d:%02d\n",
+	dev_vdbg(dev, "%s secs=%d, mins=%d, "
+		"hours=%d, mday=%d, mon=%d, year=%d, wday=%d\n",
+		"write", time->tm_sec, time->tm_min,
+		time->tm_hour, time->tm_mday,
+		time->tm_mon, time->tm_year, time->tm_wday);
+#if defined CONFIG_E2K && defined CONFIG_SCLKR_CLOCKSOURCE || defined CONFIG_E90S
+	if (used_for_clk(to_spi_device(dev)) && sclk_uses_hardware_rtc() && (pps_debug & 1)) {
+		pr_warn("cy14b101p_set_time while RTC is for clocksource.  %02d.%02d.%d %02d:%02d:%02d\n",
 			time->tm_mday, time->tm_mon + 1,
 			time->tm_year + 1900,
 			time->tm_hour, time->tm_min, time->tm_sec);
@@ -219,31 +220,31 @@ static int cy14b101p_set_time(struct device *dev, struct rtc_time *time)
 
 static int cy14b101p_get_time(struct device *dev, struct rtc_time *time)
 {
-        u8              buf[16];
-        int             ret;
+	u8              buf[16];
+	int             ret;
 
-        ret = cy14b101p_rtc_read_lock(dev);
+	ret = cy14b101p_rtc_read_lock(dev);
 	if (ret < 0)
 		return ret;
 	ret = cy14b101p_read_len_rtc(dev, CY14B101P_SEC,
 					buf + CY14B101P_SEC, 7);
 
-        time->tm_sec = bcd2bin(buf[CY14B101P_SEC]);
-        time->tm_min = bcd2bin(buf[CY14B101P_MIN]);
-        time->tm_hour = bcd2bin(buf[CY14B101P_HOUR]);
-        time->tm_mday = bcd2bin(buf[CY14B101P_MDAY]);
+	time->tm_sec = bcd2bin(buf[CY14B101P_SEC]);
+	time->tm_min = bcd2bin(buf[CY14B101P_MIN]);
+	time->tm_hour = bcd2bin(buf[CY14B101P_HOUR]);
+	time->tm_mday = bcd2bin(buf[CY14B101P_MDAY]);
 	time->tm_mon = bcd2bin(buf[CY14B101P_MON]);
 	time->tm_year = bcd2bin(buf[CY14B101P_YEAR]) + epoch;
 
-        dev_vdbg(dev, "%s secs=%d, mins=%d, "
-                "hours=%d, mday=%d, mon=%d, year=%d, wday=%d\n",
-                "read", time->tm_sec, time->tm_min,
-                time->tm_hour, time->tm_mday,
-                time->tm_mon, time->tm_year, time->tm_wday);
+	dev_vdbg(dev, "%s secs=%d, mins=%d, "
+		"hours=%d, mday=%d, mon=%d, year=%d, wday=%d\n",
+		"read", time->tm_sec, time->tm_min,
+		time->tm_hour, time->tm_mday,
+		time->tm_mon, time->tm_year, time->tm_wday);
 
 	cy14b101p_rtc_unlock(dev);
-        if (ret < 0)
-                return ret;
+	if (ret < 0)
+		return ret;
 
 	/*
 	 * Account for differences between how the RTC uses the values
@@ -252,42 +253,40 @@ static int cy14b101p_get_time(struct device *dev, struct rtc_time *time)
 	time->tm_mon -= 1;
 	time->tm_year -= 1900;
 
-        return rtc_valid_tm(time);
+	return rtc_valid_tm(time);
 }
 
 #ifdef CONFIG_RTC_INTF_DEV
 
 static int cy14b101p_ioctl(struct device *dev, unsigned cmd, unsigned long arg)
 {
-        u8              val = CY14B101P_HL | CY14B101P_PL;
-        int             ret = -ENOIOCTLCMD;
+	u8              val = CY14B101P_HL | CY14B101P_PL;
+	int             ret = -ENOIOCTLCMD;
 
-        switch (cmd) {
-        case RTC_AIE_OFF:
-                ret = 0;
-                val &= ~CY14B101P_AIE;
-                break;
-        case RTC_AIE_ON:
-                ret = 0;
-                val |= CY14B101P_AIE;
-                break;
+	switch (cmd) {
+	case RTC_AIE_OFF:
+		ret = 0;
+		val &= ~CY14B101P_AIE;
+		break;
+	case RTC_AIE_ON:
+		ret = 0;
+		val |= CY14B101P_AIE;
+		break;
 	default:
 		return -ENOIOCTLCMD;
-        }
-#if defined(CONFIG_MCST)
-	if (atomic_read(&rtc4clk_src)) {
-		pr_warn("cy14b101p_ioctl: "
-			"RTC is used for clocksource. "
-			"Alarm functionality is disabled\n");
+	}
+#if defined CONFIG_E2K && defined CONFIG_SCLKR_CLOCKSOURCE || defined CONFIG_E90S
+	if (used_for_clk(to_spi_device(dev))) {
+		dev_warn(dev, "cy14b101p_ioctl: RTC is used for clocksource. Alarm functionality is disabled\n");
 		return -EINVAL;
 	}
 #endif
-        if (ret == 0) {
+	if (ret == 0) {
 		ret = ret ?: cy14b101p_rtc_write_lock(dev);
-                ret = ret ?: cy14b101p_write_rtc(dev, CY14B101P_INT, val);
+		ret = ret ?: cy14b101p_write_rtc(dev, CY14B101P_INT, val);
 		ret = ret ?: cy14b101p_rtc_unlock(dev);
-        }
-        return ret;
+	}
+	return ret;
 }
 
 #else
@@ -296,12 +295,10 @@ static int cy14b101p_ioctl(struct device *dev, unsigned cmd, unsigned long arg)
 
 static int cy14b101p_set_alarm(struct device *dev, struct rtc_wkalrm *alm)
 {
-        int             ret;
-#if defined(CONFIG_MCST)
-	if (atomic_read(&rtc4clk_src)) {
-		pr_warn("cy14b101p_set_alarm: "
-			"RTC is used for clocksource. "
-			"Alarm functionality is disabled\n");
+	int             ret;
+#if defined CONFIG_E2K && defined CONFIG_SCLKR_CLOCKSOURCE || defined CONFIG_E90S
+	if (used_for_clk(to_spi_device(dev))) {
+		dev_warn(dev, "cy14b101p_set_alarm: RTC is used for clocksource. Alarm functionality is disabled\n");
 		return -EINVAL;
 	}
 #endif
@@ -313,105 +310,103 @@ static int cy14b101p_set_alarm(struct device *dev, struct rtc_wkalrm *alm)
 	ret = ret ?: cy14b101p_write_rtc(dev, CY14B101P_INT, 
 			CY14B101P_HL | CY14B101P_PL | ((alm->enabled) ? CY14B101P_AIE : 0));
 	cy14b101p_rtc_unlock(dev);
-        return ret;
+	return ret;
 }
 
 static int cy14b101p_get_alarm(struct device *dev, struct rtc_wkalrm *alm)
 {
-        int             ret;
-        u8              buf[16];
+	int             ret;
+	u8              buf[16];
 
 	ret = cy14b101p_rtc_write_lock(dev);
 	if (ret < 0) return ret;
 
 	ret = cy14b101p_read_rtc(dev, CY14B101P_FLAGS, buf);
-        if (ret < 0) return ret;
+	if (ret < 0) return ret;
 	alm->pending = !!(*buf & CY14B101P_AIE);
    
 	ret = cy14b101p_read_rtc(dev, CY14B101P_INT, buf);
-        if (ret < 0) return ret;
+	if (ret < 0) return ret;
 	alm->enabled = !!(*buf & CY14B101P_AIE);
 
 	ret = cy14b101p_read_len_rtc(dev, CY14B101P_ALM_SEC, 
-                        buf + CY14B101P_ALM_SEC, 4);
-        if (ret < 0) return ret;
+			buf + CY14B101P_ALM_SEC, 4);
+	if (ret < 0) return ret;
 
 	ret = cy14b101p_rtc_unlock(dev);
 	if (ret < 0) return ret;
 
-        dev_vdbg(dev, "%s: %02x %02x %02x %02x\n",
-                "alm0 read", buf[CY14B101P_ALM_SEC], buf[CY14B101P_ALM_MIN],
-                buf[CY14B101P_ALM_HOUR], buf[CY14B101P_ALM_WDAY]);
+	dev_vdbg(dev, "%s: %02x %02x %02x %02x\n",
+		"alm0 read", buf[CY14B101P_ALM_SEC], buf[CY14B101P_ALM_MIN],
+		buf[CY14B101P_ALM_HOUR], buf[CY14B101P_ALM_WDAY]);
 
-        if ((CY14B101P_ALM_DIS & buf[CY14B101P_ALM_SEC])
-                        || (CY14B101P_ALM_DIS & buf[CY14B101P_ALM_MIN])
-                        || (CY14B101P_ALM_DIS & buf[CY14B101P_ALM_HOUR]))
-                return -EIO;
+	if ((CY14B101P_ALM_DIS & buf[CY14B101P_ALM_SEC])
+			|| (CY14B101P_ALM_DIS & buf[CY14B101P_ALM_MIN])
+			|| (CY14B101P_ALM_DIS & buf[CY14B101P_ALM_HOUR]))
+		return -EIO;
 
-        /* Stuff these values into alm->time and let RTC framework code
-         * fill in the rest ... and also handle rollover to tomorrow when
-         * that's needed.
-         */
-        alm->time.tm_sec = bcd2bin(buf[CY14B101P_ALM_SEC]);
-        alm->time.tm_min = bcd2bin(buf[CY14B101P_ALM_MIN]);
-        alm->time.tm_hour = bcd2bin(buf[CY14B101P_ALM_HOUR]);
-        alm->time.tm_mday = -1;
-        alm->time.tm_mon = -1;
-        alm->time.tm_year = -1;
-        /* next three fields are unused by Linux */
-        alm->time.tm_wday = -1;
-        alm->time.tm_mday = -1;
-        alm->time.tm_isdst = -1;
+	/* Stuff these values into alm->time and let RTC framework code
+	 * fill in the rest ... and also handle rollover to tomorrow when
+	 * that's needed.
+	 */
+	alm->time.tm_sec = bcd2bin(buf[CY14B101P_ALM_SEC]);
+	alm->time.tm_min = bcd2bin(buf[CY14B101P_ALM_MIN]);
+	alm->time.tm_hour = bcd2bin(buf[CY14B101P_ALM_HOUR]);
+	alm->time.tm_mday = -1;
+	alm->time.tm_mon = -1;
+	alm->time.tm_year = -1;
+	/* next three fields are unused by Linux */
+	alm->time.tm_wday = -1;
+	alm->time.tm_mday = -1;
+	alm->time.tm_isdst = -1;
 
-        return 0;
+	return 0;
 }
 
 static struct rtc_class_ops cy14b101p_ops = {
-        .ioctl          = cy14b101p_ioctl,
-        .read_time      = cy14b101p_get_time,
-        .set_time       = cy14b101p_set_time,
-        .read_alarm     = cy14b101p_get_alarm,
-        .set_alarm      = cy14b101p_set_alarm,
-        .proc           = NULL,
+	.ioctl          = cy14b101p_ioctl,
+	.read_time      = cy14b101p_get_time,
+	.set_time       = cy14b101p_set_time,
+	.read_alarm     = cy14b101p_get_alarm,
+	.set_alarm      = cy14b101p_set_alarm,
+	.proc           = NULL,
 };
 
 static irqreturn_t cy14b101p_irq(int irq, void *p)
 {
-        struct cy14b101p           *cy14b101p = p;
-        disable_irq(irq);
-        schedule_work(&cy14b101p->work);
-        return IRQ_HANDLED;
+	struct cy14b101p           *cy14b101p = p;
+	disable_irq(irq);
+	schedule_work(&cy14b101p->work);
+	return IRQ_HANDLED;
 }
 
 static void cy14b101p_work(struct work_struct *work)
 {
-        struct cy14b101p   *cy14b101p = container_of(work, struct cy14b101p, work);
-        struct mutex    *lock = &cy14b101p->rtc->ops_lock;
-        struct spi_device *spi = cy14b101p->spi;
+	struct cy14b101p   *cy14b101p = container_of(work, struct cy14b101p, work);
+	struct mutex    *lock = &cy14b101p->rtc->ops_lock;
+	struct spi_device *spi = cy14b101p->spi;
 	struct device	*dev = &spi->dev;
 
-#if defined(CONFIG_MCST)
-	if (atomic_read(&rtc4clk_src)) {
-		pr_warn("cy14b101p_work: "
-			"RTC is used for clocksource. "
-			"Alarm functionality is disabled\n");
+#if defined CONFIG_E2K && defined CONFIG_SCLKR_CLOCKSOURCE || defined CONFIG_E90S
+	if (used_for_clk(spi)) {
+		pr_warn("cy14b101p_work: RTC is used for clocksource. Alarm functionality is disabled\n");
 		return;
 	}
 #endif
-	printk("now we in cy14b101p_work!\n");
-        /* lock to protect cy14b101p->ctrl */
-        mutex_lock(lock);
+
+	/* lock to protect cy14b101p->ctrl */
+	mutex_lock(lock);
 
 	cy14b101p_rtc_write_lock(dev);
 	cy14b101p_write_rtc(dev, CY14B101P_INT,  CY14B101P_HL | CY14B101P_PL);
 	cy14b101p_rtc_unlock(dev);
 
-        mutex_unlock(lock);
+	mutex_unlock(lock);
 
-        if (!test_bit(FLAG_EXITING, &cy14b101p->flags))
-                enable_irq(spi->irq);
+	if (!test_bit(FLAG_EXITING, &cy14b101p->flags))
+		enable_irq(spi->irq);
 
-        rtc_update_irq(cy14b101p->rtc, 1, RTC_AF | RTC_IRQF);
+	rtc_update_irq(cy14b101p->rtc, 1, RTC_AF | RTC_IRQF);
 }
 
 /*
@@ -498,7 +493,7 @@ cy14b101p_nvram_write_for_panic2nvram(u_int off, unsigned char *buf, int count)
 
 #if 0
 extern int l_raw_write_panic_to_nvram(struct spi_device *spi, int rdsr, int wren, int wrcmd,
-                                u_int off);
+				u_int off);
 
 static int cy14b101p_raw_write_panic_to_nvram(u_int off, u_char *buf, int sz)
 {
@@ -690,6 +685,15 @@ static int cy14b101p_remove(struct spi_device *spi)
 {
 	struct cy14b101p *cy14b101p = spi_get_drvdata(spi);
 
+#if defined CONFIG_E2K && defined CONFIG_SCLKR_CLOCKSOURCE || defined CONFIG_E90S
+	if (used_for_clk(spi)) {
+# ifdef CONFIG_SCLKR_CLOCKSOURCE
+		sclk_unregister_rtc();
+# endif
+		WRITE_ONCE(clk_rtc, NULL);
+	}
+#endif
+
 	sysfs_remove_bin_file(&spi->dev.kobj, &nvram);
 
 	/* carefully shut down irq and workqueue, if present */
@@ -704,41 +708,31 @@ static int cy14b101p_remove(struct spi_device *spi)
 	return 0;
 }
 
-#if defined(CONFIG_MCST)
-static void init_pps(struct spi_device *spi)
+#if defined CONFIG_E2K && defined CONFIG_SCLKR_CLOCKSOURCE || defined CONFIG_E90S
+static void init_pps(struct spi_device *spi, struct rtc_device *rtc)
 {
 	struct cy14b101p *cy14b101p = spi_get_drvdata(spi);
 	struct device	*dev = &spi->dev;
-#if defined(CONFIG_E2K)
-	if (machine.native_iset_ver >= E2K_ISET_V3 &&
-		(sclkr_mode == -1 || sclkr_mode == SCLKR_RTC) &&
-		/* only first RTC is used for SCLKR while there is now flag which */
-		(atomic_cmpxchg(&rtc4clk_src, 0, 1) == 0)) {
-		int	error;
-		static struct task_struct *sclkregistask;
-
+#if defined CONFIG_E2K && defined CONFIG_SCLKR_CLOCKSOURCE
+	if ((sclkr_mode == SCLKR_UNINITIALIZED || sclkr_mode == SCLKR_RTC) &&
+			/* only first RTC is used for SCLKR while there is now flag which */
+			cmpxchg(&clk_rtc, NULL, rtc) == NULL) {
 		cy14b101p_rtc_write_lock(dev);
 		cy14b101p_write_rtc(dev, CY14B101P_INT,
 			CY14B101P_SQWE | CY14B101P_AIE |  CY14B101P_HL |
 			CY14B101P_PL);
 		cy14b101p_rtc_unlock(dev);
-		sclkregistask = kthread_run(sclk_register,
-			(void *)SCLKR_RTC, "sclkregister");
-		if (IS_ERR(sclkregistask)) {
-			error = PTR_ERR(sclkregistask);
-			dev_err(dev, "Failed to start sclk register thread, error: %d\n",
-				error);
+
+		if (!sclk_register_rtc()) {
+			cy14b101p_ops.set_alarm = NULL;
+			dev_warn(dev, "used for clocksource, alarm functionality is disabled\n");
 		}
-		((struct rtc_class_ops *)
-			cy14b101p->rtc->ops)->set_alarm = NULL;
-		dev_warn(dev, "RTC dev.id=%d is used for clocksource."
-					" Alarm functionality is disabled\n", dev->id);
 	}
-#endif	/* CONFIG_E2K */
+#endif	/* CONFIG_E2K && CONFIG_SCLKR_CLOCKSOURCE */
 #if defined(CONFIG_E90S)
 	if (clk_rt_enabled() &&
-		/* only first RTC is used for SCLKR while there is now flag which */
-		atomic_cmpxchg(&rtc4clk_src, 0, 1) == 0) {
+			/* only first RTC is used for SCLKR while there is now flag which */
+			cmpxchg(&clk_rtc, NULL, rtc) == NULL) {
 		int	error;
 		static struct task_struct *clk_rt_registask;
 
@@ -763,7 +757,7 @@ static void init_pps(struct spi_device *spi)
 #endif	/* CONFIG_E90S */
 	return;
 }
-#endif	/* CONFIG_MCST */
+#endif
 
 static int cy14b101p_probe(struct spi_device *spi)
 {
@@ -820,6 +814,12 @@ static int cy14b101p_probe(struct spi_device *spi)
 	if (cy_register & CY14B101P_OSCEN) {
 		dev_err(dev, "rtc CY14B101P ERROR oscillator is stopped: OSCEN=1\n");
 	}
+#if defined(CONFIG_MCST)
+	if (cy_register & 0x3f) {	/* Calibration value */
+		dev_err(dev, "rtc CY14B101P ERROR calibration_value != 0. Set to 0\n");
+		cy14b101p_write_rtc(dev, CY14B101P_CAL, 0);
+	}
+#endif
 	ret = cy14b101p_read_rtc(dev, CY14B101P_FLAGS, &cy_register);
 	if (ret < 0) {
 		dev_err(dev, "read rtc CY14B101P_FLAGS is failed\n");
@@ -835,8 +835,9 @@ static int cy14b101p_probe(struct spi_device *spi)
 		cy14b101p_rtc_write_flags(dev, 0);
 		msleep(2000);
 	}
-#if defined(CONFIG_MCST)
-	init_pps(spi);
+#if defined CONFIG_E2K && defined CONFIG_SCLKR_CLOCKSOURCE || defined CONFIG_E90S
+	init_pps(spi, cy14b101p->rtc);
+#endif
 #ifdef CONFIG_NVRAM_PANIC
 	panic2nvram_read = cy14b101p_nvram_read_for_panic2nvram;
 	panic2nvram_write = cy14b101p_nvram_write_for_panic2nvram;
@@ -845,7 +846,6 @@ static int cy14b101p_probe(struct spi_device *spi)
 #endif
 	nvram_for_panic = spi;
 #endif
-#endif	/* CONFIG_MCST */
 
 	/* Maybe set up alarm IRQ; be ready to handle it triggering right
 	 * away.  NOTE that we don't share this.  The signal is active low,
@@ -878,41 +878,10 @@ fail0:
 	return status;
 }
 
-#ifdef CONFIG_PM
-static int cy14b101p_rtc_suspend(struct device *dev)
-{
-	dev_warn(dev, "DEBUG: cy14b101p_rtc_suspend.\n");
-#if defined(CONFIG_E2K) && defined(CONFIG_MCST)
-	if (strcmp(curr_clocksource->name, "sclkr") == 0) {
-		if (timekeeping_notify(&lt_cs)) {
-			pr_warn("susp_sclkr: can't set lt clocksourse\n");
-		}
-	}
-#endif
-	return 0;
-}
-
-static int cy14b101p_rtc_resume(struct device *dev)
-{
-	struct spi_device *spi = to_spi_device(dev);
-
-	dev_warn(dev, "DEBUG: cy14b101p_rtc_resume.\n");
-	init_pps(spi);
-	return 0;
-}
-#else
-#define cy14b101p_rtc_suspend NULL
-#define cy14b101p_rtc_resume NULL
-#endif
-static const struct dev_pm_ops cy14b101p_rtc_pm_ops = {
-	.suspend = cy14b101p_rtc_suspend,
-	.resume = cy14b101p_rtc_resume,
-};
 static struct spi_driver cy14b101p_driver = {
 	.driver = {
 		.name = "rtc-cy14b101p",
 		.owner  = THIS_MODULE,
-		.pm = &cy14b101p_rtc_pm_ops,
 	},
 	.probe		= cy14b101p_probe,
 	.remove		= cy14b101p_remove,

@@ -319,8 +319,8 @@ static void zilog_load_zsregs(struct uart_zilog_port *uap, u8 *regs)
 	write_zsreg(uap, R10, regs[R10]);
 
 	/* Set TX/RX controls sans the enable bits.  */
-       	write_zsreg(uap, R3, regs[R3] & ~RxENABLE);
-       	write_zsreg(uap, R5, regs[R5] & ~TxENABLE);
+	write_zsreg(uap, R3, regs[R3] & ~RxENABLE);
+	write_zsreg(uap, R5, regs[R5] & ~TxENABLE);
 
 	/* now set R7 "prime" on ESCC */
 	write_zsreg(uap, R15, regs[R15] | EN85C30);
@@ -371,7 +371,7 @@ static void zilog_load_zsregs(struct uart_zilog_port *uap, u8 *regs)
  */
 static void zilog_maybe_update_regs(struct uart_zilog_port *uap)
 {
-       	if (!ZS_REGS_HELD(uap)) {
+	if (!ZS_REGS_HELD(uap)) {
 		if (ZS_TX_ACTIVE(uap)) {
 			uap->flags |= PMACZILOG_FLAG_REGS_HELD;
 		} else {
@@ -517,7 +517,7 @@ static bool zilog_receive_chars(struct uart_zilog_port *uap,
 			spin_lock_irqsave(&uap->port.lock, *flags);
 			if (swallow)
 				goto next_char;
- 		}
+		}
 #endif /* CONFIG_MAGIC_SYSRQ && CONFIG_SERIAL_CORE_CONSOLE */
 
 		/* A real serial line, record the character and status.  */
@@ -549,7 +549,7 @@ static bool zilog_receive_chars(struct uart_zilog_port *uap,
 
 		if (uap->port.ignore_status_mask == 0xff ||
 		    (r1 & uap->port.ignore_status_mask) == 0) {
-		    	tty_insert_flip_char(port, ch, flag);
+			tty_insert_flip_char(port, ch, flag);
 		}
 		if (r1 & Rx_OVR) {
 			tty_insert_flip_char(port, 0, TTY_OVERRUN);
@@ -700,7 +700,7 @@ again:
 #ifdef DEBUG_HARD
 	pmz_debug("irq, r3: %x\n", r3);
 #endif
-       	/* Channel A */
+	/* Channel A */
 	push = false;
 	if (r3 & (CHAEXT | CHATxIP | CHARxIP)) {
 		/* Channel A */
@@ -929,7 +929,7 @@ static int zilog_startup(struct uart_port *port)
 	if (!ZS_IS_EXTCLK(uap))
 		uap->curregs[R1] |= EXT_INT_ENAB;
 	write_zsreg(uap, R1, uap->curregs[R1]);
-       	spin_unlock_irqrestore(&port->lock, flags);
+	spin_unlock_irqrestore(&port->lock, flags);
 
 	pmz_debug("zilog: startup() done.\n");
 
@@ -1188,12 +1188,12 @@ static void zilog_irda_setup(struct uart_zilog_port *uap, unsigned long *baud)
 	uap->curregs[R5] |= DTR;
 	write_zsreg(uap, R5, uap->curregs[R5]);
 	zssync(uap);
-       	mdelay(1);
+	mdelay(1);
 
 	/* Switch SCC to 19200 */
 	zilog_convert_to_zs(uap, CS8, 0, 19200);		
 	zilog_load_zsregs(uap, uap->curregs);
-       	mdelay(1);
+	mdelay(1);
 
 	/* Write get_version command byte */
 	write_zsdata(uap, 1);
@@ -1952,7 +1952,7 @@ static struct pci_driver l_zilog_driver =
 	.probe		= serial_zilog_probe,
 	.remove		= serial_zilog_remove,
 	.suspend	= serial_zilog_suspend,
-       	.resume		= serial_zilog_resume,
+	.resume		= serial_zilog_resume,
 	.id_table	= zilog_pci_table,
 };
 

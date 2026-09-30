@@ -520,9 +520,11 @@ do { \
 	E2K_WAIT_ST; \
 } while (0)
 
-#define flush_DCACHE_line_end() \
+#define flush_DCACHE_line_end(code_modified) \
 do { \
 	E2K_WAIT_FLUSH; \
+	if (code_modified) \
+		asm volatile ("{disp %%ctpr1, 0f} {ct %%ctpr1} 0:" ::: "ctpr1", "memory"); \
 } while (0)
 
 static inline void __flush_DCACHE_line(e2k_addr_t virt_addr)
@@ -540,7 +542,7 @@ flush_DCACHE_line(e2k_addr_t virt_addr)
 
 	flush_DCACHE_line_begin();
 	__flush_DCACHE_line(virt_addr);
-	flush_DCACHE_line_end();
+	flush_DCACHE_line_end(false);
 }
 
 /*

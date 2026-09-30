@@ -1,6 +1,6 @@
- # SPDX-License-Identifier: GPL-2.0
- # Copyright (c) 2023 MCST
- 
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2023 MCST
+
 #
 # Makefile for the Elbrus linux kernel.
 # /arch/l/kernel
@@ -12,7 +12,7 @@ obj-y += pmc/
 
 obj-$(CONFIG_L_EARLY_PRINTK) += console.o
 obj-$(CONFIG_NVRAM_PANIC) += panic2nvram.o
-obj-$(CONFIG_L_LOCAL_APIC) += lt.o
+obj-$(CONFIG_LT_CLOCKSOURCE) += lt.o
 obj-$(CONFIG_SERIAL_AM85C30_CONSOLE) += am85c30.o
 obj-$(CONFIG_CLKR_CLOCKSOURCE) += clkr.o
 

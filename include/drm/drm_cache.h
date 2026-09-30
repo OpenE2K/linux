@@ -35,10 +35,6 @@
 
 #include <linux/scatterlist.h>
 
-#ifdef CONFIG_E2K
-#include <asm/pci.h>
-#endif
-
 void drm_clflush_pages(struct page *pages[], unsigned long num_pages);
 void drm_clflush_sg(struct sg_table *st);
 void drm_clflush_virt_range(void *addr, unsigned long length);
@@ -73,12 +69,6 @@ static inline bool drm_arch_can_wc_memory(void)
 	if (e90s_get_cpu_type() <= E90S_CPU_R2000)
 		return false;
 	return true;
-#elif defined(CONFIG_E2K)
-	/*
-	 * Use dynamic detection of PCIe No Snoop support, it
-	 * appeared partially (for loads only) in iset v6 models.
-	 */
-	return use_pcie_no_snoop;
 #else
 	return true;
 #endif

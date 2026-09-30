@@ -3,21 +3,6 @@
  * Copyright (c) 2023 MCST
  */
 
-/*
- * This file is subject to the terms and conditions of the GNU General Public
- * License.  See the file "COPYING" in the main directory of this archive
- * for more details.
- *
- * This file contains NUMA specific variables and functions which can
- * be split away from DISCONTIGMEM and are used on NUMA machines with
- * contiguous memory.
- * 		2002/08/07 Erich Focht <efocht@ess.nec.de>
- * Populate cpu entries in sysfs for non-numa systems as well
- *  	Intel Corporation - Ashok Raj
- * Port to E2K
- * 	MCST - 2009/11/18 Evgeny Kravtsunov <kravtsunov_e@mcst.ru>
- */
-
 #include <linux/cpu.h>
 #include <linux/kernel.h>
 #include <linux/mm.h>

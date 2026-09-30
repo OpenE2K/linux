@@ -59,8 +59,10 @@ typedef struct thread_info {
 	unsigned long		status;		/* thread synchronous flags */
 	int			preempt_lazy_count;	/* 0 => lazy preemptable
 							  <0 => BUG */
+#ifdef SHOW_WOKEN_TIME
 	long long		irq_enter_clk;	/* CPU clock when irq enter */
 						/* occured */
+#endif
 	mm_segment_t		addr_limit;	/* thread address space */
 	struct pt_regs		*pt_regs;	/* head of pt_regs */
 						/* structure queue: */
@@ -88,11 +90,18 @@ typedef struct thread_info {
 	 * this was user interrupt. */
 	struct kernel_gregs	tmp_k_gregs;
 
+	/* On v5/v6 upon kernel entry we must save user's global registers
+	 * using `strqp` instruction, but for address argument it requires
+	 * a free register which we do not have (all contain user data). So
+	 * instead use `stgd`; to properly save ET tag combine `stgdq` with
+	 * `stgdqp`, and this temporary will hold tags saved by `stgdq`. */
+	u64 g_tmp_tag[2] __aligned(16);
+
 #ifdef CONFIG_KVM_HOST_MODE
 	struct kernel_gregs	k_gregs_light;
 #endif
 
-        e2k_upsr_t              upsr;           /* kernel upsr */
+	e2k_upsr_t              upsr;           /* kernel upsr */
 
 	data_stack_t		u_stack;	/* User data stack info */
 	hw_stack_t		u_hw_stack;	/* User hardware stacks info */

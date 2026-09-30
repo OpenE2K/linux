@@ -1408,7 +1408,7 @@ static void amdgpu_ttm_tt_unpopulate(struct ttm_bo_device *bdev, struct ttm_tt *
 
 #ifdef CONFIG_SWIOTLB
 # if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
-	if (adev->need_swiotlb && swiotlb_nr_tbl(adev->dev)) {
+	if (adev->need_swiotlb && swiotlb_nr_tbl(swiotlb_node(adev->dev))) {
 # else
 	if (adev->need_swiotlb && swiotlb_nr_tbl()) {
 # endif

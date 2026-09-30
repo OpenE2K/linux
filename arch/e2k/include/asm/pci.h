@@ -8,8 +8,6 @@
 
 #ifdef __KERNEL__
 
-extern bool use_pcie_no_snoop;
-
 #define HAVE_PCI_LEGACY			1
 #define HAVE_MULTIROOT_BUS_PCI_DOMAINS	1	/* each IOHUB has own */
 						/* config space */

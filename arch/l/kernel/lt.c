@@ -25,7 +25,19 @@
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
-long lt_clock_rate = 10000000;
+u64 lt_clock_rate __ro_after_init;
+
+static int setup_lt_clock_rate(void)
+{
+	if (IS_ENABLED(CONFIG_E2K) && is_prototype()) {
+		lt_clock_rate = 500000;
+	} else {
+		lt_clock_rate = 10000000;
+	}
+
+	return 0;
+}
+pure_initcall(setup_lt_clock_rate);
 
 lt_regs_t *lt_regs = NULL;
 
@@ -162,16 +174,14 @@ static struct clock_event_device lt_ce = {
  */
 void __init setup_lt_timer(void)
 {
+	/* Can be called before any initcalls so initialize manually */
+	setup_lt_clock_rate();
+
 	DebugLT("started\n");
 	if (get_lt_timer()) {
 		pr_err("%s(): could not get access to Elbrus-timer\n",
 			__func__);
 		return;
-	}
-
-	if (is_prototype()) {
-		if (IS_ENABLED(CONFIG_E2K))
-			lt_clock_rate = 500000;
 	}
 
 	/* cpu_possible_mask() ? */

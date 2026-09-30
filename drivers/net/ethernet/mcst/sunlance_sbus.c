@@ -3,8 +3,6 @@
  * Copyright (c) 2023 MCST
  */
 
-
-
 #define SUNLANCE_CHECK_TMD
 #include <linux/interrupt.h>
 #if defined(__sparc__) && !defined(__sparc64__)
@@ -15,8 +13,8 @@
 #else // e2k, e90s - using pci2sbus interface
 
 extern int sbus_request_threaded_irq(unsigned int irq, irqreturn_t (*handler)(int, void *),
-                              irqreturn_t (*threadfn)(int, void *), unsigned long irqflags,
-                              const char * devname, void *dev_id);
+			      irqreturn_t (*threadfn)(int, void *), unsigned long irqflags,
+			      const char * devname, void *dev_id);
 extern void sbus_free_irq(unsigned int irq, void *dev_id);
 #define lance_request_threaded_irq      sbus_request_threaded_irq
 #define lance_free_irq                  sbus_free_irq
@@ -38,8 +36,8 @@ static void lance_free_hwresources(struct lance_private *lp)
 	}
 	if (lp->lregs.vbase)
 		of_iounmap(&lp->op->resource[0], lp->lregs.vbase, LANCE_REG_SIZE);
-        if (lp->ioctl_lregs)
-                of_iounmap(&lp->op->resource[SBUS_IOCTL_BAR], lp->ioctl_lregs,
+	if (lp->ioctl_lregs)
+		of_iounmap(&lp->op->resource[SBUS_IOCTL_BAR], lp->ioctl_lregs,
 				resource_size(&lp->op->resource[SBUS_IOCTL_BAR]));
 	if (lp->init_block_iomem) {
 		of_iounmap(&lp->lebuffer->resource[0], lp->init_block_iomem,
@@ -88,10 +86,7 @@ static int sparc_lance_probe_one(struct of_device *op,
 
 	if (sparc_lance_debug && version_printed++ == 0)
 		printk (KERN_INFO "%s", version);
-#ifdef CONFIG_MCST_RT
-        raw_spin_lock_init(&lp->rt_stuff_lock);
-#endif
-        raw_spin_lock_init(&lp->init_lock);
+	raw_spin_lock_init(&lp->init_lock);
 	raw_spin_lock_init(&lp->lock);
 	lance_setup_mac(dev);
 
@@ -101,20 +96,20 @@ static int sparc_lance_probe_one(struct of_device *op,
 		printk(KERN_ERR "SunLance: Cannot map registers.\n");
 		goto fail;
 	}
-        lp->lregs.rdp = lp->lregs.vbase + RDP;
-        lp->lregs.rap = lp->lregs.vbase + RAP;
+	lp->lregs.rdp = lp->lregs.vbase + RDP;
+	lp->lregs.rap = lp->lregs.vbase + RAP;
 
 #ifdef CONFIG_E90
-        op->resource[SBUS_IOCTL_BAR].start = 0xf0400000;
+	op->resource[SBUS_IOCTL_BAR].start = 0xf0400000;
 	op->resource[SBUS_IOCTL_BAR].end = 0xf0400000 + LANCE_REG_SIZE_BAGET -1;
 	op->resource[SBUS_IOCTL_BAR].flags = op->resource[0].flags;
-        lp->ioctl_lregs = of_ioremap(&op->resource[SBUS_IOCTL_BAR], 0,
-                                 resource_size(&op->resource[SBUS_IOCTL_BAR]), dev->name);
-        if (lp->ioctl_lregs == 0UL) {
-                printk(KERN_ERR "%s: Cannot map SunLance ioctl registers.\n",
-                       dev->name);
-                goto fail;
-        }
+	lp->ioctl_lregs = of_ioremap(&op->resource[SBUS_IOCTL_BAR], 0,
+				 resource_size(&op->resource[SBUS_IOCTL_BAR]), dev->name);
+	if (lp->ioctl_lregs == 0UL) {
+		printk(KERN_ERR "%s: Cannot map SunLance ioctl registers.\n",
+		       dev->name);
+		goto fail;
+	}
 #endif
 
 	lp->ledma = ledma;
@@ -174,7 +169,7 @@ static int sparc_lance_probe_one(struct of_device *op,
 	}
 	lp->dev = dev;
 	SET_NETDEV_DEV(dev, &op->dev);
-        dev_set_drvdata(&op->dev, lp);
+	dev_set_drvdata(&op->dev, lp);
 #if IS_ENABLED(CONFIG_PCI2SBUS)
 	dev->irq = op->irqs[0] & 0xff0f;
 #else
@@ -187,11 +182,11 @@ static int sparc_lance_probe_one(struct of_device *op,
 	lp->mii = sbus_mii;
 
 #if 0
-        if (sunlance_uses_poll) {
-                dev->poll = &lance_poll;
-                dev->weight = (1 << LANCE_LOG_RX_BUFFERS);
-                dev->quota = dev->weight;
-        }
+	if (sunlance_uses_poll) {
+		dev->poll = &lance_poll;
+		dev->weight = (1 << LANCE_LOG_RX_BUFFERS);
+		dev->quota = dev->weight;
+	}
 #endif
 	return 0;
 

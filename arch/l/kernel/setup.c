@@ -277,7 +277,7 @@ static int __init machine_mac_addr_setup(char *str)
 	} else if (get_long_option(&str, &machine_mac_addr)) {
 		u64 tmp = be64_to_cpu(machine_mac_addr);
 		memcpy(l_base_mac_addr, ((u8 *)&tmp) + 2,
-		       			sizeof(l_base_mac_addr));
+					sizeof(l_base_mac_addr));
 
 		printk("machine_mac_addr_setup: "
 			"New MAC address is %06llx\n"

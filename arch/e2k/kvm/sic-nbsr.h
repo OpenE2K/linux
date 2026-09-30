@@ -20,13 +20,16 @@
 
 typedef struct kvm_nbsr_regs {
 	u32 regs[MAX_SUPPORTED_NODE_NBSR_NUM];
+	u32 write_mask[MAX_SUPPORTED_NODE_NBSR_NUM];
 	u32 bc_regs[BC_MM_REG_NUM];
+	u32 efuse_ram[EFUSE_RAM_LINES];
 } kvm_nbsr_regs_t;
 
 typedef struct kvm_nbsr {
 	gpa_t base;	/* NBSR registers base address */
 	int size;	/* size of all registers of all nodes */
 	int node_size;	/* size of all registers on one node */
+	e2k_iset_ver_t iset_no;	/* guest cpu iset version */
 	struct kvm_io_device dev;
 	struct kvm *kvm;
 	unsigned nodes_online;
@@ -59,7 +62,7 @@ do {									\
 #define	KVM_PCI_PREF_MEM_RANGE_START	0x00000000000
 #define	KVM_PCI_PREF_MEM_RANGE_END	0x10000000000
 
-extern int kvm_nbsr_init(struct kvm *kvm);
+extern int kvm_nbsr_init(struct kvm *kvm, unsigned long cpu_iset);
 extern void kvm_nbsr_destroy(struct kvm *kvm);
 extern int nbsr_setup_memory_region(struct kvm_nbsr *nbsr, int node_id,
 					gpa_t base, gpa_t size);

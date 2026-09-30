@@ -8,7 +8,7 @@
 #include <linux/uaccess.h>
 #include <asm/unistd.h>
 
-notrace __section(".entry.text")
+notrace __interrupt __section(".entry.text")
 int fast_sys_set_return(u64 ip, int flags)
 {
 	return native_do_fast_sys_set_return(ip, flags);

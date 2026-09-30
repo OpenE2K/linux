@@ -80,10 +80,12 @@ void epic_init_system_handlers_table(void)
 			prepic_smp_error_interrupt, 1,
 			"prepic_error_interrupt");
 
-	/* IPI delivery to inactive guest (virtualization only) */
-	setup_PIC_vector_handler(CEPIC_EPIC_INT_VECTOR,
-			cepic_epic_interrupt, 1,
-			"cepic_epic_interrupt");
+	if (!IS_HV_GM()) {
+		/* IPI delivery to inactive guest (virtualization only) */
+		setup_PIC_vector_handler(CEPIC_EPIC_INT_VECTOR,
+				cepic_epic_interrupt, 1,
+				"cepic_epic_interrupt");
+	}
 
 #ifdef CONFIG_KVM_ASYNC_PF
 	if (IS_HV_GM()) {

@@ -503,7 +503,7 @@ do {									\
 	init_BGR_reg(); \
 	clear_memory_8(&current_thread_info()->k_gregs, \
 			sizeof(current_thread_info()->k_gregs), ETAGEWD); \
-	NATIVE_GREGS_SET_EMPTY(skip_k_gregs); \
+	NATIVE_SET_GREGS_EMPTY(true, true); \
 })
 #else	/* ! CONFIG_GREGS_CONTEXT */
 #define	NATIVE_INIT_G_REGS(user_only)
@@ -627,7 +627,7 @@ do {							\
 	regs->ss_hi = NATIVE_READ_SS_HI_REG_VALUE();	\
 	NATIVE_SAVE_RPR_REGS(regs);			\
 	if (IS_ENABLED(CONFIG_TC_STORAGE)) {		\
-		NATIVE_FLUSH_ALL_TC;			\
+		NATIVE_FLUSH_ALL_TC();			\
 		regs->tcd = NATIVE_GET_TCD();		\
 	}						\
 } while (0)
@@ -795,7 +795,7 @@ DECLARE_PER_CPU(unsigned long, kernel_trap_cellar[MMU_TRAP_CELLAR_MAX_SIZE]);
 # define SET_CLW_FIRST_REQUEST(regs, cnt)	((regs)->clw_first = (cnt))
 # define GET_CLW_FIRST_REQUEST(regs)		((regs)->clw_first)
 # define SET_CLW_CPU(regs, cpu)			((regs)->clw_cpu = (cpu))
-# define ENABLE_US_CLW()	write_MMU_US_CL_D(!!cpu_has(CPU_HWBUG_CLW))
+# define ENABLE_US_CLW()	write_MMU_US_CL_D(!this_cpu_read(clw_enabled))
 # define DISABLE_US_CLW()	write_MMU_US_CL_D(1)
 #else	/* !CONFIG_CLW_ENABLE */
 # define CLEAR_CLW_REQUEST_COUNT(regs)
@@ -820,16 +820,25 @@ do { \
 			ctpr2_hi, ctpr3_hi, lsr, lsr1, ilcr, ilcr1); \
 } while (0)
 
-#define PREFIX_RESTORE_USER_CRs(PV_TYPE, regs)			\
+#define KVM_RESTORE_USER_CRs(regs)			\
 ({									\
 	u64 cr0_hi = AS_WORD((regs)->crs.cr0_hi);			\
 	u64 cr0_lo = AS_WORD((regs)->crs.cr0_lo);			\
 	u64 cr1_hi = AS_WORD((regs)->crs.cr1_hi);			\
 	u64 cr1_lo = AS_WORD((regs)->crs.cr1_lo);			\
-	PV_TYPE##_NV_NOIRQ_WRITE_CR0_HI_REG_VALUE(cr0_hi);		\
-	PV_TYPE##_NV_NOIRQ_WRITE_CR0_LO_REG_VALUE(cr0_lo);		\
-	PV_TYPE##_NV_NOIRQ_WRITE_CR1_HI_REG_VALUE(cr1_hi);		\
-	PV_TYPE##_NV_NOIRQ_WRITE_CR1_LO_REG_VALUE(cr1_lo);		\
+	KVM_NV_NOIRQ_WRITE_CR0_HI_REG_VALUE(cr0_hi);		\
+	KVM_NV_NOIRQ_WRITE_CR0_LO_REG_VALUE(cr0_lo);		\
+	KVM_NV_NOIRQ_WRITE_CR1_HI_REG_VALUE(cr1_hi);		\
+	KVM_NV_NOIRQ_WRITE_CR1_LO_REG_VALUE(cr1_lo);		\
+})
+
+#define NATIVE_RESTORE_USER_CRs(regs)			\
+({									\
+	e2k_cr0_hi_t cr0_hi = (regs)->crs.cr0_hi;			\
+	e2k_cr0_lo_t cr0_lo = (regs)->crs.cr0_lo;			\
+	e2k_cr1_hi_t cr1_hi = (regs)->crs.cr1_hi;			\
+	e2k_cr1_lo_t cr1_lo = (regs)->crs.cr1_lo;			\
+	native_write_cr(cr0_lo, cr0_hi, cr1_lo, cr1_hi); \
 })
 
 #define PREFIX_RESTORE_USER_STACK_REGS(PV_TYPE, regs, in_syscall)	\
@@ -847,13 +856,11 @@ do { \
 	usd_lo = AS_WORD(stacks->usd_lo);				\
 	usd_hi = AS_WORD(stacks->usd_hi);				\
 	top = stacks->top;						\
-	PREFIX_RESTORE_USER_CRs(PV_TYPE, regs);				\
+	PV_TYPE##_RESTORE_USER_CRs(regs);				\
 	CHECK_USD_BASE_SIZE(regs);					\
 	PV_TYPE##_NV_WRITE_USBR_USD_REG_VALUE(top, usd_hi, usd_lo);	\
 	RESTORE_USER_CUT_REGS(ti, regs, in_syscall);			\
 })
-#define NATIVE_RESTORE_USER_CRs(regs)	\
-		PREFIX_RESTORE_USER_CRs(NATIVE, regs)
 #define NATIVE_RESTORE_USER_STACK_REGS(regs, insyscall) \
 		PREFIX_RESTORE_USER_STACK_REGS(NATIVE, regs, insyscall)
 
@@ -879,6 +886,7 @@ static inline void kvm_trap_init(unsigned long cellar_addr) { }
 #define RESTORE_COMMON_REGS(regs) \
 		NATIVE_RESTORE_COMMON_REGS(regs)
 
+#define SET_GREGS_EMPTY(global, local)	NATIVE_SET_GREGS_EMPTY(global, local)
 #define INIT_G_REGS(skip_k_gregs)	NATIVE_INIT_G_REGS(skip_k_gregs)
 #define BOOT_INIT_G_REGS()	NATIVE_BOOT_INIT_G_REGS()
 
@@ -901,32 +909,17 @@ get_all_user_glob_regs(e2k_global_regs_t *gregs)
 
 #endif	/* CONFIG_KVM_GUEST_KERNEL */
 
-#if CONFIG_CPU_ISET_MIN >= 6
-static inline void restore_dimtp(const e2k_dimtp_t *dimtp)
+static __always_inline void restore_dimtp(e2k_dimtp_t dimtp)
 {
-	NATIVE_SET_DSREGS_CLOSED_NOEXC(dimtp.lo, dimtp.hi, dimtp->lo, dimtp->hi, 4, 6);
+	if (!cpu_has(CPU_FEAT_ISET_V6))
+		return;
+
+	NATIVE_SET_DSREGS_CLOSED_ISET(6, dimtp.lo, dimtp.hi, dimtp.lo, dimtp.hi);
 }
-static inline void clear_dimtp(void)
+static __always_inline void clear_dimtp(void)
 {
-	NATIVE_SET_DSREGS_CLOSED_NOEXC(dimtp.lo, dimtp.hi, 0ull, 0ull, 4, 6);
+	restore_dimtp((e2k_dimtp_t) { 0 });
 }
-#elif !defined CONFIG_E2K_MACHINE
-static inline void restore_dimtp(const e2k_dimtp_t *dimtp)
-{
-	if (machine.restore_dimtp)
-		machine.restore_dimtp(dimtp);
-}
-static inline void clear_dimtp(void)
-{
-	if (machine.restore_dimtp) {
-		e2k_dimtp_t dimtp = {{ 0 }};
-		machine.restore_dimtp(&dimtp);
-	}
-}
-#else
-static inline void restore_dimtp(const e2k_dimtp_t *dimtp) { }
-static inline void clear_dimtp(void) { }
-#endif
 
 #define NATIVE_RESTORE_MONITOR_COUNTERS(sw_regs)			\
 do {									\
@@ -937,7 +930,7 @@ do {									\
 	u64 dimar0 = sw_regs->dimar0;					\
 	u64 dimar1 = sw_regs->dimar1;					\
 									\
-	restore_dimtp(&sw_regs->dimtp);					\
+	restore_dimtp(sw_regs->dimtp);					\
 	NATIVE_WRITE_DDMAR0_REG_VALUE(ddmar0);				\
 	NATIVE_WRITE_DDMAR1_REG_VALUE(ddmar1);				\
 	NATIVE_WRITE_DIMAR0_REG_VALUE(dimar0);				\
@@ -1166,6 +1159,7 @@ NATIVE_RESTORE_TASK_REGS_TO_SWITCH(struct task_struct *task, bool is_thread_swit
 	NATIVE_NV_WRITE_PSP_REG_VALUE(psp_hi, psp_lo);
 	NATIVE_NV_WRITE_PCSP_REG_VALUE(pcsp_hi, pcsp_lo);
 
+	alternative("", "wait ma_c=1", CPU_HWBUG_CR_BEFORE_WRITES, "memory");
 	NATIVE_NV_NOIRQ_WRITE_CR0_LO_REG(cr0_lo);
 	NATIVE_NV_NOIRQ_WRITE_CR0_HI_REG(cr0_hi);
 	NATIVE_NV_NOIRQ_WRITE_CR1_LO_REG(cr1_lo);
@@ -1285,13 +1279,13 @@ NATIVE_SWITCH_TO_KERNEL_STACK(e2k_addr_t ps_base, e2k_size_t ps_size,
 })
 #define UNFREEZE_TIRs()	NATIVE_WRITE_TIR_LO_REG_VALUE(0)
 
-static inline void save_sbbp(u64 *sbbp)
+static __always_inline void save_sbbp(u64 *sbbp)
 {
 	BUILD_BUG_ON(SBBP_ENTRIES_NUM != 32);
 	int i;
 #pragma unroll(32)
 	for (i = 0; i < SBBP_ENTRIES_NUM; i++)
-		(sbbp)[i] = NATIVE_READ_SBBP_REG_VALUE();
+		sbbp[i] = NATIVE_READ_SBBP_REG_VALUE();
 }
 
 static inline void set_osgd_task_struct(struct task_struct *task)

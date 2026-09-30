@@ -146,9 +146,9 @@
 #define ECC_MODE_MASK 0x7
 
 #define PCS_PMC_REGS_base 0x1000
-#define PMC_INFO 0x000
-#define PMC_FREQ_CORE_FLOAT 0x110
-#define PMC_FREQ_OCN_FLOAT 0x114
+#define PMC_INFO_REG 0x000
+#define PMC_FREQ_CORE_FLOAT_REG 0x110
+#define PMC_FREQ_OCN_FLOAT_REG 0x114
 #define PMC_FREQ_GRAPHIC_FLOAT 0x600
 #define PMC_FREQ_CORE_TABLE 0x120
 #define PMC_FREQ_OCN_TABLE 0x140
@@ -1327,10 +1327,10 @@ static int get_wlcc_information(struct link_data *data, char *buf,
 {
 	struct link_data *b = data;
 	int cpu_type = machine.native_id;
-	char *wlcc_half_rate[] = {"2.5", "3", "2.5", "3", "1.25", "1.5", "2", "4"};
-	char *wlcc_full_rate[] = {"5", "6", "5", "6", "2.5", "3", "4", "8"};
-	char *wlcc_half_rate_v6[] = {"1.25", "1.5", "2.5", "3", "1", "2", "2.25", "2.75"};
-	char *wlcc_full_rate_v6[] = {"2.5", "3", "5", "6", "2", "4", "4.5", "5.5"};
+	char *wlcc_half_rate_v6[] = {"2.5", "3", "2.5", "3", "1.25", "1.5", "2", "4"};
+	char *wlcc_full_rate_v6[] = {"5", "6", "5", "6", "2.5", "3", "4", "8"};
+	char *wlcc_half_rate[] = {"1.25", "1.5", "2.5", "3", "1", "2", "2.25", "2.75"};
+	char *wlcc_full_rate[] = {"2.5", "3", "5", "6", "2", "4", "4.5", "5.5"};
 
 	j += sprintf(buf + j, "NODE%d-wlcc: ", hwmon->node);
 	if (b->wlcc_rate == 1) {
@@ -1698,7 +1698,7 @@ static ssize_t show_mem_data(struct device *dev,
 {
 	struct hwmon_data *hwmon = dev_get_drvdata(dev);
 	struct mem_data b = read_mem(hwmon->node);
-	int j;
+	int j = 0;
 	int i;
 	int mem_channels = get_mem_channels();
 	int cpu_type = machine.native_id;
@@ -1955,7 +1955,7 @@ static ssize_t show_mem_rate_e8c(struct device *dev,
 static struct pins_data read_pins(int node)
 {
 	struct pins_data a;
-	int PMC_ADDR = PCS_PMC_REGS_base + PMC_INFO;
+	int PMC_ADDR = PCS_PMC_REGS_base + PMC_INFO_REG;
 	int pmc_inform = sic_read_node_nbsr_reg(node, PMC_ADDR);
 	int rt_lcfg_val;
 	int sys_mon_0_reg = PCS_PMC_REGS_base + PMC_SYS_MON_0_REG;

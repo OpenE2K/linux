@@ -34,10 +34,208 @@ struct pcsm_data {
 	int node;
 };
 
-int (*vm_table_type)[VM_MAX_SENSORS];
 struct pcsm_data *p_pcsm[MAX_NODE];
 
-static const struct ts *ts_map;
+static const struct cpu_sensors *cpu_sensors __read_mostly;
+
+static const struct cpu_sensors cpu_sensors_e16c = {
+	.ts_map = {
+		{"CORE_0",  PMC_TERM_TS5_offset},
+		{"CORE_1",  PMC_TERM_TS1_offset},
+		{"CORE_14", PMC_TERM_TS2_offset},
+		{"CORE_15", PMC_TERM_TS3_offset},
+		{"EIOH",    PMC_TERM_TS4_offset},
+		{"TEST",    PMC_TERM_TS0_offset}
+	},
+	.vm_table_type = {
+		{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
+		{VCORE, VDDR,  VDDR,  VDDR,  VCORE, VDDR,  NO_EXIST, NO_EXIST, },
+		{VCORE, VDDR,  VDDR,  VDDR,  VCORE, VDDR,  NO_EXIST, NO_EXIST, },
+		{VCORE, VDDR,  VDDR,  VDDR,  VCORE, VDDR,  NO_EXIST, NO_EXIST, },
+		{VCORE, VDDR,  VDDR,  VDDR,  VCORE, VDDR,  NO_EXIST, NO_EXIST, },
+		{VCORE, VDDR,  VDDR,  VDDR,  VCORE, VDDR,  NO_EXIST, NO_EXIST, },
+		{VCORE, VDDR,  VDDR,  VDDR,  VCORE, VDDR,  NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
+	}
+};
+
+static const struct cpu_sensors cpu_sensors_e16c_improved_vm = {
+	.ts_map = {
+		{"CORE_0",  PMC_TERM_TS5_offset},
+		{"CORE_1",  PMC_TERM_TS1_offset},
+		{"CORE_14", PMC_TERM_TS2_offset},
+		{"CORE_15", PMC_TERM_TS3_offset},
+		{"EIOH",    PMC_TERM_TS4_offset},
+		{"TEST",    PMC_TERM_TS0_offset}
+	},
+	.vm_table_type = {
+		{VEXT,  VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
+		{VCORE, VDDR,  VDDR,  VDDR,  VCORE, VDDR,  NO_EXIST, NO_EXIST, },
+		{VCORE, VDDR,  VDDR,  VDDR,  VCORE, VDDR,  NO_EXIST, NO_EXIST, },
+		{VCORE, VDDR,  VDDR,  VDDR,  VCORE, VDDR,  NO_EXIST, NO_EXIST, },
+		{VCORE, VDDR,  VDDR,  VDDR,  VCORE, VDDR,  NO_EXIST, NO_EXIST, },
+		{VCORE, VDDR,  VDDR,  VDDR,  VCORE, VDDR,  NO_EXIST, NO_EXIST, },
+		{VCORE, VDDR,  VDDR,  VDDR,  VCORE, VDDR,  NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
+	}
+};
+
+static const struct cpu_sensors cpu_sensors_e12c = {
+	.ts_map = {
+		{"CORE_0",  PMC_TERM_TS5_offset},
+		{"CORE_1",  PMC_TERM_TS1_offset},
+		{"CORE_14", PMC_TERM_TS2_offset},
+		{"CORE_15", PMC_TERM_TS3_offset},
+		{"EIOH",    PMC_TERM_TS4_offset},
+		{"TEST",    PMC_TERM_TS0_offset}
+	},
+	.vm_table_type = {
+		{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
+		{VCORE, VDDR,  VDDR,  VDDR,  VCORE, VDDR,  NO_EXIST, NO_EXIST, },
+		{VCORE, VDDR,  VDDR,  VDDR,  VCORE, VDDR,  NO_EXIST, NO_EXIST, },
+		{VCORE, VDDR,  VDDR,  VDDR,  VCORE, VDDR,  NO_EXIST, NO_EXIST, },
+		{VCORE, VDDR,  VDDR,  VDDR,  VCORE, VDDR,  NO_EXIST, NO_EXIST, },
+		{VCORE, VDDR,  VDDR,  VDDR,  VCORE, VDDR,  NO_EXIST, NO_EXIST, },
+		{VCORE, VDDR,  VDDR,  VDDR,  VCORE, VDDR,  NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
+	}
+};
+
+static const struct cpu_sensors cpu_sensors_e12c_improved_vm = {
+	.ts_map = {
+		{"CORE_0",  PMC_TERM_TS1_offset},
+		{"CORE_1",  PMC_TERM_TS0_offset},
+		{"CORE_10", PMC_TERM_TS2_offset},
+		{"CORE_11", PMC_TERM_TS3_offset},
+		{"EIOH",    PMC_TERM_TS4_offset}
+	},
+	.vm_table_type = {
+		{VEXT,  VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VDDR,  VCORE, VDDR,  VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VDDR,  VCORE, VDDR,  VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VDDR,  VCORE, VDDR,  VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+	}
+};
+
+static const struct cpu_sensors cpu_sensors_e2c3 = {
+	.ts_map = {
+		{"CORE_0",  PMC_TERM_TS2_offset},
+		{"CORE_1",  PMC_TERM_TS1_offset},
+		{"MC0",	    PMC_TERM_TS3_offset},
+		{"MC1",	    PMC_TERM_TS0_offset},
+		{"EIOH",    PMC_TERM_TS4_offset}
+	},
+	.vm_table_type = {
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VDDR,  VCORE, VCORE, VDDR,  VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VDDR,  VCORE, VCORE, VDDR,  VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VDDR,  VCORE, VCORE, VDDR,  VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+	}
+};
+
+static const struct cpu_sensors cpu_sensors_e2c3_improved_vm = {
+	.ts_map = {
+		{"CORE_0",  PMC_TERM_TS2_offset},
+		{"CORE_1",  PMC_TERM_TS1_offset},
+		{"MC0",	    PMC_TERM_TS3_offset},
+		{"MC1",	    PMC_TERM_TS0_offset},
+		{"EIOH",    PMC_TERM_TS4_offset}
+	},
+	.vm_table_type = {
+		{VEXT,  VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VDDR,  VCORE, VCORE, VDDR,  VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VDDR,  VCORE, VCORE, VDDR,  VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VDDR,  VCORE, VCORE, VDDR,  VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+	}
+};
+
+static const struct cpu_sensors cpu_sensors_e8v7 = {
+	.ts_map = {
+		{"CORE_0",  PMC_TERM_TS1_offset},
+		{"CORE_3",  PMC_TERM_TS2_offset},
+		{"CORE_5",  PMC_TERM_TS3_offset},
+		{"CORE_6",  PMC_TERM_TS4_offset},
+		{"MGA",	    PMC_TERM_TS0_offset}
+	},
+	.vm_table_type = {
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VDDR,  VCORE, VCORE, VDDR,  VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VDDR,  VCORE, VCORE, VDDR,  VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VDDR,  VCORE, VCORE, VDDR,  VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
+	}
+};
 
 #ifdef DEBUG
 static void print_pwm_regs(pwm_regs_t *regs)
@@ -61,7 +259,7 @@ static void pwm_wait_val(int node)
     regs.val = 1;
 
     while (regs.val && i < 100) {
-	regs.word = sic_read_node_nbsr_reg(node, PCSM_BASE_ADDR + PMC_FAN_CFG);
+	regs.word = sic_read_node_nbsr_reg(node, PCSM_BASE_ADDR + PMC_FAN_CFG_offset);
 	i++;
     }
 }
@@ -72,7 +270,7 @@ static void pwm_wait_rdata_val(int node)
     pwm_regs_t regs = {.word = 0};
 
     while (!regs.rdata_val && i < 100) {
-	regs.word = sic_read_node_nbsr_reg(node, PCSM_BASE_ADDR + PMC_FAN_CFG);
+	regs.word = sic_read_node_nbsr_reg(node, PCSM_BASE_ADDR + PMC_FAN_CFG_offset);
 	i++;
     }
 }
@@ -80,7 +278,7 @@ static void pwm_wait_rdata_val(int node)
 static u8 read_pwm_data(int node, int sel, u8 addr)
 {
     pwm_regs_t regs = {.word = sic_read_node_nbsr_reg(node,
-	    PCSM_BASE_ADDR + PMC_FAN_CFG)};
+	    PCSM_BASE_ADDR + PMC_FAN_CFG_offset)};
 
     regs.val = 1;
     regs.cop = 0;
@@ -88,11 +286,11 @@ static u8 read_pwm_data(int node, int sel, u8 addr)
     regs.addr = addr;
     regs.wdata = 0;
 
-    sic_write_node_nbsr_reg(node, PCSM_BASE_ADDR + PMC_FAN_CFG, regs.word);
+	sic_write_node_nbsr_reg(node, PCSM_BASE_ADDR + PMC_FAN_CFG_offset, regs.word);
 
     pwm_wait_rdata_val(node);
 
-    regs.word = sic_read_node_nbsr_reg(node, PCSM_BASE_ADDR + PMC_FAN_CFG);
+	regs.word = sic_read_node_nbsr_reg(node, PCSM_BASE_ADDR + PMC_FAN_CFG_offset);
 
     return regs.rdata;
 }
@@ -100,7 +298,7 @@ static u8 read_pwm_data(int node, int sel, u8 addr)
 static void write_pwm_data(int node, int sel, u8 addr, u8 data)
 {
     pwm_regs_t regs = {.word = sic_read_node_nbsr_reg(node,
-	    PCSM_BASE_ADDR + PMC_FAN_CFG)};
+	    PCSM_BASE_ADDR + PMC_FAN_CFG_offset)};
 
     regs.val = 1;
     regs.cop = 1;
@@ -108,7 +306,7 @@ static void write_pwm_data(int node, int sel, u8 addr, u8 data)
     regs.addr = addr;
     regs.wdata = data;
 
-    sic_write_node_nbsr_reg(node, PCSM_BASE_ADDR + PMC_FAN_CFG, regs.word);
+	sic_write_node_nbsr_reg(node, PCSM_BASE_ADDR + PMC_FAN_CFG_offset, regs.word);
 
     pwm_wait_val(node);
 }
@@ -373,7 +571,7 @@ static ssize_t pmc_show_temp(struct device *dev,
 {
 	struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
 	struct pcsm_data *data = dev_get_drvdata(dev);
-	int addr = ts_map[attr->index].addr;
+	int addr = cpu_sensors->ts_map[attr->index].addr;
 	term_ts_regs_t reg = { .word = sic_read_node_nbsr_reg(data->node,
 		PCSM_BASE_ADDR + addr) };
 
@@ -387,16 +585,11 @@ static ssize_t pmc_show_temp_max(struct device *dev,
     struct pcsm_data *data = dev_get_drvdata(dev);
     int index;
     int ts_max = 0;
-    int ts_count = 5;
 
-    if (IS_MACHINE_E16C) {
-	ts_count++;
-    }
-
-    for (index = 0; index < ts_count; index++) {
+    for (index = 0; index < PMC_TERM_TS_MAX && cpu_sensors->ts_map[index].name; index++) {
 	term_ts_regs_t reg = {
 		.word = sic_read_node_nbsr_reg(data->node,
-				PCSM_BASE_ADDR + ts_map[index].addr)
+				PCSM_BASE_ADDR + cpu_sensors->ts_map[index].addr)
 	};
 	int ts_val = temp_to_millidegrees(reg);
 
@@ -411,6 +604,59 @@ static ssize_t pmc_show_temp_max(struct device *dev,
 #define VREF    1213
 #define N_TO_V(N) (VREF*ACCURACY*(6*N - 3 - (1 << 14))/((1 << 14)*5))
 
+static void read_vm_data_v6(int (*vm_table_val)[VM_MAX_SENSORS], int sn, int ch, int node) {
+    pvt_vm_regs_t reg;
+
+    reg.word = sic_read_node_nbsr_reg(node, PCS_VM_N_CH_DATA(sn, ch));
+#ifdef DEBUG
+    pr_err("DEBUG: addr 0x%x sn %d ch %d val %d volt %d",
+		PCS_VM_N_CH_DATA(sn, ch), sn, ch, reg.word, N_TO_V(reg.data));
+#endif
+    if (reg.type || reg.fault) {
+	if (reg.fault)
+	    vm_table_val[ch][sn] = -EFAULT;
+	else
+	    vm_table_val[ch][sn] = -EINVAL;
+	return;
+    }
+
+    vm_table_val[ch][sn] = N_TO_V(reg.data);
+}
+
+static void read_vm_data_v7(int (*vm_table_val)[VM_MAX_SENSORS], int sn, int *ch_p, int node) {
+    pmc_vm_regs_t reg;
+    int ch = *ch_p;
+
+    reg.word = sic_read_node_nbsr_reg(node, PMC_VOLT_VMN_CH(sn, ch));
+#ifdef DEBUG
+    pr_err("DEBUG: addr 0x%x sn %d ch %d val %d volt %d",
+		PMC_VOLT_VMN_CH(sn, ch), sn, ch, reg.word, v_i);
+#endif
+    if (!reg.v_val_i || reg.v_fault_i) {
+	if (reg.v_fault_i)
+	    vm_table_val[ch][sn] = -EFAULT;
+	else
+	    vm_table_val[ch][sn] = -EINVAL;
+    } else
+	vm_table_val[ch][sn] = reg.v_i;
+
+    if (++ch >= VM_MAX_CHANNELS)
+	return;
+    else
+	*ch_p = ch;
+#ifdef DEBUG
+    pr_err("DEBUG: addr 0x%x sn %d ch %d val %d volt %d",
+		PMC_VOLT_VMN_CH(sn, ch), sn, ch, reg.word, v_j);
+#endif
+    if (!reg.v_val_j || reg.v_fault_j) {
+	if (reg.v_fault_j)
+	    vm_table_val[ch][sn] = -EFAULT;
+	else
+	    vm_table_val[ch][sn] = -EINVAL;
+    } else
+	vm_table_val[ch][sn] = reg.v_j;
+}
+
 static void pvt_read_vm_data(int (*vm_table_val)[VM_MAX_SENSORS], int node)
 {
     int ch, sn;
@@ -419,13 +665,11 @@ static void pvt_read_vm_data(int (*vm_table_val)[VM_MAX_SENSORS], int node)
 
     for (ch = 0; ch < VM_MAX_CHANNELS; ch++) {
 	for (sn = 0; sn < VM_MAX_SENSORS; sn++) {
-	    if (vm_table_e16c[ch][sn] != NO_EXIST) {
-		int val = sic_read_node_nbsr_reg(node, PCS_VM_N_CH_DATA(sn, ch));
-#ifdef DEBUG
-		pr_err("DEBUG: addr 0x%x sn %d ch %d val %d volt %d",
-			PCS_VM_N_CH_DATA(sn, ch), sn, ch, val, N_TO_V(val));
-#endif
-		vm_table_val[ch][sn] = N_TO_V(val);
+	    if (cpu_sensors->vm_table_type[ch][sn] != NO_EXIST) {
+		if (cpu_has(CPU_FEAT_ISET_V7))
+		    read_vm_data_v7(vm_table_val, sn, &ch, node);
+		else
+		    read_vm_data_v6(vm_table_val, sn, ch, node);
 	    }
 	}
     }
@@ -438,7 +682,9 @@ static int pvt_in_avg(int (*vm_table_val)[VM_MAX_SENSORS], int index)
 
     for (ch = 0; ch < VM_MAX_CHANNELS; ch++) {
 	for (sn = 0; sn < VM_MAX_SENSORS; sn++) {
-	    if (vm_table_type[ch][sn] == index) {
+	    if (cpu_sensors->vm_table_type[ch][sn] == index
+		    && vm_table_val[ch][sn] != -EFAULT
+		    && vm_table_val[ch][sn] != -EINVAL) {
 		count++;
 		sum += vm_table_val[ch][sn];
 	    }
@@ -469,8 +715,10 @@ static int pvt_in_min(int (*vm_table_val)[VM_MAX_SENSORS], int index)
 
     for (ch = 0; ch < VM_MAX_CHANNELS; ch++) {
 	for (sn = 0; sn < VM_MAX_SENSORS; sn++) {
-	    if (vm_table_type[ch][sn] == index) {
-		if (vm_table_val[ch][sn] < lowest) {
+	    if (cpu_sensors->vm_table_type[ch][sn] == index) {
+		if (vm_table_val[ch][sn] < lowest
+		    && vm_table_val[ch][sn] != -EFAULT
+		    && vm_table_val[ch][sn] != -EINVAL) {
 		    lowest = vm_table_val[ch][sn];
 		}
 	    }
@@ -501,8 +749,10 @@ static int pvt_in_max(int (*vm_table_val)[VM_MAX_SENSORS], int index)
 
     for (ch = 0; ch < VM_MAX_CHANNELS; ch++) {
 	for (sn = 0; sn < VM_MAX_SENSORS; sn++) {
-	    if (vm_table_type[ch][sn] == index) {
-		if (vm_table_val[ch][sn] > highest) {
+	    if (cpu_sensors->vm_table_type[ch][sn] == index) {
+		if (vm_table_val[ch][sn] > highest
+		    && vm_table_val[ch][sn] != -EFAULT
+		    && vm_table_val[ch][sn] != -EINVAL) {
 		    highest = vm_table_val[ch][sn];
 		}
 	    }
@@ -527,17 +777,95 @@ static ssize_t pvt_show_in_max(struct device *dev,
 	pvt_in_max(vm_table_val, attr->index)%ACCURACY);
 }
 
-static int vddr_sensor_exist(int (*vm_table_val)[VM_MAX_SENSORS], int sensor)
+static int pvt_in_ext(int (*vm_table_val)[VM_MAX_SENSORS], int index)
 {
-    int ch;
+    int ch, sn, ext = 0;
 
     for (ch = 0; ch < VM_MAX_CHANNELS; ch++) {
-	if (vm_table_type[ch][sensor] == VDDR) {
-	    return 1;
+	for (sn = 0; sn < VM_MAX_SENSORS; sn++) {
+	    if (cpu_sensors->vm_table_type[ch][sn] == index
+		&& vm_table_val[ch][sn] != -EFAULT
+		&& vm_table_val[ch][sn] != -EINVAL) {
+		ext = vm_table_val[ch][sn];
+		return ext;
+	    }
 	}
     }
 
-    return 0;
+    return ext;
+}
+
+static ssize_t pvt_show_in_ext(struct device *dev,
+    struct device_attribute *devattr,
+    char *buf)
+{
+    struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
+    struct pcsm_data *data = dev_get_drvdata(dev);
+    int vm_table_val[VM_MAX_CHANNELS][VM_MAX_SENSORS];
+
+    pvt_read_vm_data(vm_table_val, data->node);
+
+    return snprintf(buf, PAGE_SIZE - 1, "%d.%d\n",
+	pvt_in_ext(vm_table_val, attr->index)/ACCURACY,
+	pvt_in_ext(vm_table_val, attr->index)%ACCURACY);
+}
+
+static int get_vm_info(int (*vm_table_val)[VM_MAX_SENSORS], int sn, char *buf, int pos) {
+    bool vddr_sensor_exist = false, vext_sensor_exist = false;
+    int ch;
+
+    pos += snprintf(&buf[pos], PAGE_SIZE - 1,  "VM[%d] VCORE mV: ", sn);
+    for (ch = 0; ch < VM_MAX_CHANNELS; ch++) {
+	if (cpu_sensors->vm_table_type[ch][sn] == VCORE) {
+	    if (vm_table_val[ch][sn] == -EFAULT)
+		pos += snprintf(&buf[pos], PAGE_SIZE - 1, "FAULT ");
+	    else if (vm_table_val[ch][sn] == -EINVAL)
+		pos += snprintf(&buf[pos], PAGE_SIZE - 1, "INVAL ");
+	    else {
+		pos += snprintf(&buf[pos], PAGE_SIZE - 1, "%d.%d ",
+		vm_table_val[ch][sn]/ACCURACY, vm_table_val[ch][sn]%ACCURACY);
+	    }
+	} else if (!vddr_sensor_exist && cpu_sensors->vm_table_type[ch][sn] == VDDR) {
+	    vddr_sensor_exist = true;
+	} else if (!vext_sensor_exist && cpu_sensors->vm_table_type[ch][sn] == VEXT) {
+	    vext_sensor_exist = true;
+	}
+    }
+    if (vddr_sensor_exist) {
+	pos += snprintf(&buf[pos], PAGE_SIZE - 1,  "\nVM[%d] VDDR  mV: ", sn);
+	for (ch = 0; ch < VM_MAX_CHANNELS; ch++) {
+	    if (cpu_sensors->vm_table_type[ch][sn] == VDDR) {
+		if (vm_table_val[ch][sn] == -EFAULT)
+		    pos += snprintf(&buf[pos], PAGE_SIZE - 1, "FAULT ");
+		else if (vm_table_val[ch][sn] == -EINVAL)
+		    pos += snprintf(&buf[pos], PAGE_SIZE - 1, "INVAL ");
+		else {
+		    pos += snprintf(&buf[pos], PAGE_SIZE - 1, "%d.%d ",
+		    vm_table_val[ch][sn]/ACCURACY, vm_table_val[ch][sn]%ACCURACY);
+		}
+	    }
+	}
+	vddr_sensor_exist = false;
+    }
+    if (vext_sensor_exist) {
+	pos += snprintf(&buf[pos], PAGE_SIZE - 1,  "\nVM[%d] VEXT  mV: ", sn);
+	for (ch = 0; ch < VM_MAX_CHANNELS; ch++) {
+	    if (cpu_sensors->vm_table_type[ch][sn] == VEXT) {
+		if (vm_table_val[ch][sn] == -EFAULT)
+		    pos += snprintf(&buf[pos], PAGE_SIZE - 1, "FAULT ");
+		else if (vm_table_val[ch][sn] == -EINVAL)
+		    pos += snprintf(&buf[pos], PAGE_SIZE - 1, "INVAL ");
+		else {
+		    pos += snprintf(&buf[pos], PAGE_SIZE - 1, "%d.%d ",
+		    vm_table_val[ch][sn]/ACCURACY, vm_table_val[ch][sn]%ACCURACY);
+		}
+	    }
+	}
+	vext_sensor_exist = false;
+    }
+    pos += snprintf(&buf[pos], PAGE_SIZE - 1, "\n");
+
+    return pos;
 }
 
 #define INFO_BRIEF  0
@@ -550,31 +878,14 @@ static ssize_t pvt_show_vm_info(struct device *dev,
     struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
     struct pcsm_data *data = dev_get_drvdata(dev);
     int vm_table_val[VM_MAX_CHANNELS][VM_MAX_SENSORS];
-    int ch, sn;
-    int pos = 0;
+    int sn, pos = 0;
 
     pvt_read_vm_data(vm_table_val, data->node);
 
     if (attr->index == INFO_ALL) {
 	for (sn = 0; sn < VM_MAX_SENSORS; sn++) {
-	    if (vm_table_type[0][sn] != NO_EXIST) {
-		pos += snprintf(&buf[pos], PAGE_SIZE - 1,  "VM[%d] VCORE mV: ", sn);
-		for (ch = 0; ch < VM_MAX_CHANNELS; ch++) {
-		    if (vm_table_type[ch][sn] == VCORE) {
-			pos += snprintf(&buf[pos], PAGE_SIZE - 1, "%d.%d ",
-			vm_table_val[ch][sn]/ACCURACY, vm_table_val[ch][sn]%ACCURACY);
-		    }
-		}
-		if (vddr_sensor_exist(vm_table_type, sn)) {
-		    pos += snprintf(&buf[pos], PAGE_SIZE - 1,  "\nVM[%d] VDDR  mV: ", sn);
-		    for (ch = 0; ch < VM_MAX_CHANNELS; ch++) {
-			if (vm_table_type[ch][sn] == VDDR) {
-			    pos += snprintf(&buf[pos], PAGE_SIZE - 1, "%d.%d ",
-			    vm_table_val[ch][sn]/ACCURACY, vm_table_val[ch][sn]%ACCURACY);
-			}
-		    }
-		}
-		pos += snprintf(&buf[pos], PAGE_SIZE - 1, "\n");
+	    if (cpu_sensors->vm_table_type[0][sn] != NO_EXIST) {
+		pos = get_vm_info(vm_table_val, sn, buf, pos);
 	    }
 	}
     }
@@ -593,12 +904,13 @@ static ssize_t pvt_show_vm_info(struct device *dev,
 }
 
 static const char * const input_names[] = {
-	[VM1] = "Vcore average",
-	[VM2] = "Vcore min",
-	[VM3] = "Vcore max",
-	[VM4] = "Vddr  average",
-	[VM5] = "Vddr  min",
-	[VM6] = "Vddr  max",
+	[0] = "Vcore average",
+	[1] = "Vcore min",
+	[2] = "Vcore max",
+	[3] = "Vddr  average",
+	[4] = "Vddr  min",
+	[5] = "Vddr  max",
+	[6] = "Vext",
 };
 
 static ssize_t in_label_show(struct device *dev,
@@ -617,12 +929,16 @@ static ssize_t ts_label_show(struct device *dev,
     struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
     const char *ts_name;
 
-    if (IS_MACHINE_E16C || IS_MACHINE_E12C || IS_MACHINE_E2C3)
-	ts_name = ts_map[attr->index].name;
-    else
-	ts_name = "unsupported CPU";
+    ts_name = cpu_sensors->ts_map[attr->index].name;
 
     return sprintf(buf, "%s\n", ts_name);
+}
+
+static ssize_t ts_max_label_show(struct device *dev,
+	struct device_attribute *devattr,
+	char *buf)
+{
+    return sprintf(buf, "%s\n", "Tmax");
 }
 
 static ssize_t show_pcs_adjust_period(struct device *dev,
@@ -705,28 +1021,28 @@ static void pcs_events_enable(int node)
 
 /* TEMP */
 static SENSOR_DEVICE_ATTR(temp1_input, MATTR,
-		pmc_show_temp, NULL, TS1);
+		pmc_show_temp, NULL, 0);
 static SENSOR_DEVICE_ATTR(temp2_input, MATTR,
-		pmc_show_temp, NULL, TS2);
+		pmc_show_temp, NULL, 1);
 static SENSOR_DEVICE_ATTR(temp3_input, MATTR,
-		pmc_show_temp, NULL, TS3);
+		pmc_show_temp, NULL, 2);
 static SENSOR_DEVICE_ATTR(temp4_input, MATTR,
-		pmc_show_temp, NULL, TS4);
+		pmc_show_temp, NULL, 3);
 static SENSOR_DEVICE_ATTR(temp5_input, MATTR,
-		pmc_show_temp, NULL, TS5);
+		pmc_show_temp, NULL, 4);
 static SENSOR_DEVICE_ATTR(temp6_input, MATTR,
-		pmc_show_temp, NULL, TS6);
+		pmc_show_temp, NULL, 5);
 static DEVICE_ATTR(temp7_input, MATTR,
 		pmc_show_temp_max, NULL);
 
 
-static SENSOR_DEVICE_ATTR_RO(temp1_label, ts_label, TS1);
-static SENSOR_DEVICE_ATTR_RO(temp2_label, ts_label, TS2);
-static SENSOR_DEVICE_ATTR_RO(temp3_label, ts_label, TS3);
-static SENSOR_DEVICE_ATTR_RO(temp4_label, ts_label, TS4);
-static SENSOR_DEVICE_ATTR_RO(temp5_label, ts_label, TS5);
-static SENSOR_DEVICE_ATTR_RO(temp6_label, ts_label, TS6);
-static SENSOR_DEVICE_ATTR_RO(temp7_label, ts_label, TS7);
+static SENSOR_DEVICE_ATTR_RO(temp1_label, ts_label, 0);
+static SENSOR_DEVICE_ATTR_RO(temp2_label, ts_label, 1);
+static SENSOR_DEVICE_ATTR_RO(temp3_label, ts_label, 2);
+static SENSOR_DEVICE_ATTR_RO(temp4_label, ts_label, 3);
+static SENSOR_DEVICE_ATTR_RO(temp5_label, ts_label, 4);
+static SENSOR_DEVICE_ATTR_RO(temp6_label, ts_label, 5);
+static SENSOR_DEVICE_ATTR_RO(temp7_label, ts_max_label, 6);
 
 
 /* VOLT */
@@ -744,6 +1060,9 @@ static SENSOR_DEVICE_ATTR(in5_input, MATTR,
 static SENSOR_DEVICE_ATTR(in6_input, MATTR,
 		pvt_show_in_max, NULL, VDDR);
 
+static SENSOR_DEVICE_ATTR(in7_input, MATTR,
+		pvt_show_in_ext, NULL, VEXT);
+
 static SENSOR_DEVICE_ATTR(vcore_table, MATTR,
 		pvt_show_vm_info, NULL, INFO_ALL);
 static SENSOR_DEVICE_ATTR(vcore_brief, MATTR,
@@ -753,12 +1072,13 @@ static DEVICE_ATTR(pcs_events, MATTR,
 static DEVICE_ATTR(pcs_adjust_period, MATTR,
 		show_pcs_adjust_period, set_pcs_adjust_period);
 
-static SENSOR_DEVICE_ATTR_RO(in1_label, in_label, VM1);
-static SENSOR_DEVICE_ATTR_RO(in2_label, in_label, VM2);
-static SENSOR_DEVICE_ATTR_RO(in3_label, in_label, VM3);
-static SENSOR_DEVICE_ATTR_RO(in4_label, in_label, VM4);
-static SENSOR_DEVICE_ATTR_RO(in5_label, in_label, VM5);
-static SENSOR_DEVICE_ATTR_RO(in6_label, in_label, VM6);
+static SENSOR_DEVICE_ATTR_RO(in1_label, in_label, 0);
+static SENSOR_DEVICE_ATTR_RO(in2_label, in_label, 1);
+static SENSOR_DEVICE_ATTR_RO(in3_label, in_label, 2);
+static SENSOR_DEVICE_ATTR_RO(in4_label, in_label, 3);
+static SENSOR_DEVICE_ATTR_RO(in5_label, in_label, 4);
+static SENSOR_DEVICE_ATTR_RO(in6_label, in_label, 5);
+static SENSOR_DEVICE_ATTR_RO(in7_label, in_label, 6);
 
 /* FIRST INSTANCE */
 /* FAN */
@@ -998,6 +1318,16 @@ static const struct attribute_group in_group = {
     .attrs = in_attrs,
 };
 
+static struct attribute *in_ext_attrs[] = {
+	&sensor_dev_attr_in7_input.dev_attr.attr,
+	&sensor_dev_attr_in7_label.dev_attr.attr,
+	NULL
+};
+
+static const struct attribute_group in_ext_group = {
+	.attrs = in_ext_attrs,
+};
+
 static struct attribute *pwm1_attrs[] = {
 	&sensor_dev_attr_fan1_min.dev_attr.attr,
 	&sensor_dev_attr_fan1_max.dev_attr.attr,
@@ -1092,7 +1422,7 @@ static const struct attribute_group pwm2_group = {
 	.attrs = pwm2_attrs,
 };
 
-static const struct attribute_group *pcsm_attr_groups[7];
+static const struct attribute_group *pcsm_attr_groups[8];
 
 #ifdef CONFIG_EPIC
 static void do_pcsm_monitor(struct work_struct *work)
@@ -1183,27 +1513,36 @@ MODULE_DEVICE_TABLE(platform, pcsm_drv_id);
 
 static int pcsm_drv_init(void)
 {
-	if (!(IS_MACHINE_E2C3 || IS_MACHINE_E12C || IS_MACHINE_E16C))
+	if (!(IS_MACHINE_E2C3 || IS_MACHINE_E12C
+			|| IS_MACHINE_E16C || IS_MACHINE_E8V7))
 		return -ENODEV;
 
 	int group = 0;
 
 	if (IS_MACHINE_E16C) {
-		vm_table_type = vm_table_e16c;
-		ts_map = ts_e16c_map;
+		if (cpu_has(CPU_FEAT_IMPROVED_VM_V6))
+			cpu_sensors = &cpu_sensors_e16c_improved_vm;
+		else
+			cpu_sensors = &cpu_sensors_e16c;
+		pcsm_attr_groups[group++] = &temp_e16c_group;
 	} else if (IS_MACHINE_E12C) {
-		vm_table_type = vm_table_e12c;
-		ts_map = ts_e12c_map;
+		if (cpu_has(CPU_FEAT_IMPROVED_VM_V6))
+			cpu_sensors = &cpu_sensors_e12c_improved_vm;
+		else
+			cpu_sensors = &cpu_sensors_e12c;
 	} else if (IS_MACHINE_E2C3) {
-		vm_table_type = vm_table_e2c3;
-		ts_map = ts_e2c3_map;
+		if (cpu_has(CPU_FEAT_IMPROVED_VM_V6))
+			cpu_sensors = &cpu_sensors_e2c3_improved_vm;
+		else
+			cpu_sensors = &cpu_sensors_e2c3;
+	} else if (IS_MACHINE_E8V7) {
+		cpu_sensors = &cpu_sensors_e8v7;
 	}
 
+	if (cpu_has(CPU_FEAT_IMPROVED_VM_V6))
+		pcsm_attr_groups[group++] = &in_ext_group;
+
 	pcsm_attr_groups[group++] = &temp_group;
-
-	if (IS_MACHINE_E16C)
-		pcsm_attr_groups[group++] = &temp_e16c_group;
-
 	pcsm_attr_groups[group++] = &in_group;
 	pcsm_attr_groups[group++] = &pwm1_group;
 	pcsm_attr_groups[group++] = &pwm2_group;
@@ -1220,8 +1559,7 @@ static int pcsm_drv_init(void)
 
 static void pcsm_drv_exit(void)
 {
-	if (IS_MACHINE_E2C3 || IS_MACHINE_E12C || IS_MACHINE_E16C)
-		platform_driver_unregister(&pcsm_drv_driver);
+	platform_driver_unregister(&pcsm_drv_driver);
 } /* pcsm_drv_exit */
 
 module_init(pcsm_drv_init);

@@ -53,35 +53,35 @@ static inline bool native_sge_is_set(void)
 
 #ifdef CONFIG_E2K_PROFILING
 typedef struct {
-                                                // FIRST ELEMENT
-        long max_disable_interrupt;             // max #ticks of disable_interrupt
-        long sum_disable_interrupt;             // all #ticks of disable_interrupt
-        long number_interrupt;                  // number of interrupts
-        long number_irqs;                       // number of closed irq
-        long number_system_call;                // number of system_call
-        
-        long max_disable_interrupt_after_dump;  // max #ticks of disable_interrupt
-                                                // after last read or write profile file
-        long interrupts[exc_max_num];           // interrupt table 
-        long interrupts_time[exc_max_num];      // interrupt time (in ticks)
-        long max_interrupts_time[exc_max_num];  // max interrupt time (in ticks)
-        long syscall[NR_syscalls];              // syscall   table
-        long syscall_time[NR_syscalls];         // syscall   time (in ticks)
-        long max_syscall_time[NR_syscalls];     // max syscall  time
-        long clk;                               // time of interrupt's begining 
-        // NR_VECTORS 256
-        long max_do_irq_time[256];              // max DO_IRQ's  time
-        long do_irq[256];                       // number of DO_IRQ
-        long do_irq_time[256];                  // time of DO_IRQ
-        long clk_of_do_irq;                     // time of DO_IRQ's begining 
-        long last_element;
+						// FIRST ELEMENT
+	long max_disable_interrupt;             // max #ticks of disable_interrupt
+	long sum_disable_interrupt;             // all #ticks of disable_interrupt
+	long number_interrupt;                  // number of interrupts
+	long number_irqs;                       // number of closed irq
+	long number_system_call;                // number of system_call
+	
+	long max_disable_interrupt_after_dump;  // max #ticks of disable_interrupt
+						// after last read or write profile file
+	long interrupts[exc_max_num];           // interrupt table 
+	long interrupts_time[exc_max_num];      // interrupt time (in ticks)
+	long max_interrupts_time[exc_max_num];  // max interrupt time (in ticks)
+	long syscall[NR_syscalls];              // syscall   table
+	long syscall_time[NR_syscalls];         // syscall   time (in ticks)
+	long max_syscall_time[NR_syscalls];     // max syscall  time
+	long clk;                               // time of interrupt's begining 
+	// NR_VECTORS 256
+	long max_do_irq_time[256];              // max DO_IRQ's  time
+	long do_irq[256];                       // number of DO_IRQ
+	long do_irq_time[256];                  // time of DO_IRQ
+	long clk_of_do_irq;                     // time of DO_IRQ's begining 
+	long last_element;
 } disable_interrupt_t ;
 
 extern unsigned long get_cmos_time(void);
 extern disable_interrupt_t disable_interrupt[NR_CPUS];
 
 #define read_ticks(n)	(n = NATIVE_READ_CLKR_REG_VALUE())
-                     
+		     
 #define add_info_interrupt(n, ticks)					\
 ({	long t; int cpu;						\
 	t = NATIVE_READ_CLKR_REG_VALUE() - ticks;			\
@@ -105,19 +105,19 @@ extern disable_interrupt_t disable_interrupt[NR_CPUS];
 })
 
 typedef struct {
-        long max_time;
-        long full_time;
-        long begin_time;
-        long number;
-        long beg_ip;
-        long beg_parent_ip;
-        long end_ip;
-        long end_parent_ip;
-        long max_beg_ip;
-        long max_beg_parent_ip;
-        long max_end_ip;
-        long max_begin_time; 
-        long max_end_parent_ip;
+	long max_time;
+	long full_time;
+	long begin_time;
+	long number;
+	long beg_ip;
+	long beg_parent_ip;
+	long end_ip;
+	long end_parent_ip;
+	long max_beg_ip;
+	long max_beg_parent_ip;
+	long max_end_ip;
+	long max_begin_time; 
+	long max_end_parent_ip;
 } time_info_t;
 
 /* 
@@ -131,14 +131,14 @@ typedef struct {
  *  -  used your new define for merging what you want 
  */ 
 typedef struct {
-        time_info_t max_disabled_interrupt;           // max time of disabled inerrupts
-        time_info_t max_stack_reg;                    // max time of saving of stack_registers
-        time_info_t max_tir_reg;                      // max time for storing TIR
-        time_info_t max_mmu_reg;                      // max time for storing mmu registers
-        time_info_t max_restore_stack_reg;            // max time for restoring of stack_registers
-        time_info_t max_restoring_reg;                // max time for restoring all registers
-        time_info_t max_restore_mmu_reg;              // max time for restoring mmu registers
-        time_info_t max_cpu_idle;                     // max time for cpu_idle
+	time_info_t max_disabled_interrupt;           // max time of disabled inerrupts
+	time_info_t max_stack_reg;                    // max time of saving of stack_registers
+	time_info_t max_tir_reg;                      // max time for storing TIR
+	time_info_t max_mmu_reg;                      // max time for storing mmu registers
+	time_info_t max_restore_stack_reg;            // max time for restoring of stack_registers
+	time_info_t max_restoring_reg;                // max time for restoring all registers
+	time_info_t max_restore_mmu_reg;              // max time for restoring mmu registers
+	time_info_t max_cpu_idle;                     // max time for cpu_idle
 } system_info_t ;
 
 extern char* system_info_name[];
@@ -149,8 +149,8 @@ extern int enable_collect_interrupt_ticks;
     cpu = boot_smp_processor_id();                              \
     if (system_info[cpu].max_disabled_interrupt.begin_time >0){ \
        store_max_time_in_system_info(                           \
-         system_info[cpu].max_disabled_interrupt.begin_time,    \
-         max_disabled_interrupt);                               \
+	 system_info[cpu].max_disabled_interrupt.begin_time,    \
+	 max_disabled_interrupt);                               \
        system_info[cpu].max_disabled_interrupt.begin_time = 0;  \
     }                                                           \
 })
@@ -175,26 +175,26 @@ extern int enable_collect_interrupt_ticks;
 	}								\
 })
 #define  info_save_stack_reg(tick)                              \
-         store_max_time_in_system_info(tick,max_stack_reg)
+	 store_max_time_in_system_info(tick,max_stack_reg)
 #define  info_restore_stack_reg(tick)                           \
-         store_max_time_in_system_info(tick,max_restore_stack_reg)
+	 store_max_time_in_system_info(tick,max_restore_stack_reg)
 
 #define  info_save_mmu_reg(tick)                                \
-         store_max_time_in_system_info(tick,max_mmu_reg)
+	 store_max_time_in_system_info(tick,max_mmu_reg)
     
 #define  info_restore_mmu_reg(tick)                             \
-         store_max_time_in_system_info(tick,max_restore_mmu_reg)
+	 store_max_time_in_system_info(tick,max_restore_mmu_reg)
     
 #define  info_save_tir_reg(tick)                                \
-         store_max_time_in_system_info(tick,max_tir_reg)
+	 store_max_time_in_system_info(tick,max_tir_reg)
 
 #define  info_restore_all_reg(tick)                             \
-         store_max_time_in_system_info(tick,max_restoring_reg); \
+	 store_max_time_in_system_info(tick,max_restoring_reg); \
 
 #define cpu_idle_time()                                         \
-        store_begin_time_in_system_info(max_cpu_idle)
+	store_begin_time_in_system_info(max_cpu_idle)
 #define calculate_cpu_idle_time()                               \
-        calculate_max_time_in_system_info(max_cpu_idle)
+	calculate_max_time_in_system_info(max_cpu_idle)
 
 #define	store_begin_time_in_system_info(FIELD)				\
 ({	long t; int  cpu;						\
@@ -333,14 +333,14 @@ extern long TIME;
 #define condition_mark_disable_interrupt_ticks(_cond_)          \
 ({                                                              \
      if (enable_collect_interrupt_ticks) {              	\
-         mark_disable_interrupt_ticks();                        \
+	 mark_disable_interrupt_ticks();                        \
      }                                                          \
 })
 
 #define condition_collect_disable_interrupt_ticks(_cond_)       \
 ({                                                              \
      if (enable_collect_interrupt_ticks && _cond_) {            \
-         collect_disable_interrupt_ticks();                     \
+	 collect_disable_interrupt_ticks();                     \
      }                                                          \
 })
  

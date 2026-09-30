@@ -690,6 +690,14 @@
 		NATIVE_NV_NOIRQ_WRITE_CR1_HI_REG_VALUE(v); \
 })
 
+#define kvm_write_cr(cr0_lo, cr0_hi, cr1_lo, cr1_hi) \
+do { \
+	KVM_WRITE_CR0_LO_REG_VALUE((cr0_lo).word); \
+	KVM_WRITE_CR0_HI_REG_VALUE((cr0_hi).word); \
+	KVM_WRITE_CR1_LO_REG_VALUE((cr1_lo).word); \
+	KVM_WRITE_CR1_HI_REG_VALUE((cr1_hi).word); \
+} while (0)
+
 #define	KVM_NV_READ_CR0_LO_REG_VALUE()	KVM_READ_CR0_LO_REG_VALUE()
 #define	KVM_NV_READ_CR0_HI_REG_VALUE()	KVM_READ_CR0_HI_REG_VALUE()
 #define	KVM_NV_READ_CR1_LO_REG_VALUE()	KVM_READ_CR1_LO_REG_VALUE()
@@ -1487,11 +1495,11 @@ do { \
 #define BOOT_READ_PSP_HI_REG_VALUE()	KVM_READ_PSP_HI_REG_VALUE()
 
 #define WRITE_PSP_LO_REG_VALUE(PSP_lo_value)		\
- 	      	KVM_WRITE_PSP_LO_REG_VALUE(PSP_lo_value)
+		KVM_WRITE_PSP_LO_REG_VALUE(PSP_lo_value)
 #define WRITE_PSP_HI_REG_VALUE(PSP_hi_value)		\
-      	 	KVM_WRITE_PSP_HI_REG_VALUE(PSP_hi_value)
+		KVM_WRITE_PSP_HI_REG_VALUE(PSP_hi_value)
 #define BOOT_WRITE_PSP_LO_REG_VALUE(PSP_lo_value)	\
-      	 	KVM_WRITE_PSP_LO_REG_VALUE(PSP_lo_value)
+		KVM_WRITE_PSP_LO_REG_VALUE(PSP_lo_value)
 #define BOOT_WRITE_PSP_HI_REG_VALUE(PSP_hi_value)	\
 		KVM_WRITE_PSP_HI_REG_VALUE(PSP_hi_value)
 
@@ -1528,6 +1536,9 @@ do { \
 		KVM_WRITE_CR1_LO_REG_VALUE(CR1_lo_value)
 #define	WRITE_CR1_HI_REG_VALUE(CR1_hi_value) \
 		KVM_WRITE_CR1_HI_REG_VALUE(CR1_hi_value)
+
+#define write_cr		kvm_write_cr
+#define write_cr__no_wait	kvm_write_cr
 
 /*
  * Read/write double-word Control Transfer Preparation Registers

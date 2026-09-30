@@ -366,10 +366,10 @@ static inline struct kvm_cepic *to_cepic(struct kvm_io_device *dev)
 static void epic_reg_read(struct kvm_cepic *epic, u32 offset, int len,
 		void *data)
 {
-	if ((len != 4) || (len != 8)) {
+	if ((len != 4) && (len != 8)) {
 		epic_debug("KVM_EPIC_READ: unsupported len %d offset %x\n",
 			   len, offset);
-		*(unsigned int *)data = -1UL;
+		*(unsigned int *)data = -1U;
 		return;
 	}
 
@@ -571,7 +571,7 @@ static int epic_mmio_write(struct kvm_vcpu *vcpu, struct kvm_io_device *this,
 			__func__, offset, len, val);
 
 	/* Do not model accesses to PREPIC regs */
-	if (offset < PAGE_SIZE)
+	if (offset < PAGE_SIZE) {
 		if (len == 4) {
 			u32 val;
 			val = *(u32 *)data;
@@ -585,6 +585,7 @@ static int epic_mmio_write(struct kvm_vcpu *vcpu, struct kvm_io_device *this,
 			trace_kvm_epic_write_d(offset, val);
 			epic_reg_write_d(epic, offset, val);
 		}
+	}
 
 	return 0;
 }

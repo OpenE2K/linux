@@ -334,18 +334,13 @@ int kvm_hv_io_page_fault(struct kvm_vcpu *vcpu, gpa_t gpa,
 	is_write = !!(AS(cond).store);
 	spec = !!(AS(cond).spec);
 
-	if (spec) {
-		if (is_write) {
-			complete_intc_info_io_write(vcpu, intc_info_mu);
-			DebugKVMIO("speculative write to IO area - ignoring\n");
-		} else {
-			NATIVE_STORE_VALUE_WITH_TAG(&intc_info_mu->data,
-				ITAGDWD_IO_DEBUG, ETAGDWD);
-			NATIVE_STORE_VALUE_WITH_TAG(&intc_info_mu->data_ext,
-				ITAGDWD_IO_DEBUG, ETAGDWD);
-			complete_intc_info_io_read(vcpu, intc_info_mu);
-			DebugKVMIO("speculative read from IO area - return diag value\n");
-		}
+	if (spec && !is_write) {
+		NATIVE_STORE_VALUE_WITH_TAG(&intc_info_mu->data,
+			ITAGDWD_IO_DEBUG, ETAGDWD);
+		NATIVE_STORE_VALUE_WITH_TAG(&intc_info_mu->data_ext,
+			ITAGDWD_IO_DEBUG, ETAGDWD);
+		complete_intc_info_io_read(vcpu, intc_info_mu);
+		DebugKVMIO("speculative read from IO area - return diag value\n");
 		return 0;
 	}
 

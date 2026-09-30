@@ -11,7 +11,7 @@
 #include <asm/mmu.h>
 
 extern int native_mkctxt_prepare_hw_user_stacks(void __user *user_func,
-		void *args, u64 args_size, size_t d_stack_sz, int format,
+		void __user *args, u64 args_size, size_t d_stack_sz, int format,
 		void __user *tramp_ps_frames, void __user *ps_frames,
 		e2k_mem_crs_t __user *cs_frames, const void __user *uc_link);
 
@@ -22,7 +22,7 @@ extern int native_mkctxt_prepare_hw_user_stacks(void __user *user_func,
 /* it is native kernel without or with virtualization support */
 
 static inline int mkctxt_prepare_hw_user_stacks(void (*user_func)(void),
-		void *args, u64 args_size, size_t d_stack_sz, int format,
+		void __user *args, u64 args_size, size_t d_stack_sz, int format,
 		void __user *tramp_ps_frames, void __user *ps_frames,
 		e2k_mem_crs_t __user *cs_frames, const void __user *uc_link)
 {

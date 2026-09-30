@@ -205,23 +205,46 @@ static inline void write_SH_CORE_MODE_reg(e2k_core_mode_t core_mode)
 }
 #endif /* CONFIG_KVM */
 
-#define	READ_G_PREEMPT_TMR_REG() \
-		((g_preempt_tmr_t) NATIVE_GET_DSREG_CLOSED(g_preempt_tmr))
-#define	WRITE_G_PREEMPT_TMR_REG(x) \
-		NATIVE_SET_DSREG_CLOSED_NOEXC(g_preempt_tmr, AW(x), 5, 7)
+/*
+ * Read/Write G_PREEMPT_TMR register
+ */
+static __always_inline e2k_g_preempt_tmr_t read_G_PREEMPT_TMR_reg(void)
+{
+	return (e2k_g_preempt_tmr_t) {
+		.word = NATIVE_GET_DSREG_CLOSED(g_preempt_tmr)
+	};
+}
 
-#define READ_INTC_PTR_CU() NATIVE_GET_DSREG_CLOSED(intc_ptr_cu)
-#define READ_INTC_INFO_CU() NATIVE_GET_DSREG_CLOSED(intc_info_cu)
-#define WRITE_INTC_INFO_CU(x) \
-		NATIVE_SET_DSREG_CLOSED_NOEXC(intc_info_cu, x, 5, 7)
+static __always_inline void write_G_PREEMPT_TMR_reg(e2k_g_preempt_tmr_t gpt)
+{
+	NATIVE_SET_DSREG_CLOSED_NOEXC(g_preempt_tmr, AW(gpt), 5, 7);
+}
+
+/*
+ * Read/Write INTC_PTR_CU and INTC_INFO_CU registers
+ */
+
+static __always_inline u64 read_INTC_PTR_CU_reg_value(void)
+{
+	return (u64) NATIVE_GET_DSREG_CLOSED(intc_ptr_cu);
+}
+
+static __always_inline u64 read_INTC_INFO_CU_reg_value(void)
+{
+	return (u64) NATIVE_GET_DSREG_CLOSED(intc_info_cu);
+}
+
+static __always_inline void write_INTC_INFO_CU_pair_value(u64 lo, u64 hi)
+{
+	NATIVE_SET_DSREGS_CLOSED_ISET(6, intc_info_cu, intc_info_cu, lo, hi);
+}
 
 /* Clear INTC_INFO_CU header and INTC_PTR_CU */
 static inline void clear_intc_info_cu(void)
 {
-	READ_INTC_PTR_CU();
-	WRITE_INTC_INFO_CU(0ULL);
-	WRITE_INTC_INFO_CU(0ULL);
-	READ_INTC_PTR_CU();
+	(void)read_INTC_PTR_CU_reg_value();
+	write_INTC_INFO_CU_pair_value(0ULL, 0ULL);
+	(void)read_INTC_PTR_CU_reg_value();
 }
 
 static inline void save_intc_info_cu(intc_info_cu_t *info, int *num)
@@ -233,7 +256,7 @@ static inline void save_intc_info_cu(intc_info_cu_t *info, int *num)
 	 * but the subsequent reads fo INTC_INFO will increase
 	 * it again until it reaches the same value it had before.
 	 */
-	info_ptr = READ_INTC_PTR_CU();
+	info_ptr = read_INTC_PTR_CU_reg_value();
 	if (!info_ptr) {
 		*num = -1;
 		AW(info->header.lo) = 0;
@@ -241,17 +264,16 @@ static inline void save_intc_info_cu(intc_info_cu_t *info, int *num)
 		return;
 	}
 
-	AW(info->header.lo) = READ_INTC_INFO_CU();
-	AW(info->header.hi) = READ_INTC_INFO_CU();
+	AW(info->header.lo) = read_INTC_INFO_CU_reg_value();
+	AW(info->header.hi) = read_INTC_INFO_CU_reg_value();
 	info_ptr -= 2;
 
 	/*
 	 * Read intercepted events list
 	 */
 	for (; info_ptr > 0; info_ptr -= 2) {
-		AW(info->entry[i].lo) = READ_INTC_INFO_CU();
-		info->entry[i].hi = READ_INTC_INFO_CU();
-		info->entry[i].no_restore = false;
+		AW(info->entry[i].lo) = read_INTC_INFO_CU_reg_value();
+		info->entry[i].hi = read_INTC_INFO_CU_reg_value();
 		++i;
 	};
 
@@ -263,7 +285,7 @@ static inline void restore_intc_info_cu(const intc_info_cu_t *info, int num)
 	int i;
 
 	/* Clear the pointer, in case we just migrated to new cpu */
-	READ_INTC_PTR_CU();
+	read_INTC_PTR_CU_reg_value();
 
 	/* Header will be cleared by hardware during GLAUNCH */
 	if (num == -1 || num == 0)
@@ -273,33 +295,13 @@ static inline void restore_intc_info_cu(const intc_info_cu_t *info, int num)
 	 * Restore intercepted events. Header flags aren't used for reexecution,
 	 * so restore 0 in header.
 	 */
-	WRITE_INTC_INFO_CU(0ULL);
-	WRITE_INTC_INFO_CU(0ULL);
+	write_INTC_INFO_CU_pair_value(0ULL, 0ULL);
 	for (i = 0; i < num; i++) {
-		if (!info->entry[i].no_restore) {
-			WRITE_INTC_INFO_CU(AW(info->entry[i].lo));
-			WRITE_INTC_INFO_CU(info->entry[i].hi);
-		}
+		write_INTC_INFO_CU_pair_value(AW(info->entry[i].lo), info->entry[i].hi);
 	}
 }
 
-static inline void
-kvm_reset_intc_info_cu_is_updated(struct kvm_vcpu *vcpu)
-{
-	vcpu->arch.intc_ctxt.cu_updated = false;
-}
-static inline void
-kvm_set_intc_info_cu_is_updated(struct kvm_vcpu *vcpu)
-{
-	vcpu->arch.intc_ctxt.cu_updated = true;
-}
-static inline bool
-kvm_get_intc_info_cu_is_updated(struct kvm_vcpu *vcpu)
-{
-	return vcpu->arch.intc_ctxt.cu_updated;
-}
-
-#endif	/*  __ASSEMBLY__ */
+#endif /*  __ASSEMBLY__ */
 
 #endif /* __KERNEL__ */
 

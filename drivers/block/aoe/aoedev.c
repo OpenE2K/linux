@@ -285,9 +285,16 @@ freedev(struct aoedev *d)
 	if (d->gd) {
 		aoedisk_rm_debugfs(d);
 		del_gendisk(d->gd);
+#ifdef CONFIG_MCST
+		/* rm #35598: removing aoe devices with flush leads to page fault */
+		blk_cleanup_queue(d->blkq);
+#endif
 		put_disk(d->gd);
 		blk_mq_free_tag_set(&d->tag_set);
+#ifndef CONFIG_MCST
+		/* rm #35598: removing aoe devices with flush leads to page fault */
 		blk_cleanup_queue(d->blkq);
+#endif
 	}
 	t = d->targets;
 	e = t + d->ntargets;

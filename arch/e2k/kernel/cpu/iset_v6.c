@@ -75,16 +75,6 @@ void save_dimtp_v6(e2k_dimtp_t *dimtp)
 	dimtp->hi = NATIVE_GET_DSREG_CLOSED(dimtp.hi);
 }
 
-void restore_dimtp_v6(const e2k_dimtp_t *dimtp)
-{
-	NATIVE_SET_DSREGS_CLOSED_NOEXC(dimtp.lo, dimtp.hi, dimtp->lo, dimtp->hi, 4, 6);
-}
-
-void clear_dimtp_v6(void)
-{
-	NATIVE_SET_DSREGS_CLOSED_NOEXC(dimtp.lo, dimtp.hi, 0ull, 0ull, 4, 6);
-}
-
 #ifdef CONFIG_MLT_STORAGE
 static bool read_MLT_entry_v6(e2k_mlt_entry_t *mlt, int entry_num)
 {
@@ -166,7 +156,9 @@ static void save_epic_context(struct kvm_vcpu_arch *vcpu)
 	union cepic_epic_int reg_epic_int;
 	unsigned int i;
 
-	/* Shuld not happen: scheduler is always called with open interrupts
+	WARN_ON_ONCE(!irqs_disabled());
+
+	/* Should not happen: scheduler is always called with open interrupts
 	 * so CEPIC_EPIC_INT must have been delivered before calling vcpu_put
 	 * (and in case we are in kvm_arch_vcpu_blocking() - it is also called
 	 * with open interrupts). */
@@ -219,6 +211,8 @@ static void restore_epic_context(const struct kvm_vcpu_arch *vcpu)
 	epic_page_t *cepic = vcpu->hw_ctxt.cepic;
 	unsigned int i, j, epic_pnmirr;
 	unsigned long epic_pmirr;
+
+	WARN_ON_ONCE(!irqs_disabled());
 
 	kvm_hv_epic_load(arch_to_vcpu(vcpu));
 
@@ -342,7 +336,7 @@ void save_kvm_context_v6(struct kvm_vcpu_arch *vcpu)
 	/* The last still runnig vcpu saves it sclkm3.
 	 * Guest time run paused */
 	if (ka->num_sclkr_run-- == 1) {
-		ka->sh_sclkm3 = READ_SH_SCLKM3_REG_VALUE() - read_sclkr_sync();
+		ka->sh_sclkm3 = READ_SH_SCLKM3_REG_VALUE() - read_sclkr(NULL);
 	}
 	raw_spin_unlock_irqrestore(&ka->sh_sclkr_lock, flags);
 
@@ -361,8 +355,7 @@ void save_kvm_context_v6(struct kvm_vcpu_arch *vcpu)
 	 * but the hardware pointers should be cleared and VCPU marked as
 	 * updated to recover ones if need.
 	 */
-	READ_INTC_PTR_CU();
-	kvm_set_intc_info_cu_is_updated(arch_to_vcpu(vcpu));
+	read_INTC_PTR_CU_reg_value();
 	READ_INTC_PTR_MU();
 	kvm_set_intc_info_mu_is_updated(arch_to_vcpu(vcpu));
 
@@ -454,15 +447,15 @@ void restore_kvm_context_v6(const struct kvm_vcpu_arch *vcpu)
 	WRITE_SH_OSCUIR_REG_VALUE(AW(hw_ctxt->sh_oscuir));
 
 	WRITE_SH_OSR0_REG_VALUE(hw_ctxt->sh_osr0);
-	/* sclkm3 = sclkm3 + ("current read_sclkr_sync()" -
-	 *	"read_sclkr_sync() when last vcpu leaves cpu")
+	/* sclkm3 = sclkm3 + ("current read_sclkr()" -
+	 *	"read_sclkr() when last vcpu leaves cpu")
 	 * sclkm3 has a summary time when each vcpu of guest was out of cpu
 	 */
 	raw_spin_lock_irqsave(&ka->sh_sclkr_lock, flags);
 	/* The first activated vcpu calculates sclkm3 for
 	 * itself and all subsequent activated vcpu-s.*/
 	if (ka->num_sclkr_run++ == 0) {
-		ka->sh_sclkm3 = read_sclkr_sync() + ka->sh_sclkm3;
+		ka->sh_sclkm3 = read_sclkr(NULL) + ka->sh_sclkm3;
 		/* Guest time run resumed (including still sleeping vcpu-s) */
 	}
 	WRITE_SH_SCLKM3_REG_VALUE(ka->sh_sclkm3);
@@ -686,9 +679,15 @@ die:
  * wakeups as only whole cache lines can be watched. */
 static void __cpuidle mem_wait_idle(void)
 {
+	unsigned long flags;
 	unsigned long need_resched_mask = (1ul << TIF_NEED_RESCHED) |
 			(IS_ENABLED(CONFIG_PREEMPT_LAZY) ? (1ul << TIF_NEED_RESCHED_LAZY) : 0);
+
+	if (cpu_has(CPU_HWBUG_WAIT_INT))
+		raw_all_irq_save(flags);
 	E2K_WATCH_FOR_MODIFICATION_64(&current_thread_info()->flags, need_resched_mask);
+	if (cpu_has(CPU_HWBUG_WAIT_INT))
+		raw_all_irq_restore(flags);
 }
 
 void __cpuidle C1_enter_v6(void)

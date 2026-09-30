@@ -333,7 +333,7 @@ const system_call_func sys_call_table[NR_syscalls] =
 	SYSTEM_CALL_TBL_ENTRY(sys_set_backtrace),
 	SYSTEM_CALL_TBL_ENTRY(sys_get_backtrace),
 	SYSTEM_CALL_TBL_ENTRY(sys_access_hw_stacks),
-	SYSTEM_CALL_TBL_ENTRY(sys_el_posix), /* 255 */
+	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall), /* 255 */
 	SYSTEM_CALL_TBL_ENTRY(sys_io_uring_setup),
 	SYSTEM_CALL_TBL_ENTRY(sys_io_uring_enter),
 	SYSTEM_CALL_TBL_ENTRY(sys_io_uring_register),
@@ -395,10 +395,10 @@ const system_call_func sys_call_table[NR_syscalls] =
 	SYSTEM_CALL_TBL_ENTRY(sys_tgkill), 
 	SYSTEM_CALL_TBL_ENTRY(sys_utimes), 
 	SYSTEM_CALL_TBL_ENTRY(sys_fadvise64_64), /* 310 */
-        
-        SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),   /*  __NR_vserver */ 
-                                          /*The system call isn't implemented in the Linux 2.6.14
-                                             * kernel  */
+	
+	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),   /*  __NR_vserver */ 
+					  /*The system call isn't implemented in the Linux 2.6.14
+					     * kernel  */
 	SYSTEM_CALL_TBL_ENTRY(sys_mbind),
 	SYSTEM_CALL_TBL_ENTRY(sys_get_mempolicy),
 	SYSTEM_CALL_TBL_ENTRY(sys_set_mempolicy),
@@ -829,7 +829,7 @@ const system_call_func sys_call_table_32[NR_syscalls] =
 	COMPAT_SYSTEM_CALL_TBL_ENTRY(sys_set_backtrace),
 	COMPAT_SYSTEM_CALL_TBL_ENTRY(sys_get_backtrace),
 	COMPAT_SYSTEM_CALL_TBL_ENTRY(sys_access_hw_stacks),
-	SYSTEM_CALL_TBL_ENTRY(sys_el_posix),	/* 255 */
+	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),	/* 255 */
 	SYSTEM_CALL_TBL_ENTRY(sys_io_uring_setup),
 	SYSTEM_CALL_TBL_ENTRY(sys_io_uring_enter),
 	SYSTEM_CALL_TBL_ENTRY(sys_io_uring_register),
@@ -891,10 +891,10 @@ const system_call_func sys_call_table_32[NR_syscalls] =
 	SYSTEM_CALL_TBL_ENTRY(sys_tgkill), 
 	SYSTEM_CALL_TBL_ENTRY(sys_utimes_time32),
 	SYS32_SYSTEM_CALL_TBL_ENTRY(sys32_fadvise64_64), /* 310 */
-        
-        SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),   /*  __NR_vserver */ 
-                                          /*The system call isn't implemented in the Linux 2.6.14
-                                             * kernel  */
+	
+	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),   /*  __NR_vserver */ 
+					  /*The system call isn't implemented in the Linux 2.6.14
+					     * kernel  */
 	COMPAT_SYSTEM_CALL_TBL_ENTRY(sys_mbind),
 	COMPAT_SYSTEM_CALL_TBL_ENTRY(sys_get_mempolicy),
 	COMPAT_SYSTEM_CALL_TBL_ENTRY(sys_set_mempolicy),
@@ -1333,7 +1333,7 @@ const protected_system_call_func sys_call_table_entry8[NR_syscalls] = {
 	PROT_SYSCALL_TBL_ENTRY(protected_sys_set_backtrace),
 	PROT_SYSCALL_TBL_ENTRY(protected_sys_get_backtrace),
 	PROT_SYSCALL_TBL_ENTRY(sys_access_hw_stacks),
-	PROT_SYSCALL_TBL_ENTRY(sys_el_posix), /* 255 */
+	PROT_SYSCALL_TBL_ENTRY(sys_ni_syscall), /* 255 */
 	PROT_SYSCALL_TBL_ENTRY(sys_io_uring_setup),
 	PROT_SYSCALL_TBL_ENTRY(sys_io_uring_enter),
 	PROT_SYSCALL_TBL_ENTRY(protected_sys_io_uring_register),
@@ -1416,7 +1416,7 @@ const protected_system_call_func sys_call_table_entry8[NR_syscalls] = {
 	PROT_SYSCALL_TBL_ENTRY(protected_sys_keyctl),
 	PROT_SYSCALL_TBL_ENTRY(sys_ni_syscall),	/* sys_mcst_rt */
 	PROT_SYSCALL_TBL_ENTRY(sys_getcpu),
-	PROT_SYSCALL_TBL_ENTRY(sys_move_pages),
+	PROT_SYSCALL_TBL_ENTRY(protected_sys_move_pages),
 	PROT_SYSCALL_TBL_ENTRY(sys_splice),
 	PROT_SYSCALL_TBL_ENTRY(protected_sys_vmsplice),	/* 330 */
 	PROT_SYSCALL_TBL_ENTRY(sys_tee),
@@ -1834,7 +1834,7 @@ const system_call_func sys_call_table_deprecated[NR_syscalls] =
 	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),
 	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),
 	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),
-	SYSTEM_CALL_TBL_ENTRY(sys_el_posix),	/* 255 */
+	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),	/* 255 */
 	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),	/* 256 */
 	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),
 	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),
@@ -1896,10 +1896,10 @@ const system_call_func sys_call_table_deprecated[NR_syscalls] =
 	SYSTEM_CALL_TBL_ENTRY(sys_tgkill), 
 	SYSTEM_CALL_TBL_ENTRY(sys_utimes_time32), 
 	SYS32_SYSTEM_CALL_TBL_ENTRY(sys32_fadvise64_64), /* 310 */
-        
-        SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),   /*  __NR_vserver */ 
-                                          /*The system call isn't implemented in the Linux 2.6.14
-                                             * kernel  */
+	
+	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),   /*  __NR_vserver */ 
+					  /*The system call isn't implemented in the Linux 2.6.14
+					     * kernel  */
 	COMPAT_SYSTEM_CALL_TBL_ENTRY(sys_mbind),
 	COMPAT_SYSTEM_CALL_TBL_ENTRY(sys_get_mempolicy),
 	COMPAT_SYSTEM_CALL_TBL_ENTRY(sys_set_mempolicy),

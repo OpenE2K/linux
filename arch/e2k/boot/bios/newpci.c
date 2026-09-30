@@ -1,15 +1,8 @@
 /*
- *    Low-Level PCI Support for PC
- *
- *      (c) 1999--2000 Martin Mares <mj@suse.cz>
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
  */
-/* lots of mods by ron minnich (rminnich@lanl.gov), with 
- * the final architecture guidance from Tom Merritt (tjm@codegen.com)
- * In particular, we changed from the one-pass original version to 
- * Tom's recommended multiple-pass version. I wasn't sure about doing 
- * it with multiple passes, until I actually started doing it and saw
- * the wisdom of Tom's recommendations ...
- */
+
 #include <linux/pci.h>
 #include "pci.h"
 #include <linux/pci_ids.h>
@@ -1595,7 +1588,7 @@ handle_superio(int pass, struct superio *all_superio[], int nsuperio)
 	  pass, i, s, s->super);
     if (!s->super) {
 	printk_debug("handle_superio: Pass %d, Skipping #%d as it has no superio pointer!\n", pass, i);
-        continue;
+	continue;
     }
     printk_debug("handle_superio: Pass %d, Superio %s\n", pass, 
 	   s->super->name);
@@ -1683,7 +1676,7 @@ void pci_bios(void)
 	int domain;
 
 	printk_info("Finding PCI configuration type\n");
-        pci_set_method();
+	pci_set_method();
 	for (domain = 0; domain < MAX_NUMIOHUBS; domain ++) {
 		if (!(online_iohubs_map & (1 << domain)))
 			continue;

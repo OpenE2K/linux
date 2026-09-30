@@ -53,8 +53,6 @@ enum page_cache_mode {
 	PCM_UNKNOWN
 };
 
-extern bool use_pcie_no_snoop;
-
 /*
  * Returns PTE memory type for RAM pages taking
  * into account PCIe No Snoop supoport.
@@ -70,10 +68,9 @@ static inline pte_mem_type_t memtype2pte_mem_type(enum page_cache_mode memtype)
 	case PCM_UNKNOWN:
 		return GEN_CACHE_MT;
 	case PCM_WC:
-		return (use_pcie_no_snoop) ? EXT_PREFETCH_MT : GEN_NON_CACHE_MT;
+		return GEN_NON_CACHE_MT;
 	case PCM_UC:
-		return (use_pcie_no_snoop) ? EXT_NON_PREFETCH_MT
-					   : GEN_NON_CACHE_ORDERED_MT;
+		return GEN_NON_CACHE_ORDERED_MT;
 	default:
 		WARN_ONCE(1, "Got an impossible value for enum, some type error in kernel?");
 		return GEN_NON_CACHE_MT;
@@ -795,6 +792,9 @@ static inline pgprot_t pgprot_nx(pgprot_t prot)
 	__pgprot(_PAGE_SET_MEM_TYPE(pgprot_val(prot), GEN_NON_CACHE_MT))
 
 #define pgprot_writethrough pgprot_writecombine
+
+#define pgprot_dmacoherent(prot) \
+	__pgprot(_PAGE_SET_MEM_TYPE(pgprot_val(prot), GEN_CACHE_MT))
 
 /* PTE_PFN_MASK extracts the PFN from a (pte|pmd|pud|pgd)val_t */
 #define PTE_PFN_MASK		_PAGE_PFN_MASK

@@ -38,19 +38,19 @@ typedef enum {
 
 typedef union {
     struct {
-        BYTE channel:3 ;
-        BYTE AudioFormatCode:4 ;
-        BYTE Rsrv1:1 ;
+	BYTE channel:3 ;
+	BYTE AudioFormatCode:4 ;
+	BYTE Rsrv1:1 ;
 
-        BYTE b32KHz:1 ;
-        BYTE b44_1KHz:1 ;
-        BYTE b48KHz:1 ;
-        BYTE b88_2KHz:1 ;
-        BYTE b96KHz:1 ;
-        BYTE b176_4KHz:1 ;
-        BYTE b192KHz:1 ;
-        BYTE Rsrv2:1 ;
-        BYTE ucCode ;
+	BYTE b32KHz:1 ;
+	BYTE b44_1KHz:1 ;
+	BYTE b48KHz:1 ;
+	BYTE b88_2KHz:1 ;
+	BYTE b96KHz:1 ;
+	BYTE b176_4KHz:1 ;
+	BYTE b192KHz:1 ;
+	BYTE Rsrv2:1 ;
+	BYTE ucCode ;
     } s ;
     BYTE uc[3] ;
 
@@ -58,15 +58,15 @@ typedef union {
 
 typedef union {
     struct {
-        BYTE FL_FR:1 ;
-        BYTE LFE:1 ;
-        BYTE FC:1 ;
-        BYTE RL_RR:1 ;
-        BYTE RC:1 ;
-        BYTE FLC_FRC:1 ;
-        BYTE RLC_RRC:1 ;
-        BYTE Reserve:1 ;
-        BYTE Unuse[2] ;
+	BYTE FL_FR:1 ;
+	BYTE LFE:1 ;
+	BYTE FC:1 ;
+	BYTE RL_RR:1 ;
+	BYTE RC:1 ;
+	BYTE FLC_FRC:1 ;
+	BYTE RLC_RRC:1 ;
+	BYTE Reserve:1 ;
+	BYTE Unuse[2] ;
     } s ;
     BYTE uc[3] ;
 } SPK_ALLOC ;
@@ -79,22 +79,22 @@ typedef union {
 
 typedef union _tag_DCSUPPORT {
     struct {
-        BYTE DVI_Dual:1 ;
-        BYTE Rsvd:2 ;
-        BYTE DC_Y444:1 ;
-        BYTE DC_30Bit:1 ;    
-        BYTE DC_36Bit:1 ;    
-        BYTE DC_48Bit:1 ;    
-        BYTE SUPPORT_AI:1 ;    
+	BYTE DVI_Dual:1 ;
+	BYTE Rsvd:2 ;
+	BYTE DC_Y444:1 ;
+	BYTE DC_30Bit:1 ;    
+	BYTE DC_36Bit:1 ;    
+	BYTE DC_48Bit:1 ;    
+	BYTE SUPPORT_AI:1 ;    
     } info ;
     BYTE uc ;
 } DCSUPPORT ;   // Richard Note: Color Depth
 
 typedef union _LATENCY_SUPPORT{
     struct {
-        BYTE Rsvd:6 ;
-        BYTE I_Latency_Present:1 ;
-        BYTE Latency_Present:1 ;
+	BYTE Rsvd:6 ;
+	BYTE I_Latency_Present:1 ;
+	BYTE Latency_Present:1 ;
     } info ;
     BYTE uc ;
 } LATENCY_SUPPORT ;

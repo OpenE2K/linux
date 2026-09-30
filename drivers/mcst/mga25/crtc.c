@@ -457,11 +457,10 @@ static void mga25_crtc_atomic_disable(struct drm_crtc *crtc,
 				      struct drm_crtc_state *old_state)
 {
 	struct mga25_crtc *mcrtc = to_mga25_crtc(crtc);
-	wcrtc(MGA2_DC_CTRL_SOFT_RESET | MGA2_DC_CTRL_DEFAULT, CTRL);
-	struct drm_plane_state *ps =
-			drm_atomic_get_plane_state(old_state->state, crtc->primary);
-	bool fb_changed = !IS_ERR(ps) && ps->fb;
+	struct drm_plane *p;
+	struct drm_plane_state *ps;
 
+	wcrtc(MGA2_DC_CTRL_SOFT_RESET | MGA2_DC_CTRL_DEFAULT, CTRL);
 	/*
 	 * We need to make sure that all planes are disabled before we
 	 * enable the crtc. Otherwise we might try to scan from a destroyed
@@ -474,10 +473,17 @@ static void mga25_crtc_atomic_disable(struct drm_crtc *crtc,
 	* reference to the old framebuffer. To solve this we get a
 	* reference to old_fb and set a worker to release it later.
 	*/
-	if (fb_changed && !mcrtc->fb_unref_gem) {
-		mcrtc->fb_unref_gem = to_mga25_framebuffer(ps->fb)->gobj;
-		drm_gem_object_get(mcrtc->fb_unref_gem);
+	drm_atomic_crtc_state_for_each_plane(p, old_state) {
+		ps = drm_atomic_get_plane_state(old_state->state, p);
+		if (WARN_ON(IS_ERR(ps)) && !ps->fb)
+			continue;
+		if (mcrtc->fb_unref_gem[p->type])
+			continue;
+		mcrtc->fb_unref_gem[p->type] =
+			to_mga25_framebuffer(ps->fb)->gobj;
+		drm_gem_object_get(mcrtc->fb_unref_gem[p->type]);
 	}
+
 	mga25_cursor_hide(crtc);
 
 	DRM_DEBUG_DRIVER("Disabling the CRTC\n");
@@ -535,9 +541,11 @@ static const struct drm_crtc_helper_funcs mga25_crtc_helper_funcs = {
 
 static void mga25_crtc_destroy(struct drm_crtc *crtc)
 {
+	int i;
 	struct mga25_crtc *mcrtc = to_mga25_crtc(crtc);
 	mga25_cursor_fini(crtc);
-	drm_gem_object_put(mcrtc->fb_unref_gem);
+	for (i = 0; i < ARRAY_SIZE(mcrtc->fb_unref_gem); i++)
+		drm_gem_object_put(mcrtc->fb_unref_gem[i]);
 	of_node_put(crtc->port);
 	drm_crtc_cleanup(crtc);
 }

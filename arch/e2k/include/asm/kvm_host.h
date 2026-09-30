@@ -107,6 +107,12 @@ kvm_is_hw_pv_vm_available(void)
 {
 	return kvm_vm_types_available & KVM_E2K_HW_PV_VM_TYPE_MASK;
 }
+static inline bool
+kvm_is_sic_nbsr_iset_available(void)
+{
+	return true;
+}
+
 
 #define KVM_USER_MEM_SLOTS	32
 /* memory slots that does not exposed to userspace */
@@ -860,6 +866,36 @@ typedef struct kvm_sw_cpu_context {
 	mmu_reg_t	tc_hpa;		/* host physical base of VCPU */
 					/* trap cellar */
 	mmu_reg_t	trap_count;
+	mmu_reg_t	mtrr_deftype;
+	mmu_reg_t	mtrr_fix_64k_00000;
+	mmu_reg_t	mtrr_fix_16k_80000;
+	mmu_reg_t	mtrr_fix_16k_a0000;
+	mmu_reg_t	mtrr_fix_4k_c0000;
+	mmu_reg_t	mtrr_fix_4k_c8000;
+	mmu_reg_t	mtrr_fix_4k_d0000;
+	mmu_reg_t	mtrr_fix_4k_d8000;
+	mmu_reg_t	mtrr_fix_4k_e0000;
+	mmu_reg_t	mtrr_fix_4k_e8000;
+	mmu_reg_t	mtrr_fix_4k_f0000;
+	mmu_reg_t	mtrr_fix_4k_f8000;
+	mmu_reg_t	mtrr_physbase0;
+	mmu_reg_t	mtrr_physbase1;
+	mmu_reg_t	mtrr_physbase2;
+	mmu_reg_t	mtrr_physbase3;
+	mmu_reg_t	mtrr_physbase4;
+	mmu_reg_t	mtrr_physbase5;
+	mmu_reg_t	mtrr_physbase6;
+	mmu_reg_t	mtrr_physbase7;
+	mmu_reg_t	mtrr_physmask0;
+	mmu_reg_t	mtrr_physmask1;
+	mmu_reg_t	mtrr_physmask2;
+	mmu_reg_t	mtrr_physmask3;
+	mmu_reg_t	mtrr_physmask4;
+	mmu_reg_t	mtrr_physmask5;
+	mmu_reg_t	mtrr_physmask6;
+	mmu_reg_t	mtrr_physmask7;
+
+	bool		no_switch_pt;	/* do not switch PT registers */
 
 #ifdef CONFIG_USE_AAU
 	e2k_aau_t aau_context;
@@ -916,8 +952,6 @@ typedef struct kvm_intc_cpu_context {
 	intc_mu_state_t mu_state[INTC_INFO_MU_ITEM_MAX];
 	bool mu_updated;	/* the mu info was updated, so need restote */
 				/* on the registers */
-	bool cu_updated;	/* the cu info was updated, so need restore */
-				/* on the registers */
 	s8 nr_TIRs;
 	u64 exceptions;		/* source mask of all exceptions in the TIRs */
 				/* at the interception moment */
@@ -932,7 +966,6 @@ typedef struct kvm_intc_cpu_context {
 	e2k_tir_t TIRs[TIR_NUM];
 	u64 sbbp[SBBP_ENTRIES_NUM];
 	u64 intc_mu_to_move;
-	u64 cu_entry_handled;
 } kvm_intc_cpu_context_t;
 
 struct kvm_epic_page;
@@ -1427,6 +1460,9 @@ struct kvm_arch {
 	 * its frequency) */
 	unsigned long wd_prescaler_mult;
 
+	/* Offset from raw monotonic clock to time of guest start */
+	s64 raw_clock_offset;
+
 #ifdef KVM_HAVE_LEGACY_VGA_PASSTHROUGH
 	/* Directly map legacy VGA area (0xa0000-0xbffff) to guest */
 	bool legacy_vga_passthrough;
@@ -1612,6 +1648,14 @@ static inline void kvm_init_cepic_idle_timer(struct kvm_vcpu *vcpu) { }
 static inline void kvm_epic_start_idle_timer(struct kvm_vcpu *vcpu) { }
 static inline void kvm_epic_stop_idle_timer(struct kvm_vcpu *vcpu) { }
 #endif /* CONFIG_KVM_HW_VIRTUALIZATION && !CONFIG_KVM_GUEST_KERNEL */
+
+extern void kvm_sclkr_read(struct kvm_vcpu *, intc_info_cu_entry_t *);
+extern void kvm_sclkm1_read(struct kvm_vcpu *, intc_info_cu_entry_t *);
+extern void kvm_sclkm2_read(struct kvm_vcpu *, intc_info_cu_entry_t *);
+extern void kvm_sclkr_write(struct kvm_vcpu *, intc_info_cu_entry_t *);
+extern void kvm_sclkm1_write(struct kvm_vcpu *, intc_info_cu_entry_t *);
+extern void kvm_sclkm2_write(struct kvm_vcpu *, intc_info_cu_entry_t *);
+extern void kvm_sclkm3_write(struct kvm_vcpu *, intc_info_cu_entry_t *);
 
 extern struct work_struct kvm_dump_stacks;
 extern void wait_for_print_all_guest_stacks(struct work_struct *work);

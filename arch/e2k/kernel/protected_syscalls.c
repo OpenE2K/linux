@@ -993,8 +993,8 @@ long protected_sys_clean_descriptors(void __user *addr,
 		return -EFAULT;
 	}
 
-	if (flags & (CLEAN_DESCRIPTORS_SINGLE | CLEAN_DESCRIPTORS_NO_GARB_COLL) ==
-		(CLEAN_DESCRIPTORS_SINGLE | CLEAN_DESCRIPTORS_NO_GARB_COLL)) {
+	if ((flags & (CLEAN_DESCRIPTORS_SINGLE | CLEAN_DESCRIPTORS_NO_GARB_COLL)) ==
+			(CLEAN_DESCRIPTORS_SINGLE | CLEAN_DESCRIPTORS_NO_GARB_COLL)) {
 		rval = mem_set_empty_tagged_dw(addr, size, 0x0baddead0baddead);
 	} else if (flags & CLEAN_DESCRIPTORS_SINGLE) {
 		e2k_ptr_t old_descriptor;
@@ -1664,7 +1664,7 @@ long protected_sys_execveat(const unsigned long dirfd,		/*a1 */
 		}
 	}
 	/* The array argv must be terminated by zero */
-	kargv[argc] = 0;
+	rval = put_user(0L, &kargv[argc]); /* i.e. kargv[argc] = 0; */
 
 	/*
 	 * Convert descriptors in envp to ints
@@ -1682,7 +1682,7 @@ long protected_sys_execveat(const unsigned long dirfd,		/*a1 */
 		}
 	}
 	/* The array envp must be terminated by zero */
-	kenvp[envc] = 0;
+	rval = put_user(0L, &kenvp[envc]); /* i.e. kenvp[envc] = 0; */
 
 	rval = sys_execveat(dirfd, filename, (char const __user *const __user *) kargv,
 			    (char const __user *const __user *) kenvp, flags);
@@ -4610,12 +4610,6 @@ long protected_sys_process_madvise(const long		pidfd,		/* a1 */
 	return rval;
 }
 
-/*
- * Converting protected structure siginfo_t into 64-bit format.
- * Allocates converted structure on user stack and returns it in the 2nd arg.
- * Returns error code or 0 if converted OK.
- */
-
 /* Post-processor aimed to return syscall termination status
  *          from temporal structure used to run syscall back
  *            to original protected structure.
@@ -4663,50 +4657,6 @@ int update_protected_siginfo_t(void __user *siginfo64,
 	}
 	return 0;
 }
-
-/* rt_sigqueueinfo/rt_tgsigqueueinfo conversion masks siginfo_t structure: */
-#define MASK_SIGINFO_T_RT_PID_UID	0xc9c400088 /* field type mask */
-#define MASK_SIGINFO_T_RT		0xc9c488088 /* field type mask */
-
-static inline
-unsigned long get_siginfo_mask_on_layout(int signo, int code)
-/* This function implements check similar to the one in has_si_pid_and_uid() */
-{
-	unsigned long mask;
-
-	switch (siginfo_layout(signo, code)) {
-	case SIL_KILL:
-	case SIL_CHLD:
-	case SIL_RT:
-		mask = MASK_SIGINFO_T_RT_PID_UID;
-		break;
-	default:
-		mask = MASK_SIGINFO_T_RT;
-		break;
-	}
-
-	return mask;
-}
-
-static inline
-unsigned long get_siginfo_mask_on_siginfo(const int __user *usiginfo)
-{
-	int signo, code;
-	long mask;
-
-	if (get_user(signo, usiginfo) || get_user(code, usiginfo + 8)) {
-		PROTECTED_MODE_ALERT(PMSCERRMSG_FATAL_READ_FROM,
-				     __func__, (unsigned long __user) usiginfo);
-		PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EFAULT);
-		return 0L;
-	}
-
-	mask =  get_siginfo_mask_on_layout(signo, code);
-	DbgSCP("signo=%d, code=%d ==> mask = 0x%lx\n", signo, code, mask);
-
-	return mask;
-}
-
 
 notrace __section(".entry.text")
 long protected_sys_waitid(const long		which,		/* a1 */
@@ -5477,6 +5427,70 @@ long protected_sys_munlock(unsigned long	addr,
 	}
 
 	return sys_munlock(addr, len);
+}
+
+notrace __section(".entry.text")
+extern long protected_sys_move_pages(int pid,
+				unsigned long nr_pages,
+				const void __user * __user *pages,
+				const int __user *nodes,
+				int __user *status,
+				int flags,
+				const struct pt_regs *regs)
+{
+	int size;
+	const void __user * __user *pages64;
+	long ret;
+
+	if (!nr_pages) {
+		pages64 = pages;
+		goto out;
+	}
+
+	/* Check that size of 'pages' fits to keep 'nr_pages' pointers: */
+
+	size = e2k_ptr_size(regs->args[5], regs->args[6], 0);
+	if (size < (nr_pages * sizeof(e2k_ptr_t))) {
+		PROTECTED_MODE_ALERT(PMSCERRMSG_COUNT_EXCEEDS_DESCR_SIZE, regs->sys_num,
+				     sys_call_ID_to_name[regs->sys_num],
+				     nr_pages * sizeof(e2k_ptr_t), size, 3);
+		PM_BNDERR_EXCEPTION_IF_ORTH_MODE(3/*arg_num*/, regs);
+		return -EINVAL;
+	}
+
+	/* Converting 'pages-128' into 'pages-64': */
+
+	pages64 = get_user_space(sizeof(void *) * nr_pages);
+	ret = convert_array(pages, pages64, size, 1, nr_pages, 0x3, 0x3, regs);
+	if (ret) {
+		PM_BNDERR_EXCEPTION_IF_ORTH_MODE(3/*arg_num*/, regs);
+		return ret;
+	}
+
+	/* Check that size of 'nodes' fits to keep 'nr_pages' elements: */
+
+	size = e2k_ptr_size(regs->args[7], regs->args[8], 0);
+	if (size < (nr_pages * sizeof(*nodes))) {
+		PROTECTED_MODE_ALERT(PMSCERRMSG_COUNT_EXCEEDS_DESCR_SIZE, regs->sys_num,
+				     sys_call_ID_to_name[regs->sys_num],
+				     nr_pages * sizeof(*nodes), size, 4);
+		PM_BNDERR_EXCEPTION_IF_ORTH_MODE(4/*arg_num*/, regs);
+		return -EINVAL;
+	}
+
+	/* Check that size of 'status' fits to keep 'nr_pages' elements: */
+
+	size = e2k_ptr_size(regs->args[9], regs->args[10], 0);
+	if (size < (nr_pages * sizeof(*status))) {
+		PROTECTED_MODE_ALERT(PMSCERRMSG_COUNT_EXCEEDS_DESCR_SIZE, regs->sys_num,
+				     sys_call_ID_to_name[regs->sys_num],
+				     nr_pages * sizeof(*status), size, 5);
+		PM_BNDERR_EXCEPTION_IF_ORTH_MODE(5/*arg_num*/, regs);
+		return -EINVAL;
+	}
+
+out:
+	return sys_move_pages(pid, nr_pages, pages, nodes, status, flags);
 }
 
 #endif /* CONFIG_PROTECTED_MODE */

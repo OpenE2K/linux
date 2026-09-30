@@ -332,7 +332,7 @@ static long kvm_vcpu_do_set_guest_virt_system(struct kvm_vcpu *vcpu,
 
 		haddr = (void *)hva;
 		offset = hva & ~PAGE_MASK;
-		towrite = min(len, (unsigned)PAGE_SIZE - offset);
+		towrite = min(len, PAGE_SIZE - (size_t) offset);
 
 		if (!access_ok(haddr, towrite)) {
 			ret = -EFAULT;

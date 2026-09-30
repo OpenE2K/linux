@@ -774,11 +774,15 @@ extern long do_sigreturn(void);
 static __always_inline int
 native_switch_kernel_return_function_to(unsigned long new_function_ip)
 {
+	unsigned long flags;
 	e2k_cr0_hi_t cr0_hi = NATIVE_NV_READ_CR0_HI_REG();
 
-	/* probably here should be some validation of the new kernel IP */
+	raw_all_irq_save(flags);
 	cr0_hi.CR0_hi_IP = new_function_ip;
+	alternative("", "wait ma_c=1", CPU_HWBUG_CR_BEFORE_WRITES, "memory");
 	NATIVE_NV_NOIRQ_WRITE_CR0_HI_REG(cr0_hi);
+	raw_all_irq_restore(flags);
+
 	return 0;
 }
 

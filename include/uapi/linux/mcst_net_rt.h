@@ -31,29 +31,29 @@
 
 
 typedef struct el_netdev_udata {
-        int proto;
-        int rx_len;
-        int skipped;
-        int timeout;
-        char * rx_buf;
-        int tx_len;
-        char *tx_buf;
-        unsigned char src_mac[ETH_ALEN];
-        unsigned char dst_mac[ETH_ALEN];
+	int proto;
+	int rx_len;
+	int skipped;
+	int timeout;
+	char * rx_buf;
+	int tx_len;
+	char *tx_buf;
+	unsigned char src_mac[ETH_ALEN];
+	unsigned char dst_mac[ETH_ALEN];
 } el_netdev_udata_t;
 
 #ifdef __KERNEL__
 #ifdef CONFIG_COMPAT
 typedef struct el_netdev_udata_compat {
-        int proto;
-        int rx_len;
-        int skipped;
-        int timeout;
-        u32 rx_buf;
-        int tx_len;
-        u32 tx_buf;
-        unsigned char src_mac[ETH_ALEN];
-        unsigned char dst_mac[ETH_ALEN];
+	int proto;
+	int rx_len;
+	int skipped;
+	int timeout;
+	u32 rx_buf;
+	int tx_len;
+	u32 tx_buf;
+	unsigned char src_mac[ETH_ALEN];
+	unsigned char dst_mac[ETH_ALEN];
 } el_netdev_udata_compat_t;
 #endif
 #endif

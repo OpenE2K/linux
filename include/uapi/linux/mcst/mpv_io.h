@@ -19,7 +19,10 @@ extern "C" {
 				WAIT_ON_CPU read();
 				multi KPI-2 support and instens culkulaition
 				are added */
-#define MPV_DRV_VER	20405	/* picoseconds per counter by ktime_get() */
+/*#define MPV_DRV_VER	20405	picoseconds per counter by ktime_get() */
+/*#define MPV_DRV_VER	20406	instans # are saved while remove/probe
+				or unbind/bind */
+#define MPV_DRV_VER	20407	/* added femtosecond per counter clock */
 
 #define	MPV_IOC				('M' << 8)
 #define	MPVIO_SEND_INTR			(MPV_IOC | 1)   // send output bus signal 
@@ -71,6 +74,10 @@ extern "C" {
 /* set timeout for all read()'s for a mpv_in
    MAX_SCHEDULE_TIMEOUT == LONG_MAX */
 #define MPVIO_SET_TIMEOUT	(MPV_IOC | 35)
+/* get femtoseconds per MPV counter clock */
+#define MPVIO_GET_FSPCC		(MPV_IOC | 36)
+/* set femtoseconds per MPV counter clock */
+#define MPVIO_SET_FSPCC		(MPV_IOC | 37)
 
 #define	MPV_NUM_IN_INTR		20
 #define	MPV_NUM_IN_IOH2		3

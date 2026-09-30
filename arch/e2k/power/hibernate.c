@@ -10,7 +10,7 @@
 #include <asm/pgalloc.h>
 #include <asm/mmu_context.h>
 #include <asm/regs_state.h>
-#include <asm/page_io.h>
+#include <asm/page_tags.h>
 #include <asm/set_memory.h>
 
 #define TAGS_PER_PAGE	(PAGE_SIZE / TAGS_BYTES_PER_PAGE)

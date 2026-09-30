@@ -85,7 +85,6 @@
 #define	MACHINE_ID_E12C_LMS		(MACHINE_ID_E12C | MACHINE_ID_SIMUL)
 #define	MACHINE_ID_E16C_LMS		(MACHINE_ID_E16C | MACHINE_ID_SIMUL)
 #define	MACHINE_ID_E2C3_LMS		(MACHINE_ID_E2C3 | MACHINE_ID_SIMUL)
-#define	MACHINE_ID_E32C_LMS		(MACHINE_ID_E32C | MACHINE_ID_SIMUL)
 #define	MACHINE_ID_E8V7_LMS		(MACHINE_ID_E8V7 | MACHINE_ID_SIMUL)
 
 #define	MACHINE_ID_VIRT_E2S		(MACHINE_ID_E2S | MACHINE_ID_VIRT)
@@ -95,7 +94,6 @@
 #define	MACHINE_ID_VIRT_E12C		(MACHINE_ID_E12C | MACHINE_ID_VIRT)
 #define	MACHINE_ID_VIRT_E16C		(MACHINE_ID_E16C | MACHINE_ID_VIRT)
 #define	MACHINE_ID_VIRT_E2C3		(MACHINE_ID_E2C3 | MACHINE_ID_VIRT)
-#define	MACHINE_ID_VIRT_E32C		(MACHINE_ID_E32C | MACHINE_ID_VIRT)
 #define	MACHINE_ID_VIRT_E8V7		(MACHINE_ID_E8V7 | MACHINE_ID_VIRT)
 
 #ifdef CONFIG_E2K_SIMULATOR
@@ -119,8 +117,6 @@
   #define native_machine_id	(MACHINE_ID_E16C | MACHINE_SIMUL_FLAG)
  #elif	defined(CONFIG_E2K_E2C3)
   #define native_machine_id	(MACHINE_ID_E2C3 | MACHINE_SIMUL_FLAG)
- #elif	defined(CONFIG_E2K_E32C)
-  #define native_machine_id	(MACHINE_ID_E32C | MACHINE_SIMUL_FLAG)
  #elif	defined(CONFIG_E2K_E8V7)
   #define native_machine_id	(MACHINE_ID_E8V7 | MACHINE_SIMUL_FLAG)
  #else
@@ -140,8 +136,6 @@
  #define	native_machine_id	MACHINE_ID_E16C_LMS
 #elif	defined(CONFIG_E2C3)	/* can be defined only for tiny boot on lms */
  #define	native_machine_id	MACHINE_ID_E2C3_LMS
-#elif	defined(CONFIG_E32C)	/* can be defined only for tiny boot on lms */
- #define	native_machine_id	MACHINE_ID_E32C_LMS
 #elif	defined(CONFIG_E8V7)	/* can be defined only for tiny boot on lms */
  #define	native_machine_id	MACHINE_ID_E8V7_LMS
 #else	/* ! CONFIG_E2K_MACHINE && ! our boot on lms */
@@ -171,8 +165,6 @@ extern void e2k_init_IRQ(void);
 		(((mach_id) & MACHINE_ID_CPU_TYPE_MASK) == IDR_E16C_MDL)
 #define	IS_THE_MACHINE_E2C3(mach_id)	\
 		(((mach_id) & MACHINE_ID_CPU_TYPE_MASK) == IDR_E2C3_MDL)
-#define	IS_THE_MACHINE_E32C(mach_id)	\
-		(((mach_id) & MACHINE_ID_CPU_TYPE_MASK) == IDR_E32C_MDL)
 #define	IS_THE_MACHINE_E8V7(mach_id)	\
 		(((mach_id) & MACHINE_ID_CPU_TYPE_MASK) == IDR_E8V7_MDL)
 #define	IS_THE_MACHINE_E2K_VIRT(mach_id)	\
@@ -207,8 +199,6 @@ extern void e2k_init_IRQ(void);
 		IS_THE_MACHINE_E16C(native_machine_id)
 #define	NATIVE_IS_MACHINE_E2C3		\
 		IS_THE_MACHINE_E2C3(native_machine_id)
-#define	NATIVE_IS_MACHINE_E32C		\
-		IS_THE_MACHINE_E32C(native_machine_id)
 #define	NATIVE_IS_MACHINE_E8V7		\
 		IS_THE_MACHINE_E8V7(native_machine_id)
 #define	NATIVE_IS_MACHINE_E2K_VIRT	(false)
@@ -227,8 +217,6 @@ extern void e2k_init_IRQ(void);
 		IS_THE_MACHINE_E16C(boot_native_machine_id)
 #define	BOOT_NATIVE_IS_MACHINE_E2C3	\
 		IS_THE_MACHINE_E2C2(boot_native_machine_id)
-#define	BOOT_NATIVE_IS_MACHINE_E32C	\
-		IS_THE_MACHINE_E32C(boot_native_machine_id)
 #define	BOOT_NATIVE_IS_MACHINE_E8V7	\
 		IS_THE_MACHINE_E8V7(boot_native_machine_id)
 #define	BOOT_NATIVE_IS_MACHINE_E2K_VIRT	false
@@ -290,8 +278,6 @@ static inline void set_mach_type_id(void)
 		IS_THE_MACHINE_E16C(get_machine_id())
 #define	IS_MACHINE_E2C3		\
 		IS_THE_MACHINE_E2C3(get_machine_id())
-#define	IS_MACHINE_E32C		\
-		IS_THE_MACHINE_E32C(get_machine_id())
 #define	IS_MACHINE_E8V7		\
 		IS_THE_MACHINE_E8V7(get_machine_id())
 #define IS_MACHINE_E2K_VIRT	\

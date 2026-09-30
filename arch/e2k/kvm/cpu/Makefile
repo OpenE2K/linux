@@ -1,6 +1,6 @@
- # SPDX-License-Identifier: GPL-2.0
- # Copyright (c) 2023 MCST
- 
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2023 MCST
+
 CFLAGS_REMOVE_iset_v3.o = $(CFLAGS_ALL_CPUS)
 CFLAGS_REMOVE_iset_v5.o = $(CFLAGS_ALL_CPUS)
 CFLAGS_REMOVE_iset_v6.o = $(CFLAGS_ALL_CPUS)

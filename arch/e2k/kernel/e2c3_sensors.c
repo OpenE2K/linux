@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
 #include <linux/platform_device.h>
 #include <linux/kernel.h>
 #include <linux/module.h>

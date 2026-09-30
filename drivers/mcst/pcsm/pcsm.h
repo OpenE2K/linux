@@ -146,19 +146,21 @@ event_info_t pcs_events[MAX_NODE][PCS_EVENTS_MAX];
 
 static int PCS_ADJUST_PERIOD = 300000; /* ms */
 
-#define PMC_FAN_CFG                     0x540
+#define PMC_FAN_CFG_offset              0x540
 
 /* */
-#define PMC_TERM_CONV                   0x008
-#define PMC_TERM_CTRL                   0x00c
-#define PMC_TERM_TS0                    0x010
-#define PMC_TERM_TS1                    0x014
-#define PMC_TERM_TS2                    0x018
-#define PMC_TERM_TS3                    0x01c
-#define PMC_TERM_TS4                    0x020
-#define PMC_TERM_TS5                    0x024
-#define PMC_TERM_TS6                    0x028
-#define PMC_TERM_TS7                    0x02c
+#define PMC_TERM_CONV_offset            0x008
+#define PMC_TERM_CTRL_offset            0x00c
+#define PMC_TERM_TS0_offset             0x010
+#define PMC_TERM_TS1_offset             0x014
+#define PMC_TERM_TS2_offset             0x018
+#define PMC_TERM_TS3_offset             0x01c
+#define PMC_TERM_TS4_offset             0x020
+#define PMC_TERM_TS5_offset             0x024
+#define PMC_TERM_TS6_offset             0x028
+#define PMC_TERM_TS7_offset             0x02c
+
+#define PMC_TERM_TS_MAX                 8
 
 #define PCS_PVT_REGS_VM_BASE    0x184
 #define PCS_VM0_DATA_OFFSET     0x034
@@ -166,9 +168,14 @@ static int PCS_ADJUST_PERIOD = 300000; /* ms */
 #define PCS_VM_N_CH_DATA(n, ch)	\
 	(PVT_BASE_ADDR + PCS_PVT_REGS_VM_BASE + PCS_VM0_DATA_OFFSET + (n*16 + ch)*4)
 
+#define PMC_REGS_VM_BASE	0x100
+#define PMC_VOLT_VMN_CH(n, i) \
+	(PCSM_BASE_ADDR + PMC_REGS_VM_BASE + (0x020 * (n)) + (0x004 * ((i) >> 1)))
+
 #define NO_EXIST    -1
 #define VCORE       0
 #define VDDR        1
+#define VEXT        2
 
 /* max value for pwm and temp registers */
 #define PCSM_THERM_MAX			0xFF
@@ -184,60 +191,15 @@ static int PCS_ADJUST_PERIOD = 300000; /* ms */
 
 #define ACCURACY 10
 
-enum vm_values {
-	VM1,
-	VM2,
-	VM3,
-	VM4,
-	VM5,
-	VM6
-};
-
-enum ts_values {
-	TS1,
-	TS2,
-	TS3,
-	TS4,
-	TS5,
-	TS6,
-	TS7
-};
-
 struct ts {
 	char *name;
-	int addr;
+	unsigned int addr;
 };
 
-static const struct ts ts_e16c_map[] = {
-	{"CORE_0",  PMC_TERM_TS5},
-	{"CORE_1",  PMC_TERM_TS1},
-	{"CORE_14", PMC_TERM_TS2},
-	{"CORE_15", PMC_TERM_TS3},
-	{"EIOH",    PMC_TERM_TS4},
-	{"TEST",    PMC_TERM_TS0},
-	{"Tmax",    PMC_TERM_TS6}
+struct cpu_sensors {
+	struct ts ts_map[PMC_TERM_TS_MAX];
+	s8 vm_table_type[VM_MAX_CHANNELS][VM_MAX_SENSORS];
 };
-
-static const struct ts ts_e12c_map[] = {
-	{"CORE_0",  PMC_TERM_TS1},
-	{"CORE_1",  PMC_TERM_TS0},
-	{"CORE_10", PMC_TERM_TS2},
-	{"CORE_11", PMC_TERM_TS3},
-	{"EIOH",    PMC_TERM_TS4},
-	{"",	    PMC_TERM_TS5},
-	{"Tmax",    PMC_TERM_TS6}
-};
-
-static const struct ts ts_e2c3_map[] = {
-	{"CORE_0",  PMC_TERM_TS2},
-	{"CORE_1",  PMC_TERM_TS1},
-	{"MC0",	    PMC_TERM_TS3},
-	{"MC1",	    PMC_TERM_TS0},
-	{"EIOH",    PMC_TERM_TS4},
-	{"",	    PMC_TERM_TS5},
-	{"Tmax",    PMC_TERM_TS6}
-};
-
 
 static const char * const pmc_sys_events[] = {
 	"mc03_dimm_event",
@@ -265,63 +227,6 @@ static const char * const pmc_sys_events[] = {
 	"mc03_throttle",
 	"mc47_throttle",
 	"cpu_forcepr"
-};
-
-int vm_table_e16c[VM_MAX_CHANNELS][VM_MAX_SENSORS] = {
-	{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
-	{VCORE, VDDR,  VDDR,  VDDR,  VCORE, VDDR,  NO_EXIST, NO_EXIST, },
-	{VCORE, VDDR,  VDDR,  VDDR,  VCORE, VDDR,  NO_EXIST, NO_EXIST, },
-	{VCORE, VDDR,  VDDR,  VDDR,  VCORE, VDDR,  NO_EXIST, NO_EXIST, },
-	{VCORE, VDDR,  VDDR,  VDDR,  VCORE, VDDR,  NO_EXIST, NO_EXIST, },
-	{VCORE, VDDR,  VDDR,  VDDR,  VCORE, VDDR,  NO_EXIST, NO_EXIST, },
-	{VCORE, VDDR,  VDDR,  VDDR,  VCORE, VDDR,  NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
-};
-
-int vm_table_e2c3[VM_MAX_CHANNELS][VM_MAX_SENSORS] = {
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VDDR,  VCORE, VCORE, VDDR,  VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VDDR,  VCORE, VCORE, VDDR,  VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VDDR,  VCORE, VCORE, VDDR,  VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-};
-
-int vm_table_e12c[VM_MAX_CHANNELS][VM_MAX_SENSORS] = {
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VDDR,  VDDR,  VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VDDR,  VDDR,  VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VDDR,  VDDR,  VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
 };
 
 extern unsigned int pcsm_l_cpufreq_get(unsigned int cpu);
@@ -355,6 +260,33 @@ typedef union pmc_term_ts_regs {
     };
     u32 word;
 } term_ts_regs_t;
+
+typedef union pvt_vm_regs {
+    struct {
+	u32 data:      14;
+	u32 rsv1:       2;
+	u32 type:       1;
+	u32 fault:      1;
+	u32 rsv2:      14;
+    };
+    u32 word;
+} pvt_vm_regs_t;
+
+typedef union pmc_vm_regs {
+    struct {
+	u32 v_i:         11;
+	u32 v_val_i:      1;
+	u32 v_diag_i:     1;
+	u32 v_fault_i:    1;
+	u32 rsv1:         2;
+	u32 v_j:         11;
+	u32 v_val_j:      1;
+	u32 v_diag_j:     1;
+	u32 v_fault_j:    1;
+	u32 rsv2:         2;
+    };
+    u32 word;
+} pmc_vm_regs_t;
 
 typedef union pwm_tach_control_regs {
     struct {

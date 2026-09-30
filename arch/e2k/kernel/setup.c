@@ -401,7 +401,7 @@ void __init setup_per_cpu_areas(void)
 # endif /* CONFIG_NEED_PER_CPU_EMBED_FIRST_CHUNK */
 
 # ifdef CONFIG_NEED_PER_CPU_PAGE_FIRST_CHUNK
-        if (rc < 0) {
+	if (rc < 0) {
 		rc = pcpu_page_first_chunk(PERCPU_MODULE_RESERVE,
 				pcpu_fc_alloc, pcpu_fc_free, pcpu_populate_pte);
 		if (rc)
@@ -685,6 +685,8 @@ void __init setup_arch(char **cmdline_p)
 	extern int panic_timeout;
 	int cpu;
 
+	BUILD_BUG_ON(ARCH_KMALLOC_MINALIGN != max(ARCH_SLAB_MINALIGN, ARCH_DMA_MINALIGN));
+
 	arch_setup_machine();
 
 	/*
@@ -714,8 +716,7 @@ void __init setup_arch(char **cmdline_p)
 	nmi_call_function_init();
 #endif
 	/* get cmdline for devtree */
-	if (bootblock_virt->info.bios.devtree)
-		early_init_dt_scan(__va(bootblock_virt->info.bios.devtree));
+	early_device_tree_init();
 
 	parse_bootinfo();
 	parse_cmd_line(cmdline_p);
@@ -724,7 +725,9 @@ void __init setup_arch(char **cmdline_p)
 	/* reboot on panic */
 	panic_timeout = 30;	/* 30 seconds of black screen of death */
 
+	jump_label_init();
 	parse_early_param();
+
 	l_setup_arch();
 	set_mach_type_id();
 
@@ -766,7 +769,7 @@ void __init setup_arch(char **cmdline_p)
 
 	apply_alternative_instructions();
 
-	unflatten_device_tree();
+	device_tree_init();
 
 	/* Must be called after paging_init() & device_tree_init() */
 	l_setup_vga();

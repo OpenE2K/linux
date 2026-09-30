@@ -2738,8 +2738,8 @@ static struct ctl_table kern_table[] = {
 #if defined(CONFIG_E2K) && defined(CONFIG_SCLKR_CLOCKSOURCE)
 	{
 		.procname	= "sclkr_src",
-		.data		= &sclkr_src,
-		.maxlen		= SCLKR_SRC_LEN,
+		.data		= &proc_sclkr_cmd,
+		.maxlen		= SCLKR_CMD_LEN,
 		.mode		= 0644,
 		.proc_handler	= proc_sclkr,
 	},

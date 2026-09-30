@@ -761,8 +761,7 @@ int kvm_guest_spinlock_init(struct kvm *kvm)
 		INIT_LIST_HEAD(&u->unlocked_list);
 		list_add_tail(&u->unlocked_list, &kvm->arch.spinunlocked_free);
 	}
-	kvm->arch.spinlock_hash_lock =
-		__RAW_SPIN_LOCK_UNLOCKED(kvm->arch.spinlock_hash_lock);
+	raw_spin_lock_init(&kvm->arch.spinlock_hash_lock);
 	kvm->arch.spinlock_hash_disable = false;
 	return 0;
 }

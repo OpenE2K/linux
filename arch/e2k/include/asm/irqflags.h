@@ -100,6 +100,7 @@ do { \
 		AS(cr1_lo).nmie = 1; \
 		AS(cr1_lo).uie = 1; \
 		AS(cr1_lo).unmie = 1; \
+		alternative("", "wait ma_c=1", CPU_HWBUG_CR_BEFORE_WRITES, "memory"); \
 		WRITE_CR1_LO_REG(cr1_lo); \
 	} \
  \
@@ -548,35 +549,8 @@ do { \
 		((IS_IRQ_MASK_GLOBAL()) ? __raw_glob_irqs_disabled_flags(flags) : \
 					  __raw_loc_irqs_disabled_flags(flags))
 
-#ifdef CONFIG_MCST_RT
-
-#define SAVE_CURR_TIME_SWITCH_TO                                        \
-{ 									\
-        cpu_times[raw_smp_processor_id()].curr_time_switch_to =         \
-						READ_CLKR_REG_VALUE();	\
-} 
-
-#define CALCULATE_TIME_SWITCH_TO                                        \
-{                                                                       \
-        int cpu = raw_smp_processor_id();                               \
-	cpu_times[cpu].curr_time_switch_to = READ_CLKR_REG_VALUE() -	\
-                              cpu_times[cpu].curr_time_switch_to;       \
-        if (cpu_times[cpu].curr_time_switch_to <                        \
-            cpu_times[cpu].min_time_switch_to){                         \
-            cpu_times[cpu].min_time_switch_to =                         \
-                               cpu_times[cpu].curr_time_switch_to;      \
-        }                                                               \
-        if (cpu_times[cpu].curr_time_switch_to >                        \
-            cpu_times[cpu].max_time_switch_to){                         \
-            cpu_times[cpu].max_time_switch_to =                         \
-                                cpu_times[cpu].curr_time_switch_to;     \
-        }                                                               \
-}
-
-#else /* !CONFIG_MCST_RT */
- #define SAVE_CURR_TIME_SWITCH_TO
- #define CALCULATE_TIME_SWITCH_TO
-#endif /* CONFIG_MCST_RT */
+#define SAVE_CURR_TIME_SWITCH_TO
+#define CALCULATE_TIME_SWITCH_TO
 
 #ifdef CONFIG_CLI_CHECK_TIME
 
@@ -746,7 +720,7 @@ do { \
 #define all_irq_restore(flags)					\
 	do {							\
 		typecheck(unsigned long, flags);		\
-		if (raw_all_irqs_disabled_flags(flags)) {	\
+		if (raw_irqs_disabled_flags(flags)) {		\
 			raw_all_irq_restore(flags);		\
 			trace_hardirqs_off();			\
 		} else {					\

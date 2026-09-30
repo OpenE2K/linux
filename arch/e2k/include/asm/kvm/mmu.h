@@ -407,8 +407,9 @@ static inline gpa_t kvm_hva_to_gpa(struct kvm *kvm, unsigned long hva)
 {
 	struct kvm_memslots *slots;
 	struct kvm_memory_slot *memslot;
-	int i;
+	int i, srcu_idx;
 
+	srcu_idx = srcu_read_lock(&kvm->srcu);
 	for (i = 0; i < KVM_ADDRESS_SPACE_NUM; i++) {
 		slots = __kvm_memslots(kvm, i);
 		kvm_for_each_memslot(memslot, slots) {
@@ -422,9 +423,11 @@ static inline gpa_t kvm_hva_to_gpa(struct kvm *kvm, unsigned long hva)
 				continue;
 			gfn = hva_to_gfn_memslot(hva, memslot);
 			gpa = (gfn << PAGE_SHIFT) + (hva & ~PAGE_MASK);
+			srcu_read_unlock(&kvm->srcu, srcu_idx);
 			return gpa;
 		}
 	}
+	srcu_read_unlock(&kvm->srcu, srcu_idx);
 
 	return INVALID_GPA;
 }

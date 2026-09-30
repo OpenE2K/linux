@@ -1,6 +1,6 @@
- # SPDX-License-Identifier: GPL-2.0
- # Copyright (c) 2023 MCST
- 
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2023 MCST
+
 ifdef CONFIG_FUNCTION_TRACER
 # Do not profile debug and lowlevel utilities
 CFLAGS_REMOVE_perf_event.o = -pg

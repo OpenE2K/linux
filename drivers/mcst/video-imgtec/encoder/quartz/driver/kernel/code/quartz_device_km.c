@@ -1875,7 +1875,9 @@ int __init init_quartz(void)
 	eRet = SYSDEVU_RegisterDriver(&as_quartz_device[0]);
 	if (IMG_SUCCESS != eRet)
 	{
+#if !defined(CONFIG_MCST)
 		IMG_ASSERT(eRet == IMG_SUCCESS && "Driver registration failed");
+#endif
 #if defined (IMG_KERNEL_MODULE)
 		ret = EUNATCH;
 		goto init_driver_registration_failed;

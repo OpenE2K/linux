@@ -307,10 +307,6 @@ int __swap_writepage(struct page *page, struct writeback_control *wbc,
 		return ret;
 	}
 
-#ifdef CONFIG_E2K
-	tag_swap_write_page(page, wbc);
-#endif  /* CONFIG_E2K */
-
 	ret = bdev_write_page(sis->bdev, swap_page_sector(page), page, wbc);
 	if (!ret) {
 		count_swpout_vm_event(page);

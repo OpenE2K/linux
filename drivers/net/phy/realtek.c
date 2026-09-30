@@ -185,7 +185,9 @@ static int rtl8211f_config_init(struct phy_device *phydev)
 {
 	struct device *dev = &phydev->mdio.dev;
 	u16 val_txdly, val_rxdly;
+#ifndef CONFIG_MCST
 	u16 val;
+#endif
 	int ret;
 
 #ifdef CONFIG_MCST
@@ -258,6 +260,7 @@ static int rtl8211f_config_init(struct phy_device *phydev)
 	return 0;
 }
 
+#ifndef CONFIG_MCST
 static int rtl821x_resume(struct phy_device *phydev)
 {
 	int ret;
@@ -270,6 +273,7 @@ static int rtl821x_resume(struct phy_device *phydev)
 
 	return 0;
 }
+#endif
 
 static int rtl8211e_config_init(struct phy_device *phydev)
 {

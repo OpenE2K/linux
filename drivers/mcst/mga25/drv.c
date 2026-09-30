@@ -111,7 +111,7 @@ struct drm_ioctl_desc mga25_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(MGA2_GEM_CREATE, mga25_gem_create_ioctl, DRM_AUTH | DRM_UNLOCKED),
 	DRM_IOCTL_DEF_DRV(MGA2_GEM_MMAP, mga25_gem_mmap_ioctl, DRM_AUTH | DRM_UNLOCKED),
 	DRM_IOCTL_DEF_DRV(MGA2_SYNC, mga25_gem_sync_ioctl, DRM_AUTH | DRM_UNLOCKED),
-     	DRM_IOCTL_DEF_DRV(MGA2_INFO, mga25_info_ioctl, DRM_AUTH | DRM_UNLOCKED),
+	DRM_IOCTL_DEF_DRV(MGA2_INFO, mga25_info_ioctl, DRM_AUTH | DRM_UNLOCKED),
 	DRM_IOCTL_DEF_DRV(MGA2_AUC2, mga25_auc2_ioctl,  DRM_AUTH | DRM_UNLOCKED),
 	DRM_IOCTL_DEF_DRV(MGA2_VIRT_TO_HNDL, mga25_virt_to_handle,  DRM_AUTH | DRM_UNLOCKED),
 };
@@ -151,6 +151,7 @@ static struct drm_driver mga25_drm_driver = {
 	.gem_vm_ops = &mga25_gem_vm_ops,
 
 	.dumb_create = mga25_dumb_create,
+	.dumb_map_offset = mga25_gem_dumb_map_offset,
 
 	.prime_handle_to_fd	= drm_gem_prime_handle_to_fd,
 	.prime_fd_to_handle	= drm_gem_prime_fd_to_handle,
@@ -386,6 +387,9 @@ static int mga25_init(struct drm_device *drm, int reg_bar, int vram_bar)
 		if ((ret = dma_set_coherent_mask(dev, DMA_BIT_MASK(64))))
 			goto out;
 	}
+
+	WARN_ON(dma_set_max_seg_size(dev, UINT_MAX));
+
 	mga2->regs = devm_ioremap(dev,
 			pci_resource_start(pdev, reg_bar),
 			pci_resource_len(pdev, reg_bar));
@@ -423,8 +427,8 @@ static int mga25_init(struct drm_device *drm, int reg_bar, int vram_bar)
 	drm->mode_config.prefer_shadow = 0;
 	drm->mode_config.quirk_addfb_prefer_host_byte_order = true;
 
-        drm->mode_config.max_width = (1 << 16) - 1;
-        drm->mode_config.max_height = (1 << 16) - 1;
+	drm->mode_config.max_width = (1 << 16) - 1;
+	drm->mode_config.max_height = (1 << 16) - 1;
 	drm->max_vblank_count = 0xffffffff; /* full 32 bit counter */
 
 	mga2->uncached_pool = gen_pool_create(PAGE_SHIFT, dev_to_node(dev));

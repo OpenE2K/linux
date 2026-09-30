@@ -58,7 +58,7 @@ SYM_FUNC_START(ttable_entry0)
 	}
 	/* Important: the first memory access in kernel is store, not load.
 	 * This is needed to flush SLT before trying to load anything. */
-	KERNEL_ENTRY(TSK_TI_TMP_, /* not a syscall */, 0 /* crp */)
+	KERNEL_ENTRY(TSK_TI_TMP_, /* not a syscall */, 0 /* crp */, 1 /* hw_trap */)
 	{
 		nop 1
 		rrd %sbr, GCURTASK
@@ -116,7 +116,7 @@ SYM_FUNC_START(ttable_entry0)
 
 	{
 	ipd 1
-	disp %ctpr1, 2f
+	disp %ctpr1, ttable_entry0_user
 	rrd %clkr, %dr0
 	CLW_ONLY(addd,1 0, 1, %dr21 ? %pred0)
 	mmurr,2 %cont, %dr9 ? ~ %pred0
@@ -151,11 +151,14 @@ SYM_FUNC_START(ttable_entry0)
 	{
 	rrd	%ctpr2, %dr5;
 	CLW_ONLY(mmurr,5 %us_cl_m3, %dr11 ? %pred0)
+	ldgdw,3 0, TSK_PTRACE, %r20 ? %pred0
 	}
 	{
 	rrd	%ctpr3, %dr3;
 
+#ifdef SHOW_WOKEN_TIME
 	std	%dr0, GCURTASK, TSK_IRQ_ENTER_CLK /* ti->irq_enter_clk = %clkr */
+#endif
 	/* Check for data stack overflow. Handler does not use stack at all
 	 * so it is enough to catch biggest possible getsp that failed. */
 	cmpbedb,1 %dr7, 4096ULL << 32, %pred1 ? ~ %pred0
@@ -164,175 +167,30 @@ SYM_FUNC_START(ttable_entry0)
 	{
 	rrd	%usd.lo, %dr2;
 
+	addd,1	%dr1, KERNEL_C_STACK_SIZE + KERNEL_C_STACK_OFFSET, %dr1 ? %pred0;
+
 	/* Disable CLW unit for nonprotected mode, we must do it before
 	 * data stack switching. There is no need for an explicit
 	 * 'wait all_e' for CLW as it is done by hardware on trap enter. */
 	CLW_ONLY(mmurw,2 %dr21, %us_cl_d ? %pred0)
 	CLW_ONLY(mmurr,5 %us_cl_b, %dr13 ? %pred0)
-	ct	%ctpr1 ? ~ %pred0;			// kernel_trap_handler()
+	ct	%ctpr1 ? %pred0; // ttable_entry0_user
 	}
 
-/* user */
-
-	/* set kernel state of UPSR to preserve FP disable exception */
-	/* on movfi instructions */
-	/* %r21 - user UPSR to save at thread_info structure */
-	/* NMI disabled and can be enabled after TIRs parsing */
-	/* SGI should be disabled and can be enabled later */
-	{
-	ipd 3
-	disp	%ctpr1, user_trap_handler;
-
-	rrs	%upsr, %r21;
-
-	/* For user traps only since only then tmp_k_gregs is needed:
-	 * thread_info->k_gregs = thread_info->tmp_k_gregs */
-	ldrd,2 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | TSK_TI_TMP_G_VCPU_STATE, %dr28
-	ldrd,5 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | TSK_TI_TMP_G_VCPU_STATE_EXT, %dr29
-	}
-
-	ALTERNATIVE_1_ALTINSTR
-		/* PSR IRQ masks are global, UPSR masks are not used */
-		{
-			adds	0, E2K_KERNEL_UPSR_GLOB_IRQ_DISABLED_ALL, %r27
-			ldgdw,3 0, TSK_PTRACE, %r20
-		}
-	ALTERNATIVE_2_OLDINSTR
-		/* PSR IRQ mask is local and UPSR masks are used as global */
-		{
-			adds	0, E2K_KERNEL_UPSR_LOC_IRQ_DISABLED_ALL, %r27
-			ldgdw,3 0, TSK_PTRACE, %r20
-		}
-	ALTERNATIVE_3_FEATURE(CPU_FEAT_GLOBAL_IRQ_MASK)
-
-	{
-	rws	%r27, %upsr;
-
-	addd,1	%dr1, KERNEL_C_STACK_SIZE + KERNEL_C_STACK_OFFSET, %dr1;
-	stw,2	%r21, GCURTASK, TSK_UPSR;	/* thread_info->upsr = upsr */
-	ldd,5	GCURTASK, TSK_U_STACK_TOP, %dr27
-	}
-
+/* kernel */
 	/* Switch to kernel local data stack */
 	ALTERNATIVE_1_ALTINSTR
-		/* CPU_HWBUG_USD_ALIGNMENT version */
-		{
-		/* sbr = stack + KERNEL_C_STACK_SIZE + KERNEL_C_STACK_OFFSET */
-		rwd	%dr1, %sbr
-		ldrd,2 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | TSK_TI_TMP_G_TASK, %dr30
-		ldrd,5 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | TSK_TI_TMP_G_TASK_EXT, %dr31
-		nop 1;
-		}
+		/* CPU_FEAT_ATOMIC_LDRD version */
 	ALTERNATIVE_2_OLDINSTR
-		/* Default version */
-		{
-		/* sbr = stack + KERNEL_C_STACK_SIZE + KERNEL_C_STACK_OFFSET */
-		rwd	%dr1, %sbr
-		ldrd,2 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | TSK_TI_TMP_G_TASK, %dr30
-		ldrd,5 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | TSK_TI_TMP_G_TASK_EXT, %dr31
-		}
-	ALTERNATIVE_3_FEATURE(CPU_HWBUG_USD_ALIGNMENT)
-	{
-	rwd	%dr23, %usd.lo
-	ldrd,2 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | TSK_TI_TMP_G_MY_CPU_OFFSET, %dr32
-	ldrd,5 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | TSK_TI_TMP_G_MY_CPU_OFFSET_EXT, %dr33
-	}
-	{
-	rwd	%dr22, %usd.hi;
-	ldrd,2 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | TSK_TI_TMP_G_CPU_ID_PREEMPT, %dr34
-	ldrd,5 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | TSK_TI_TMP_G_CPU_ID_PREEMPT_EXT, %dr35
-	}
-	{
-	rrd	%lsr, %dr16
-	}
-	{
-	rrd	%ilcr, %dr4;
-	strd,2 %dr28, GCURTASK, TAGGED_MEM_STORE_REC_OPC | TSK_TI_G_VCPU_STATE
-	strd,5 %dr29, GCURTASK, TAGGED_MEM_STORE_REC_OPC | TSK_TI_G_VCPU_STATE_EXT
-	}
-	{
-	strd,2 %dr30, GCURTASK, TAGGED_MEM_STORE_REC_OPC | TSK_TI_G_TASK
-	strd,5 %dr31, GCURTASK, TAGGED_MEM_STORE_REC_OPC | TSK_TI_G_TASK_EXT
-	}
-	{
-	strd,2 %dr32, GCURTASK, TAGGED_MEM_STORE_REC_OPC | TSK_TI_G_MY_CPU_OFFSET
-	strd,5 %dr33, GCURTASK, TAGGED_MEM_STORE_REC_OPC | TSK_TI_G_MY_CPU_OFFSET_EXT
-	}
-	{
-	strd,2 %dr34, GCURTASK, TAGGED_MEM_STORE_REC_OPC | TSK_TI_G_CPU_ID_PREEMPT
-	strd,5 %dr35, GCURTASK, TAGGED_MEM_STORE_REC_OPC | TSK_TI_G_CPU_ID_PREEMPT_EXT
-	}
-	{
-	/* MMU registers can be written only after disabling CLW/AAU */
-	mmurw %dr37, %cont
-	}
-	{
-	mmurw,2 %dr36, %root_ptb
-	}
-	{
-	getsp   -(PTRACE_SZOF + TRAP_PTREGS_SZOF), %dr0
-	/* mmurw -> memory access; getsp -> usage */
-	nop 3
-	wait all_c=1
-	}
-#ifdef CONFIG_CLW_ENABLE
-	{
-	std	%dr10, [%dr0 + PT_US_CL_M2]
-	std	%dr11, [%dr0 + PT_US_CL_M3]
-	}
-	{
-	std	%dr8, [%dr0 + PT_US_CL_M0]
-	std	%dr9, [%dr0 + PT_US_CL_M1]
-	}
-	{
-	std	%dr12, [%dr0 + PT_US_CL_UP]
-	std	%dr13, [%dr0 + PT_US_CL_B]
-	}
-#endif
-	{
-	rrd	%rndpr, %dr38
-	std	%dr6, [%dr0 + PT_CTRP1];	// regs->ctpr1 = ctpr1
-	std	%dr5, [%dr0 + PT_CTRP2];	// regs->ctpr2 = ctpr2
-	}
-	{
-	rwd	-1ULL, %rndpr
-	std	%dr3, [%dr0 + PT_CTRP3];	// regs->ctpr3 = ctpr3
-	std	%dr16, [%dr0 + PT_LSR];		// regs->lsr = lsr
-	}
-	{
-	std	%dr4, [%dr0 + PT_ILCR];		// regs->ilcr = ilcr
-	std     %dr27, [%dr0 + PT_STACK+ST_TOP]; /* regs->stacks.top = */
- 	}
-	{
-	/* regs->g_stacks.sbr/top = %sbr */
-	PV_VCPU(std	%dr26, [%dr0 + PT_G_STACK+G_ST_SBR])
-	}
-	{
-	getsp   -64, %empty;	   // reserve stack for function arguments
-	std	%dr2, [%dr0 + PT_STACK+ST_USD_LO]; // regs->stacks.usd_lo = usd.lo
-	std	%dr7, [%dr0 + PT_STACK+ST_USD_HI]; // regs->stacks.usd_hi = usd.hi
-	cmpesb,3 %r20, 0, %pred2
-	}
-	{
-	std	%dr14, [%dr0 + PT_LSR1]
-	std	%dr15, [%dr0 + PT_ILCR1]
-	SMP_ONLY(shld,3 GCPUID_PREEMPT, 3, GCPUOFFSET)
-	}
-	{
-	std	%dr17, [%dr0 + PT_CTPR1_HI]
-	std	%dr18, [%dr0 + PT_CTPR2_HI]
-	}
-	{
-	std	%dr19, [%dr0 + PT_CTPR3_HI]
-	std	%dr38, [%dr0 + PT_RNDPR]
-	}
-	{
-	SMP_ONLY(ldd,5 GCPUOFFSET, __per_cpu_offset, GCPUOFFSET)
-	ct	%ctpr1 ? %pred2 // user_trap_handler()
-	}
-	ibranch save_dam_and_jump_ctpr1
+		/* Default version: revert USD.p effects
+		 * (clear usd.p and reduce usd.psl) */
+		{andnd %dr2, 1 << 58, %dr21
+		 cmpandedb %dr2, 1 << 58, %pred4}
+		{subd %dr21, 1 << 32, %dr21 ? ~ %pred4}
+		{rwd %dr21, %usd.lo}
+		{wait all_e=1}
+	ALTERNATIVE_3_FEATURE(CPU_FEAT_ATOMIC_LDRD)
 
-2: /* kernel */
 	// if (READ_SBR_REG() >= TASK_SIZE)
 	//	kernel_trap_handler();
 	{
@@ -387,6 +245,159 @@ SYM_FUNC_START(ttable_entry0)
 	ct %ctpr1;	// kernel_trap_handler()
 	}
 SYM_FUNC_END(ttable_entry0)
+
+.section ".entry.text", "ax",@progbits
+SYM_FUNC_START(ttable_entry0_user)
+	/* set kernel state of UPSR to preserve FP disable exception */
+	/* on movfi instructions */
+	/* %r21 - user UPSR to save at thread_info structure */
+	/* NMI disabled and can be enabled after TIRs parsing */
+	/* SGI should be disabled and can be enabled later */
+	{
+	ipd 3
+	disp	%ctpr1, user_trap_handler;
+
+	rrs	%upsr, %r21;
+
+	/* For user traps only since only then tmp_k_gregs is needed:
+	 * thread_info->k_gregs = thread_info->tmp_k_gregs */
+	ldrd,2 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | TSK_TI_TMP_G_VCPU_STATE, %dr28
+	ldrd,5 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | TSK_TI_TMP_G_VCPU_STATE_EXT, %dr29
+	}
+
+	ALTERNATIVE_1_ALTINSTR
+		/* PSR IRQ masks are global, UPSR masks are not used */
+		{
+			rws	E2K_KERNEL_UPSR_GLOB_IRQ_DISABLED_ALL, %upsr;
+
+			stw,2	%r21, GCURTASK, TSK_UPSR;	/* thread_info->upsr = upsr */
+			ldd,5	GCURTASK, TSK_U_STACK_TOP, %dr27
+		}
+	ALTERNATIVE_2_OLDINSTR
+		/* PSR IRQ mask is local and UPSR masks are used as global */
+		{
+			rws	E2K_KERNEL_UPSR_LOC_IRQ_DISABLED_ALL, %upsr;
+
+			stw,2	%r21, GCURTASK, TSK_UPSR;	/* thread_info->upsr = upsr */
+			ldd,5	GCURTASK, TSK_U_STACK_TOP, %dr27
+		}
+	ALTERNATIVE_3_FEATURE(CPU_FEAT_GLOBAL_IRQ_MASK)
+
+	/* Switch to kernel local data stack */
+	ALTERNATIVE_1_ALTINSTR
+		/* CPU_HWBUG_USD_ALIGNMENT version */
+		{
+		/* sbr = stack + KERNEL_C_STACK_SIZE + KERNEL_C_STACK_OFFSET */
+		rwd	%dr1, %sbr
+		ldrd,2 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | TSK_TI_TMP_G_TASK, %dr30
+		ldrd,5 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | TSK_TI_TMP_G_TASK_EXT, %dr31
+		nop 1;
+		}
+	ALTERNATIVE_2_OLDINSTR
+		/* Default version */
+		{
+		/* sbr = stack + KERNEL_C_STACK_SIZE + KERNEL_C_STACK_OFFSET */
+		rwd	%dr1, %sbr
+		ldrd,2 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | TSK_TI_TMP_G_TASK, %dr30
+		ldrd,5 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | TSK_TI_TMP_G_TASK_EXT, %dr31
+		}
+	ALTERNATIVE_3_FEATURE(CPU_HWBUG_USD_ALIGNMENT)
+	{
+	rwd	%dr23, %usd.lo
+	ldrd,2 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | TSK_TI_TMP_G_MY_CPU_OFFSET, %dr32
+	ldrd,5 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | TSK_TI_TMP_G_MY_CPU_OFFSET_EXT, %dr33
+	}
+	{
+	nop 1 /* ld -> st */
+	rwd	%dr22, %usd.hi;
+	ldrd,2 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | TSK_TI_TMP_G_CPU_ID_PREEMPT, %dr34
+	ldrd,5 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | TSK_TI_TMP_G_CPU_ID_PREEMPT_EXT, %dr35
+	}
+	{
+	rrd	%lsr, %dr16
+	strd,2 %dr28, GCURTASK, TAGGED_MEM_STORE_REC_OPC | TSK_TI_G_VCPU_STATE
+	strd,5 %dr29, GCURTASK, TAGGED_MEM_STORE_REC_OPC | TSK_TI_G_VCPU_STATE_EXT
+	}
+	{
+	rrd	%ilcr, %dr4;
+	strd,2 %dr30, GCURTASK, TAGGED_MEM_STORE_REC_OPC | TSK_TI_G_TASK
+	strd,5 %dr31, GCURTASK, TAGGED_MEM_STORE_REC_OPC | TSK_TI_G_TASK_EXT
+	}
+	{
+	strd,2 %dr32, GCURTASK, TAGGED_MEM_STORE_REC_OPC | TSK_TI_G_MY_CPU_OFFSET
+	strd,5 %dr33, GCURTASK, TAGGED_MEM_STORE_REC_OPC | TSK_TI_G_MY_CPU_OFFSET_EXT
+	}
+	{
+	strd,2 %dr34, GCURTASK, TAGGED_MEM_STORE_REC_OPC | TSK_TI_G_CPU_ID_PREEMPT
+	strd,5 %dr35, GCURTASK, TAGGED_MEM_STORE_REC_OPC | TSK_TI_G_CPU_ID_PREEMPT_EXT
+	}
+	{
+	/* MMU registers can be written only after disabling CLW/AAU */
+	mmurw %dr37, %cont
+	}
+	{
+	mmurw,2 %dr36, %root_ptb
+	}
+	{
+	getsp   -(PTRACE_SZOF + TRAP_PTREGS_SZOF), %dr0
+	/* mmurw -> memory access; getsp -> usage */
+	nop 3
+	wait all_c=1
+	}
+#ifdef CONFIG_CLW_ENABLE
+	{
+	std	%dr10, [%dr0 + PT_US_CL_M2]
+	std	%dr11, [%dr0 + PT_US_CL_M3]
+	}
+	{
+	std	%dr8, [%dr0 + PT_US_CL_M0]
+	std	%dr9, [%dr0 + PT_US_CL_M1]
+	}
+	{
+	std	%dr12, [%dr0 + PT_US_CL_UP]
+	std	%dr13, [%dr0 + PT_US_CL_B]
+	}
+#endif
+	{
+	rrd	%rndpr, %dr38
+	std	%dr6, [%dr0 + PT_CTRP1];	// regs->ctpr1 = ctpr1
+	std	%dr5, [%dr0 + PT_CTRP2];	// regs->ctpr2 = ctpr2
+	}
+	{
+	rwd	-1ULL, %rndpr
+	std	%dr3, [%dr0 + PT_CTRP3];	// regs->ctpr3 = ctpr3
+	std	%dr16, [%dr0 + PT_LSR];		// regs->lsr = lsr
+	}
+	{
+	std	%dr4, [%dr0 + PT_ILCR];		// regs->ilcr = ilcr
+	std     %dr27, [%dr0 + PT_STACK+ST_TOP]; /* regs->stacks.top = */
+ 	}
+	{
+	getsp   -64, %empty;	   // reserve stack for function arguments
+	std	%dr2, [%dr0 + PT_STACK+ST_USD_LO]; // regs->stacks.usd_lo = usd.lo
+	std	%dr7, [%dr0 + PT_STACK+ST_USD_HI]; // regs->stacks.usd_hi = usd.hi
+	cmpesb,3 %r20, 0, %pred2
+	}
+	{
+	std	%dr14, [%dr0 + PT_LSR1]
+	std	%dr15, [%dr0 + PT_ILCR1]
+	SMP_ONLY(shld,3 GCPUID_PREEMPT, 3, GCPUOFFSET)
+	}
+	{
+	std	%dr17, [%dr0 + PT_CTPR1_HI]
+	std	%dr18, [%dr0 + PT_CTPR2_HI]
+	}
+	{
+	std	%dr19, [%dr0 + PT_CTPR3_HI]
+	std	%dr38, [%dr0 + PT_RNDPR]
+	}
+	{
+	PV_VCPU(std	%dr26, [%dr0 + PT_G_STACK+G_ST_SBR]) /* regs->g_stacks.sbr/top = %sbr */
+	SMP_ONLY(ldd,5 GCPUOFFSET, __per_cpu_offset, GCPUOFFSET)
+	ct	%ctpr1 ? %pred2 // user_trap_handler()
+	}
+	ibranch save_dam_and_jump_ctpr1
+SYM_FUNC_END(ttable_entry0_user)
 
 #define WSZ 12
 #define SYS_CALL(sys_call_table, FORMAT_32, ENTRY) \
@@ -864,7 +875,6 @@ SYM_FUNC_START(ttable_entry7)
 	shls,2		%r13, 20, %r13
 }
 {
-	nop 5
 	rwd %dr17, %usd.lo
 
 	ors,1		%r11, %r13, %r11
@@ -872,17 +882,21 @@ SYM_FUNC_START(ttable_entry7)
 	puttagd,5	%dr2, 0, %db[2]
 }
 {
+	rrd		%cr1.lo, %db[6]
 	ors,1		%r11, %r10, %r11
 	puttagd,2	%dr3, 0, %db[3]
 	puttagd,5	%dr4, 0, %db[4]
 }
 {
-	ors,0		%r11, %r12, %r11
+	/* Wait for usd modification */
+	wait 		all_e=1
+	ors,1		%r11, %r12, %r11
 	puttagd,2	%dr5, 0, %db[5]
 }
 {
 	adds,0		%r11, 0, %b[0]
-	/* Use call instead of jump so that we can restore %usd.p here */
+	/* Use call instead of jump so that we can restore %usd.p here.
+	 * Addionally provide %cr1.lo for getcontext. */
 	call %ctpr1, wbs=9
 }
 {
@@ -1165,6 +1179,28 @@ SYM_FUNC_START(save_dam_and_jump_ctpr1)
 		ct %ctpr1
 	}
 SYM_FUNC_END(save_dam_and_jump_ctpr1)
+
+SYM_FUNC_START(done_to_hcall)
+	{
+		/* Not interested in spurious interrupt */
+		rwd 0, %tir.lo;
+	}
+	{
+		ldrqp,2,sm GCURTASK, TAGGED_MEM_LOAD_REC_OPC | TSK_TI_TMP_G16, %qpg16
+		ldrqp,3,sm GCURTASK, TAGGED_MEM_LOAD_REC_OPC | TSK_TI_TMP_G18, %qpg18
+	}
+	{
+		/* rwd -> done */
+		wait all_e=1
+		nop 3
+
+		ldrqp,5,sm GCURTASK, TAGGED_MEM_LOAD_REC_OPC | TSK_TI_TMP_G17, %qpg17
+	}
+	{
+		done;
+	}
+SYM_FUNC_END(done_to_hcall)
+
 
 .section ".init.text", "ax"
 .global __trampolines_start

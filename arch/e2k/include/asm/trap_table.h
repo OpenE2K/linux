@@ -161,11 +161,8 @@ static inline void native_exit_handle_syscall(e2k_addr_t sbr, e2k_usd_hi_t usd_h
 		e2k_usd_lo_t usd_lo, e2k_upsr_t upsr, u64 psize, const e2k_mem_crs_t *crs)
 {
 	NATIVE_EXIT_HANDLE_SYSCALL(sbr, usd_hi.USD_hi_half, usd_lo.USD_lo_half,
-				   upsr.UPSR_reg, psize);
-	WRITE_CR0_HI_REG(crs->cr0_hi);
-	WRITE_CR0_LO_REG(crs->cr0_lo);
-	WRITE_CR1_HI_REG(crs->cr1_hi);
-	WRITE_CR1_LO_REG(crs->cr1_lo);
+				   upsr.UPSR_reg, psize, crs->cr0_lo, crs->cr0_hi,
+				   crs->cr1_lo, crs->cr1_hi);
 }
 
 extern SYS_RET_TYPE notrace handle_sys_call(system_call_func sys_call,

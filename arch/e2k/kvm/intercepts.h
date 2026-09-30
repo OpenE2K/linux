@@ -425,34 +425,6 @@ kvm_inject_aau_page_exc(struct kvm_vcpu *vcpu, pt_regs_t *regs,
 }
 
 /*
- * CU interceptions events service
- */
-static inline void
-kvm_reset_intc_info_cu_is_deleted(intc_info_cu_entry_t *info)
-{
-	info->no_restore = false;
-}
-static inline void
-kvm_set_intc_info_cu_is_deleted(intc_info_cu_entry_t *info)
-{
-	info->no_restore = true;
-}
-static inline bool
-kvm_is_intc_info_cu_deleted(intc_info_cu_entry_t *info)
-{
-	return info->no_restore;
-}
-
-static inline void
-kvm_delete_intc_info_cu(struct kvm_vcpu *vcpu, intc_info_cu_entry_t *info)
-{
-	if (!likely(kvm_is_intc_info_cu_deleted(info))) {
-		kvm_set_intc_info_cu_is_deleted(info);
-		kvm_set_intc_info_cu_is_updated(vcpu);
-	}
-}
-
-/*
  * MMU interceptions events service
  */
 static inline void

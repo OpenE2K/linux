@@ -62,9 +62,6 @@
 #include <linux/mm.h>
 #include <linux/kasan.h>
 #include "../time/tick-internal.h"
-#ifdef CONFIG_MCST_RT
-#include <linux/mcst_rt.h>
-#endif
 
 #include "tree.h"
 #include "rcu.h"
@@ -3815,9 +3812,6 @@ static int rcu_pending(int user)
 
 	lockdep_assert_irqs_disabled();
 
-#ifdef CONFIG_MCST_RT
-	if (!rts_mode)
-#endif
 	/* Check for CPU stalls, if enabled. */
 	check_cpu_stall(rdp);
 

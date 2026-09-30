@@ -26,6 +26,7 @@
 #include <linux/dmi.h>
 #include <linux/smp.h>
 #include <linux/mm.h>
+#include <linux/seq_file.h>
 
 #include <asm/acpi.h>
 #include <asm/perf_event.h>
@@ -427,6 +428,24 @@ static int __init calibrate_APIC_clock(void)
 {
 	long delta, deltatsc;
 
+	/* Get clock frequency if present */
+	struct device_node *np = of_find_compatible_node(NULL, NULL, "mcst,apic-timer");
+	if (np) {
+		u32 freq;
+
+		if (!of_property_read_u32(np, "clock-frequency", &freq)) {
+			lapic_timer_frequency = freq / HZ;
+			levt_freq = freq / APIC_DIVISOR;
+			apic_printk(APIC_VERBOSE, "Local APIC timer frequency set to %u.%04u MHz from device tree.\n",
+					freq / 1000000, freq % 1000000);
+		}
+
+		of_node_put(np);
+
+		if (lapic_timer_frequency)
+			return -EALREADY;
+	}
+
 	/**
 	 * check if lapic timer has already been calibrated by platform
 	 * specific routine, such as tsc calibration code. if so, we just fill
@@ -477,7 +496,7 @@ static int __init calibrate_APIC_clock(void)
 	deltatsc = (long)(lapic_cal_tsc2 - lapic_cal_tsc1);
 
 	lapic_timer_frequency = (delta * APIC_DIVISOR) / LAPIC_CAL_LOOPS;
-	levt_freq = (lapic_cal_t1 - lapic_cal_t2) * (HZ / LAPIC_CAL_LOOPS);
+	levt_freq = delta * HZ / LAPIC_CAL_LOOPS;
 
 	apic_printk(APIC_VERBOSE, "..... delta %ld\n", delta);
 	apic_printk(APIC_VERBOSE, "..... mult: %u\n", lapic_clockevent.mult);
@@ -500,7 +519,7 @@ static int __init calibrate_APIC_clock(void)
 	if (lapic_timer_frequency < (1000000 / HZ)) {
 		local_irq_enable();
 		pr_warn("APIC frequency too slow, disabling apic timer\n");
-		return -1;
+		return -EINVAL;
 	}
 
 	local_irq_enable();
@@ -541,6 +560,15 @@ void __init setup_boot_APIC_clock(void)
 
 	/* Setup the lapic or request the broadcast */
 	setup_APIC_timer();
+}
+
+void cpuinfo_apic(struct seq_file *m)
+{
+	/* APIC can be installed into PCI on machine with EPIC
+	 * but here we want to report our main PIC. */
+	if (!cpu_has(CPU_FEAT_EPIC)) {
+		seq_printf(m, " apic=%u", HZ * lapic_timer_frequency);
+	}
 }
 
 void setup_secondary_APIC_clock(void)
@@ -617,11 +645,10 @@ __visible void __irq_entry smp_apic_timer_interrupt(struct pt_regs *regs)
 		cur_time = ktime_to_ns(ktime_get());
 		if (cur_time > next_time + DELTA_NS) {
 			per_cpu(next_rt_intr, cpu) = 0;
-		} else if (cur_time > next_time - DELTA_NS &&
-				cur_time < next_time + DELTA_NS) {
-			/* set 1 -- must do timer later
-			 * in do_postpone_tick() */
-			per_cpu(next_rt_intr, cpu) = 1;
+			per_cpu(must_do_timer, cpu) = 0;
+		} else if (cur_time > next_time - DELTA_NS) {
+			/* must do timer later in do_postpone_tick() */
+			per_cpu(must_do_timer, cpu) = 1;
 			set_irq_regs(old_regs);
 			ack_APIC_irq();
 			/* if do_postpone_tick() will not called: */

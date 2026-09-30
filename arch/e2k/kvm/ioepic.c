@@ -492,8 +492,10 @@ int kvm_ioepic_init(struct kvm *kvm)
 	kvm_ioepic_reset(ioepic);
 	kvm_iodevice_init(&ioepic->dev, &ioepic_mmio_ops);
 	ioepic->kvm = kvm;
+	mutex_lock(&kvm->slots_lock);
 	ret = kvm_io_bus_register_dev(kvm, KVM_MMIO_BUS, ioepic->base_address,
 				      IOEPIC_MEM_LENGTH, &ioepic->dev);
+	mutex_unlock(&kvm->slots_lock);
 	if (ret < 0)
 		kfree(ioepic);
 

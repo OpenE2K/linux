@@ -34,6 +34,7 @@
 #include <asm/io.h>
 #include <asm/e2k-iommu.h>
 #include <asm/e2k_debug.h>
+#include <asm/sclkr.h>
 #include <asm/kvm.h>
 #include <asm/kvm_host.h>
 #include <asm/kvm/cpu_hv_regs_access.h>
@@ -350,7 +351,7 @@ static void kvm_hardware_virt_enable(void)
 	host_machine.write_SH_CORE_MODE(CORE_MODE.CORE_MODE_reg);
 
 	DebugKVM("KVM: CPU #%d: set guest CORE_MODE to indicate guest mode on any VMs\n",
-			raw_smp_processor_id());
+			smp_processor_id());
 
 	machine.rwd(E2K_REG_HCEM, user_hcall_init());
 	machine.rwd(E2K_REG_HCEB, (unsigned long) __hypercalls_begin);
@@ -363,23 +364,18 @@ static void kvm_hardware_virt_enable(void)
 		kvm_setup_cepic_epic_int();
 	}
 
-	cpumask_set_cpu(raw_smp_processor_id(), &kvm_e2k_hardware_enabled);
+	cpumask_set_cpu(smp_processor_id(), &kvm_e2k_hardware_enabled);
 }
 
 static void kvm_hardware_virt_disable(void)
 {
-	if (unlikely(!list_empty(&vm_list))) {
-		pr_warn_once("KVM: unable to disable E2K hardware virt extensions, while VMs are running\n");
-		return;
-	}
-
-	cpumask_clear_cpu(raw_smp_processor_id(), &kvm_e2k_hardware_enabled);
+	cpumask_clear_cpu(smp_processor_id(), &kvm_e2k_hardware_enabled);
 
 	machine.rwd(E2K_REG_HCEM, 0);
 	machine.rwd(E2K_REG_HCEB, 0);
 
-	if (cpu_has(CPU_FEAT_EPIC) && cpumask_empty(&kvm_e2k_hardware_enabled))
-		prepic_set_virt_en(false);
+	/* Since PREPIC might be in use right now, we cannot
+	 * call `prepic_set_virt_en(false)` here. */
 }
 #else	/* ! CONFIG_KVM_HW_VIRTUALIZATION */
 static bool kvm_is_hv_enable(void)
@@ -1396,6 +1392,10 @@ int kvm_vm_ioctl_check_extension(struct kvm *kvm, int ext)
 			r = kvm_is_shadow_pt_enable(kvm);
 		}
 		break;
+	case KVM_CAP_E2K_SIC_NBSR_ISET:
+		DebugKVM("ioctl is KVM_CAP_E2K_SIC_NBSR_ISET\n");
+		r = kvm_is_sic_nbsr_iset_available();
+		break;
 	case KVM_CAP_ENABLE_CAP_VM:
 		r = 1;
 		break;
@@ -2126,6 +2126,8 @@ int kvm_arch_init_vm(struct kvm *kvm, unsigned long vm_type)
 		clear_kvm_mode_flag(kvm, KVMF_PRIV_HCALL_ENABLE);
 	}
 
+	kvm->arch.raw_clock_offset = -(s64) ktime_get_raw_ns();
+
 	return 0;
 
 error_boot_spinlock:
@@ -2241,8 +2243,7 @@ static int kvm_create_host_info(struct kvm *kvm)
 	memset(kmap_host_info, 0, sizeof(kvm_host_info_t));
 	kvm->arch.host_info = host_info;
 	kvm->arch.kmap_host_info = kmap_host_info;
-	kvm->arch.time_state_lock =
-		__RAW_SPIN_LOCK_UNLOCKED(&kvm->arch.time_state_lock);
+	raw_spin_lock_init(&kvm->arch.time_state_lock);
 	kvm_setup_host_info(kvm);
 
 	r = 0;
@@ -2416,7 +2417,11 @@ long kvm_arch_vm_ioctl(struct file *filp,
 		break;
 	case KVM_CREATE_SIC_NBSR:
 		DebugKVMIOCTL("ioctl is KVM_CREATE_SIC_NBSR\n");
-		r = kvm_nbsr_init(kvm);
+		r = kvm_nbsr_init(kvm, E2K_ISET_V6);
+		break;
+	case KVM_CREATE_SIC_NBSR_ISET:
+		DebugKVMIOCTL("ioctl is KVM_CREATE_SIC_NBSR_ISET with param 0x%lx\n", arg);
+		r = kvm_nbsr_init(kvm, arg);
 		break;
 #ifdef KVM_HAVE_GET_SET_IRQCHIP
 	case KVM_GET_IRQCHIP: {
@@ -2821,20 +2826,34 @@ void reset_lapic_state(struct kvm_vcpu *vcpu)
  * because otherwise there is a race: "Variant 2" above could happen between
  * the check in kvm_vcpu_check_block() and the consequent schedule() call, in
  * which case VCPU0 will go sleep but VCPU1 will be sure that VCPU0 was woken.
+ *
+ * Synchronization is done by using KVM_MP_STATE_HALTED for indication whether
+ * EPIC has been saved.  To avoid races we change the state and switch EPIC
+ * context under closed interrupts.
  */
 void kvm_arch_vcpu_blocking(struct kvm_vcpu *vcpu)
 {
 	if (kvm_vcpu_is_epic(vcpu)) {
+		unsigned long flags;
+
+		all_irq_save(flags);
+		vcpu->arch.mp_state = KVM_MP_STATE_HALTED;
 		kvm_epic_vcpu_blocking(&vcpu->arch);
 		kvm_epic_start_idle_timer(vcpu);
+		all_irq_restore(flags);
 	}
 }
 
 void kvm_arch_vcpu_unblocking(struct kvm_vcpu *vcpu)
 {
 	if (kvm_vcpu_is_epic(vcpu)) {
+		unsigned long flags;
+
+		all_irq_save(flags);
 		kvm_epic_stop_idle_timer(vcpu);
 		kvm_epic_vcpu_unblocking(&vcpu->arch);
+		vcpu->arch.mp_state = KVM_MP_STATE_RUNNABLE;
+		all_irq_restore(flags);
 	}
 }
 
@@ -2989,10 +3008,9 @@ static void init_hw_ctxt(struct kvm_vcpu *vcpu)
 {
 	vcpu_boot_stack_t *boot_stacks = &vcpu->arch.boot_stacks;
 	guest_hw_stack_t *boot_regs = &boot_stacks->regs;
-	kvm_guest_info_t *guest_info = &vcpu->kvm->arch.guest_info;
 	struct kvm_hw_cpu_context *hw_ctxt = &vcpu->arch.hw_ctxt;
 	epic_page_t *cepic = hw_ctxt->cepic;
-	virt_ctrl_cu_t cu;
+	virt_ctrl_cu_t virt_ctrl_cu;
 	union cepic_ctrl epic_reg_ctrl;
 	union cepic_esr2 epic_reg_esr2;
 	union cepic_timer_lvtt epic_reg_timer_lvtt;
@@ -3065,17 +3083,15 @@ static void init_hw_ctxt(struct kvm_vcpu *vcpu)
 	/*
 	 * VIRT_CTRL_* registers
 	 */
-	cu.VIRT_CTRL_CU_reg = 0;
-	if (guest_info->is_stranger) {
-		/* it need turn ON interceptions on IDR read */
-		cu.VIRT_CTRL_CU_rr_idr = 1;
-	}
-	cu.VIRT_CTRL_CU_rw_sclkr = 1;
-	cu.VIRT_CTRL_CU_rw_sclkm3 = 1;
-	cu.VIRT_CTRL_CU_virt = 1;
-	cu.VIRT_CTRL_CU_hcem = 1;
+	AW(virt_ctrl_cu) = 0;
+	virt_ctrl_cu.rr_idr = 1; /* Must give proper core number */
+	virt_ctrl_cu.rw_sclkr = 1;
+	virt_ctrl_cu.rw_sclkm3 = 1;
+	virt_ctrl_cu.rr_sclkr = !use_sclkr_sched_clock();
+	virt_ctrl_cu.virt = 1;
+	virt_ctrl_cu.hcem = 1;
 
-	hw_ctxt->virt_ctrl_cu = cu;
+	hw_ctxt->virt_ctrl_cu = virt_ctrl_cu;
 	hw_ctxt->virt_ctrl_mu = vcpu->arch.mmu.virt_ctrl_mu;
 	hw_ctxt->g_w_imask_mmu_cr = vcpu->arch.mmu.g_w_imask_mmu_cr;
 
@@ -4172,6 +4188,7 @@ static user_area_t *kvm_do_find_memory_region(struct kvm *kvm, int slot, e2k_add
 			kvm_guest_mem_type_t type, bool reverse)
 {
 	int id, as_id, as_id_from, as_id_to;
+	int srcu_idx;
 
 	DebugKVM("started for slot %d address 0x%lx size 0x%lx type %s\n",
 		slot, address, size, (type & guest_vram_mem_type) ? "VRAM" : "RAM");
@@ -4196,6 +4213,7 @@ static user_area_t *kvm_do_find_memory_region(struct kvm *kvm, int slot, e2k_add
 	if (type == 0)
 		type = guest_ram_mem_type;
 
+	srcu_idx = srcu_read_lock(&kvm->srcu);
 	for (as_id = as_id_from; as_id <= as_id_to; as_id++) {
 		struct kvm_memslots *slots = __kvm_memslots(kvm, as_id);
 		int memslots_count = slots->used_slots;
@@ -4270,9 +4288,11 @@ static user_area_t *kvm_do_find_memory_region(struct kvm *kvm, int slot, e2k_add
 			if (phys_mem && virt_address != NULL)
 				*virt_address = address;
 
+			srcu_read_unlock(&kvm->srcu, srcu_idx);
 			return guest_area;
 		}
 	}
+	srcu_read_unlock(&kvm->srcu, srcu_idx);
 
 	DebugKVM("could not find any suitable memory slot\n");
 

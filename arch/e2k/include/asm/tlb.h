@@ -45,8 +45,26 @@ static inline void tlb_flush(struct mmu_gather *tlb)
 	}
 }
 
-#define __pud_free_tlb(tlb, pudp, start)	pud_free((tlb)->mm, pudp)
-#define __pmd_free_tlb(tlb, pmdp, start)	pmd_free((tlb)->mm, pmdp)
-#define __pte_free_tlb(tlb, ptep, addr)		pte_free((tlb)->mm, ptep)
+static inline void __pud_free_tlb(struct mmu_gather *tlb, pud_t *pudp,
+				  unsigned long address)
+{
+	tlb_remove_page(tlb, virt_to_page(pudp));
+}
+
+static inline void __pmd_free_tlb(struct mmu_gather *tlb, pmd_t *pmdp,
+				  unsigned long address)
+{
+	struct page *page = virt_to_page(pmdp);
+
+	pgtable_pmd_page_dtor(page);
+	tlb_remove_page(tlb, page);
+}
+
+static inline void __pte_free_tlb(struct mmu_gather *tlb, struct page *pte,
+				  unsigned long address)
+{
+	pgtable_pte_page_dtor(pte);
+	tlb_remove_page(tlb, pte);
+}
 
 #endif /* _E2K_TLB_H */

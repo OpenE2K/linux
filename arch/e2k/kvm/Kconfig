@@ -1,6 +1,6 @@
- # SPDX-License-Identifier: GPL-2.0
- # Copyright (c) 2023 MCST
- 
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2023 MCST
+
 #
 # KVM configuration
 #
@@ -333,3 +333,10 @@ config	DIRECT_VIRQ_INJECTION
 	help
 	  Direct injection of VIRQs to guest kernel VCPU through standard
 	  mechanism of traps passing from host to guest
+
+config TEST_HYPERCALLS_LOOP
+	bool "Test many hypercalls in a row"
+	depends on KVM
+	help
+	  Runs same hypercall many times over and over again, to check for
+	  any possible asymmetries or leaks in data stack switch code.

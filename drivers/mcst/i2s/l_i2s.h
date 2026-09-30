@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
 #include <linux/of.h>
 
 /* Offsets for I2S controller configuring */

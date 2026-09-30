@@ -2430,8 +2430,8 @@ void __init setup_IO_APIC(void)
 {
 	apic_printk(APIC_VERBOSE, "ENABLING IO-APIC IRQs\n");
 	/*
-         * Set up IO-APIC IRQ routing.
-         */
+	 * Set up IO-APIC IRQ routing.
+	 */
 	setup_ioapic_ids_from_mpc_nocheck();
 	setup_IO_APIC_irqs();
 	init_IO_APIC_traps();

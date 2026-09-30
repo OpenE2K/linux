@@ -1098,6 +1098,8 @@ static void local_apic_timer_interrupt(void)
 #ifdef CONFIG_MCST
 DEFINE_PER_CPU(long long, next_rt_intr) = 0;
 EXPORT_SYMBOL(next_rt_intr);
+DEFINE_PER_CPU(long long, must_do_timer) = 0;
+EXPORT_SYMBOL(must_do_timer);
 
 #define DELTA_NS	(NSEC_PER_SEC / HZ / 2)
 
@@ -1117,12 +1119,9 @@ void do_postpone_tick(int to_next_rt_ns)
 		per_cpu(next_rt_intr, cpu) = cur_time + to_next_rt_ns;
 	} else{
 		per_cpu(next_rt_intr, cpu) = 0;
+		per_cpu(must_do_timer, cpu) = 0;
 	}
-#if 0
-	trace_printk("DOPOSTP old_nx-cur=%lld cur=%lld nx=%lld\n",
-		next_tm - cur_time, cur_time, cur_time + to_next_rt_ns);
-#endif
-	if (next_tm == 1) {
+	if (per_cpu(must_do_timer, cpu)) {
 		/* FIXME next line has long run time and may be deleted */
 		memset(&regs_new, 0, sizeof(struct pt_regs));
 		/* need to get answer to user_mod() only */
@@ -1163,11 +1162,9 @@ DEFINE_IDTENTRY_SYSVEC(sysvec_apic_timer_interrupt)
 		cur_time = ktime_to_ns(ktime_get());
 		if (cur_time > next_time + DELTA_NS) {
 			per_cpu(next_rt_intr, cpu) = 0;
-		} else if (cur_time > next_time - DELTA_NS &&
-				cur_time < next_time + DELTA_NS) {
-			/* set 1 -- must do timer later
-			 * in do_postpone_tick() */
-			per_cpu(next_rt_intr, cpu) = 1;
+		} else if (cur_time > next_time - DELTA_NS) {
+			/* must do timer later in do_postpone_tick() */
+			per_cpu(must_do_timer, cpu) = 1;
 			/* if do_postpone_tick() will not called: */
 			ack_APIC_irq();
 			apic_write(APIC_TMICT,

@@ -1,0 +1,15 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2025 MCST
+ */
+
+/dts-v1/;
+
+/ {
+	version = "1.0_2024-03-04";
+	model = "Elbrus-generic";
+	compatible = "mcst,elbrus-generic";
+
+	#address-cells = <1>;
+	#size-cells = <1>;
+};

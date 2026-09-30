@@ -30,17 +30,17 @@
 static void stop_all_children_and_parent(void)
 {
 	struct task_struct *t;
-        
-        Dbg_gc_trace(" stop_all_children_and_parent \n");
-        
-        if (thread_group_empty(current))
+	
+	Dbg_gc_trace(" stop_all_children_and_parent \n");
+	
+	if (thread_group_empty(current))
 		return;
 
 	rcu_read_lock();
 	for_each_thread(current, t) { 
 		if (t != current)
 			send_sig_info(SIGSTOP, SEND_SIG_PRIV, t);
-        }
+	}
 	rcu_read_unlock();
 }
 
@@ -48,16 +48,16 @@ static void wakeup_all_children_and_parent(void)
 {
 	struct task_struct *t;
  
-        Dbg_gc_trace(" wakeup_all_children_and_parent begin \n");
+	Dbg_gc_trace(" wakeup_all_children_and_parent begin \n");
 
-        if (thread_group_empty(current))
+	if (thread_group_empty(current))
 		return;
 
 	rcu_read_lock();
 	for_each_thread(current, t) { 
 		if (t != current)
 			send_sig_info(SIGCONT, SEND_SIG_PRIV, t);
-        }
+	}
 	rcu_read_unlock();
 }
  

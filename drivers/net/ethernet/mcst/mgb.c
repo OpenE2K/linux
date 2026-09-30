@@ -263,7 +263,7 @@ static DEFINE_MUTEX(mgb_mutex);
 #define MG_ECMB		(1 <<  1) /* RW,   ENABLE CMAB INTR */
 #define MG_SINT		(1 <<  0) /* R,    Status Interrupt */
 
-#define MG_W1C_MASK	(MG_CLST | MG_CMAB | MG_RRDY | MG_CRLS | MG_CTFL)
+#define MG_W1C_MASK	(MG_CLST | MG_CMAB | MG_RRDY | MG_CRLS | MG_CTFL | MG_CPLS)
 
 /* MGIO_DATA registers shifts*/
 #define MGIO_DATA_OFF		0
@@ -320,6 +320,7 @@ static DEFINE_MUTEX(mgb_mutex);
 #define SH_R_MODE_PADDR0	(1 << 0)  /* RW1  */
 
 /* eldwcxpcs.ko */
+void eldwcxpcs_mpll_reinit(struct pci_dev *pdev, unsigned char *ioaddr);
 int eldwcxpcs_get_mpll_mode(struct pci_dev *pdev);
 /* PCS MPLL MODE */
 #define MPLL_MODE_10G		0
@@ -539,6 +540,13 @@ typedef struct init_block {
  */
 #define default_psf_csr (0)
 
+/* Shift according to pci_dev->irq */
+#define MGB_T0_INTR	0	/* tx queue0 interrupt */
+#define MGB_T1_INTR	1	/* tx queue1 interrupt */
+#define MGB_R0_INTR	2	/* rx queue0 interrupt */
+#define MGB_R1_INTR	3	/* rx queue1 interrupt */
+#define MGB_Q_INTR_MAX	(MGB_R1_INTR + 1)
+#define MGB_SYS_INTR	4	/* system interrupt */
 
 struct mgb_stats {
 	unsigned long swint;
@@ -572,6 +580,7 @@ struct mgb_private {
 	int			pcsaddr;	/* Address of Internal PHY */
 	u32			pcs_dev_id;
 	struct device_node	*phy_node;	/* Connection to External PHY */
+	int			phy_reset;	/* External PHY may be reset */
 	int			mpll_mode;      /* Normal=1, 2G5=2, Bif=3 */
 	u32			e_cap;
 	u32			irq_delay;
@@ -581,6 +590,7 @@ struct mgb_private {
 	unsigned char		log_tx_buffs;
 	unsigned char		linkup;
 	int			nd_number;
+	struct cpumask		affinity_mask[MGB_Q_INTR_MAX];
 	/* For IEEE 1588 */
 	struct hwtstamp_config	hwtstamp_config;
 	struct ptp_clock	*ptp_clock;
@@ -630,13 +640,6 @@ struct mgb_private {
 #define MGB_F_RX1_NAPI	(MGB_F_RX_NAPI + 1)
 #define MGB_F_SYNC		31
 #define MGB_F_ALL		0x7e
-
-/* Shift according to pci_dev->irq */
-#define MGB_T0_INTR	0	/* tx queue0 interrupt */
-#define MGB_T1_INTR	1	/* tx queue1 interrupt */
-#define MGB_R0_INTR	2	/* rx queue0 interrupt */
-#define MGB_R1_INTR	3	/* rx queue1 interrupt */
-#define MGB_SYS_INTR	4	/* system interrupt */
 
 
 #define mgb_nq(ep, q)		(!!(ep->mgb_qs[0] != q))
@@ -1214,7 +1217,8 @@ static int mgio_read_clause_45(struct mgb_private *ep, int mii_id, int reg_num)
 	mgb_write_mgio_csr(ep,
 			   (mgb_read_mgio_csr(ep) & ~MG_W1C_MASK) | MG_RRDY);
 	rd = (0x2UL << MGIO_CS_OFF) |
-	     (reg_num & ((0x1fUL << MGIO_REG_AD_OFF) | 0xffff)) |
+	     (((reg_num >> MII_DEVADDR_C45_SHIFT) & 0x1fUL) << MGIO_REG_AD_OFF) |
+	     (reg_num & MII_REGADDR_C45_MASK) |
 	     ((mii_id & 0x1f) << MGIO_PHY_AD_OFF);
 	mgb_write_mgio_data(ep, rd);
 	if (mgb_wait_rrdy(ep))
@@ -1255,7 +1259,8 @@ static void mgio_write_clause_45(struct mgb_private *ep, int mii_id,
 	mgb_write_mgio_csr(ep,
 			   (mgb_read_mgio_csr(ep) & ~MG_W1C_MASK) | MG_RRDY);
 	wr = (0x2 << MGIO_CS_OFF) |
-	     (reg_num & ((0x1f << MGIO_REG_AD_OFF) | 0xffff)) |
+	     (((reg_num >> MII_DEVADDR_C45_SHIFT) & 0x1fUL) << MGIO_REG_AD_OFF) |
+	     (reg_num & MII_REGADDR_C45_MASK) |
 	     ((mii_id & 0x1f) << MGIO_PHY_AD_OFF);
 	mgb_write_mgio_data(ep, wr);
 	if (mgb_wait_rrdy(ep))
@@ -1308,11 +1313,11 @@ static void mgb_pcs_write(struct mgb_private *ep, int regnum, u16 value)
 #define PCS_DEV_ID_1G_2G5_10G	0x7996CED3
 #endif
 
-#define PMA_and_PMD_MMD	(0x1 << 18)
-#define PCS_MMD		(0x3 << 18)
-#define AN_MMD		(0x7 << 18)
-#define VS_MMD1		(0x1e << 18)
-#define VS_MII_MMD	(0x1f << 18)
+#define PMA_and_PMD_MMD	(0x1 << 16)
+#define PCS_MMD		(0x3 << 16)
+#define AN_MMD			(0x7 << 16)
+#define VS_MMD1		(0x1e << 16)
+#define VS_MII_MMD		(0x1f << 16)
 
 #define SR_XS_PCS_CTRL1		(0x0000 | PCS_MMD)
 #define SR_XS_PCS_DEV_ID1	(0x0002 | PCS_MMD)
@@ -1968,11 +1973,11 @@ static int mgb_mdio_register(struct mgb_private *ep,
 				return 0;
 			}
 		}
-		if (phydev->phy_id == 0) {
+		if (!phydev->is_c45 && !phydev->phy_id) {
 			if (netif_msg_link(ep))
 				dev_err(&pdev->dev,
 					"register mdiobus %s "
-					"(external phy with id=0 found, ignore it. "
+					"(external C22 PHY with id=0 found, ignore it. "
 					"Please, update DT!)\n",
 					new_bus->id);
 
@@ -1980,8 +1985,29 @@ static int mgb_mdio_register(struct mgb_private *ep,
 			ep->mii_bus = NULL;
 
 			return -ENODEV;
+		} else if (phydev->is_c45) {
+			const int num_ids = ARRAY_SIZE(phydev->c45_ids.device_ids);
+			int i;
+
+			for (i = 1; i < num_ids; i++) {
+				if (phydev->c45_ids.device_ids[i] == 0xffffffff)
+					continue;
+				goto done;
+			}
+			if (netif_msg_link(ep))
+				dev_err(&pdev->dev, "register mdiobus %s "
+					"(external C45 PHY found without valid ids.)\n",
+					new_bus->id);
+
+			mdiobus_unregister(ep->mii_bus);
+			ep->mii_bus = NULL;
+
+			return -ENODEV;
 		}
+done:
 		ep->extphyaddr = phydev->mdio.addr;
+		ep->an_sgmii = 1;
+		ep->an_clause_73 = 0;
 
 		/* reset external PHY via BMCR_RESET bit */
 		genphy_soft_reset(phydev);
@@ -2256,9 +2282,11 @@ static void mgb_hwtstamp(struct mgb_private *ep, struct sk_buff *skb,
 		return;
 	}
 #ifdef CONFIG_E2K
-	ns_clksrc = read_sclkr_sync();
-#else
+	ns_clksrc = read_sclkr(NULL);
+#elif defined(CONFIG_E90S)
 	ns_clksrc = read_clk_rt(NULL);
+#else
+	ns_clksrc = 0;
 #endif
 	delta = now_tai - ns_clksrc;
 	sec_clksrc = ns_clksrc % NSEC_PER_SEC;
@@ -2666,46 +2694,49 @@ static void mgb_distribute_irqs(struct mgb_private *ep)
 {
 	int i;
 	int step = 0;
-	struct cpumask m;
 	struct cpumask dev_m;
 	int fc = PCI_FUNC(ep->pci_dev->devfn);
-	int irq;
+	int irq = ep->pci_dev->irq;
 
-	if (ep->mgb_qs[1] == NULL) {
+	if (!ep->mgb_qs[1])
 		return;
-	}
-	if (num_online_cpus() < 2) {
+
+	if (num_online_cpus() < 2)
 		return;
-	}
+
 	cpumask_copy(&dev_m, cpumask_of_node(dev_to_node(&ep->dev->dev)));
 	do {
 	for (i = 0; i < num_possible_cpus(); i++) {
-		if (!cpu_online(i)) {
+		struct cpumask m;
+		int vec;
+
+		if (!cpu_online(i))
 			continue;
-		}
+
 		cpumask_clear(&m);
 		cpumask_set_cpu(i, &m);
-		if (!cpumask_intersects(&m, &dev_m)) {
+		if (!cpumask_intersects(&m, &dev_m))
 			continue;
-		}
-		irq = ep->pci_dev->irq;
+
 		if (step == 0) {
-			irq += fc ? MGB_T0_INTR : MGB_R0_INTR;
+			vec = fc ? MGB_T0_INTR : MGB_R0_INTR;
 		} else if (step == 1) {
-			irq += fc ? MGB_T1_INTR : MGB_R1_INTR;
+			vec = fc ? MGB_T1_INTR : MGB_R1_INTR;
 		} else if (step == 2) {
-			irq += fc ? MGB_R1_INTR : MGB_T1_INTR;
+			vec = fc ? MGB_R1_INTR : MGB_T1_INTR;
 		} else if (step == 3) {
-			irq += fc ? MGB_R0_INTR : MGB_T0_INTR;
+			vec = fc ? MGB_R0_INTR : MGB_T0_INTR;
 		} else {
 			break;
 		}
-		if (irq_set_affinity_hint(irq, &m)) {
-				break;
-		}
+
+		ep->affinity_mask[vec] = m;
+
+		if (irq_set_affinity_hint(irq + vec, &ep->affinity_mask[vec]))
+			break;
 		step++;
 	}
-	} while (step < 4);
+	} while (step < MGB_Q_INTR_MAX);
 }
 
 static int mgb_assign_irqs(struct net_device *dev)
@@ -3784,6 +3815,12 @@ static void mgb_set_regs_after_reset(struct mgb_private *ep)
 	unsigned long flags;
 
 	raw_spin_lock_irqsave(&ep->mgio_lock, flags);
+
+	/* Reset the MGIO_CSR register manually:
+	 * the 20-th bit is set to 1, the remaining bits are set to 0 or
+	 * are set by the corresponding input signals.
+	 */
+	mgb_write_mgio_csr(ep, (MG_LSTS1 | MG_W1C_MASK));
 	mgio_csr = mgb_read_mgio_csr(ep);
 
 	mgb_write_e_cap(ep, ep->e_cap);
@@ -3821,7 +3858,8 @@ static void mgb_phy_reset(struct mgb_private *ep)
 {
 	struct phy_device *phydev = ep->dev->phydev;
 
-	if (ep->extphyaddr == -1)
+	if ((ep->extphyaddr == -1) ||
+	    !ep->phy_reset)
 		return;
 
 	if (phydev && (phydev->phy_id == RTL8211F_PHY_ID)) {
@@ -3855,6 +3893,14 @@ static void mgb_phy_reset(struct mgb_private *ep)
 
 			reg |= (1 << 1); /* BYP_PWRUP=1 */
 			mgb_pcs_write(ep, VR_MII_DIG_CTRL1, reg);
+		}
+		if (ep->mpll_mode > MPLL_MODE_1G) {
+			/* Reinit mplls only if
+			 * mpll_mode = MPLL_MODE_2G5/MPLL_MODE_1G_BIF(MPLL_B)
+			 */
+			raw_spin_lock_irqsave(&ep->mgio_lock, flags);
+			eldwcxpcs_mpll_reinit(ep->pci_dev, ep->base_ioaddr);
+			raw_spin_unlock_irqrestore(&ep->mgio_lock, flags);
 		}
 	}
 }
@@ -5776,6 +5822,7 @@ static int mgb_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	struct device_node *np = dev_of_node(&pdev->dev);
 	const char *of_status_prop = NULL;
 	const char *of_phymode_prop = NULL;
+	const char *of_sfp_prop = NULL;
 	int mpllm;
 
 	/* check cmdline param */
@@ -5793,7 +5840,6 @@ static int mgb_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 					dev_info(&pdev->dev,
 						 "device %d disabled in devicetree\n",
 						 mgb_nd_number);
-					of_node_put(np);
 					mgb_nd_number++;
 					return -ENODEV;
 				}
@@ -6001,18 +6047,34 @@ static int mgb_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 				ep->an_clause_73 = 0;
 				dev_info(&pdev->dev, "phy-mode - %s\n",
 					 of_phymode_prop);
-			} else {
+			} else if (!of_property_read_string(np, "sfp",
+						     &of_sfp_prop)) {
 				ep->extphyaddr = -1;
 				mgb_sfp_default_settings(ep);
+				dev_info(&pdev->dev, "sfp - %s\n",
+					 of_sfp_prop);
+			} else {
 				dev_info(&pdev->dev,
-					"disable external PHY, use SFP+\n");
+					"running automatic interface detection\n");
+			}
+		}
+	}
+
+	ep->phy_reset = 0;
+	if (np) {
+		const char *of_phyreset_prop;
+
+		of_phyreset_prop = of_get_property(np, "phy-reset", NULL);
+		if (of_phyreset_prop) {
+			if (!strcmp(of_phyreset_prop, "on")) {
+				ep->phy_reset = 1;
+				dev_info(&pdev->dev, "External PHY RESET# enabled\n");
 			}
 		}
 	}
 
 	/* PHY register mdio bus */
 	err = mgb_mdio_register(ep, np);
-	of_node_put(np);
 	if (err) {
 		dev_err(&pdev->dev, "register mdio failed.\n");
 		err = -ENODEV;

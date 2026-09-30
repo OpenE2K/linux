@@ -216,7 +216,8 @@ void kvm_cancel_clockdev(struct kvm_vcpu *vcpu)
 	hrtimer_cancel(&vcpu->arch.hrt);
 	DebugKVM("VCPU #%d early timer at %px was shutting down\n",
 		vcpu->vcpu_id, &vcpu->arch.hrt);
-	if (vcpu->arch.apic != NULL) {
+	if (vcpu->arch.apic != NULL &&
+		vcpu->arch.apic->lapic_timer.timer.base != NULL) {
 		hrtimer_cancel(&vcpu->arch.apic->lapic_timer.timer);
 		DebugKVM("VCPU #%d local apic timer at %px was shutting down\n",
 			vcpu->vcpu_id, &vcpu->arch.apic->lapic_timer.timer);

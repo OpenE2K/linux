@@ -84,5 +84,7 @@ void __init native_time_init(void)
 		return;
 	}
 
+	timer_probe();
+
 	DebugTM("time_init exited.\n");
 }

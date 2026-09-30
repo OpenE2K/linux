@@ -59,6 +59,7 @@ extern char __entry_handlers_start[], __entry_handlers_end[];
 extern char __entry_handlers_hcalls_start[], __entry_handlers_hcalls_end[];
 extern char __start_ro_after_init[], __end_ro_after_init[];
 extern char __trampolines_start[], __trampolines_end[];
+extern char __dtb_default_begin[];
 #endif	/* ! __ASSEMBLY__ */
 
 #ifdef	CONFIG_NUMA

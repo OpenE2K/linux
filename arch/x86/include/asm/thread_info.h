@@ -58,7 +58,7 @@ struct thread_info {
 	u32			status;		/* thread synchronous flags */
 	int			preempt_lazy_count;	/* 0 => lazy preemptable
 							  <0 => BUG */
-#ifdef CONFIG_MCST
+#ifdef SHOW_WOKEN_TIME
 	long long	irq_enter_clk;	/* CPU clock when irq enter was */
 #endif
 };

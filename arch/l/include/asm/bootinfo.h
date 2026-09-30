@@ -16,14 +16,12 @@
 
 #define	KSTRMAX_SIZE			128
 #define	KSTRMAX_SIZE_EX			512
-#define	BIOS_INFO_SIGN_SIZE		8
 #define KERNEL_ARGS_STRING_EX_SIGN_SIZE	22
 #define	BOOT_VER_STR_SIZE		128
 #define	BOOTBLOCK_SIZE			0x1000
 #define	BOOTBLOCK_BOOT_SIGNATURE	0x8086
 #define	BOOTBLOCK_ROMLOADER_SIGNATURE	0xe200
 #define	BOOTBLOCK_KVM_GUEST_SIGNATURE	0x20e2
-#define	BIOS_INFO_SIGNATURE		"E2KBIOS"
 #define	KVM_INFO_SIGNATURE		"E2KKVM"
 #define KERNEL_ARGS_STRING_EX_SIGNATURE "KERNEL_ARGS_STRING_EX"
 #define BOOT_KERNEL_ARGS_STRING_EX_SIGNATURE	\
@@ -100,33 +98,22 @@ typedef struct ioh_eth_mac_table_entry_t {
 } ioh_eth_mac_table_entry_t;
 
 typedef struct bios_info {
-	__u8	signature[BIOS_INFO_SIGN_SIZE];		/* signature, */
-							/* 'E2KBIOS' */
+	__u64	reserved1;				/* reserved1 */
 	__u8	boot_ver[BOOT_VER_STR_SIZE];		/* boot version */
 	__u8	mb_type;				/* mother board type */
-	__u8	chipset_type;				/* chipset type */
+	__u8	reserved2;				/* reserved2 */
 	__u8	cpu_type;				/* cpu type */
-	__u8	kernel_args_string_ex[KSTRMAX_SIZE_EX];	/* extended command */
-							/* line of kernel */
-							/* used to pass */
-							/* command line */
-							/* from e2k BIOS */
+	__u8	kernel_args_string_ex[KSTRMAX_SIZE_EX];	/* extended command line of kernel used */
+							/* to pass command line from e2k BIOS */
 	__u8	reset_type;				/* reset type */
-	__u32	cache_lines_damaged;			/* number of damaged */
-							/* cache lines */
+	__u32	cache_lines_damaged;			/* number of damaged cache lines */
 
-	jb_info_t jb_info;				/* jb info */
-	s3_info_t s3_info;				/* S3 info */
+	jb_info_t	jb_info;			/* jb info */
+	s3_info_t	s3_info;			/* S3 info */
 
-	__u64	nodes_mem_slabs_deprecated[47];		/* array of slabs */
-							/* accessible memory */
-							/* on each node */
-							/* accessible memory */
-							/* on each node */
-	bank_info_t banks_ex[L_MAX_PHYS_BANKS_EX];	/* extended array of */
-							/* descriptors of */
-							/* banks of available */
-							/* physical memory */
+	__u64	reserved3[47];				/* reserved3 */
+	bank_info_t banks_ex[L_MAX_PHYS_BANKS_EX];	/* extended array of descriptors of */
+							/* banks of available physical memory */
 	__u64	devtree;				/* devtree pointer */
 	__u32	bootlog_addr;				/* bootlog address */
 	__u32	bootlog_len;				/* bootlog length */
@@ -165,33 +152,21 @@ typedef struct boot_info {
 	__u64	mach_serialn;	/* serial number of the machine */
 	__u8	mac_addr[6];	/* base MAC address for ethernet cards */
 	__u16	reserved2;	/* reserved2 */
-
 	char	kernel_args_string[KSTRMAX_SIZE]; /* command line of kernel */
-						  /* used to pass command line */
-						  /* from e2k BIOS */
-	node_banks_t	nodes_mem[L_MAX_MEM_NUMNODES];	/* array of */
-						/* descriptors of banks of */
-						/* available physical memory */
-						/* on each node */
-	bank_info_t	busy[L_MAX_BUSY_AREAS];	/* descriptors of areas */
-						/* occupied by BIOS, all this */
-						/* shoud be kept in system */
-						/* recovery mode */
-	u64		cntp_info_deprecated[32];	/* control points */
-							/* info to save and */
-							/* restore them state */
-	u64		dmp_deprecated[20];	/* Info for future work of */
-						/* dump analyzer */
-	__u64		mac_table_ptr; /* Pointer to the beginning
-					  of the list of MAC addresses */
+						  /* used to pass command line from e2k BIOS */
+	node_banks_t	nodes_mem[L_MAX_MEM_NUMNODES];	/* array of descriptors of banks of */
+						/* available physical memory on each node */
+	bank_info_t	busy[L_MAX_BUSY_AREAS];	/* descriptors of areas occupied by BIOS, all */
+						/* this shoud be kept in system recovery mode */
+	__u64		reserved3[52];		/* reserved3 */
+	__u64		mac_table_ptr;	/* Pointer to the beginning of the list of MAC addresses */
 	__u64		reserved4[11];	/* reserved4 */
 	__u64           dmi_info;	/* smbios and dmi address */
 	__u8		mb_name[16];	/* Motherboard product name */
 	__u32		reserved5;	/* reserved5 */
 	__u32		kernel_csum;	/* kernel image control sum */
 	bios_info_t	bios;		/* extended BIOS info */
-					/* SHOULD BE LAST ITEM into this */
-					/* structure */
+					/* SHOULD BE LAST ITEM into this structure */
 } boot_info_t;
 
 typedef struct bootblock_struct {
@@ -222,18 +197,13 @@ typedef struct bootblock_struct {
 	__u8		bootblock_ver;		/* bootblock version number */
 	__u32		reserved1;		/* reserved1 */
 	boot_times_t	boot_times;		/* boot load times */
-	__u16		kernel_flags;		/* kernel flags, boot should */
-						/* not modify it */
-	__u16		reserved2;		/* reserved2 */
-	__u32		reserved3;		/* reserved3 */
-	__u64		reserved4[2];		/* reserved4 */
-	__u32		reserved5;		/* reserved5 */
-	__u16		boot_flags;		/* boot flags: if non */
-						/* zero then this structure */
-						/* is recovery info */
-						/* structure instead of boot */
-						/* info structure */
-	__u16		bootblock_marker;	/* marker of the end of boot block (0xAA55) */
+	__u16	kernel_flags_deprecated;	/* kernel flags */
+	__u16	reserved2;			/* reserved2 */
+	__u32	reserved3;			/* reserved3 */
+	__u64	reserved4[2];			/* reserved4 */
+	__u32	reserved5;			/* reserved5 */
+	__u16	boot_flags;			/* boot flags */
+	__u16	bootblock_marker;		/* marker of the end of boot block (0xAA55) */
 } bootblock_struct_t;
 
 extern	bootblock_struct_t *bootblock_virt;	/* bootblock structure */
@@ -251,23 +221,11 @@ extern	bootblock_struct_t *bootblock_virt;	/* bootblock structure */
 					/* BIOS should not clear memory */
 					/* and should keep current state of */
 					/* physical memory */
-#define	CNT_POINT_BB_FLAG	0x0002	/* kernel restarted in the mode of */
-					/* control point creation */
-					/* BIOS should read kernel image from */
-					/* the disk to the specified area of */
-					/* the memory and start kernel (this */
-					/* flag should be with */
-					/* RECOVERY_BB_FLAG flag) */
 #define NO_READ_IMAGE_BB_FLAG   0x0004	/* BIOS should not read kernel image */
 					/* from disk and start current */
 					/* image in the specified area of */
 					/* the memory (this flag should be */
 					/* with RECOVERY_BB_FLAG flag) */
-#define	DUMP_ANALYZE_BB_FLAG	0x0008	/* This flag is used only by kernel */
-					/* to indicate dump analyzer mode */
-#define	MEMORY_DUMP_BB_FLAG	0x0010	/* BIOS should dump all physical */
-					/* memory before start all other */
-					/* actions */
 
 /*
  * The machine identification flags
@@ -275,11 +233,7 @@ extern	bootblock_struct_t *bootblock_virt;	/* bootblock structure */
 
 #define	SIMULATOR_MACH_FLAG		0x0001	/* system is running on */
 						/* simulator */
-#define	PROTOTYPE_MACH_FLAG_DEPRECATED	0x0002	/* machine is prototype */
 #define	IOHUB_MACH_FLAG_DEPRECATED	0x0004	/* machine has IOHUB */
-#define OLDMGA_MACH_FLAG		0x0008	/* MGA card has old firmware */
-#define MULTILINK_MACH_FLAG		0x0010	/* some nodes are connected */
-						/* by sevral IP links */
 #define	MSI_MACH_FLAG			0x0020	/* boot inits right values in */
 						/* apic to support MSI. */
 						/* Meanfull for e2k only. For */

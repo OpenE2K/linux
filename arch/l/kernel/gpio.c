@@ -178,6 +178,13 @@ static int l_gpio_get_value(struct gpio_chip *gc, unsigned int offset)
 	return x;
 }
 
+static int l_gpio_get_direction(struct gpio_chip *gc, unsigned offset)
+{
+	struct l_gpio *c = gpiochip_get_data(gc);
+	unsigned x = readl(c->regs + L_GPIO_CNTRL);
+
+	return !(x & BIT(offset));
+}
 /*
  * Configure the GPIO line as an input.
  */
@@ -365,8 +372,15 @@ static irqreturn_t l_gpio_irq_handler(int irq, void *dev_id)
 	return ret;
 }
 
+static void l_gpio_irq_ack(struct irq_data *data)
+{
+	/* Do nothing: just to prevent handle_edge_irq()
+	 * from calling NULL-pointer */
+}
+
 static const struct irq_chip l_gpio_irqchip = {
 	.name = "l-gpio-irqchip",
+	.irq_ack     = l_gpio_irq_ack,
 	.irq_enable  = l_gpio_irq_enable,
 	.irq_disable = l_gpio_irq_disable,
 	.irq_unmask  = l_gpio_irq_enable,
@@ -378,9 +392,8 @@ static const struct irq_chip l_gpio_irqchip = {
 static int l_gpio_probe(struct pci_dev *pdev, struct l_gpio *c)
 {
 	int err;
-	struct device *dev = &pdev->dev;
 	struct gpio_chip *gc = &c->chip;
-	struct irq_chip *girq = &c->irq_chip;
+	struct gpio_irq_chip *girq = &gc->irq;
 	int i, bar = c->data.bar;
 
 	err = pci_enable_device_mem(pdev);
@@ -405,6 +418,15 @@ static int l_gpio_probe(struct pci_dev *pdev, struct l_gpio *c)
 	writel(L_GPIO_INT_LVL_DEF, c->regs + L_GPIO_INT_LVL);
 #endif
 
+	c->irq_chip = l_gpio_irqchip;
+	girq->chip = &c->irq_chip;
+	/* This will let us handle the parent IRQ in the driver */
+	girq->parent_handler = NULL;
+	girq->num_parents = 0;
+	girq->parents = NULL;
+	girq->default_type = IRQ_TYPE_NONE;
+	girq->handler = handle_bad_irq;
+
 	err = gpiochip_add_data(gc, c);
 	if (err)
 		goto err;
@@ -412,13 +434,7 @@ static int l_gpio_probe(struct pci_dev *pdev, struct l_gpio *c)
 		;
 	if (i == 0)
 		goto out;
-	*girq = l_gpio_irqchip;
 
-	err = gpiochip_irqchip_add(gc, girq, 0, handle_level_irq,  IRQ_TYPE_NONE);
-	if (err) {
-		dev_err(dev, "cannot add irqchip\n");
-		goto err;
-	}
 	for (i = 0; !err && c->data.irq[i].nr &&
 				i < ARRAY_SIZE(c->data.irq); i++) {
 		err = request_irq(c->data.irq[i].nr, l_gpio_irq_handler,
@@ -560,6 +576,7 @@ static int l_gpio_init_one(struct pci_dev *pdev, const struct l_gpio_data *drv_d
 	c = (struct gpio_chip *)next;
 	c->owner = THIS_MODULE;
 	c->label = DRV_NAME;
+	c->get_direction = l_gpio_get_direction;
 	c->direction_input = l_gpio_direction_input;
 	c->direction_output = l_gpio_direction_output;
 	c->get = l_gpio_get_value;

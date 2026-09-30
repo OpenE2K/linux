@@ -55,16 +55,12 @@ extern void boot_native_write_MMU_OS_VAB_reg_value(unsigned long value);
 		NATIVE_READ_MMU_REG(	\
 			_MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_U_PPTB_NO))
 #define	NATIVE_WRITE_MMU_U_PPTB_REG(reg_val)				\
-		NATIVE_WRITE_MMU_REG( \
-			_MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_U_PPTB_NO),	\
-			mmu_reg_val(reg_val))
+		NATIVE_SET_MMUREG_ISET(6, u_pptb, (reg_val))
 #define	NATIVE_READ_MMU_U_VPTB_REG()					\
 		NATIVE_READ_MMU_REG(	\
 			_MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_U_VPTB_NO))
 #define	NATIVE_WRITE_MMU_U_VPTB_REG(reg_val)				\
-		NATIVE_WRITE_MMU_REG( \
-			_MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_U_VPTB_NO),	\
-			mmu_reg_val(reg_val))
+		NATIVE_SET_MMUREG_ISET(6, u_vptb, (reg_val))
 
 #define	BOOT_NATIVE_WRITE_MMU_OS_PPTB_REG(reg_val)			\
 		boot_native_write_MMU_OS_PPTB_reg_value(reg_val)

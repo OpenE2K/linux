@@ -4475,32 +4475,6 @@ void kvm_mmu_uninit_vm(struct kvm *kvm)
 	kvm_page_track_unregister_notifier(kvm, node);
 }
 
-void kvm_zap_gfn_range(struct kvm *kvm, gfn_t gfn_start, gfn_t gfn_end)
-{
-	struct kvm_memslots *slots;
-	struct kvm_memory_slot *memslot;
-	int i;
-
-	spin_lock(&kvm->mmu_lock);
-	for (i = 0; i < KVM_ADDRESS_SPACE_NUM; i++) {
-		slots = __kvm_memslots(kvm, i);
-		kvm_for_each_memslot(memslot, slots) {
-			gfn_t start, end;
-
-			start = max(gfn_start, memslot->base_gfn);
-			end = min(gfn_end, memslot->base_gfn + memslot->npages);
-			if (start >= end)
-				continue;
-
-			mmu_pt_slot_handle_ptes_level_range(kvm, memslot, NULL,
-				PT_PAGE_TABLE_LEVEL, PT_MAX_HUGEPAGE_LEVEL,
-				start, end - 1, true);
-		}
-	}
-
-	spin_unlock(&kvm->mmu_lock);
-}
-
 void kvm_mmu_slot_remove_write_access(struct kvm *kvm,
 				      struct kvm_memory_slot *memslot)
 {
@@ -6324,14 +6298,16 @@ unsigned int kvm_mmu_calculate_mmu_pages(struct kvm *kvm)
 	unsigned int  nr_pages = 0;
 	struct kvm_memslots *slots;
 	struct kvm_memory_slot *memslot;
-	int i;
+	int i, srcu_idx;
 
+	srcu_idx = srcu_read_lock(&kvm->srcu);
 	for (i = 0; i < KVM_ADDRESS_SPACE_NUM; i++) {
 		slots = __kvm_memslots(kvm, i);
 
 		kvm_for_each_memslot(memslot, slots)
 			nr_pages += memslot->npages;
 	}
+	srcu_read_unlock(&kvm->srcu, srcu_idx);
 
 	nr_mmu_pages = nr_pages * KVM_PERMILLE_MMU_PAGES / 1000;
 	nr_mmu_pages = max(nr_mmu_pages,

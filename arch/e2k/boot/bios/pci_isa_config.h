@@ -1,7 +1,13 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
 /* 
  * Southbridge configuration.
  * PCI/ISA Bridge Configuration Registers (Function 0).
  */
+
 #ifndef _PCI_ISA_CONFIG_H_
 #define _PCI_ISA_CONFIG_H_
 

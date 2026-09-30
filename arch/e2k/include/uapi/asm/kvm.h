@@ -22,7 +22,7 @@
  * refinement of the interface in format yymmdd so that the version
  * number always monotonously increased
  */
-#define KVM_ARCH_API_VERSION	230221
+#define KVM_ARCH_API_VERSION	251114
 
 #define KVM_COALESCED_MMIO_PAGE_OFFSET 1
 
@@ -75,6 +75,10 @@
 #define	KVM_CAP_E2K_SHADOW_PT_MMU	310	/* is shadow PT enabled */
 #define	KVM_CAP_E2K_TDP_MMU		311	/* is Two Dimensial Paging */
 						/* mode enabled */
+
+/* KVM SIC NBSR capabilities */
+#define	KVM_CAP_E2K_SIC_NBSR_ISET	320	/* is iset dependent version of */
+							/* SIC NBSR model */
 
 /* Architectural interrupt line count. */
 #define KVM_NR_INTERRUPTS 256
@@ -349,6 +353,7 @@ typedef struct kvm_pci_region {
 } kvm_pci_region_t;
 
 typedef struct kvm_guest_nbsr_state {
+	unsigned long cpu_iset;
 	unsigned int rt_pcim0;
 	unsigned int rt_pcim1;
 	unsigned int rt_pcim2;
@@ -429,6 +434,7 @@ typedef struct kvm_guest_nbsr_state {
 						kvm_guest_nbsr_state_t)
 #define	KVM_CREATE_SIC_NBSR		_IO(KVMIO, 0xef)
 #define	KVM_SET_PCI_REGION		_IOW(KVMIO, 0xf0, kvm_pci_region_t)
+#define	KVM_CREATE_SIC_NBSR_ISET	_IOW(KVMIO, 0xf1, unsigned long)
 
 /* e2k-specific exit reasons from KVM to userspace assistance */
 #define KVM_EXIT_E2K_NOTIFY_IO		33

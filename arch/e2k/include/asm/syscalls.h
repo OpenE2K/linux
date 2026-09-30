@@ -201,6 +201,13 @@ extern long protected_sys_munlock(unsigned long	addr,
 				const unsigned long unused5,
 				const unsigned long unused6,
 				const struct pt_regs *regs);
+extern long protected_sys_move_pages(int pid,
+				unsigned long nr_pages,
+				const void __user * __user *pages,
+				const int __user *nodes,
+				int __user *status,
+				int flags,
+				const struct pt_regs *regs);
 extern long protected_sys_open(const char __user *pathname,
 			       int		flags,
 			       mode_t		mode,
@@ -593,6 +600,6 @@ extern
 const char *sys_call_ID_to_name[];
 
 #define  SYSCALL_NAME(sys_num) \
-	((sys_num) < NR_syscalls ? sys_call_ID_to_name[sys_num] : "BadSyscallID")
+	(((u32) (sys_num)) < NR_syscalls ? sys_call_ID_to_name[sys_num] : "BadSyscallID")
 
 #endif /* _ASM_E2K_SYSCALLS_H */

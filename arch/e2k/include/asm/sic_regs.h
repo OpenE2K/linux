@@ -95,6 +95,7 @@
 
 #define	SIC_rt_pcicfgb	0x90
 #define	SIC_rt_pcicfged	0x98
+#define	SIC_rt_vgamemed	0x9c
 
 /* PREPIC */
 #define	SIC_prepic_version	0x8000
@@ -134,6 +135,12 @@
 #define SIC_iommu_err1		0x03b4
 #define SIC_iommu_err_info_lo	0x03b8
 #define SIC_iommu_err_info_hi	0x03bc
+#define SIC_iommu_mcr		0x03c0
+#define SIC_iommu_mid		0x03c4
+#define SIC_iommu_mar0_lo	0x03c8
+#define SIC_iommu_mar0_hi	0x03cc
+#define SIC_iommu_mar1_lo	0x03d0
+#define SIC_iommu_mar1_hi	0x03d4
 
 #define SIC_iommu_reg_base	SIC_iommu_ctrl
 #define SIC_iommu_reg_size	0x0080
@@ -206,21 +213,63 @@
 #define SIC_ipcc_str2		0x64c
 #define SIC_ipcc_str3		0x68c
 
+#define SIC_hw0			0xc80
+#define SIC_hw1			0xc84
+#define SIC_hw2			0xc88
+#define SIC_hw3			0xc8c
+
 /* Power management */
 #define SIC_pwr_mgr		0x280
 
 /* E12C/E16C/E2C3 Power Control System (PCS) registers
  * PMC base = 0x1000 is added */
+#define PMC_INFO				0x1000
+#define PMC_TERM_CONV			0x1008
+#define PMC_TERM_CTRL			0x100c
+#define PMC_TERM_TS0			0x1010
+#define PMC_TERM_TS1			0x1014
+#define PMC_TERM_TS2			0x1018
+#define PMC_TERM_TS3			0x101c
+#define PMC_TERM_TS4			0x1020
+#define PMC_TERM_TS5			0x1024
+#define PMC_TERM_TS6			0x1028
+#define PMC_TERM_TS7			0x102c
 #define PMC_FREQ_CFG			0x1100
 #define PMC_FREQ_STEPS			0x1104
 #define PMC_FREQ_C2			0x1108
+#define PMC_FREQ_BND			0x110c
+#define PMC_FREQ_CORE_FLOAT		0x1110
+#define PMC_FREQ_OCN_FLOAT		0x1114
+#define PMC_FREQ_CORE_TABLE0		0x1120
+#define PMC_FREQ_CORE_TABLE1		0x1124
+#define PMC_FREQ_CORE_TABLE2		0x1128
+#define PMC_FREQ_CORE_TABLE3		0x112c
+#define PMC_FREQ_CORE_TABLE4		0x1130
+#define PMC_FREQ_CORE_TABLE5		0x1134
+#define PMC_FREQ_CORE_TABLE6		0x1138
+#define PMC_FREQ_CORE_TABLE7		0x113c
+#define PMC_FREQ_OCN_TABLE0		0x1140
+#define PMC_FREQ_OCN_TABLE1		0x1144
+#define PMC_FREQ_OCN_TABLE2		0x1148
+#define PMC_FREQ_OCN_TABLE3		0x114c
+#define PMC_FREQ_OCN_TABLE4		0x1150
+#define PMC_FREQ_OCN_TABLE5		0x1154
+#define PMC_FREQ_OCN_TABLE6		0x1158
+#define PMC_FREQ_OCN_TABLE7		0x115c
 #define PMC_FREQ_CORE_0_MON		0x1200
 #define PMC_FREQ_CORE_0_CTRL		0x1204
 #define PMC_FREQ_CORE_0_SLEEP		0x1208
 #define PMC_FREQ_CORE_N_MON(n)	(PMC_FREQ_CORE_0_MON +  n * 16)
 #define PMC_FREQ_CORE_N_CTRL(n)	(PMC_FREQ_CORE_0_CTRL +  n * 16)
 #define PMC_FREQ_CORE_N_SLEEP(n)	((PMC_FREQ_CORE_0_SLEEP) +  n * 16)
+#define PMC_FREQ_OCN_MON		0x1400
+#define PMC_FREQ_OCN_CTRL		0x1404
+#define PMC_FREQ_GRAPHIC_0_MON	0x1410
+#define PMC_FREQ_GRAPHIC_0_CTRL	0x1414
+#define PMC_FREQ_GRAPHIC_N_MON(n)	(PMC_FREQ_GRAPHIC_0_MON +  n * 16)
+#define PMC_FREQ_GRAPHIC_N_CTRL(n)	(PMC_FREQ_GRAPHIC_0_CTRL +  n * 16)
 #define PMC_SYS_MON_1			0x1504
+#define PMC_FAN_CFG			0x1540
 
 /* PMC_FREQ_CORE_0_SLEEP fields: */
 typedef union {
@@ -514,6 +563,7 @@ typedef union {
 
 #define EFUSE_RAM_ADDR          0x0cc0
 #define EFUSE_RAM_DATA          0x0cc4
+#define EFUSE_RAM_LINES         256
 
 #ifndef __ASSEMBLY__
 /*
@@ -1025,8 +1075,8 @@ typedef union {
 #define E2K_PWR_MGR0_core1_clk	fields.core1_clk    /* core #1 clock on/off  */
 #define E2K_PWR_MGR0_ic_clk	fields.ic_clk       /* dsp clock on/off   */
 #define E2K_PWR_MGR0_snoop_wait	fields.snoop_wait   /* delay before off   */
-                                                    /* for snoop-requests */
-                                                    /* handling           */
+						    /* for snoop-requests */
+						    /* handling           */
 #define E2K_PWR_MGR0_reg	word
 
 /*
@@ -1056,6 +1106,44 @@ typedef union e2k_sic_mcr_struct {		/* Structure of word */
 #define E2K_SIC_MCR_es1		fields.es1	/* monitor #1 event */
 						/* specifier */
 #define E2K_SIC_MCR_reg		word
+
+/*
+ * SIC_HW* registers
+ */
+typedef union {
+	struct {
+		u32 independent_rdma	: 1;
+		u32 snrd32		: 1;
+		u32 dpack64		: 1;
+		u32 i2ri		: 2;
+		u32 scrqprior		: 1;
+		u32			: 26;
+	};
+	struct {
+		u32			: 6;
+		u32 dcindscr		: 3;
+		u32 b63761wa		: 1;
+		u32			: 22;
+	} e4c; /* e4c only */
+	struct {
+		u32			: 6;
+		u32 trwm_sc3		: 3;
+		u32 dma_wr_glue_en	: 1;
+		u32 us_tc_vc1_map	: 2;
+		u32 ds_tc_vc1_map	: 2;
+		u32 iol_ermo		: 1;
+		u32			: 17;
+	} v4_v5; /* iset: v4, v5 */
+	struct {
+		u32			: 15;
+		u32 hc_dma_rfo_en	: 1;
+		u32 ddrrsync_en		: 1;
+		u32 ddrrsync_delay	: 3;
+		u32 ddrrsync_rst	: 1;
+		u32			: 11;
+	} v5; /* iset: v5 */
+	u32 word;
+} e2k_sic_hw1_t;
 
 /*
  * Monitor accumulator register hi part (SIC_MAR0_hi, SIC_MAR1_hi)

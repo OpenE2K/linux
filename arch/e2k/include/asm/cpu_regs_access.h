@@ -213,6 +213,9 @@
 #define	WRITE_CR1_HI_REG_VALUE(CR1_hi_value)			\
 		NATIVE_NV_NOIRQ_WRITE_CR1_HI_REG_VALUE(CR1_hi_value)
 
+#define write_cr		native_write_cr
+#define write_cr__no_wait	native_write_cr__no_wait
+
 /*
  * Read/write double-word Control Transfer Preparation Registers
  * (CTPR1/CTPR2/CTPR3)

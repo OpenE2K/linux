@@ -66,7 +66,9 @@ int mpv_debug_more = 0;
 
 #define PCI_COMPLEMENT		0x40	/* 8 bits */
 #define PSEC_PER_USEC	1000000
+#define FSEC_PER_USEC	1000000000
 #define PSEC_PER_SEC	1000000000000LL
+#define FSEC_PER_SEC	1000000000000000LL
 
 #define SBUS_DEV 	1
 #define PCI_DEV  	2
@@ -147,7 +149,7 @@ static void mpv_shutdown(struct pci_dev *dev);
 static int mpv_send_pps(u32 bus, int enable);
 static int mpv_get_freq(u32 bus);
 
-/* number of msecs for psecs_per_corr_clck calculating
+/* number of msecs for fsecs_per_mpvclock calculating
  * Should be less then 131 ms for 32 MHz MPV and 20-bit MPV_REG_CHECK */
 #define	measure_sleep_time_ms	100
 int	stv_num_msrms = 0;
@@ -302,6 +304,10 @@ static struct pci_driver mpv_pci_driver = {
 };
 #endif
 
+static struct pci2instance {
+	unsigned char domain, bus, slot, func;
+} *pci2instance;
+
 static int
 mpv_init(void)
 {
@@ -310,6 +316,7 @@ mpv_init(void)
 	mpv_sysctl_register();
 	dbgmpv("********* MPV_INIT: START for %s *********\n", MPV_NAME);
 	atomic_set(&mpv_instances, 0);
+	pci2instance = kmalloc(sizeof(pci2instance) * MAX_MPV_INSTANCES, GFP_KERNEL);
 	mpv_class = class_create(THIS_MODULE, "mpv");
 	if (!mpv_class || IS_ERR(mpv_class)) {
 		pr_err("Error creating class: /sys/class/mpv mpv_class=%p\n",
@@ -368,8 +375,8 @@ mpv_exit(void)
 }
 
 static int
-mpv_common_probe(struct device *dev, mpv_state_t **mpv_stp, void *r_base,
-		int mpv_new, int revision_id, int dev_type)
+mpv_common_probe(struct device *dev, struct pci_dev *pdev, mpv_state_t **mpv_stp,
+		void *r_base, int mpv_new, int revision_id, int dev_type)
 {
 	mpv_state_t	*mpv_st;
 	int		i;
@@ -381,12 +388,35 @@ mpv_common_probe(struct device *dev, mpv_state_t **mpv_stp, void *r_base,
 	struct device	*device;
 	s64 start_tm1, start_tm2, fin_tm1, fin_tm2, measure_time_ns;
 
+	if (!pdev) {
+		instance = atomic_inc_return(&mpv_instances) - 1;
+		if (instance >= MAX_MPV_INSTANCES) {
+			pr_err("MPV: number of instances > MAX_MPV_INSTANCES=%d\n",
+				MAX_MPV_INSTANCES);
+			return 1;
+		}
+		goto got_inst;
+	}
+	for (instance = 0; instance < (atomic_read(&mpv_instances) ? : 1); instance++) {
+		if (pci2instance[instance].domain == pci_domain_nr(pdev->bus) &&
+			pci2instance[instance].bus == pdev->bus->number &&
+			pci2instance[instance].slot == PCI_SLOT(pdev->devfn) &&
+			pci2instance[instance].func == PCI_FUNC(pdev->devfn)) {
+			goto got_inst;
+		}
+	}
 	instance = atomic_inc_return(&mpv_instances) - 1;
 	if (instance >= MAX_MPV_INSTANCES) {
 		pr_err("MPV: number of instances > MAX_MPV_INSTANCES=%d\n",
 			MAX_MPV_INSTANCES);
 		return 1;
 	}
+	pci2instance[instance].domain = pci_domain_nr(pdev->bus);
+	pci2instance[instance].bus = pdev->bus->number;
+	pci2instance[instance].slot = PCI_SLOT(pdev->devfn);
+	pci2instance[instance].func = PCI_FUNC(pdev->devfn);
+
+got_inst:
 	if (mpv_status[instance] == 1) {
 		dev_info(dev, "device %d enabled in cmdline\n", instance);
 	} else if (mpv_status[instance] == 0) {
@@ -544,19 +574,18 @@ mpv_common_probe(struct device *dev, mpv_state_t **mpv_stp, void *r_base,
 	/* Picoseconds per corr.clock is culculated */
 	if (mpv_time_cnt != 0) {
 #if BITS_PER_LONG == 64
-		mpv_st->psecs_per_corr_clck =
-			measure_time_ns * 1000 / mpv_time_cnt;
+		mpv_st->fsecs_per_mpvclock =
+			measure_time_ns * 1000000LL / mpv_time_cnt;
 #else
 		{unsigned long long long_res =
-			(unsigned long long)measure_time_ns * 1000LL;
+			(unsigned long long)measure_time_ns * 1000000LL;
 			do_div(long_res, mpv_time_cnt);
-			mpv_st->psecs_per_corr_clck = long_res;
+			mpv_st->fsecs_per_mpvclock = long_res;
 		}
 #endif
 	} else {
-		/* FIXME 40000 ? */
-		pr_err("mpv_time_cnt == 0\n");
-		mpv_st->psecs_per_corr_clck = mpv_new ? 40000 : 120000;
+		pr_err("MPV ERROR mpv_time_cnt == 0. Set fsecs_per_mpvclock = 2000000\n");
+		mpv_st->fsecs_per_mpvclock = 2000000;
 	}
 	pr_warn("%d-MPV mpv_time_cnt = %u measure_time_ns=%lld register_reading_ns=%lld\n",
 		instance, mpv_time_cnt, measure_time_ns,
@@ -710,7 +739,7 @@ mpv_pci_probe(struct pci_dev *pdev, const struct pci_device_id *pci_ent)
 		return -EFAULT;
 	}
 	cur_pdev = pdev;
-	rval = mpv_common_probe(&pdev->dev, &mpv_st, regs_base, mpv_new, revision_id,
+	rval = mpv_common_probe(&pdev->dev, pdev, &mpv_st, regs_base, mpv_new, revision_id,
 								PCI_DEV);
 	if (rval) {
 		if (rval == -ECANCELED) { /*device is disabled*/
@@ -788,32 +817,26 @@ mpv_pci_probe(struct pci_dev *pdev, const struct pci_device_id *pci_ent)
 	mk_hndl_first(mpv_st->irq, MPV_NAME);
 #endif
 	if (mpv_st->mpv_new == MPV_KPI2) {
-		printk("%d-MPV KPI-2 DEV=0x%x VEND=0x%x REV=0x%x "
-			"drv.ver.%d IRQ 0=%d IRQ 1,2=%d, BUS =%s, "
-			"picoseconds per counter clock = %d\n",
+		pr_info("%d-MPV KPI-2 DEV=0x%x VEND=0x%x REV=0x%x drv.ver.%d IRQ 0=%d IRQ 1,2=%d, BUS =%s, femtosecond per counter clock = %lld\n",
 			mpv_st->inst,
 			MPV_KPI2_DEVID, vendor_id, mpv_st->revision_id,
 			MPV_DRV_VER, mpv_st->irq, mpv_st->irq + 3,
-			pci_name(pdev), mpv_st->psecs_per_corr_clck);
+			pci_name(pdev), mpv_st->fsecs_per_mpvclock);
 	} else
 		if (mpv_st->mpv_new == MPV_EIOH) {
-			printk("%d-MPV EIOH DEV=0x%x VEND=0x%x REV=0x%x "
-				"drv.ver.%d IRQ 0=%d IRQ 1=%d IRQ 2=%d, "
-				"BUS =%s, picoseconds per counter clock = %d\n",
+			pr_info("%d-MPV EIOH DEV=0x%x VEND=0x%x REV=0x%x drv.ver.%d IRQ 0=%d IRQ 1=%d IRQ 2=%d, BUS =%s, femtosecond per counter clock = %lld\n",
 				mpv_st->inst,
 				MPV_KPI2_DEVID, vendor_id, mpv_st->revision_id,
 				MPV_DRV_VER, mpv_st->irq, mpv_st->irq + 1,
 								mpv_st->irq + 2,
-				pci_name(pdev), mpv_st->psecs_per_corr_clck);
+				pci_name(pdev), mpv_st->fsecs_per_mpvclock);
 	} else {
 		if (mpv_st->mpv_new == MPV_4)
 			dev_id = MPV4_DEVID;
-		printk("%d-MPV DEV=0x%x VEND=0x%x REV=0x%x HWREV=0x%x. "
-			"drv.ver.%d IRQ=%d (pirq=%d), BUS =%s, "
-			"picoseconds per counter clock = %d\n",
+		pr_info("%d-MPV DEV=0x%x VEND=0x%x REV=0x%x HWREV=0x%x. drv.ver.%d IRQ=%d (pirq=%d), BUS =%s, femtosecond per counter clock = %lld\n",
 			mpv_st->inst, dev_id, vendor_id, mpv_st->revision_id,
 			mpv_st->hw_rev_id, MPV_DRV_VER, mpv_st->irq, pirq,
-			pci_name(pdev), mpv_st->psecs_per_corr_clck);
+			pci_name(pdev), mpv_st->fsecs_per_mpvclock);
 	}
 	dbgmpv("MPV inst. =%d :MAJOR =%d, MINOR =%03d-%03d\n",
 		mpv_st->inst, mpv_st->major, mpv_st->minor_base, minor_max);
@@ -821,6 +844,8 @@ mpv_pci_probe(struct pci_dev *pdev, const struct pci_device_id *pci_ent)
 err_unmap:
 	pci_disable_device(pdev);
 	_mpv_pci_remove(pdev, mpv_st);
+	if (rval)
+		pr_err("%s(): inst. %d finished with error.\n", __func__, mpv_st->inst);
 	return rval;
 }
 static void
@@ -832,6 +857,11 @@ mpv_pci_remove(struct pci_dev *pci_dev)
 		pr_err("%s(): device instance = %d isn't loaded.\n",
 			__func__, mpv_st->inst);
 		return;
+	}
+	pr_info("mpv_pci_remove BUS= %s mpv_%d\n", pci_name(pci_dev), mpv_st->inst);
+	if (mpv_st->open_in || mpv_st->open_out || mpv_st->open_st) {
+		pr_err("mpv_pci_remove ERROR: There is open file. The open masks: in 0x%x out 0x%x st  0x%x\n",
+			mpv_st->open_in, mpv_st->open_out, mpv_st->open_st);
 	}
 	if (mpv_st->mpv_new == MPV_KPI2) {
 		pci_write_config_byte(mpv_st->pdev, GPIO_MPV_SW, 0);
@@ -853,9 +883,11 @@ mpv_shutdown(struct pci_dev *pci_dev)
 {
 	mpv_state_t	*mpv_st = pci_get_drvdata(pci_dev);
 
-	if (mpv_st == NULL)
+	if (mpv_st == NULL) {
+		pr_err("%s(): device instance = %d isn't loaded.\n",
+			__func__, mpv_st->inst);
 		return;
-
+	}
 	mpv_reset_module(mpv_st);
 	if (mpv_st->mpv_new == MPV_KPI2) {
 		pci_write_config_byte(mpv_st->pdev, GPIO_MPV_SW, 0);
@@ -905,7 +937,7 @@ mpv_sbus_probe(struct of_device *op,
 		else
 			revision_id  = 1;
 	}
-	rval = mpv_common_probe(op->dev, &mpv_st, regs_base, 0, revision_id, SBUS_DEV);
+	rval = mpv_common_probe(op->dev, NULL, &mpv_st, regs_base, 0, revision_id, SBUS_DEV);
 	if (rval) {
 		if (rval == -ECANCELED) /*device is disabled*/
 			rval = 0;
@@ -945,10 +977,9 @@ mpv_sbus_probe(struct of_device *op,
 	}
 #endif /* P2S */
 	mpv_st->irq_orig = mpv_st->irq;
-	pr_warn("MPV-sbus attach: sbusIRQ=%d revision_id=%x "
-		"picoseconds per counter clock = %d\n",
+	pr_warn("MPV-sbus attach: sbusIRQ=%d revision_id=%x femtosecond per counter clock = %d\n",
 		mpv_st->irq, mpv_st->revision_id,
-		mpv_st->psecs_per_corr_clck);
+		mpv_st->fsecs_per_mpvclock);
 	return 0;
 err_unmap:
 	of_iounmap(&op->resource[0], mpv_st->regs_base,
@@ -1164,7 +1195,10 @@ mpv_read (struct file *file, char *buf, size_t sz, loff_t *f_pos)
 	int min_sz	= sizeof (mpv_rd_inf_t);
 	int		corr_cnt = 0;
 	int interrupts;
-	unsigned long long clock_limit, prev_cycl, cur_cycl;
+	unsigned long long clock_limit, prev_cycl;
+#ifdef SHOW_WOKEN_TIME
+	unsigned long long cur_cycl;
+#endif
 	struct	timespec64 intr_real_tm;
 	unsigned long	expire;
 
@@ -1217,13 +1251,14 @@ mpv_read (struct file *file, char *buf, size_t sz, loff_t *f_pos)
 			raw_spin_unlock_irq(&mpv_st->mpv_lock);
 			return -ETIME;
 got:
-			cur_cycl = get_cycles();
+			current->wakeup_tm = getns64timeofday();
 			if (mpv_st->num_time_regs >= bus) {
 				corr_cnt = mpv_read_regl(mpv_st,
 						mpv_st->corr_cnt_reg[bus]);
 			}
 			mpv_st->kdata_intr[bus].num_reciv_intr++;
-#ifdef CONFIG_MCST
+#ifdef SHOW_WOKEN_TIME
+			cur_cycl = get_cycles();
 			mpv_st->kdata_intr[bus].irq_enter_clks =
 				cycles_2nsec(cur_cycl - prev_cycl);
 #endif
@@ -1233,13 +1268,13 @@ got:
 			mpv_st->kdata_intr[bus].intr_appear_nsec_mono =
 				ktime_to_ns(ktime_get());
 			mpv_st->kdata_intr[bus].correct_counter_nsec =
-				corr_cnt * mpv_st->psecs_per_corr_clck / 1000;
+				(long long)corr_cnt * mpv_st->fsecs_per_mpvclock / 1000000;
 			if (mpv_st->mpv_new || mpv_st->revision_id >= 2)
 				mpv_st->kdata_intr[bus].intpts_cnt =
 					mpv_read_regl(mpv_st,
 						mpv_st->intpts_cnt_reg[bus]);
 			mpv_st->non_oncpu_irq |= interrupts & ~disposal_bit;
-			current->waken_tm = sched_clock();
+			current->waken_tm = getns64timeofday();
 			goto finish;
 		}	/* wait_on_cpu */
 		if (file->f_flags & O_NONBLOCK &&
@@ -1803,9 +1838,6 @@ mpv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		}
 		raw_spin_unlock_irqrestore(&mpv_st->mpv_lock, flags);
 #endif /* SBUS or PCI2SBUS */
-#if defined(CONFIG_MCST_RT) && defined(CONFIG_PCI)
-		mk_hndl_first(mpv_st->irq, MPV_NAME);
-#endif
 		break;
 	}
 	case MPVIO_RUN_DEVICE:
@@ -1849,7 +1881,7 @@ mpv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		rval = copy_from_user((caddr_t)&intr_user, (caddr_t)arg, sizeof (mpv_intr_t));
 		if (rval != 0) {
 			printk( "mpv_ioctl (MPVIO_WAIT_INTR): copy_from_user() finished with error.");
-   			return (-EFAULT);
+			return (-EFAULT);
 		};
 		raw_spin_lock_irq(&mpv_st->mpv_lock);
 		if (mpv_st->intr_assemble == 0) {
@@ -1886,7 +1918,7 @@ mpv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 				};
 #endif
 				raw_spin_unlock_irq(&mpv_st->mpv_lock);   
-   				return (-ETIME);
+				return (-ETIME);
 			}
 		} else {
 			/* handler could mask some input if it is 'alive' */
@@ -2007,11 +2039,11 @@ mpv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			return -EINVAL;
 		}
 #if BITS_PER_LONG == 64
-		interval = (unsigned long long)arg * PSEC_PER_USEC /
-				mpv_st->psecs_per_corr_clck;
+		interval = (unsigned long long)arg * FSEC_PER_USEC /
+				mpv_st->fsecs_per_mpvclock;
 #else
-		interval = (unsigned long long)arg * PSEC_PER_USEC;
-		do_div(interval, mpv_st->psecs_per_corr_clck);
+		interval = (unsigned long long)arg * FSEC_PER_USEC;
+		do_div(interval, mpv_st->fsecs_per_mpvclock);
 #endif
 		dbgmpv("%s() cmd=%d Beg gen_period_reg[%d] \t0x%x =0x%x"
 				" mod=0x%x raw_intrv=0x%lld arg=0x%lld\n",
@@ -2091,7 +2123,7 @@ mpv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		raw_spin_unlock_irqrestore(&mpv_st->mpv_lock, flags);
 		return 0;
 	case MPVIO_GET_PSPCC: /* get picoseconds per counter clock */
-		return mpv_st->psecs_per_corr_clck;
+		return mpv_st->fsecs_per_mpvclock / 1000;
 	case MPVIO_SET_PERIOD:
 		/* set period (ns) to inform driver that mpv-in is periodic.
 		 * Drive mpv will be able to pospone timer interrupt functionsi
@@ -2103,10 +2135,18 @@ mpv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	case MPVIO_WAIT_ONCPU: /* arg - waiting time as usec */
 		mpv_st->kdata_intr[bus].wait_on_cpu = (long) arg;
 		return 0;
-	case MPVIO_SET_PSPCC: /* set picoseconds per counter clock */
+	case MPVIO_SET_PSPCC: /* set femtosecond per counter clock */
 	    {
 		long new_psecs = (long) arg;
-		mpv_st->psecs_per_corr_clck = new_psecs;
+		mpv_st->fsecs_per_mpvclock = new_psecs * 1000;
+		return 0;
+	    }
+	case MPVIO_GET_FSPCC: /* get femtosecond per counter clock */
+		return mpv_st->fsecs_per_mpvclock;
+	case MPVIO_SET_FSPCC: /* set femtosecond per counter clock */
+	    {
+		long new_fsecs = (long) arg;
+		mpv_st->fsecs_per_mpvclock = new_fsecs;
 		return 0;
 	    }
 	case MPVIO_SET_GENOUT:
@@ -2165,10 +2205,10 @@ mpv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		}
 #if BITS_PER_LONG == 64
 		interval = (unsigned long long)arg * PSEC_PER_USEC /
-				mpv_st->psecs_per_corr_clck;
+				mpv_st->fsecs_per_mpvclock;
 #else
 		interval = (unsigned long long)arg * PSEC_PER_USEC;
-		do_div(interval, mpv_st->psecs_per_corr_clck);
+		do_div(interval, mpv_st->fsecs_per_mpvclock);
 #endif
 		if (mpv_st->mpv_new) {
 			/* psecs_per_gen_clck is differ in IOH2 */
@@ -2304,10 +2344,10 @@ mpv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		}
 #if BITS_PER_LONG == 64
 		interval = (unsigned long long)arg * PSEC_PER_USEC /
-				mpv_st->psecs_per_corr_clck;
+				mpv_st->fsecs_per_mpvclock;
 #else
 		interval = (unsigned long long)arg * PSEC_PER_USEC;
-		do_div(interval, mpv_st->psecs_per_corr_clck);
+		do_div(interval, mpv_st->fsecs_per_mpvclock);
 #endif
 		if (mpv_st->mpv_new) {
 			printk(KERN_ERR "The is no MPVIO_SEND_ALIVE:"
@@ -2392,8 +2432,8 @@ mpv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			mpv_read_regl(mpv_st, mpv_st->gen_period_reg[bus]),
 			mpv_read_regl(mpv_st, mpv_st->gen_mode_reg),
 			raw_intrv, (int) arg);
-		mpv_st->kdata_intr[bus].interv_gen_ns = raw_intrv *
-				mpv_st->psecs_per_corr_clck / PSEC_PER_USEC;
+		mpv_st->kdata_intr[bus].interv_gen_ns = (long long)raw_intrv *
+				mpv_st->fsecs_per_mpvclock / 1000000;
 		raw_spin_lock_irqsave(&mpv_st->mpv_lock, flags);
 		if (raw_intrv == 0) {
 			mpv_st->polar = (mpv_st->polar & ~disposal_bit) |
@@ -2627,10 +2667,11 @@ mpv_intr_handler(int irq, void *arg)
 	int stv_in_nmb = mpv_st->stv_in_number;
 	struct pps_event_time ts;
 	long prv_clk;
-	unsigned long long psecs_per_clck;
+	unsigned long long fsecs_per_clck;
 	long long prev_interv = 0;
+	int wk_cpu = -1;
 
-#ifdef CONFIG_MCST
+#ifdef SHOW_WOKEN_TIME
 	long long	irq_enter_clks;
 	irq_enter_clks = get_cycles() - current_thread_info()->irq_enter_clk;
 #endif
@@ -2678,12 +2719,12 @@ mpv_intr_handler(int irq, void *arg)
 			if (mpv_st->kdata_intr[stv_in_nmb].num_reciv_intr > 8 &&
 					prv_clk != 0) {
 #if BITS_PER_LONG == 64
-				psecs_per_clck = PSEC_PER_SEC / prv_clk;
+				fsecs_per_clck = FSEC_PER_SEC / prv_clk;
 #else
-				psecs_per_clck = PSEC_PER_SEC;
-				do_div(psecs_per_clck, prv_clk);
+				fsecs_per_clck = FSEC_PER_SEC;
+				do_div(fsecs_per_clck, prv_clk);
 #endif
-				mpv_st->psecs_per_corr_clck = psecs_per_clck;
+				mpv_st->fsecs_per_mpvclock = fsecs_per_clck;
 			}
 		}
 		if (stv_in_nmb < mpv_st->num_time_regs) {
@@ -2691,7 +2732,7 @@ mpv_intr_handler(int irq, void *arg)
 			corr_count_ns =
 				mpv_read_regl(mpv_st,
 					mpv_st->corr_cnt_reg[stv_in_nmb]) *
-					mpv_st->psecs_per_corr_clck / 1000;
+					mpv_st->fsecs_per_mpvclock / 1000000;
 			read_cc_ns = (int)(cycles_2nsec(get_cycles() - cycl1));
 		}
 		mpv_st->kdata_intr[stv_in_nmb].correct_counter_nsec =
@@ -2728,7 +2769,7 @@ mpv_intr_handler(int irq, void *arg)
 					    mpv_st->corr_cnt_reg[stv_in_nmb]));
 		}
 #endif
-#ifdef CONFIG_MCST
+#ifdef SHOW_WOKEN_TIME
 		mpv_st->kdata_intr[stv_in_nmb].irq_enter_clks = irq_enter_clks;
 #endif
 		if (mpv_st->mpv_new || mpv_st->revision_id >= 2)
@@ -2767,7 +2808,7 @@ mpv_intr_handler(int irq, void *arg)
 			corr_count_ns =
 				mpv_read_regl(mpv_st,
 					mpv_st->corr_cnt_reg[i]) *
-					mpv_st->psecs_per_corr_clck / 1000;
+					mpv_st->fsecs_per_mpvclock / 1000000;
 			read_cc_ns = (int)(cycles_2nsec(get_cycles() - cycl1));
 			mpv_st->kdata_intr[i].correct_counter_nsec =
 				(int)corr_count_ns;
@@ -2798,7 +2839,7 @@ mpv_intr_handler(int irq, void *arg)
 			mpv_st->kdata_intr[i].correct_counter_nsec = 0;
 			mpv_st->kdata_intr[i].read_cc_ns = 0;
 		}
-#ifdef CONFIG_MCST
+#ifdef SHOW_WOKEN_TIME
 		mpv_st->kdata_intr[i].irq_enter_clks = irq_enter_clks;
 #endif
 		if (mpv_st->mpv_new || mpv_st->revision_id >= 2)
@@ -2816,16 +2857,18 @@ mpv_intr_handler(int irq, void *arg)
 				&mpv_st->kdata_intr[i].wait1_task_list) {
 			waiter_item = list_entry(tmp, raw_wqueue_t, task_list);
 			wake_up_process(waiter_item->task);
+			wk_cpu = task_cpu(waiter_item->task);
 		}
 	};
 	/* wake up for ioctl(MPVIO_WAIT_INTR) -- any interrupt */
 out:	list_for_each_safe(tmp, next, &mpv_st->any_in_task_list) {
 		waiter_item = list_entry(tmp, raw_wqueue_t, task_list);
 		wake_up_process(waiter_item->task);
+		wk_cpu = task_cpu(waiter_item->task);
 	}
 	raw_spin_unlock_irqrestore(&mpv_st->mpv_lock, flags);
-	/* do it for the last mpv_in but not under spinlock */
-	do_postpone_tick(prev_interv);
+	if (wk_cpu != smp_processor_id())
+		do_postpone_tick(prev_interv);
 	if (waitqueue_active(&mpv_st->pollhead))
 		return IRQ_WAKE_THREAD;
 	return IRQ_HANDLED;

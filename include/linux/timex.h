@@ -169,6 +169,7 @@ void ntp_notify_cmos_timer(void);
 #ifdef CONFIG_MCST
 extern void set_pps_stat2(int);
 extern long long  next_rt_intr;
+extern long long  must_do_timer;
 extern int pps_debug;
 #endif
 

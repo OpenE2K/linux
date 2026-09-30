@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
 #ifndef _INIT_KEYB_H_
 #define _INIT_KEYB_H_
 

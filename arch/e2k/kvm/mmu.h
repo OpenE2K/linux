@@ -730,7 +730,6 @@ unsigned int kvm_mmu_calculate_mmu_pages(struct kvm *kvm);
 void kvm_mmu_change_mmu_pages(struct kvm *kvm, unsigned int kvm_nr_mmu_pages);
 
 extern void kvm_vcpu_release_trap_cellar(struct kvm_vcpu *vcpu);
-void kvm_zap_gfn_range(struct kvm *kvm, gfn_t gfn_start, gfn_t gfn_end);
 int kvm_mmu_unprotect_page(struct kvm *kvm, gfn_t gfn);
 unsigned long kvm_slot_page_size(struct kvm_memory_slot *slot, gfn_t gfn);
 

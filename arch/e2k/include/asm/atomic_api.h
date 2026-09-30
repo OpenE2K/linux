@@ -173,7 +173,7 @@ do { \
 
 #define virt_api_atomic_ticket_trylock(spinlock, tail_shift) \
 ({ \
- 	register int	__rval;	\
+	register int	__rval;	\
 	register int	__val; \
 	register int	__head; \
 	register int	__tail; \
@@ -643,30 +643,30 @@ atomic_free_lock_writer(arch_rwlock_t *rw)
 	rval; \
 })
 
-#define __api_user_atomic32_op(insn, oparg, uaddr, mem_model, oldval) \
+#define __api_user_atomic32_op(insn, oparg, uaddr, use_descriptor, mem_model, oldval) \
 ({ \
 	int __ret; \
 	typeof(oparg) __stored_val; \
-	USER_ATOMIC_FETCH_OP(oparg, uaddr, oldval, __stored_val, \
-			       w, insn, mem_model, __ret); \
+	USER_ATOMIC_FETCH_OP(oparg, uaddr, oldval, __stored_val, 4, \
+			     w, LDST_WORD_FMT, insn, use_descriptor, mem_model, __ret); \
 	VIRT_HWBUG_AFTER_LD_ACQ_##mem_model(); \
 	__builtin_expect(__ret, 0); \
 })
 
-#define __api_user_cmpxchg_word(old, new, addr, mem_model, oldval) \
+#define __api_user_cmpxchg_word(old, new, addr, use_descriptor, mem_model, oldval) \
 ({ \
 	int __ret, __stored_val; \
 	USER_ATOMIC_CMPXCHG_WORD_RETURN(old, new, addr, __stored_val, \
-			oldval, mem_model, __ret); \
+			oldval, use_descriptor, mem_model, __ret); \
 	VIRT_HWBUG_AFTER_LD_ACQ_##mem_model(); \
 	__builtin_expect(__ret, 0); \
 })
 
-#define __api_user_xchg(val, addr, size_letter, mem_model, oldval) \
+#define __api_user_xchg(val, addr, size, size_letter, fmt, use_descriptor, mem_model, oldval) \
 ({ \
 	int __ret; \
-	USER_ATOMIC_XCHG_RETURN(val, addr, oldval, size_letter, \
-			mem_model, __ret); \
+	USER_ATOMIC_XCHG_RETURN(val, addr, oldval, size, size_letter, fmt, \
+			use_descriptor, mem_model, __ret); \
 	VIRT_HWBUG_AFTER_LD_ACQ_##mem_model(); \
 	__ret; \
 })
@@ -759,7 +759,7 @@ atomic_free_lock_writer(arch_rwlock_t *rw)
 
 #define virt_api_xchg_return(val, addr, size_letter, mem_model) \
 ({ \
- 	register long	rval;	\
+	register long	rval;	\
 	NATIVE_ATOMIC_XCHG_RETURN(val, addr, rval, size_letter, mem_model); \
 	VIRT_HWBUG_AFTER_LD_ACQ_##mem_model(); \
 	rval; \
@@ -768,7 +768,7 @@ atomic_free_lock_writer(arch_rwlock_t *rw)
 #define virt_api_cmpxchg_return(old, new, addr, size_letter, \
 				sxt_size, mem_model) \
 ({ \
- 	register long	rval;	\
+	register long	rval;	\
 	register long	stored_val; \
 	NATIVE_ATOMIC_CMPXCHG_RETURN(old, new, addr, stored_val, rval, \
 					size_letter, sxt_size, mem_model); \

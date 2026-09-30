@@ -144,10 +144,10 @@ struct user_regs_struct {
 /*
  *  additional part (for binary compiler)
  */          
-        unsigned long long rpr_hi;
-        unsigned long long rpr_lo;
-        
-        unsigned long long tir_lo [TIR_NUM];
+	unsigned long long rpr_hi;
+	unsigned long long rpr_lo;
+	
+	unsigned long long tir_lo [TIR_NUM];
 	unsigned long long tir_hi [TIR_NUM];
 
 	unsigned long long trap_cell_addr [MAX_TC_SIZE];
@@ -158,7 +158,7 @@ struct user_regs_struct {
 	unsigned long long dam [DAM_ENTRIES_NUM];
 
 	unsigned long long sbbp [SBBP_ENTRIES_NUM];
-        
+	
 	unsigned long long mlt [MLT_NUM];
 
 /*
@@ -240,7 +240,7 @@ struct user {
 	unsigned long	start_code;	/* text starting address */
 	unsigned long	start_data;	/* data starting address */
 	unsigned long	start_stack;	/* stack starting address */
-  	long int signal;     		/* Signal that caused the core dump. */
+	long int signal;     		/* Signal that caused the core dump. */
 	int reserved;			/* No longer used */
 	struct user_pt_regs * u_ar0;	/* Used by gdb to help find the */
 					/* values for the registers. */

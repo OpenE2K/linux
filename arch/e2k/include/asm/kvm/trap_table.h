@@ -276,7 +276,7 @@ extern unsigned long kvm_pass_page_fault_to_guest(struct pt_regs *regs,
 				trap_cellar_t *tcellar);
 extern void kvm_complete_page_fault_to_guest(unsigned long what_complete);
 
-extern int do_hret_last_wish_intc(struct kvm_vcpu *vcpu, struct pt_regs *regs);
+extern int intc_hret_last_wish(struct kvm_vcpu *vcpu, struct pt_regs *regs);
 
 extern unsigned long (*ttable_entry18)(unsigned long, unsigned long, unsigned long,
 				       unsigned long, unsigned long, unsigned long,
@@ -741,7 +741,7 @@ pass_the_trap_to_guest(struct pt_regs *regs,
 	if (trap_no == exc_last_wish_num) {
 		int r;
 
-		r = do_hret_last_wish_intc(vcpu, regs);
+		r = intc_hret_last_wish(vcpu, regs);
 		if (r == 0) {
 			return 1;
 		} else {

@@ -282,7 +282,6 @@ static struct pci_dev *l_dev_to_parent_pcidev(struct device *dev)
  */
 static bool l_iommu_check_device(struct device *dev)
 {
-	struct pci_dev *pdev;
 	if (!dev || !dev->dma_mask)
 		return false;
 
@@ -291,13 +290,6 @@ static bool l_iommu_check_device(struct device *dev)
 
 	if (!dev || !dev_is_pci(dev))
 		return false;
-	pdev = to_pci_dev(dev);
-	if (pdev->vendor == PCI_VENDOR_ID_MCST_TMP &&
-			pdev->device == PCI_DEVICE_ID_MCST_3D_VIVANTE_R2000P &&
-			/* Check if r2000+ is a video card */
-			(pdev->subsystem_device != 3)) {
-		return false;
-	}
 	return true;
 }
 
@@ -460,7 +452,8 @@ static void l_quirk_enable_local_iommu(struct pci_dev *pdev)
 			pdev->subsystem_device == 10)) {
 		return;
 	}
-	if (pdev->subsystem_device == 3)
+	if ((pdev->subsystem_device == 3) ||
+		(pdev->subsystem_device == 4))
 		return;
 	if (WARN_ON(pdev->bus->number != 0)) /* r2000+ not a video card */
 		return;
@@ -468,12 +461,10 @@ static void l_quirk_enable_local_iommu(struct pci_dev *pdev)
 	l_iommu_init_hw(i, l_iommu_win_sz);
 }
 DECLARE_PCI_FIXUP_ENABLE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_MGA26, l_quirk_enable_local_iommu);
-DECLARE_PCI_FIXUP_ENABLE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_VP9_BIGEV2_R2000P, l_quirk_enable_local_iommu);
 DECLARE_PCI_FIXUP_ENABLE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_VP9_G2_R2000P, l_quirk_enable_local_iommu);
 
 static const struct pci_device_id l_devices_with_iommu[] = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_MGA26)},
-	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_VP9_BIGEV2_R2000P)},
 	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_VP9_G2_R2000P)},
 	{ }	/* terminate list */
 };
@@ -508,7 +499,8 @@ static struct l_iommu *l_iommu_get_iommu_for_device(struct device *dev)
 	id = pci_match_id(l_devices_with_iommu, pdev);
 	if (!id)
 		return NULL;
-	if (pdev->subsystem_device == 3)  /* r2000+ not a video card */
+	if ((pdev->subsystem_device == 3) ||
+		 (pdev->subsystem_device == 4)) /* r2000+ not a video card */
 		return NULL;
 	if (WARN_ON(pdev->bus->number != 0)) /* r2000+ not a video card */
 		return NULL;
@@ -876,31 +868,6 @@ static void l_quirk_iommu_direct_devices(struct pci_dev *pdev)
 }
 DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_MGA2,
 			  l_quirk_iommu_direct_devices);
-DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MCST_TMP,
-	PCI_DEVICE_ID_MCST_3D_VIVANTE_R2000P, l_quirk_iommu_direct_devices);
-
-#define VCFG 0x40
-# define VCFG_Convert32BitAddressForIommu 0x00000002
-static void l_quirk_iommu_direct_devices_r2000p(struct pci_dev *pdev)
-{
-	/*
-	 * http://wiki.lab.sun.mcst.ru/e2kwiki/R2000p#.D0.A0.D0.B5.D0.B3.D0.B8.D1.81.D1.82.D1.80_VCFG
-	 *
-	 * Clear VCFG.Convert32BitAddressForIommu bit: disable hardware
-	 * setting of [39:32] bits in IOMMU DMA addresses with IommuEnable.
-	 */
-	u32 data;
-	pci_read_config_dword(pdev, VCFG, &data);
-	data = data & ~VCFG_Convert32BitAddressForIommu;
-	pci_write_config_dword(pdev, VCFG, data);
-	/* Check if r2000+ is a video card */
-	if (pdev->subsystem_device != 3) {
-		/* use dma-direct interface */
-		set_dma_ops(&pdev->dev, NULL);
-	}
-}
-DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MCST_TMP,
-	PCI_DEVICE_ID_MCST_3D_VIVANTE_R2000P, l_quirk_iommu_direct_devices_r2000p);
 
 #ifdef CONFIG_PM_SLEEP
 static int l_iommu_suspend(void)

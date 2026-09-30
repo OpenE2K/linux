@@ -13,10 +13,15 @@
 #include <linux/module.h>
 #include <linux/log2.h>
 #include <linux/workqueue.h>
-#if defined(CONFIG_E2K) && defined(CONFIG_SCLKR_CLOCKSOURCE)
+#ifdef CONFIG_MCST
+#if defined(CONFIG_SCLKR_CLOCKSOURCE)
 #include <linux/delay.h>
 #include <asm/sclkr.h>
 #endif
+#if defined(CONFIG_E90S)
+#include <asm-l/clk_rt.h>
+#endif
+#endif	/* CONFIG_MCST */
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/rtc.h>
@@ -85,6 +90,30 @@ static int rtc_valid_range(struct rtc_device *rtc, struct rtc_time *tm)
 	return 0;
 }
 
+#if defined CONFIG_E2K && defined CONFIG_SCLKR_CLOCKSOURCE || defined CONFIG_E90S
+/**
+ * used_for_clk - test if RTC device is connected to sclkr
+ * @rtc: RTC device to test.
+ */
+static bool used_for_clk(struct rtc_device *rtc) __must_hold(&sclkr_lock)
+{
+# ifdef CONFIG_E2K
+	/* Guest does not have access to hardware RTC */
+	if (IS_HV_GM())
+		return false;
+# endif
+
+	return READ_ONCE(clk_rtc) == rtc;
+}
+
+/* rtc_os_corr - is a value which is modified while write to RTC
+ * instead of real writing to RTC. It is used to avoid PPS
+ * jump while RTC write. PPS jump breaks SCLKR/CLK_RT work
+ *
+ * Protected by sclkr_lock. */
+static s64 rtc_os_corr = 0;
+#endif
+
 static int __rtc_read_time(struct rtc_device *rtc, struct rtc_time *tm)
 {
 	int err;
@@ -103,6 +132,17 @@ static int __rtc_read_time(struct rtc_device *rtc, struct rtc_time *tm)
 		}
 
 		rtc_add_offset(rtc, tm);
+#if defined CONFIG_E2K && defined CONFIG_SCLKR_CLOCKSOURCE || defined CONFIG_E90S
+# ifdef CONFIG_SCLKR_CLOCKSOURCE
+		mutex_lock(&sclkr_lock);
+# endif
+		if (used_for_clk(rtc)) {
+			rtc_time64_to_tm(rtc_tm_to_time64(tm) + rtc_os_corr, tm);
+		}
+# ifdef CONFIG_SCLKR_CLOCKSOURCE
+		mutex_unlock(&sclkr_lock);
+# endif
+#endif
 
 		err = rtc_valid_tm(tm);
 		if (err < 0)
@@ -159,18 +199,52 @@ int rtc_set_time(struct rtc_device *rtc, struct rtc_time *tm)
 	if (!rtc->ops)
 		err = -ENODEV;
 	else if (rtc->ops->set_time)
-#if defined(CONFIG_MCST) && defined(CONFIG_SCLKR_CLOCKSOURCE)
-		if (strcmp(curr_clocksource->name, "sclkr") == 0 &&
-					sclkr_mode == SCLKR_RTC) {
-			prepare_sclkr_rtc_set();
-			err = rtc->ops->set_time(rtc->dev.parent, tm);
-			finish_sclkr_rtc_set();
+#if defined CONFIG_E2K && defined CONFIG_SCLKR_CLOCKSOURCE || defined CONFIG_E90S
+	{
+		/*
+		 * RTC update can shift pulse-per-second that drives
+		 * clocksource.  Avoid the problem by skipping actual
+		 * RTC write when such clocksource is used.
+		 *
+		 * There are two cases:
+		 *
+		 * 1) This particualr RTC is connected to sclkr and sclkr
+		 * is actually relying on it right now.
+		 * In this case just update the software offset (`rtc_os_corr`).
+		 *
+		 * 2) Otherwise do write time to RTC.
+		 * Also clear the software offset if RTC is connected to
+		 * sclkr because RTC's time is correct now.
+		 */
+#ifdef CONFIG_SCLKR_CLOCKSOURCE
+		mutex_lock(&sclkr_lock);
+#endif
+		if (used_for_clk(rtc) && sclk_uses_hardware_rtc()) {
+			struct rtc_time tm_cur_rtc;
+			err = (rtc->ops->read_time) ?
+					rtc->ops->read_time(rtc->dev.parent, &tm_cur_rtc) :
+					-ENODEV;
+			if (err < 0) {
+#ifdef CONFIG_SCLKR_CLOCKSOURCE
+				mutex_unlock(&sclkr_lock);
+#endif
+				dev_dbg(&rtc->dev, "set_time: fail to read: %d\n", err);
+				return err;
+			}
+			rtc_os_corr = rtc_tm_to_time64(tm) - rtc_tm_to_time64(&tm_cur_rtc);
 		} else {
 			err = rtc->ops->set_time(rtc->dev.parent, tm);
+			if (used_for_clk(rtc)) {
+				rtc_os_corr = 0;
+			}
 		}
+#ifdef CONFIG_SCLKR_CLOCKSOURCE
+		mutex_unlock(&sclkr_lock);
+#endif
+	}
 #else
 		err = rtc->ops->set_time(rtc->dev.parent, tm);
-#endif
+#endif	/* CONFIG_E2K && CONFIG_SCLKR_CLOCKSOURCE || CONFIG_E90S */
 	else
 		err = -EINVAL;
 

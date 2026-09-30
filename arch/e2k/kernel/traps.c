@@ -554,14 +554,15 @@ notrace void parse_TIR_registers(struct pt_regs *regs, u64 exceptions)
 	/*
 	 * 3) Handle external interrupts before enabling interrupts
 	 */
-	if (trace_tir_enabled()) {
+	if (trace_tir_enabled() && rcu_is_watching()) {
 		int i;
 
 		for (i = 0; i <= nr_TIRs; i++)
 			trace_tir(AW(TIRs[i].TIR_lo), AW(TIRs[i].TIR_hi));
 	}
 
-	if (IS_ENABLED(CONFIG_KVM_HOST_MODE) && kvm_test_intc_emul_flag(regs)) {
+	if (IS_ENABLED(CONFIG_KVM_HOST_MODE) && kvm_test_intc_emul_flag(regs) &&
+			rcu_is_watching()) {
 		if (trace_intc_tir_enabled()) {
 			int i;
 
@@ -769,7 +770,7 @@ static inline void die_if_kernel(const char *str, struct pt_regs *regs,
 static inline void die_if_init(const char * str, struct pt_regs * regs, 
 				 long err)
 {
-        struct task_struct *tsk = current;
+	struct task_struct *tsk = current;
 
 	if (tsk->pid == 1)
 		die(str, regs, err);
@@ -1526,15 +1527,6 @@ irqreturn_t native_do_interrupt(struct pt_regs *regs)
 	if (unlikely(is_from_wait_trap(regs)))
 		handle_wtrap(regs);
 
-#if defined(CONFIG_MCST_4RT) && defined(SHOW_WOKEN_TIME)
-	if (unlikely(show_woken_time) > 1 && system_state == SYSTEM_RUNNING) {
-		per_cpu(prev_intr_clock, smp_processor_id()) =
-				__this_cpu_read(last_intr_clock);
-		per_cpu(last_intr_clock, smp_processor_id()) =
-			getns64timeofday();
-	}
-#endif
-
 	/*
 	 * We store the interrupt vector to detect cases when this irq is moved
 	 * to another vector. So when the new vector starts arriving, special
@@ -1585,16 +1577,16 @@ static long get_fp_ip(struct trap_pt_regs *trap)
 
 	for (i = nr_TIRs; i >= 0; i --) {
 		tir_hi = TIRs[i].TIR_hi;
-                /* do_fp exection - 35 BIT */
-                if (!(tir_hi.TIR_hi_exc & (1L<<35))) {
-                    continue;
-                }
+		/* do_fp exection - 35 BIT */
+		if (!(tir_hi.TIR_hi_exc & (1L<<35))) {
+		    continue;
+		}
 		tir_lo = TIRs[i].TIR_lo;
-                return tir_lo.TIR_lo_ip;
+		return tir_lo.TIR_lo_ip;
 	}
-        printk(" get_fp_ip not find IP\n");
+	printk(" get_fp_ip not find IP\n");
 	print_all_TIRs(trap->TIRs, trap->nr_TIRs);
-        return 0;
+	return 0;
 }    
 
 static void do_fp(struct pt_regs *regs)

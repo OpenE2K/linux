@@ -7,9 +7,8 @@
 // Trap table entries implemented on assembler
 //
 
-#undef NATIVE_TASK_SIZE
-#undef	HOST_TASK_SIZE
-#undef	GUEST_TASK_SIZE
+#include <linux/linkage.h>
+
 #include <asm/alternative-asm.h>
 #include <asm/mmu_regs_types.h>
 #include <asm/cpu_regs_types.h>
@@ -468,18 +467,14 @@ ttable_entry18:
 	}
 
 .section .hcall_entry0, "ax",@progbits
-	.align	8
-	.type	hcall_entry0,@function	// hypercalls
-hcall_entry0:
+SYM_FUNC_START(hcall_entry0)
 	HW_HCALL(kvm_generic_hcalls)
-	.size hcall_entry0, . -$hcall_entry0
+SYM_FUNC_END(hcall_entry0)
 
 .section .hcall_entry1, "ax",@progbits
-	.align	8
-	.type	hcall_entry1,@function	// light hypercalls
-hcall_entry1:
+SYM_FUNC_START(hcall_entry1)
 	HW_HCALL(kvm_light_hcalls)
-	.size hcall_entry1, . -$hcall_entry1
+SYM_FUNC_END(hcall_entry1)
 
 .global trap_handler_trampoline
 .section ".irqentry.text", "ax"

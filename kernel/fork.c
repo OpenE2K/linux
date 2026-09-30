@@ -103,10 +103,6 @@
 #include <asm/mmu_context.h>
 #include <asm/cacheflush.h>
 #include <asm/tlbflush.h>
-#ifdef CONFIG_MCST_4RT
-#include <linux/mcst_rt.h>
-#include <linux/cpumask.h>
-#endif
 
 #ifdef CONFIG_E2K
 #include <asm/process.h>
@@ -2616,22 +2612,6 @@ pid_t kernel_clone(struct kernel_clone_args *args)
 	int trace = 0;
 	pid_t nr;
 
-#ifdef CONFIG_MCST_4RT
-	if (rts_act_mask & RTS_NO_FORK) {
-		p = current;
-		pr_warn("RTS_NO_FORK but %s-%d does. Parents:",
-			p->comm, p->pid);
-		while (p->real_parent) {
-			p = p->real_parent;
-			pr_warn(" %s-%d", p->comm, p->pid);
-			if (p->pid <= 2)
-				break;
-		}
-		pr_warn("\n");
-		if (!strncmp(p->comm, "kworker", 6))
-			WARN_ON(1);
-	}
-#endif
 	/*
 	 * For legacy clone() calls, CLONE_PIDFD uses the parent_tid argument
 	 * to return the pidfd. Hence, CLONE_PIDFD and CLONE_PARENT_SETTID are
@@ -2695,22 +2675,6 @@ pid_t kernel_clone(struct kernel_clone_args *args)
 		init_completion(&vfork);
 		get_task_struct(p);
 	}
-
-#ifdef CONFIG_MCST_4RT
-#include <linux/cpumask.h>
-	if (cpumask_weight(&p->cpus_mask) > 1 &&
-			cpumask_intersects(&p->cpus_mask, rt_cpu_mask)) {
-		cpumask_var_t new_mask;
-
-		if (!alloc_cpumask_var(&new_mask, GFP_KERNEL))
-			return -ENOMEM;
-
-		cpumask_copy(new_mask, &p->cpus_mask);
-		cpumask_andnot(new_mask, new_mask, rt_cpu_mask);
-		set_cpus_allowed_ptr(p, new_mask);
-		free_cpumask_var(new_mask);
-	}
-#endif
 
 	wake_up_new_task(p);
 

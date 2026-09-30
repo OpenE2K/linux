@@ -1,6 +1,6 @@
- # SPDX-License-Identifier: GPL-2.0
- # Copyright (c) 2023 MCST
- 
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2023 MCST
+
 #
 # Makefile for the drm device driver.  This driver provides support for the
 # Direct Rendering Infrmga2ructure (DRI) in XFree86 4.1.0 and higher.

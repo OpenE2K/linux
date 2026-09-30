@@ -193,9 +193,9 @@ typedef	struct pt_regs {
 	clw_reg_t	us_cl_up;
 	clw_reg_t	us_cl_b;
 #endif	/* CONFIG_CLW_ENABLE */
-        /* for bin_comp */
-        u64             rpr_lo;
-        u64             rpr_hi;
+	/* for bin_comp */
+	u64             rpr_lo;
+	u64             rpr_hi;
 #ifdef	CONFIG_VIRTUALIZATION
 	u64		sys_func;	/* need only for guest */
 	e2k_stacks_t	g_stacks;	/* current state of guest kernel */
@@ -328,8 +328,8 @@ typedef struct sw_regs {
 	u64		ss_hi;
 
 	/* Additional registers for BINCO */
-        u64             rpr_lo;
-        u64             rpr_hi;
+	u64             rpr_lo;
+	u64             rpr_hi;
 #ifdef CONFIG_TC_STORAGE
 	u64		tcd;
 #endif
@@ -586,10 +586,6 @@ do { \
 	if (!paravirt_enabled()) { \
 		/* FIXME: it need implement for guest kernel */ \
 		NATIVE_SAVE_BINCO_REGS_FOR_PTRACE(__pt_regs); \
-	} \
-	if (from_syscall(__pt_regs) && __pt_regs->sys_num != __NR_sigreturn) { \
-		memset(&current_thread_info()->k_gregs, 0, \
-				sizeof(current_thread_info()->k_gregs)); \
 	} \
 } while (0)
 

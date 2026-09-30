@@ -54,6 +54,7 @@
 #define	ETAGNVQ		0x00		/* Num. value quadro */
 #define	ETAGNPQ		0x00		/* Null pointer */
 #define	ETAGEWQ		0x55		/* Empty quadro */
+#define	ETAGEWQP	0x55		/* Empty quadro packed */
 #define	ETAGDWQ		0x55		/* Diagnotic quadro */
 #define	ETAGAPQ		0xCF		/* Array pointer */
 #define	ETAGSAP		0xCF		/* Stack array pointer */

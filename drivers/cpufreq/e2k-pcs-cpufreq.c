@@ -478,7 +478,7 @@ static int pcs_l_cpufreq_target_index(struct cpufreq_policy *policy,
 }
 
 static unsigned int pcs_l_cpufreq_fast_switch(struct cpufreq_policy *policy,
-                                              unsigned int target_freq)
+					      unsigned int target_freq)
 {
 	unsigned int next_freq, index;
 

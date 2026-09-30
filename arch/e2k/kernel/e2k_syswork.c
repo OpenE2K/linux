@@ -151,8 +151,8 @@ static void print_interrupt_info(void)
 	for_each_possible_cpu(j) {
 
 	pr_info("\t\t\t CPU%d\n", j);
-        pnt = (time_info_t*) &system_info[j].max_disabled_interrupt;
-        for (i = 0; i < sizeof(system_info_name)/sizeof(void *); i++) {
+	pnt = (time_info_t*) &system_info[j].max_disabled_interrupt;
+	for (i = 0; i < sizeof(system_info_name)/sizeof(void *); i++) {
 		pr_info("  %30s  max time=%10ld   average=%10ld  "
 			"number=%10ld\n",
 			system_info_name[i],
@@ -170,42 +170,42 @@ static void print_interrupt_info(void)
 	pnt++;
 	}
 	pr_info("\n\t\t\t\t system calls\n");
-        for (i = 0; i < NR_syscalls; i++) {
-            if (disable_interrupt[j].syscall[i]) {
+	for (i = 0; i < NR_syscalls; i++) {
+	    if (disable_interrupt[j].syscall[i]) {
 		printk("  %30pS ", sys_call_table[i]);
-                printk("average=%5ld   number=%10ld \n",
-                    disable_interrupt[j].syscall_time[i]/freq/
-                            ((disable_interrupt[j].syscall[i] == 0)? 1
-                             : disable_interrupt[j].syscall[i]),
-                    disable_interrupt[j].syscall[i]);
-            }
-        }
+		printk("average=%5ld   number=%10ld \n",
+		    disable_interrupt[j].syscall_time[i]/freq/
+			    ((disable_interrupt[j].syscall[i] == 0)? 1
+			     : disable_interrupt[j].syscall[i]),
+		    disable_interrupt[j].syscall[i]);
+	    }
+	}
 
-        printk("\n\t\t\t\t interrupts   \n");
-        for (i = 0; i < exc_max_num; i++) {
-            if (disable_interrupt[j].interrupts[i]) {
-                printk("  %30s max time=%5ld average=%5ld   number=%10ld \n",
-                    exc_tbl_name[i],
-                    disable_interrupt[j].max_interrupts_time[i]/freq ,
-                    disable_interrupt[j].interrupts_time[i]/freq/
-                           ((disable_interrupt[j].interrupts[i] == 0) ?1
-                              : disable_interrupt[j].interrupts[i]),
-                    disable_interrupt[j].interrupts[i]);
-            }
+	printk("\n\t\t\t\t interrupts   \n");
+	for (i = 0; i < exc_max_num; i++) {
+	    if (disable_interrupt[j].interrupts[i]) {
+		printk("  %30s max time=%5ld average=%5ld   number=%10ld \n",
+		    exc_tbl_name[i],
+		    disable_interrupt[j].max_interrupts_time[i]/freq ,
+		    disable_interrupt[j].interrupts_time[i]/freq/
+			   ((disable_interrupt[j].interrupts[i] == 0) ?1
+			      : disable_interrupt[j].interrupts[i]),
+		    disable_interrupt[j].interrupts[i]);
+	    }
 
-        }
-        printk("\n\t\t\t\t DO_IRQ   \n");
-        for (i = 0; i < NR_VECTORS; i++) {
-            if (disable_interrupt[j].do_irq[i]) {
-                printk("  %5d max time=%5ld average=%5ld   number=%10ld \n",
-                    i,
-                    disable_interrupt[j].max_do_irq_time[i]/freq ,
-                    disable_interrupt[j].do_irq_time[i]/freq/
-                            ((disable_interrupt[j].do_irq[i] ==0)? 1
-                               : disable_interrupt[j].do_irq[i]),
-                    disable_interrupt[j].do_irq[i]);
-            }
-        }
+	}
+	printk("\n\t\t\t\t DO_IRQ   \n");
+	for (i = 0; i < NR_VECTORS; i++) {
+	    if (disable_interrupt[j].do_irq[i]) {
+		printk("  %5d max time=%5ld average=%5ld   number=%10ld \n",
+		    i,
+		    disable_interrupt[j].max_do_irq_time[i]/freq ,
+		    disable_interrupt[j].do_irq_time[i]/freq/
+			    ((disable_interrupt[j].do_irq[i] ==0)? 1
+			       : disable_interrupt[j].do_irq[i]),
+		    disable_interrupt[j].do_irq[i]);
+	    }
+	}
 
     }
 
@@ -216,18 +216,18 @@ static void stop_interrupt_info(void)
 	enable_collect_interrupt_ticks = 0;
 
     printk(" start =%lx stop_interrupt_info =%lx "
-           " begin_time(max_disabled_interrupt 0) =%lx"
-           " end_time =%lx  max_time =%lx "
-           " begin_time(max_disabled_interrupt 1) =%lx "
-           " end_time =%lx  max_time =%lx \n",
-           TIME, TIME1,  system_info[0].max_disabled_interrupt.begin_time,
-           system_info[0].max_disabled_interrupt.begin_time
-                +system_info[0].max_disabled_interrupt.max_time,
-           system_info[0].max_disabled_interrupt.max_time,
-           system_info[1].max_disabled_interrupt.begin_time,
-           system_info[1].max_disabled_interrupt.begin_time
-                +system_info[1].max_disabled_interrupt.max_time,
-           system_info[1].max_disabled_interrupt.max_time);
+	   " begin_time(max_disabled_interrupt 0) =%lx"
+	   " end_time =%lx  max_time =%lx "
+	   " begin_time(max_disabled_interrupt 1) =%lx "
+	   " end_time =%lx  max_time =%lx \n",
+	   TIME, TIME1,  system_info[0].max_disabled_interrupt.begin_time,
+	   system_info[0].max_disabled_interrupt.begin_time
+		+system_info[0].max_disabled_interrupt.max_time,
+	   system_info[0].max_disabled_interrupt.max_time,
+	   system_info[1].max_disabled_interrupt.begin_time,
+	   system_info[1].max_disabled_interrupt.begin_time
+		+system_info[1].max_disabled_interrupt.max_time,
+	   system_info[1].max_disabled_interrupt.max_time);
 
  };
 
@@ -743,7 +743,7 @@ noinline void copy_stack_regs(struct task_struct *task,
 	 * registers accessing them directly at physical address.
 	 */
 
-        /*
+	/*
 	 * Copy a part (or all) of the chain stack.
 	 * If it fails then leave regs->valid set to 0.
 	 */
@@ -773,7 +773,7 @@ noinline void copy_stack_regs(struct task_struct *task,
 		goto out;
 	}
 
-        /* Copy a part (or all) of the procedure stack.
+	/* Copy a part (or all) of the procedure stack.
 	 * Do _not_ set regs->valid to 0 if it fails
 	 * (we can still print stack albeit without register windows) */
 	regs->base_psp_stack = (void *) regs->psp_stack_cache;
@@ -996,7 +996,7 @@ static void print_reg_window(u64 window_base, int window_size,
 	u64 *rw = (u64 *)window_base;
 	u64 qreg_lo, qreg_hi, ext_lo, ext_hi;
 	u8 tag_lo, tag_hi, tag_ext_lo, tag_ext_hi;
-	char brX0_name[6], brX1_name[6];
+	char brX0_name[7], brX1_name[7];
 	u64 rbs, rsz, rcur;
 
 	rbs = AS(cr1_hi).rbs;
@@ -1335,7 +1335,7 @@ void notrace arch_trigger_cpumask_backtrace(const cpumask_t *mask,
 			continue;
 
 		/* Always show trap regs for user threads and
-		 * skip by default fo kernel threads to make
+		 * skip by default for kernel threads to make
 		 * panic's stacks more robust. */
 		stack_regs->show_trap_regs = debug_trap || !(current->flags & PF_KTHREAD);
 		stack_regs->show_user_regs = debug_userstack;
@@ -1359,11 +1359,11 @@ void notrace arch_trigger_cpumask_backtrace(const cpumask_t *mask,
 void
 print_all_mmap(void)
 {
-        struct task_struct	*g = NULL, *p = NULL;
+	struct task_struct	*g = NULL, *p = NULL;
 
 	read_lock(&tasklist_lock);
 	do_each_thread(g, p) {
-        	print_mmap(p);
+		print_mmap(p);
 	} while_each_thread(g, p);
 	read_unlock(&tasklist_lock);
 }
@@ -1773,7 +1773,7 @@ print_stack_frames(struct task_struct *task, const struct pt_regs *pt_regs,
 				task_pid_nr(current), cpu);
 	} else {
 		/* Always show trap regs for user threads and
-		 * skip by default fo kernel threads to make
+		 * skip by default for kernel threads to make
 		 * panic's stacks more robust. */
 		stack_regs->show_trap_regs = debug_trap || !(current->flags & PF_KTHREAD);
 		stack_regs->show_user_regs = debug_userstack;
@@ -1858,7 +1858,7 @@ static int __init print_stack_init(void)
 		stack_regs_cache[cpu].psp_stack_cache = kmalloc(SIZE_PSP_STACK,
 				GFP_KERNEL);
 		if (stack_regs_cache[cpu].psp_stack_cache == NULL) {
-                        printk("WARNING print_stack_init: no memory, printing "
+			printk("WARNING print_stack_init: no memory, printing "
 					"running tasks' register stacks from "
 					"CPU #%d will not be done\n", cpu);
 			continue;
@@ -3167,7 +3167,7 @@ sys_e2k_syswork(long syswork, long arg2, long arg3, long arg4, long arg5)
 		 * Force stacks dump kernel thread to run as soon as we yield:
 		 * to do core dump all stacks
 		 */
-                show_state();
+		show_state();
 		break;
 	case PRINT_REGS:
 		DbgESW("PRINT_PT_REGS\n");
@@ -3198,23 +3198,23 @@ sys_e2k_syswork(long syswork, long arg2, long arg3, long arg4, long arg5)
 	case USER_CONTROL_INTERRUPT:
 #ifndef CONFIG_USR_CONTROL_INTERRUPTS
 		printk("The kernel was compiled w/o  "
-                       " CONFIG_USR_CONTROL_INTERRUPTS\n");
+		       " CONFIG_USR_CONTROL_INTERRUPTS\n");
 # else /* CONFIG_USR_CONTROL_INTERRUPTS */
-            {
-                unsigned long psr;
-                arg2 = !!arg2;
-                current_thread_info()->flags &= ~_TIF_USR_CONTROL_INTERRUPTS;
-                current_thread_info()->flags |=
-                                            arg2 << TIF_USR_CONTROL_INTERRUPTS;
-                if (arg2) {
-                        psr = (PSR_UIE | PSR_UNMIE | PSR_NMIE | PSR_IE | PSR_SGE);
-                } else {
-                        psr = (PSR_NMIE | PSR_IE | PSR_SGE);
-                }
+	    {
+		unsigned long psr;
+		arg2 = !!arg2;
+		current_thread_info()->flags &= ~_TIF_USR_CONTROL_INTERRUPTS;
+		current_thread_info()->flags |=
+					    arg2 << TIF_USR_CONTROL_INTERRUPTS;
+		if (arg2) {
+			psr = (PSR_UIE | PSR_UNMIE | PSR_NMIE | PSR_IE | PSR_SGE);
+		} else {
+			psr = (PSR_NMIE | PSR_IE | PSR_SGE);
+		}
 		parse_chain_stack(true, current, correct_psr_register, (void *) psr);
-            }
+	    }
 #endif /* CONFIG_USR_CONTROL_INTERRUPTS */
-                break;
+		break;
 	default:
 		rval = -1;
 		goto user_syswork;
@@ -3224,7 +3224,7 @@ sys_e2k_syswork(long syswork, long arg2, long arg3, long arg4, long arg5)
 user_syswork:
 	switch(syswork) {
 	case GET_CONTEXT:
-                rval = get_cr((long)arg2, (long *)arg3);
+		rval = get_cr((long)arg2, (long *)arg3);
 		break;
 	case FLUSH_CMD_CACHES:
 		rval = flush_cmd_caches(arg2, arg3);

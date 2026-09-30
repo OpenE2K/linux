@@ -487,8 +487,12 @@ IMG_RESULT SYSDEVU_RegisterDriver(SYSDEVU_sInfo *sysdev) {
 	}
 
 	dev = img_pci_driver.pci_dev;
+#if defined(CONFIG_MCST)
+	if (dev == IMG_NULL)
+		return IMG_ERROR_DEVICE_UNAVAILABLE;
+#else
 	BUG_ON(dev == IMG_NULL);
-
+#endif
 	data = (struct imgpci_prvdata *)pci_get_drvdata(dev);
 
 	if (data->memmap[2].size > MAP_MEM_SIZE)

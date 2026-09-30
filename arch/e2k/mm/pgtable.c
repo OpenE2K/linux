@@ -236,7 +236,7 @@ int memtype_reserve(phys_addr_t start, phys_addr_t end,
 	*cache_flush_needed = false;
 
 	if (start >= end) {
-		WARN("%s failed: mem [0x%llx-0x%llx], requested %s",
+		WARN(1, "%s failed: mem [0x%llx-0x%llx], requested %s",
 				__func__, start, end - 1, memtype_name(memtype));
 		return -EINVAL;
 	}
@@ -305,8 +305,7 @@ void memtype_free(phys_addr_t start, phys_addr_t end)
 		struct page *page = pfn_to_page(pfn);
 		prev_type = get_page_memtype(page);
 
-		if (prev_type == PCM_WB ||
-		    prev_type == PCM_UNKNOWN) {
+		if (prev_type != PCM_WC && prev_type != PCM_UC) {
 			WARN_ONCE(1, "memtype_free for [mem 0x%llx-0x%llx], pfn 0x%lx is mapped as %s already\n",
 				start, end - 1, pfn,
 				memtype_name(PCM_WB));

@@ -61,14 +61,7 @@ static noinline int __cpuidle cpu_idle_poll(void)
 
 	while (!tif_need_resched() &&
 	       (cpu_idle_force_poll || tick_check_broadcast_expired()))
-#ifdef CONFIG_MCST_RT
-	{
-		idle_check_delayed_works(smp_processor_id());
-#endif
 		cpu_relax();
-#ifdef CONFIG_MCST_RT
-	}
-#endif
 
 	rcu_idle_exit();
 	start_critical_timings();

@@ -94,38 +94,6 @@ typedef union {	/*  array pointer */
 })
 
 
-
-#define MAKE_AP_LO(area_base, area_size, off, access)	\
-({							\
-	e2k_ptr_lo_t __lo;				\
-	AW(__lo) = 0UL;					\
-	__lo.base = area_base;				\
-	__lo.rw     = access;				\
-	__lo.itag   = E2K_AP_ITAG;			\
-	AW(__lo);					\
-})
-
-#define MAKE_AP_HI(area_base, area_size, offs, access) 	\
-({							\
-	e2k_ptr_hi_t __hi;				\
-	AW(__hi)         = 0UL;				\
-	__hi.size   = area_size;			\
-	__hi.curptr = offs;				\
-	AW(__hi);					\
-})
-
-
-static inline e2k_ptr_t MAKE_AP(u64 base, u64 len)
-{
-	e2k_ptr_t ptr = {{0}};
-	ptr.lo = 0L | ((base & E2K_VA_MASK) |
-		((u64)E2K_AP_ITAG << 61) |
-		((u64)RW_ENABLE << 59));
-	ptr.hi = 0L | ((len & 0xFFFFFFFF) << 32);
-	return ptr;
-}
-
-
 /*
  * Procedure Label (PL)
  */

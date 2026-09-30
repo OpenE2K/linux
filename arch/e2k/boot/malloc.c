@@ -14,7 +14,7 @@ static void error(char *x)
 	rom_puts(x);
 	rom_puts("\n\n -- System halted");
 
-        E2K_LMS_HALT_ERROR(0xdead); /* Halt */
+	E2K_LMS_HALT_ERROR(0xdead); /* Halt */
 }
 
 e2k_addr_t free_mem_ptr;	/* zip.c wants it visible */

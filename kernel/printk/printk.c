@@ -2257,6 +2257,9 @@ static int printk_kthread_func(void *data)
 			printk_delay(r.info->level);
 		}
 
+#if defined(CONFIG_E2K) && defined(CONFIG_E2K_KEXEC)
+		if (!console_suspended)
+#endif
 		con->write(con, write_text, len);
 		if (len)
 			printk_delay(r.info->level);

@@ -139,8 +139,9 @@ struct drm_ioctl_desc mga2_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(MGA2_GEM_CREATE, mga2_gem_create_ioctl, DRM_AUTH | DRM_UNLOCKED),
 	DRM_IOCTL_DEF_DRV(MGA2_GEM_MMAP, mga2_gem_mmap_ioctl, DRM_AUTH | DRM_UNLOCKED),
 	DRM_IOCTL_DEF_DRV(MGA2_SYNC, mga2_gem_sync_ioctl, DRM_AUTH | DRM_UNLOCKED),
-     	DRM_IOCTL_DEF_DRV(MGA2_INFO, mga2_info_ioctl, DRM_AUTH | DRM_UNLOCKED),
+	DRM_IOCTL_DEF_DRV(MGA2_INFO, mga2_info_ioctl, DRM_AUTH | DRM_UNLOCKED),
 	DRM_IOCTL_DEF_DRV(MGA2_AUC2, mga2_auc2_ioctl,  DRM_AUTH | DRM_UNLOCKED),
+	DRM_IOCTL_DEF_DRV(MGA2_VIRT_TO_HNDL, mga2_virt_to_handle,  DRM_AUTH | DRM_UNLOCKED),
 };
 
 #ifdef CONFIG_PM_SLEEP
@@ -244,6 +245,7 @@ static struct drm_driver driver = {
 	.gem_vm_ops = &mga2_gem_vm_ops,
 
 	.dumb_create = mga2_dumb_create,
+	.dumb_map_offset = mga2_gem_dumb_map_offset,
 
 	.prime_handle_to_fd	= drm_gem_prime_handle_to_fd,
 	.prime_fd_to_handle	= drm_gem_prime_fd_to_handle,

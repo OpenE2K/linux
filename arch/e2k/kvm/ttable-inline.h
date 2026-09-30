@@ -617,6 +617,7 @@ switch_to_gst_hw_stacks(struct pt_regs *regs, e2k_stacks_t *stacks,
 	cr0_lo = AS_WORD((regs)->crs.cr0_lo);
 	cr1_hi = AS_WORD((regs)->crs.cr1_hi);
 	cr1_lo = AS_WORD((regs)->crs.cr1_lo);
+	alternative("", "wait ma_c=1", CPU_HWBUG_CR_BEFORE_WRITES, "memory");
 	NATIVE_NV_NOIRQ_WRITE_CR0_HI_REG_VALUE(cr0_hi);
 	NATIVE_NV_NOIRQ_WRITE_CR0_LO_REG_VALUE(cr0_lo);
 	NATIVE_NV_NOIRQ_WRITE_CR1_HI_REG_VALUE(cr1_hi);
@@ -644,7 +645,7 @@ static __always_inline void guest_mkctxt_complete(void)
 	struct pt_regs regs;
 	struct local_gregs l_gregs;
 	e2k_aau_t aau_context;
-	u64 sbbp[SBBP_ENTRIES_NUM], wsz;
+	u64 wsz;
 	struct trap_pt_regs saved_trap;
 	unsigned long ts_flag;
 	unsigned long mmu_pid;
@@ -675,7 +676,7 @@ static __always_inline void guest_mkctxt_complete(void)
 	}
 
 	if (copy_context_from_signal_stack(&l_gregs, &regs, &saved_trap,
-				sbbp, &aau_context, NULL)) {
+				&aau_context, NULL)) {
 		user_exit();
 		pr_err("%s(): kill guest: copy context from signal stack failed\n",
 			__func__);
@@ -732,7 +733,6 @@ return_pv_vcpu_inject(inject_caller_t from)
 	struct trap_pt_regs saved_trap, *trap;
 	gthread_info_t *gti;
 	bool guest_user, user_stacks;
-	u64 sbbp[SBBP_ENTRIES_NUM];
 	struct k_sigaction ka;
 	e2k_aau_t aau_context;
 	struct local_gregs l_gregs;
@@ -780,7 +780,7 @@ return_pv_vcpu_inject(inject_caller_t from)
 	E2K_KVM_BUG_ON(kvm_is_guest_migrated_to_other_vcpu(ti, vcpu));
 
 	if (copy_context_from_signal_stack(&l_gregs, &regs, &saved_trap,
-					   sbbp, &aau_context, &ka)) {
+					   &aau_context, &ka)) {
 		user_exit();
 		pr_err("%s(): kill guest: copy context from signal stack failed\n",
 			__func__);

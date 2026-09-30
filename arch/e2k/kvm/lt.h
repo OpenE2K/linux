@@ -35,11 +35,7 @@ typedef	struct kvm_lt_regs {
 	wd_counter_l_t	  wd_counter;	    /* watchdog counter */
 	wd_counter_h_t	  wd_prescaler;	    /* watchdog prescaler */
 	wd_limit_t	  wd_limit;	    /* watchdog limit */
-	power_counter_l_t power_counter_lo; /* power counter low bits */
-	power_counter_h_t power_counter_hi; /* power counter high bits */
 	wd_control_t	  wd_control;	    /* watchdog control register */
-	reset_counter_l_t reset_counter_lo; /* reset counter low bits */
-	reset_counter_h_t reset_counter_hi; /* reset counter low bits */
 
 	u32	latched_reset_counter;	/* latched high part of reset counter */
 	u32	latched_power_counter;	/* latched high part of power counter */
@@ -54,7 +50,6 @@ typedef struct kvm_lt {
 	struct kvm_timer power_count;
 	int sys_timer_irq_id;
 	int wd_timer_irq_id;
-	u32 ticks_per_sec;	/* cycles (ticks) per 1 sec */
 	u32 frequency;		/* frequency of counter increment (Hz) */
 				/* standard frequency of system timer */
 				/* is 10 Mhz */
@@ -82,8 +77,7 @@ static inline bool kvm_lt_in_kernel(struct kvm *kvm, int node_id)
 extern int kvm_lt_set_base(struct kvm *kvm, int node_id,
 				unsigned long new_base);
 
-extern struct kvm_lt *kvm_create_lt(struct kvm *kvm, int node_id,
-					u32 ticks_per_sec, u32 sys_timer_freq);
+extern struct kvm_lt *kvm_create_lt(struct kvm *kvm, int node_id, u32 sys_timer_freq);
 extern void kvm_free_lt(struct kvm *kvm, int node_id);
 extern void kvm_free_all_lt(struct kvm *kvm);
 

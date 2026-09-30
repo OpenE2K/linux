@@ -75,7 +75,6 @@
 #include <linux/vmalloc.h>
 #ifdef CONFIG_MCST
 #include <linux/delay.h>
-#include <linux/mcst_rt.h>
 #endif 
 
 #include <trace/events/kmem.h>
@@ -3548,6 +3547,10 @@ vm_fault_t do_swap_page(struct vm_fault *vmf)
 		do_page_add_anon_rmap(page, vma, vmf->address, exclusive);
 	}
 
+#ifdef CONFIG_E2K
+	arch_swap_restore(entry, page);
+#endif
+
 	swap_free(entry);
 	if (mem_cgroup_swap_full(page) ||
 	    (vma->vm_flags & VM_LOCKED) || PageMlocked(page))
@@ -4576,17 +4579,6 @@ static vm_fault_t __handle_mm_fault(struct vm_area_struct *vma,
 	pgd_t *pgd;
 	p4d_t *p4d;
 	vm_fault_t ret;
-
-#ifdef CONFIG_MCST_4RT
-	if (mm->extra_vm_flags & VM_MLOCK_DONE) {
-		/* Attempt to allocate page when VM_MLOCK_DONE set */
-		/* for gracefully exit() */
-		mm->extra_vm_flags &= ~VM_MLOCK_DONE;
-		pr_err("Attempt to allocate page when VM_MLOCK_DONE"
-				"(after mlockall())\n");
-		return VM_FAULT_SIGBUS;
-	}
-#endif  /* CONFIG_MCST_4RT */
 
 	pgd = pgd_offset(mm, address);
 	p4d = p4d_alloc(mm, pgd, address);

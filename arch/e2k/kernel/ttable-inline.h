@@ -210,6 +210,7 @@ user_hw_stacks_restore__sw(e2k_stacks_t *stacks, u64 cur_window_q,
 	e2k_pcsp_lo_t u_pcsp_lo = stacks->pcsp_lo;
 	e2k_pcsp_hi_t u_pcsp_hi = stacks->pcsp_hi;
 	e2k_pcsp_hi_t k_pcsp_hi;
+	e2k_cr0_lo_t cr0_lo;
 	e2k_cr0_hi_t new_cr0_hi, cr0_hi;
 	e2k_cr1_lo_t new_cr1_lo, cr1_lo;
 	e2k_cr1_hi_t new_cr1_hi, cr1_hi;
@@ -233,6 +234,7 @@ user_hw_stacks_restore__sw(e2k_stacks_t *stacks, u64 cur_window_q,
 	current->thread.fill.u_psp_hi = u_psp_hi;
 	current->thread.fill.u_pcsp_lo = u_pcsp_lo;
 	current->thread.fill.u_pcsp_hi = u_pcsp_hi;
+	current->thread.fill.cr0_lo = READ_CR0_LO_REG();
 	current->thread.fill.cr0_hi = READ_CR0_HI_REG();
 	current->thread.fill.cr1_lo = READ_CR1_LO_REG();
 	current->thread.fill.cr1_hi = READ_CR1_HI_REG();
@@ -255,9 +257,9 @@ user_hw_stacks_restore__sw(e2k_stacks_t *stacks, u64 cur_window_q,
 	AW(new_cr0_hi) = (u64) fill_handlers_table[wbs];
 	AW(new_cr1_hi) = 0;
 	AS(new_cr1_hi).ussz = AS(READ_USD_HI_REG()).size >> 4;
-	WRITE_CR0_HI_REG(new_cr0_hi);
-	WRITE_CR1_LO_REG(new_cr1_lo);
-	WRITE_CR1_HI_REG(new_cr1_hi);
+
+	/* Other barriers will be inserted later when restoring user's CRs */
+	write_cr__no_wait((e2k_cr0_lo_t) {}, new_cr0_hi, new_cr1_lo, new_cr1_hi);
 
 	prefetch_nospec(&current->thread.fill.cr0_hi);
 	prefetch_nospec(&current->thread.fill.return_to_user);
@@ -280,6 +282,7 @@ user_hw_stacks_restore__sw(e2k_stacks_t *stacks, u64 cur_window_q,
 	FILL_HARDWARE_STACKS__SW(sw_fill_sequel);
 
 set_new_regs:
+	cr0_lo = current->thread.fill.cr0_lo;
 	cr0_hi = current->thread.fill.cr0_hi;
 	cr1_lo = current->thread.fill.cr1_lo;
 	cr1_hi = current->thread.fill.cr1_hi;
@@ -288,9 +291,8 @@ set_new_regs:
 	u_pcsp_lo = current->thread.fill.u_pcsp_lo;
 	u_pcsp_hi = current->thread.fill.u_pcsp_hi;
 
-	WRITE_CR0_HI_REG(cr0_hi);
-	WRITE_CR1_LO_REG(cr1_lo);
-	WRITE_CR1_HI_REG(cr1_hi);
+	/* Other barriers will be inserted later when restoring user's CRs */
+	write_cr__no_wait(cr0_lo, cr0_hi, cr1_lo, cr1_hi);
 	WRITE_PSP_REG(u_psp_hi, u_psp_lo);
 	WRITE_PCSP_REG(u_pcsp_hi, u_pcsp_lo);
 }
@@ -298,6 +300,7 @@ set_new_regs:
 static __always_inline void
 user_hw_stacks_restore__sw_sequel(void)
 {
+	e2k_cr0_lo_t cr0_lo = current->thread.fill.cr0_lo;
 	e2k_cr0_hi_t cr0_hi = current->thread.fill.cr0_hi;
 	e2k_cr1_lo_t cr1_lo = current->thread.fill.cr1_lo;
 	e2k_cr1_hi_t cr1_hi = current->thread.fill.cr1_hi;
@@ -311,14 +314,8 @@ user_hw_stacks_restore__sw_sequel(void)
 	if (cpu_has(CPU_FEAT_FILLC))
 		NATIVE_FILL_CHAIN_STACK__HW();
 
-	if (cpu_has(CPU_HWBUG_INTC_CR_WRITE)) {
-		E2K_WAIT(_ma_c);
-		E2K_NOP(7);
-	}
-
-	WRITE_CR0_HI_REG(cr0_hi);
-	WRITE_CR1_LO_REG(cr1_lo);
-	WRITE_CR1_HI_REG(cr1_hi);
+	/* Other barriers will be inserted later when restoring user's CRs */
+	write_cr__no_wait(cr0_lo, cr0_hi, cr1_lo, cr1_hi);
 
 	WRITE_PSP_REG(u_psp_hi, u_psp_lo);
 	WRITE_PCSP_REG(u_pcsp_hi, u_pcsp_lo);
@@ -382,12 +379,12 @@ jump_to_ttable_entry(struct pt_regs *regs, enum restore_caller from)
 #endif	/* !CONFIG_VIRTUALIZATION || !CONFIG_KVM_GUEST_KERNEL) */
 
 extern int copy_context_from_signal_stack(struct local_gregs *l_gregs,
-		struct pt_regs *regs, struct trap_pt_regs *trap, u64 *sbbp,
+		struct pt_regs *regs, struct trap_pt_regs *trap,
 		e2k_aau_t *aau_context, struct k_sigaction *ka);
 
 static inline int copy_pt_regs_from_signal_stack(struct pt_regs *regs)
 {
-	return copy_context_from_signal_stack(NULL, regs, NULL, NULL, NULL, NULL);
+	return copy_context_from_signal_stack(NULL, regs, NULL, NULL, NULL);
 }
 
 static __always_inline bool signal_pending_usermode_loop(struct pt_regs *regs)
@@ -615,7 +612,7 @@ static __noreturn __always_inline void finish_user_trap_handler_done(struct thre
  * function calls are allowed after this point.
  */
 static __noreturn __always_inline void
-finish_user_trap_handler_switched_stacks(struct pt_regs *regs, struct trap_pt_regs *trap,
+finish_user_trap_handler_switched_hw_stacks(struct pt_regs *regs, struct trap_pt_regs *trap,
 		restore_caller_t from)
 {
 #ifdef CONFIG_USE_AAU
@@ -623,6 +620,26 @@ finish_user_trap_handler_switched_stacks(struct pt_regs *regs, struct trap_pt_re
 #endif
 	thread_info_t *ti;
 	e2k_wd_t wd;
+
+	RESTORE_USER_TRAP_STACK_REGS(regs);
+
+	if (current->thread.flags & E2K_FLAG_PROTECTED_MODE)
+		ENABLE_US_CLW();
+
+	if (unlikely(cpu_has(CPU_HWBUG_SS) &&
+		     test_ts_flag(TS_SINGLESTEP_USER))) {
+		/*
+		 * Hardware can lose singlestep flag on interrupt if it
+		 * arrives earlier, so we must always manually reset it.
+		 */
+		e2k_cr1_lo_t cr1_lo = READ_CR1_LO_REG();
+
+		if (!AS(cr1_lo).pm) {
+			AS(cr1_lo).ss = 1;
+			alternative("", "wait ma_c=1", CPU_HWBUG_CR_BEFORE_WRITES, "memory");
+			WRITE_CR1_LO_REG(cr1_lo);
+		}
+	}
 
 	/*
 	 * Dequeue current pt_regs structure
@@ -772,11 +789,6 @@ finish_user_trap_handler(struct pt_regs *regs, restore_caller_t from)
 	/* complete intercept emulation mode */
 	trap_guest_enter(current_thread_info(), regs, EXIT_FROM_INTC_SWITCH, from);
 
-	RESTORE_USER_TRAP_STACK_REGS(regs);
-
-	if (current->thread.flags & E2K_FLAG_PROTECTED_MODE)
-		ENABLE_US_CLW();
-
 	info_restore_stack_reg(clock);
 
 #ifdef	CONFIG_KERNEL_TIMES_ACCOUNT
@@ -789,32 +801,18 @@ finish_user_trap_handler(struct pt_regs *regs, restore_caller_t from)
 	E2K_SAVE_CLOCK_REG(trap_times->end);
 #endif	/* CONFIG_KERNEL_TIMES_ACCOUNT */
 
-	if (unlikely(cpu_has(CPU_HWBUG_SS) &&
-		     test_ts_flag(TS_SINGLESTEP_USER))) {
-		/*
-		 * Hardware can lose singlestep flag on interrupt if it
-		 * arrives earlier, so we must always manually reset it.
-		 */
-		e2k_cr1_lo_t cr1_lo = READ_CR1_LO_REG();
-
-		if (!AS(cr1_lo).pm) {
-			AS(cr1_lo).ss = 1;
-			WRITE_CR1_LO_REG(cr1_lo);
-		}
-	}
-
 	if (!cpu_has(CPU_FEAT_FILLC) || !cpu_has(CPU_FEAT_FILLR))
 		current->thread.fill.from = from;
 
 	/*
 	 * If either FILLC or FILLR isn't supported, jump to finish_user_trap_handler_sw_fill.
-	 * Otherwise, fall through and call finish_user_trap_handler_switched_stacks directly.
+	 * Otherwise, fall through and call finish_user_trap_handler_switched_hw_stacks directly.
 	 */
 	user_hw_stacks_restore(trap_guest_get_restore_stacks(current_thread_info(), regs),
 			wsz, clear_fn, &finish_user_trap_handler_sw_fill,
 			finish_user_trap_handler_sw_fill_wsz);
 
-	finish_user_trap_handler_switched_stacks(regs, trap, from);
+	finish_user_trap_handler_switched_hw_stacks(regs, trap, from);
 
 	unreachable();
 }
@@ -824,7 +822,7 @@ finish_user_trap_handler(struct pt_regs *regs, restore_caller_t from)
  * function calls are allowed after this point.
  */
 static __always_inline __noreturn
-void finish_syscall_switched_stacks(struct pt_regs *regs, enum restore_caller from,
+void finish_syscall_switched_hw_stacks(struct pt_regs *regs, enum restore_caller from,
 		    bool return_to_user, bool ts_host_at_vcpu_mode)
 {
 	e2k_rndpr_t rndpr = regs->rndpr;
@@ -951,13 +949,13 @@ void finish_syscall(struct pt_regs *regs, enum restore_caller from, bool return_
 
 	/*
 	 * If either FILLC or FILLR isn't supported, jump to finish_syscall_sw_fill.
-	 * Otherwise, fall through and call finish_syscall_switched_stacks directly.
+	 * Otherwise, fall through and call finish_syscall_switched_hw_stacks directly.
 	 */
 	user_hw_stacks_restore(syscall_guest_get_restore_stacks(ts_host_at_vcpu_mode, regs),
 			wsz, clear_fn, &finish_syscall_sw_fill,
 			finish_syscall_sw_fill_wsz);
 
-	finish_syscall_switched_stacks(regs, from, return_to_user, ts_host_at_vcpu_mode);
+	finish_syscall_switched_hw_stacks(regs, from, return_to_user, ts_host_at_vcpu_mode);
 
 	unreachable();
 }

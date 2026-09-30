@@ -1,6 +1,6 @@
- # SPDX-License-Identifier: GPL-2.0
- # Copyright (c) 2023 MCST
- 
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2023 MCST
+
 subdir-ccflags-y := -Werror -Wswitch -Wenum-compare
 
 ccflags-y += -Iarch/e2k/kvm
@@ -19,7 +19,7 @@ kvm-$(CONFIG_KVM_ASYNC_PF)	+= $(KVM)/async_pf.o
 
 kvm-$(CONFIG_KVM_HOST_MODE)	+= pt-structs.o switch.o \
 				   lapic.o ioapic.o cepic.o ioepic.o \
-				   irq_comm.o timer.o virq.o io.o \
+				   irq_comm.o timer.o sclkr.o virq.o io.o \
 				   user_area.o nid.o vmid.o gpid.o \
 				   hypercalls.o process.o ttable.o priv-hypercalls.o \
 				   trap_table.o cpu.o mm.o mmu-flush.o \

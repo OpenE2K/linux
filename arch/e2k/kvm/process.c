@@ -3014,8 +3014,6 @@ void kvm_pv_wait(struct kvm *kvm, struct kvm_vcpu *vcpu)
 	/* For PV guest */
 	vcpu->arch.on_idle = true;
 
-	vcpu->arch.mp_state = KVM_MP_STATE_HALTED;
-
 	/* Suspend vcpu thread until it will be woken up by pv_kick */
 	kvm_vcpu_block(vcpu);
 
@@ -3026,7 +3024,6 @@ void kvm_pv_wait(struct kvm *kvm, struct kvm_vcpu *vcpu)
 	 */
 	kvm_check_request(KVM_REQ_UNHALT, vcpu);
 
-	vcpu->arch.mp_state = KVM_MP_STATE_RUNNABLE;
 	vcpu->arch.unhalted = false;
 
 	/* Restore arch-dependent state of vcpu */
@@ -3164,13 +3161,16 @@ int kvm_pv_host_enable_async_pf(struct kvm_vcpu *vcpu,
 				u64 apf_reason_gpa, u64 apf_id_gpa,
 				u32 apf_ready_vector, u32 irq_controller)
 {
-	if (kvm_gfn_to_hva_cache_init(vcpu->kvm, &vcpu->arch.apf.reason_gpa,
-				apf_reason_gpa, sizeof(u32)))
-		return 1;
+	int ret, srcu_idx;
 
-	if (kvm_gfn_to_hva_cache_init(vcpu->kvm, &vcpu->arch.apf.id_gpa,
-				apf_id_gpa, sizeof(u32)))
-		return 1;
+	srcu_idx = srcu_read_lock(&vcpu->kvm->srcu);
+	ret = kvm_gfn_to_hva_cache_init(vcpu->kvm, &vcpu->arch.apf.reason_gpa,
+				apf_reason_gpa, sizeof(u32));
+	ret = ret ?: kvm_gfn_to_hva_cache_init(vcpu->kvm, &vcpu->arch.apf.id_gpa,
+				apf_id_gpa, sizeof(u32));
+	srcu_read_unlock(&vcpu->kvm->srcu, srcu_idx);
+	if (ret)
+		return ret;
 
 	vcpu->arch.apf.cnt = 1;
 	vcpu->arch.apf.host_apf_reason = KVM_APF_NO;

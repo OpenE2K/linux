@@ -1,8 +1,8 @@
- # SPDX-License-Identifier: GPL-2.0
- # Copyright (c) 2023 MCST
- 
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2023 MCST
+
 #
-# Mcst CAN device configuration
+# MCST CAN device configuration
 #
 
 config CAN_ELCAN

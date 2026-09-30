@@ -959,7 +959,7 @@ int create_cut_entry(int tcount,
 			goto out_put;
 		DebugCUI("created cui=%d code 0x%lx[0x%x] glob 0x%lx[0x%x]\n",
 			 free_cui, code_base, code_sz, glob_base, glob_sz);
-  	}
+	}
 
 	tsd_base = atomic_add_return(tcount, &mm->context.tstart) - tcount;
 	ret = fill_user_cut_entry(cute_p, TASK_IS_PROTECTED(current),
@@ -1226,7 +1226,6 @@ void start_thread(struct pt_regs *regs, unsigned long entry, unsigned long sp)
 	/* Set global registers to empty state to prevent other user
 	 * or kernel current pointers access */
 	INIT_G_REGS(true);
-	memset(&ti->k_gregs, 0, sizeof(ti->k_gregs));
 
 	regs->stacks = stacks;
 	regs->crs = crs;
@@ -1356,7 +1355,6 @@ asmlinkage pid_t sys_clone_thread(unsigned long clone_flags, long stack_base,
 		unsigned long long stack_size, int __user *parent_tidptr,
 		int __user *child_tidptr, unsigned long tls)
 {
-	struct pt_regs *regs = current_pt_regs();
 	long flags = clone_flags;
 	struct kernel_clone_args args = {};
 
@@ -1406,7 +1404,7 @@ get_nested_kernel_IP(pt_regs_t *regs, int n)
 		IP = AS_STRUCT(cr0_hi).ip << 3;
 	}
 
-        raw_all_irq_restore(flags);
+	raw_all_irq_restore(flags);
 	return IP;
 }
 
@@ -2104,7 +2102,7 @@ void exit_thread(struct task_struct *task)
 void machine_restart(char * __unused)
 {
 	DebugP("machine_restart entered.\n");
-        
+	
 	if (machine.restart != NULL)
 		machine.restart(__unused);
 
@@ -2426,7 +2424,7 @@ SYSCALL_DEFINE5(arch_prctl, int, option,
 		current->mm->context.pm_sc_debug_mode = arg2
 							| PM_SC_DBG_MODE_INIT;
 		/* RM-18187 */
-		if (current->mm->context.pm_sc_debug_mode & PM_MM_FREE_PTR_MODE_MASK == 0)
+		if ((current->mm->context.pm_sc_debug_mode & PM_MM_FREE_PTR_MODE_MASK) == 0)
 			current->mm->context.pm_sc_debug_mode |= PM_MM_DEFAULT_FREE_PTR_MODE;
 		/* RM-18187 */
 		break;
@@ -2440,7 +2438,7 @@ SYSCALL_DEFINE5(arch_prctl, int, option,
 			return -EINVAL;
 		current->mm->context.pm_sc_debug_mode &= ~arg2;
 		/* RM-18187 */
-		if (current->mm->context.pm_sc_debug_mode & PM_MM_FREE_PTR_MODE_MASK == 0)
+		if ((current->mm->context.pm_sc_debug_mode & PM_MM_FREE_PTR_MODE_MASK) == 0)
 			current->mm->context.pm_sc_debug_mode |= PM_MM_DEFAULT_FREE_PTR_MODE;
 		/* RM-18187 */
 		break;

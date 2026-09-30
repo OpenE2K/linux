@@ -1,6 +1,6 @@
- # SPDX-License-Identifier: GPL-2.0
- # Copyright (c) 2023 MCST
- 
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2023 MCST
+
 subdir-ccflags-y := -DE2K_FAST_SYSCALL -Werror -Wswitch -Wenum-compare
 
 empty:=

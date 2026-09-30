@@ -2984,15 +2984,24 @@ native_boot_init_BGR_reg(void)
 /*
  * Read/Write system clock registers (SCLKM)
  */
-#define	READ_SCLKR_REG()	READ_SCLKR_REG_VALUE()
-#define	READ_SCLKM1_REG()	((e2k_sclkm1_t) READ_SCLKM1_REG_VALUE())
-#define	READ_SCLKM2_REG()	READ_SCLKM2_REG_VALUE()
-#define	READ_SCLKM3_REG()	READ_SCLKM3_REG_VALUE()
+#define	read_SCLKR_reg()	((e2k_sclkr_t) { .word = READ_SCLKR_REG_VALUE() })
+#define	read_SCLKM1_reg()	((e2k_sclkm1_t) { .word = READ_SCLKM1_REG_VALUE() })
+#define	read_SCLKM2_reg()	((e2k_sclkm2_t) { .word = READ_SCLKM2_REG_VALUE() })
+#define	read_SCLKM3_reg_value()	READ_SCLKM3_REG_VALUE()
 
-#define	WRITE_SCLKR_REG(reg_value)	WRITE_SCLKR_REG_VALUE(reg_value)
-#define	WRITE_SCLKM1_REG(reg)		WRITE_SCLKM1_REG_VALUE(AW(reg))
-#define	WRITE_SCLKM2_REG(reg_value)	WRITE_SCLKM2_REG_VALUE(reg_value)
-#define	WRITE_SCLKM3_REG(reg_value)	WRITE_SCLKM3_REG_VALUE(reg_value)
+static inline void write_SCLKR_reg(e2k_sclkr_t sclkr)
+{
+	WRITE_SCLKR_REG_VALUE(AW(sclkr));
+}
+
+extern void write_SCLKM1_reg(e2k_sclkm1_t sclkm1);
+
+static inline void write_SCLKM2_reg(e2k_sclkm2_t sclkm2)
+{
+	WRITE_SCLKM2_REG_VALUE(AW(sclkm2));
+}
+
+#define	write_SCLKM3_reg_value(reg_value)	WRITE_SCLKM3_REG_VALUE(reg_value)
 
 /*
  * Read/Write Control Unit HardWare registers (CU_HW0/CU_HW1)

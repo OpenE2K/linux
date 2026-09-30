@@ -58,14 +58,6 @@ void lkdtm_WRITE_AFTER_FREE(void)
 		pr_info("Hmm, didn't get the same memory range.\n");
 }
 
-#ifdef CONFIG_MCST_MEMORY_SANITIZE
-static void end_bio_sntz2(struct bio *bio)
-{
-	unlock_page(bio->bi_io_vec->bv_page);
-	bio_put(bio);
-}
-#endif
-
 void lkdtm_READ_AFTER_FREE(void)
 {
 	int *base, *val, saw;
@@ -94,6 +86,11 @@ void lkdtm_READ_AFTER_FREE(void)
 	*val = 0x12345678;
 	base[offset] = *val;
 	pr_info("Value in memory before free: %x\n", base[offset]);
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+	/* Force pageout(base) to test swap sanitizing.
+	 * Read base[offset] will swapin */
+	pageout4sanit(virt_to_page(base));
+#endif
 
 	kfree(base);
 
@@ -102,61 +99,9 @@ void lkdtm_READ_AFTER_FREE(void)
 	if (saw != *val) {
 		/* Good! Poisoning happened, so declare a win. */
 		pr_info("Memory correctly poisoned (%x)\n", saw);
-#ifdef CONFIG_MCST_MEMORY_SANITIZE
-	{
-		int got_val;
-		struct page *page;
-		struct bio *bio;
-		struct block_device *bdev;
-
-		if (swap_sanit_page == 0) {
-			pr_info("lkdtm: swap_sanit_page is not set\n");
-			return;
-		}
-		if (test_sntz_sect == 0) {
-			pr_info("lkdtm: swap test_sntz_sect is not set\n");
-			return;
-		}
-		page = alloc_page(GFP_KERNEL);
-		if (page == NULL) {
-			pr_info("lkdtm_READ_AFTER_FREE ERR page == NULL\n");
-			return;
-		}
-		bio = bio_alloc(GFP_NOIO, 1);
-		if (bio == NULL) {
-			pr_info("lkdtm_READ_AFTER_FREE ERR bio == NULL\n");
-			unlock_page(page);
-			return;
-		}
-		lock_page(page);
-		bio->bi_iter.bi_sector = test_sntz_sect;
-		bio_set_dev(bio, bdev);
-		bio_add_page(bio, page, PAGE_SIZE, 0);
-		bio->bi_end_io = end_bio_sntz2;
-		bio_set_op_attrs(bio, REQ_OP_READ, REQ_SYNC);
-		bio_get(bio);
-		submit_bio(bio);
-		wait_on_page_locked(page);
-		got_val = ((u32 *)page_address(page))[0];
-		pr_info("lkdtm_READ_AFTER_FREE bi_sector=0x%llx\n",
-					bio->bi_iter.bi_sector);
-		if (got_val == SANITIZE_VALUE)
-			pr_info("Freed swap page contains SANITIZE_VALUE=%x."
-				" PASS\n",
-				got_val);
-		else	
-			pr_info("Freed swap page has 0x%x != "
-				"SANITIZE_VALUE=0x%x. FAIL\n",
-				got_val, SANITIZE_VALUE);
-		return;
+	} else {
+		pr_info("Memory was not poisoned\n");
 	}
-	/* For MCST tests run it is noot need do reboot if memory
-	   sanitise is sucsessfully perfomed.  So BUG() is not colled */
-#else
-		BUG();
-#endif
-	}
-	pr_info("Memory was not poisoned\n");
 
 	kfree(val);
 }

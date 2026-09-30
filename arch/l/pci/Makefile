@@ -1,6 +1,6 @@
- # SPDX-License-Identifier: GPL-2.0
- # Copyright (c) 2023 MCST
- 
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2023 MCST
+
 CFLAGS_pci.o += -Wno-deprecated-declarations
 CFLAGS_irq.o += -Wno-deprecated-declarations
 

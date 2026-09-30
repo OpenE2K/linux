@@ -883,6 +883,7 @@ static inline void restore_guest_sys_call_stack_regs(thread_info_t *ti,
 		}
 	}
 	if (KVM_TEST_UPDATED_CPU_REGS_FLAG(regs_status, CRS_UPDATED_CPU_REGS)) {
+		alternative("", "wait ma_c=1", CPU_HWBUG_CR_BEFORE_WRITES, "memory");
 		NATIVE_NV_NOIRQ_WRITE_CR0_HI_REG(
 				kvm_get_guest_vcpu_CR0_hi(vcpu));
 		NATIVE_NV_NOIRQ_WRITE_CR0_LO_REG(

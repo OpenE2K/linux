@@ -639,12 +639,6 @@ user_trap_handler(struct pt_regs *regs)
 	AW(regs->flags) = 0;
 	init_guest_traps_handling(regs, true	/* user mode trap */);
 
-	/*
-	 * %sbbp LIFO stack is unfreezed by writing %TIR register,
-	 * so it must be read before TIRs.
-	 */
-	save_sbbp(trap->sbbp);
-
 #ifdef CONFIG_USE_AAU
 	/*
 	 * Put some distance between reading AASR (above) and using it here
@@ -672,6 +666,12 @@ user_trap_handler(struct pt_regs *regs)
 	}
 	regs->aau_context = aau_regs;
 #endif
+
+	/*
+	 * %sbbp LIFO stack is unfreezed by writing %TIR register,
+	 * so it must be read before TIRs.
+	 */
+	save_sbbp(trap->sbbp);
 
 	/*
 	 * Now we can store all needed trap context into the
@@ -811,7 +811,7 @@ user_trap_handler(struct pt_regs *regs)
 
 /*
  * We can only get here if either FILLC or FILLR isn't supported.
- * Otherwise finish_user_trap_handler_switched_stacks is called directly.
+ * Otherwise finish_user_trap_handler_switched_hw_stacks is called directly.
  */
 void notrace __noreturn
 finish_user_trap_handler_sw_fill(void)
@@ -827,7 +827,7 @@ finish_user_trap_handler_sw_fill(void)
 	regs = current_thread_info()->pt_regs;
 	trap = regs->trap;
 
-	finish_user_trap_handler_switched_stacks(regs, trap, from);
+	finish_user_trap_handler_switched_hw_stacks(regs, trap, from);
 
 	unreachable();
 }
@@ -846,6 +846,7 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 #if defined(CONFIG_KERNEL_TIMES_ACCOUNT) || defined(CONFIG_E2K_PROFILING)
 	register e2k_clock_t	clock = NATIVE_READ_CLKR_REG_VALUE();
 #endif	/* CONFIG_KERNEL_TIMES_ACCOUNT */
+	e2k_cr0_lo_t cr0_lo;
 	e2k_cr0_hi_t cr0_hi;
 	e2k_cr1_lo_t cr1_lo;
 	e2k_cr1_hi_t cr1_hi;
@@ -922,12 +923,6 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 	AW(regs->flags) = 0;
 	init_guest_traps_handling(regs, false	/* user mode trap */);
 
-	/*
-	 * %sbbp LIFO stack is unfreezed by writing %TIR register,
-	 * so it must be read before TIRs.
-	 */
-	save_sbbp(trap->sbbp);
-
 #ifdef CONFIG_USE_AAU
 	/*
 	 * Put some distance between reading AASR (above) and using it here
@@ -947,15 +942,21 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 #endif
 
 	/*
+	 * %sbbp LIFO stack is unfreezed by writing %TIR register,
+	 * so it must be read before TIRs.
+	 */
+	save_sbbp(trap->sbbp);
+
+	/*
 	 * Now we can store all needed trap context into the
 	 * current pt_regs structure
 	 */
-        read_ticks(clock);
-        exceptions = SAVE_TIRS(trap->TIRs, trap->nr_TIRs, false);
+	read_ticks(clock);
+	exceptions = SAVE_TIRS(trap->TIRs, trap->nr_TIRs, false);
 	nmi = exceptions & non_maskable_exc_mask;
 	hw_overflow = unlikely(exceptions & (exc_chain_stack_bounds_mask |
 					     exc_proc_stack_bounds_mask));
-        info_save_tir_reg(clock);
+	info_save_tir_reg(clock);
 
 	if (exceptions & have_tc_exc_mask) {
 		kstack_pf_addr = NATIVE_SAVE_TRAP_CELLAR(regs, trap);
@@ -966,7 +967,7 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 	read_ticks(clock);
 	NATIVE_SAVE_STACK_REGS(regs, current_thread_info(), false,
 			       likely(!hw_overflow && !kstack_pf_addr));
-        info_save_stack_reg(clock);
+	info_save_stack_reg(clock);
 
 	/* un-freeze the TIR's LIFO. Tracing can issue a call
 	 * here so we cannot do it earlier. */
@@ -1071,20 +1072,29 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 	 * interrupts. But there is one exception - if we received a maskable
 	 * interrupt we must do a reschedule, otherwise we might lose it.
 	 */
-	if (unlikely(need_resched() && preempt_count() == 0) &&
-			(!nmi || (exceptions & exc_interrupt_mask))
+
+	if ((preempt_count() == 0) && (!nmi || (exceptions & exc_interrupt_mask))) {
+		if (unlikely(need_resched()
 #ifdef CONFIG_PREEMPT_LAZY
-			|| (preempt_count() == 0 &&
-			current_thread_info()->preempt_lazy_count == 0
-			&& test_thread_flag(TIF_NEED_RESCHED_LAZY))
+			|| ((current_thread_info()->preempt_lazy_count == 0
+			    && test_thread_flag(TIF_NEED_RESCHED_LAZY)))
 #endif
-		) {
-		unsigned long flags;
-		raw_all_irq_save(flags);
-		/* Check again under closed interrupts to avoid races */
-		if (likely(need_resched() && !host_is_at_HV_GM_mode()))
-			preempt_schedule_irq();
-		raw_all_irq_restore(flags);
+		)) {
+			unsigned long flags;
+			raw_all_irq_save(flags);
+			/* Check again under closed interrupts to avoid races */
+			if (!host_is_at_HV_GM_mode()) {
+				if (likely(need_resched()
+#ifdef CONFIG_PREEMPT_LAZY
+				    || ((current_thread_info()->preempt_lazy_count == 0)
+					&& test_thread_flag(TIF_NEED_RESCHED_LAZY))
+#endif
+				)) {
+					preempt_schedule_irq();
+				}
+			}
+			raw_all_irq_restore(flags);
+		}
 	}
 #endif
 
@@ -1114,6 +1124,7 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 	NATIVE_CLEAR_APB();
 #endif
 
+	cr0_lo = regs->crs.cr0_lo;
 	cr0_hi = regs->crs.cr0_hi;
 	cr1_lo = regs->crs.cr1_lo;
 	cr1_hi = regs->crs.cr1_hi;
@@ -1153,9 +1164,7 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 	/* MMU registers must be written with not active CLW/AAU */
 	uaccess_enable_in_kernel_trap(regs);
 
-	WRITE_CR0_HI_REG(cr0_hi);
-	WRITE_CR1_LO_REG(cr1_lo);
-	WRITE_CR1_HI_REG(cr1_hi);
+	write_cr(cr0_lo, cr0_hi, cr1_lo, cr1_hi);
 
 #ifdef CONFIG_USE_AAU
 	if (cpu_has(CPU_HWBUG_AAU_AALDV))
@@ -1169,6 +1178,14 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 		 */
 		if (aasr.iab)
 			NATIVE_RESTORE_AADS(aau_regs);
+	}
+
+	if (!cpu_has(CPU_FEAT_ATOMIC_LDRD) && AS(regs->stacks.usd_lo).p) {
+		e2k_pusd_lo_t usd_lo;
+		AW(usd_lo) = READ_USD_LO_REG_VALUE();
+		AS(usd_lo).p = 1;
+		AS(usd_lo).psl += 1;
+		WRITE_USD_LO_REG_VALUE(AW(usd_lo));
 	}
 
 	/*
@@ -1417,7 +1434,7 @@ unsigned long e2k_dscr_ptr_size(long low, long hiw, long min_size, int *ptr_size
 			*ptr_size = 0;
 			*fatal = 1;
 			return 0;
-	} else if (unlikely(*ptr_size < 0 && lower_byte_mask && NEGATIVE_DESCR_SIZE_MASK)) {
+	} else if (unlikely(*ptr_size < 0 && (lower_byte_mask & NEGATIVE_DESCR_SIZE_MASK))) {
 		PROTECTED_MODE_WARNING(PMSCWARN_NEGATIVE_DSCR_SIZE,
 			     sys_num, sys_call_ID_to_name[sys_num], *ptr_size, argnum);
 		if (unlikely(!arch_init_pm_sc_debug_mode(PM_SC_DBG_MODE_NO_ERR_MESSAGES))
@@ -1819,7 +1836,7 @@ SYS_RET_TYPE notrace ttable_entry8_C(u64 sys_num, u64 tags, long arg1,
 #endif
 
 	if (sys_num >= NR_syscalls) {
-		sys_call = (protected_system_call_func) sys_ni_syscall;
+		sys_call = (protected_system_call_func) (void *) sys_ni_syscall;
 		mask = size1 = size2 = 0;
 	} else {
 		sys_call = sys_call_table_entry8[sys_num];
@@ -1978,7 +1995,7 @@ SYS_RET_TYPE notrace ttable_entry8_C(u64 sys_num, u64 tags, long arg1,
 	}
 #endif
 
-	if (unlikely(sys_call == (protected_system_call_func)sys_ni_syscall)) {
+	if (unlikely(sys_call == (protected_system_call_func) (void *) sys_ni_syscall)) {
 		report_unsupported_prot_syscall(sys_num);
 		rval = -ENOSYS;
 		SAVE_SYSCALL_RVAL(regs, rval);
@@ -1996,7 +2013,7 @@ SYS_RET_TYPE notrace ttable_entry8_C(u64 sys_num, u64 tags, long arg1,
 			if ((unsigned) regs->sys_num < NR_syscalls) {
 				sys_call = sys_call_table_entry8[regs->sys_num];
 			} else {
-				sys_call = (protected_system_call_func) sys_ni_syscall;
+				sys_call = (protected_system_call_func) (void *) sys_ni_syscall;
 			}
 		} else {
 			BUG();
@@ -2197,7 +2214,7 @@ SYS_RET_TYPE notrace handle_sys_call(system_call_func sys_call,
 
 /*
  * We can only get here if either FILLC or FILLR isn't supported.
- * Otherwise finish_syscall_switched_stacks is called directly.
+ * Otherwise finish_syscall_switched_hw_stacks is called directly.
  */
 void notrace __noreturn
 finish_syscall_sw_fill(void)
@@ -2209,13 +2226,13 @@ finish_syscall_sw_fill(void)
 
 	user_hw_stacks_restore__sw_sequel();
 
-	finish_syscall_switched_stacks(regs, from, return_to_user, ts_host_at_vcpu_mode);
+	finish_syscall_switched_hw_stacks(regs, from, return_to_user, ts_host_at_vcpu_mode);
 
 	unreachable();
 }
 
 int copy_context_from_signal_stack(struct local_gregs *l_gregs,
-		struct pt_regs *regs, struct trap_pt_regs *trap, u64 *sbbp,
+		struct pt_regs *regs, struct trap_pt_regs *trap,
 		e2k_aau_t *aau_context, struct k_sigaction *ka)
 {
 	struct signal_stack_context __user *context;
@@ -2328,7 +2345,6 @@ notrace long do_sigreturn(void)
 	struct pt_regs *cur_regs = current_pt_regs();
 	unsigned long cur_ti_flags = current_thread_info()->flags;
 	struct trap_pt_regs saved_trap, *trap;
-	u64 sbbp[SBBP_ENTRIES_NUM];
 	struct k_sigaction ka;
 	e2k_aau_t aau_context;
 	struct local_gregs l_gregs;
@@ -2341,7 +2357,7 @@ notrace long do_sigreturn(void)
 	current->restart_block.fn = do_no_restart_syscall;
 
 	if (copy_context_from_signal_stack(&l_gregs, &regs, &saved_trap,
-					   sbbp, &aau_context, &ka)) {
+					   &aau_context, &ka)) {
 		user_exit();
 		do_exit(SIGKILL);
 	}

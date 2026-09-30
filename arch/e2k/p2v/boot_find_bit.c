@@ -3,6 +3,8 @@
  * Copyright (c) 2023 MCST
  */
 
+#include <asm/p2v/boot_v2p.h>
+
 #include <linux/kernel.h>
 #include <linux/bitmap.h>
 

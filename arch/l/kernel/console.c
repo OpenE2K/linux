@@ -590,6 +590,11 @@ __init void register_early_dump_console(void)
 	if (early_console)
 		return;
 
+	/* Skip automatic early serial console if serial port
+	 * is not specified in command line */
+	if (!strstr(boot_command_line, "console=ttyS"))
+		return;
+
 	register_console(&early_dump_console);
 
 # ifdef CONFIG_EARLY_PRINTK

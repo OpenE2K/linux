@@ -29,6 +29,9 @@ void arch_cpu_idle_dead(void)
 	/* Tell __cpu_die() that this CPU is now safe to dispose of */
 	(void)cpu_report_death();
 
+	/* prevent NMI recieving before PIC initialization */
+	raw_all_irq_disable();
+
 	/* Unplug cpu and wait for a plug */
 	wait_for_startup(cpuid, true);
 	WARN_ON_ONCE(!physid_isset(cpuid, phys_cpu_present_map));

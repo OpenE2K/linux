@@ -215,28 +215,28 @@ static int CRT_getc(void)
 	int c;
 	if (!kbd_reset) {kbdreset(); kbd_reset++; }
 
-        if (key_pending != -1) {
-                c = key_pending;
-                key_pending = -1;
-                return c;
-        } else {
+	if (key_pending != -1) {
+		c = key_pending;
+		key_pending = -1;
+		return c;
+	} else {
 		while ((c = kbd(0)) == 0) ;
-	                return c;
-        }
+			return c;
+	}
 }
 
 static int CRT_tstc(void)
 {
 	if (!kbd_reset) {kbdreset(); kbd_reset++; }
 
-        while (key_pending == -1 && ((kbd_inb(KBSTATP) & KBINRDY) != 0)) {
-                key_pending = kbd(1);
+	while (key_pending == -1 && ((kbd_inb(KBSTATP) & KBINRDY) != 0)) {
+		key_pending = kbd(1);
 
 		kbd_udelay(1000);
 
-        }
+	}
 
-        return key_pending != -1;
+	return key_pending != -1;
 }
 
 int keyb_tstc(void)

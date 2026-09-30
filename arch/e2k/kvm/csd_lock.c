@@ -562,8 +562,7 @@ int kvm_guest_csd_lock_init(struct kvm *kvm)
 	csd_lock_waiter_t *w;
 	int i;
 
-	kvm->arch.csd_spinlock =
-		__RAW_SPIN_LOCK_UNLOCKED(kvm->arch.csd_spinlock);
+	raw_spin_lock_init(&kvm->arch.csd_spinlock);
 	INIT_LIST_HEAD(&kvm->arch.csd_lock_wait_head);
 	INIT_LIST_HEAD(&kvm->arch.csd_lock_free_head);
 	for (i = 0; i < KVM_MAX_CSD_LOCK_FREE_NUM; i++) {

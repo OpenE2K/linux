@@ -129,10 +129,7 @@ static int alloc_kexec_mem(struct kexec_mem_ptr *mem, u64 size)
 	DebugKE("allocating kexec memory started for size 0x%llx\n",
 		size);
 
-	if (!size) {
-		mem->size = 0;
-		return 0;
-	}
+	BUG_ON(!size);
 
 	mem->valid_size = size;
 
@@ -150,7 +147,7 @@ static int alloc_kexec_mem(struct kexec_mem_ptr *mem, u64 size)
 		DebugKE("allocating memory of size 0x%x bytes from 0x%llx bytes\n",
 			chunk_size, size);
 
-		if (chunk->start = alloc_pages_exact(chunk_size, GFP_ATOMIC)) {
+		if (chunk->start = alloc_pages_exact(chunk_size, GFP_ATOMIC | __GFP_NOWARN)) {
 			DebugKE("memory of chunk %d allocated from 0x%llx\n",
 				mem->chunks_count, chunk->start);
 
@@ -201,8 +198,7 @@ static int copy_kexec_mem_from_user(struct kexec_mem_ptr *to,
 	u64 offset = 0;
 	int i;
 
-	if (!to->size)
-		return 0;
+	BUG_ON(!to->size);
 
 	for (i = 0; i < to->chunks_count; i++) {
 		u64 copy_size;
@@ -517,22 +513,26 @@ static void smp_kexec_reboot_param_to_phys(struct smp_kexec_reboot_param *p)
 	p->bootblock = (void *)virt_to_phys(p->bootblock);
 	DebugInitKE("bootblock phys address 0x%llx\n", p->bootblock);
 
+	/*
+	 * p->image and p->initrd are placed on stack, so it can be vmalloced, so convert it with
+	 * e2k_virt_to_phys()
+	 */
+
 	DebugInitKE("converting image virt address 0x%llx\n", p->image);
 	kexec_mem_to_phys(p->image);
-	p->image = (void *)virt_to_phys(p->image);
+	p->image = (void *)e2k_virt_to_phys(p->image);
 	DebugInitKE("image phys address 0x%llx\n", p->image);
 
 	DebugInitKE("converting reboot virt address 0x%llx\n", p->reboot);
 	p->reboot = (kexec_reboot_func_ptr) __pa_symbol(p->reboot);
 	DebugInitKE("reboot phys address 0x%llx\n", p->reboot);
 
-	if (!p->initrd)
-		return;
-
 	DebugInitKE("converting initrd virt address 0x%llx\n", p->initrd);
-	kexec_mem_to_phys(p->initrd);
-	p->initrd = (void *)virt_to_phys(p->initrd);
-	DebugInitKE("initrd phys address 0x%llx\n", p->initrd);
+	if (p->initrd->valid_size) {
+		kexec_mem_to_phys(p->initrd);
+		p->initrd = (void *)e2k_virt_to_phys(p->initrd);
+		DebugInitKE("initrd phys address 0x%llx\n", p->initrd);
+	}
 }
 
 static noinline void __switch_to_phys__
@@ -635,9 +635,9 @@ static void do_kexec_reboot(void *info)
 	pic_disable();
 	fixup_irqs_pic();
 
-	DebugInitKE("switch to phys memory started for smp param 0x%llx\n", param);
-	kexec_switch_to_phys(
-		(struct smp_kexec_reboot_param *)virt_to_phys(param));
+	DebugInitKE("switch to phys memory started for smp param 0x%llx, phys smp param 0x%llx\n",
+		param, e2k_virt_to_phys(param));
+	kexec_switch_to_phys((struct smp_kexec_reboot_param *)e2k_virt_to_phys(param));
 }
 
 
@@ -647,9 +647,11 @@ static void do_kexec_reboot(void *info)
 
 static void unreserve_stack_mem(u64 stack)
 {
+	stack = PAGE_ALIGN_UP(stack);
+
 	DebugKE("unreserve stack memory from 0x%llx size 0x%lx\n",
-		stack - PAGE_SIZE, 2 * PAGE_SIZE);
-	if (memblock_free(stack - PAGE_SIZE, 2 * PAGE_SIZE))
+		stack - 2 * PAGE_SIZE, 4 * PAGE_SIZE);
+	if (memblock_free(stack - 2 * PAGE_SIZE, 4 * PAGE_SIZE))
 		DebugKE("stack memory unreserve failed\n");
 }
 
@@ -766,7 +768,8 @@ static void boot_kexec_reboot_sequel(struct smp_kexec_reboot_param *p)
 	boot_sync_all_processors();
 
 	if (boot_early_pic_is_bsp()) {
-		boot_merge_initrd_mem(p->initrd);
+		if (p->initrd->valid_size)
+			boot_merge_initrd_mem(p->initrd);
 		boot_merge_kernel_code_mem(p->image);
 	}
 
@@ -798,9 +801,7 @@ static int kexec_setup_bootblock(bootblock_struct_t *bootblock,
 	DebugKE("image_bootblock is 0x%llx\n", image_bootblock);
 
 	DebugKE("get %ld bytes of image_bootblock from 0x%llx to 0x%llx\n",
-		sizeof(kernel_size),
-		&image_bootblock->info.kernel_size,
-		&kernel_size);
+		sizeof(kernel_size), &image_bootblock->info.kernel_size, &kernel_size);
 	if (ret = get_user(kernel_size, &image_bootblock->info.kernel_size)) {
 		DebugKE("failed to get kernel_size from image_bootblock\n");
 		return ret;
@@ -808,9 +809,7 @@ static int kexec_setup_bootblock(bootblock_struct_t *bootblock,
 	DebugKE("kernel_size is 0x%llx\n", kernel_size);
 
 	DebugKE("get %ld bytes of image_bootblock from 0x%llx to 0x%llx\n",
-		sizeof(kernel_csum),
-		&image_bootblock->info.kernel_csum,
-		&kernel_csum);
+		sizeof(kernel_csum), &image_bootblock->info.kernel_csum, &kernel_csum);
 	if (ret = get_user(kernel_csum, &image_bootblock->info.kernel_csum)) {
 		DebugKE("failed to get kernel_csum from image_bootblock\n");
 		return ret;
@@ -835,6 +834,121 @@ static int kexec_setup_bootblock(bootblock_struct_t *bootblock,
 
 	bootblock->info.ramdisk_base = initrd->phys_addr;
 	bootblock->info.ramdisk_size = initrd->valid_size;
+
+	return ret;
+}
+
+static int check_image_mdl(bootblock_struct_t *image_bootblock)
+{
+	e2k_idr_t idr = read_IDR_reg();
+	u8 mdl = idr.IDR_mdl;
+	u8 target_mdl = image_bootblock->info.target_mdl;
+	u8 target_iset_min = image_bootblock->info.target_iset_min;
+	u8 target_iset_max = image_bootblock->info.target_iset_max;
+
+	DebugKE("mdl %d, target_mdl %d, target_iset_min %d, target_iset_max %d\n",
+		mdl, target_mdl, target_iset_min, target_iset_max);
+
+	if (target_mdl == mdl)
+		return 0;
+	else if (!target_mdl && (mdl >= target_iset_min && mdl <= target_iset_max))
+		return 0;
+
+	return -EPERM;
+}
+
+u32 *crc32_filltable(void)
+{
+	u32 *crc_table, c;
+	int i, j;
+
+	crc_table = kmalloc(256 * sizeof(uint32_t), GFP_KERNEL);
+	if (!crc_table)
+		return NULL;
+
+	for (i = 0; i < 256; i++) {
+		c = i << 24;
+		for (j = 8; j; j--)
+			c = (c & 0x80000000) ? ((c << 1) ^ 0x04c11db7) : (c << 1);
+		*crc_table++ = c;
+	}
+
+	return crc_table - 256;
+}
+
+static int check_image_csum(void *image, bootblock_struct_t *image_bootblock, u64 size)
+{
+	u32 image_csum, csum, *crc32_table;
+	int len = size;
+	char *cp = image;
+
+	image_csum = image_bootblock->info.kernel_csum;
+	DebugKE("kernel_csum is 0x%x\n", image_csum);
+
+	image_bootblock->info.kernel_csum = 0;
+
+	crc32_table = crc32_filltable();
+	if (!crc32_table) {
+		DebugKE("failed to allocate crc32_table\n");
+		return -ENOMEM;
+	}
+
+	if (len) {
+		while (len--)
+			csum = (csum << 8) ^ crc32_table[((csum >> 24) ^ (*cp++)) & 0xffL];
+		for (len = size; len; len >>= 8)
+			csum = (csum << 8) ^ crc32_table[((csum >> 24) ^ len) & 0xffL];
+		csum ^= 0xffffffffL;
+	} else {
+		csum = 0;
+	}
+	DebugKE("calculated image csum is 0x%x\n", csum);
+
+	kfree(crc32_table);
+
+	if (csum != image_csum)
+		return -EPERM;
+
+	return 0;
+}
+
+static int check_bootblock_integrity(bootblock_struct_t *bootblock, u64 size)
+{
+	if (bootblock->info.signature != 0x8086)
+		return -EPERM;
+	else if (bootblock->bootblock_marker != 0xaa55)
+		return -EPERM;
+
+	return 0;
+}
+
+static int check_image(void __user *user_image, u64 size)
+{
+	bootblock_struct_t *image_bootblock;
+	void *image;
+	int ret = 0;
+
+	DebugKE("vmalloc of %lld bytes\n", size);
+	image = vmalloc(size);
+	if (!image)
+		DebugKE("vmalloc failed\n");
+
+	DebugKE("copy 0x%llx bytes from 0x%llx to 0x%llx\n", size, user_image, image);
+	if (copy_from_user(image, user_image, size)) {
+		DebugKE("failed to copy memory from user\n");
+		return -EFAULT;
+	}
+
+	image_bootblock = (bootblock_struct_t *) (image + IMAGE_BOOTBLOCK_OFFSET);
+
+	if (ret = check_image_csum(image, image_bootblock, size))
+		pr_err("image csum check failed\n");
+	else if (ret = check_image_mdl(image_bootblock))
+		pr_err("image mdl check failed\n");
+	else if (ret = check_bootblock_integrity(image_bootblock, size))
+		pr_err("image integrity check failed\n");
+
+	vfree(image);
 
 	return ret;
 }
@@ -866,6 +980,14 @@ static long kexec_reboot(struct kexec_reboot_param __user *param)
 		return -EINVAL;
 	}
 
+	if (ret = check_image(p.image, p.image_size))
+		return ret;
+
+	if (!p.initrd_size) {
+		initrd.valid_size = 0;
+		initrd.phys_addr = 0;
+	}
+
 	DebugKE("copy %d bytes of cmdline from 0x%llx to 0x%llx\n",
 		p.cmdline_size, p.cmdline, cmdline);
 	if (copy_from_user(cmdline, (void __user *) p.cmdline, p.cmdline_size)) {
@@ -875,11 +997,10 @@ static long kexec_reboot(struct kexec_reboot_param __user *param)
 	cmdline[p.cmdline_size] = 0;
 	DebugKE("cmdline is '%s'\n", cmdline);
 
-	image_bootblock =
-		(bootblock_struct_t __user *)(p.image + IMAGE_BOOTBLOCK_OFFSET);
+	image_bootblock = (bootblock_struct_t __user *)(p.image + IMAGE_BOOTBLOCK_OFFSET);
 
 	read_USD_reg(&usd);
-	if (ret = reserve_stack_mem(virt_to_phys((void *)usd.USD_base)))
+	if (ret = reserve_stack_mem(e2k_virt_to_phys((void *)usd.USD_base)))
 		return ret;
 
 	if (ret = alloc_bootblock_mem(&bootblock))
@@ -889,8 +1010,10 @@ static long kexec_reboot(struct kexec_reboot_param __user *param)
 			p.image_size - IMAGE_KERNEL_CODE_OFFSET, &image))
 		goto out_bootblock;
 
-	if (ret = alloc_initrd_mem(p.initrd_size, &initrd))
-		goto out_code;
+	if (p.initrd_size) {
+		if (ret = alloc_initrd_mem(p.initrd_size, &initrd))
+			goto out_code;
+	}
 
 	if (ret = copy_bootblock_mem(bootblock, bootblock_virt))
 		goto out_initrd;
@@ -899,14 +1022,18 @@ static long kexec_reboot(struct kexec_reboot_param __user *param)
 			(void __user *) (p.image + IMAGE_KERNEL_CODE_OFFSET)))
 		goto out_initrd;
 
-	if (ret = copy_initrd_mem(&initrd, (void __user *) p.initrd))
-		goto out_initrd;
+	if (p.initrd_size) {
+		if (ret = copy_initrd_mem(&initrd, (void __user *) p.initrd))
+			goto out_initrd;
+	}
 
 	if (ret = find_continuous_kernel_code_mem(&image))
 		goto out_initrd;
 
-	if (ret = find_continuous_initrd_mem(&initrd))
-		goto out_code_cont;
+	if (p.initrd_size) {
+		if (ret = find_continuous_initrd_mem(&initrd))
+			goto out_code_cont;
+	}
 
 	if (DEBUG_KEXEC_MODE)
 		memblock_dump_all();
@@ -945,7 +1072,7 @@ out_code:
 out_bootblock:
 	free_bootblock_mem(bootblock);
 out_stack:
-	unreserve_stack_mem(virt_to_phys((void *)usd.USD_base));
+	unreserve_stack_mem(e2k_virt_to_phys((void *)usd.USD_base));
 
 	return ret;
 }
@@ -1003,7 +1130,7 @@ static long lintel_reboot(struct lintel_reboot_param __user *param)
 		return -EINVAL;
 
 	read_USD_reg(&usd);
-	if (ret = reserve_stack_mem(virt_to_phys((void *)usd.USD_base)))
+	if (ret = reserve_stack_mem(e2k_virt_to_phys((void *)usd.USD_base)))
 		return ret;
 
 	if (ret = alloc_bootblock_mem(&bootblock))
@@ -1050,7 +1177,7 @@ out_code:
 out_bootblock:
 	free_bootblock_mem(bootblock);
 out_stack:
-	unreserve_stack_mem(virt_to_phys((void *)usd.USD_base));
+	unreserve_stack_mem(e2k_virt_to_phys((void *)usd.USD_base));
 
 	return ret;
 }

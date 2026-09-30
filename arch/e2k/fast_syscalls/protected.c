@@ -114,7 +114,7 @@ extern long ttable_entry8(int sys_num,
 		      : [_ret] "=r" (__ret), [_prev_usd] "=&r" (prev_usd) \
 		      : [_func] "i" (&ttable_entry8), [_sys_num] "r" (sys_num), \
 			[_usd_lo] "r" (usd_lo), \
-		        [_arg2] "r" (arg2), [_arg3] "r" (arg3), \
+			[_arg2] "r" (arg2), [_arg3] "r" (arg3), \
 			[_arg4] "r" (arg4), [_arg5] "r" (arg5), \
 			[_arg6] "r" (arg6), [_arg7] "r" (arg7), \
 			[_tag2] "r" (tag2), [_tag3] "r" (tag3), \
@@ -150,8 +150,9 @@ int protected_fast_sys_clock_gettime(u32 tags, u64 usd_lo,
 		return FASTSYS_PROTECTED_FALLBACK(__NR_clock_gettime, tags,
 					 usd_lo, which_clock, arg3, arg4, arg5);
 
+	/* Can use `|=` because __put_user_switched_pt can return only -EFAULT error */
 	ret = __put_user_switched_pt(kts64_tv_sec, &tp->tv_sec);
-	return unlikely(ret) ? ret : __put_user_switched_pt(kts64_tv_nsec, &tp->tv_nsec);
+	return ret | __put_user_switched_pt(kts64_tv_nsec, &tp->tv_nsec);
 }
 
 notrace __interrupt __section(".entry.text")
@@ -187,8 +188,9 @@ int protected_fast_sys_gettimeofday(u32 tags, u64 usd_lo,
 	if (tz) {
 		typeof(sys_tz.tz_minuteswest) minuteswest = sys_tz.tz_minuteswest;
 		typeof(sys_tz.tz_dsttime) dsttime = sys_tz.tz_dsttime;
+		/* Can use `|=` because __put_user_switched_pt can return only -EFAULT error */
 		int ret = __put_user_switched_pt(minuteswest, &tz->tz_minuteswest);
-		return unlikely(ret) ? ret : __put_user_switched_pt(dsttime, &tz->tz_dsttime);
+		return ret | __put_user_switched_pt(dsttime, &tz->tz_dsttime);
 	} else {
 		return 0;
 	}
@@ -222,8 +224,9 @@ int protected_fast_sys_getcpu(u32 tags, u64 usd_lo __always_unused,
 		int node = cpu_to_node(cpu);
 		ret = __put_user_switched_pt(node, nodep);
 	}
+	/* Can use `|=` because __put_user_switched_pt can return only -EFAULT error */
 	if (cpup)
-		ret = unlikely(ret) ? ret : __put_user_switched_pt(cpu, cpup);
+		ret |= __put_user_switched_pt(cpu, cpup);
 
 	return 0;
 }
@@ -261,13 +264,13 @@ int protected_fast_sys_siggetmask(u32 tags, u64 usd_lo __always_unused,
 # error We read u64 value here...
 #endif
 notrace __interrupt __section(".entry.text")
-int protected_fast_sys_getcontext(u32 tags, u64 usd_lo __always_unused,
-				  u64 arg2, u64 arg3, size_t sigsetsize)
+int protected_fast_sys_getcontext(u32 tags, u64 usd_lo, u64 arg2, u64 arg3,
+				  size_t sigsetsize, u64 unused __always_unused, u64 cr1_lo)
 {
 	struct thread_info *ti = READ_CURRENT_REG();
 	const struct task_struct *task = thread_info_task(ti);
-	register u64 pcsp_lo, pcsp_hi;
-	register u32 fpcr, fpsr, pfpfr;
+	u64 pcsp_lo, pcsp_hi, psp_lo, psp_hi, sbr, cr1_lo_cur;
+	u32 fpcr, fpsr, pfpfr;
 	u64 set, key;
 	int size;
 	struct ucontext_prot __user *ucp;
@@ -291,17 +294,23 @@ int protected_fast_sys_getcontext(u32 tags, u64 usd_lo __always_unused,
 	if (unlikely(ret))
 		return ret;
 
-	E2K_GETCONTEXT(fpcr, fpsr, pfpfr, pcsp_lo, pcsp_hi);
+	E2K_GETCONTEXT(fpcr, fpsr, pfpfr, pcsp_lo, pcsp_hi, psp_lo, psp_hi, sbr, cr1_lo_cur);
 
 	/* We want stack to point to user frame that called us */
 	pcsp_hi -= 2 * SZ_OF_CR;
+	psp_hi -= ((e2k_cr1_lo_t) { .word = cr1_lo_cur }).wbs * EXT_4_NR_SZ;
+	psp_hi -= ((e2k_cr1_lo_t) { .word = cr1_lo }).wbs * EXT_4_NR_SZ;
 
+	/* Can use `|=` because __put_user_switched_pt can return only -EFAULT error */
 	ret = __put_user_switched_pt(set, (u64 __user *) &ucp->uc_sigmask);
-	ret = unlikely(ret) ? ret : __put_user_switched_pt(key, &ucp->uc_mcontext.sbr);
-	ret = unlikely(ret) ? ret : __put_user_switched_pt(pcsp_lo, &ucp->uc_mcontext.pcsp_lo);
-	ret = unlikely(ret) ? ret : __put_user_switched_pt(pcsp_hi, &ucp->uc_mcontext.pcsp_hi);
-	ret = unlikely(ret) ? ret : __put_user_switched_pt(fpcr, &ucp->uc_extra.fpcr);
-	ret = unlikely(ret) ? ret : __put_user_switched_pt(fpsr, &ucp->uc_extra.fpsr);
-	return unlikely(ret) ? ret : __put_user_switched_pt(pfpfr, &ucp->uc_extra.pfpfr);
+	ret |= __put_user_switched_pt(key, uc_coroutine_key_128(ucp));
+	ret |= __put_user_switched_pt(pcsp_lo, &ucp->uc_mcontext.pcsp_lo);
+	ret |= __put_user_switched_pt(pcsp_hi, &ucp->uc_mcontext.pcsp_hi);
+	ret |= __put_user_switched_pt(psp_lo, &ucp->uc_mcontext.psp_lo);
+	ret |= __put_user_switched_pt(psp_hi, &ucp->uc_mcontext.psp_hi);
+	ret |= __put_user_switched_pt(sbr, &ucp->uc_mcontext.sbr);
+	ret |= __put_user_switched_pt(fpcr, &ucp->uc_extra.fpcr);
+	ret |= __put_user_switched_pt(fpsr, &ucp->uc_extra.fpsr);
+	return ret | __put_user_switched_pt(pfpfr, &ucp->uc_extra.pfpfr);
 }
 

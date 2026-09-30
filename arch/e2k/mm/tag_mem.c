@@ -1127,17 +1127,17 @@ void __init
 swap_info_cache_init(void)
 {
 	swap_info_cache =  kmem_cache_create("swp_pg_inf_strct",
-                        sizeof(struct swap_page_info), 0,
-                        SLAB_HWCACHE_ALIGN, NULL, NULL);
-        if (!swap_info_cache)
-                panic("Cannot create swap info structures SLAB cache");
+			sizeof(struct swap_page_info), 0,
+			SLAB_HWCACHE_ALIGN, NULL, NULL);
+	if (!swap_info_cache)
+		panic("Cannot create swap info structures SLAB cache");
 
 } 
 
 void
 free_swap_info_struct(swap_page_info_t* info)
 {
-	        kmem_cache_free(swap_info_cache, info);
+		kmem_cache_free(swap_info_cache, info);
 }
 
 

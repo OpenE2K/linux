@@ -1,6 +1,6 @@
- # SPDX-License-Identifier: GPL-2.0
- # Copyright (c) 2023 MCST
- 
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2023 MCST
+
 obj-y := iset_v3.o iset_v5.o iset_v6.o cacheinfo.o recovery_string_v5.o hw_prefetchers.o
 
 CFLAGS_REMOVE_iset_v3.o = $(CFLAGS_ALL_CPUS)

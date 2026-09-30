@@ -76,11 +76,11 @@ sbus_is_slave(struct sbus_dev *dev)
 
 /* Device probing routines could find these handy */
 #define for_each_sbus(bus) \
-        for((bus) = sbus_root; (bus); (bus)=(bus)->next)
+	for((bus) = sbus_root; (bus); (bus)=(bus)->next)
 
 #define for_each_sbusdev(device, bus) \
-        for((device) = (bus)->devices; (device); (device)=(device)->next)
-        
+	for((device) = (bus)->devices; (device); (device)=(device)->next)
+	
 #define for_all_sbusdev(device, bus) \
 	for ((bus) = sbus_root; (bus); (bus) = (bus)->next) \
 		for ((device) = (bus)->devices; (device); (device) = (device)->next)
@@ -94,7 +94,7 @@ sbus_is_slave(struct sbus_dev *dev)
 #if 0
 /* TODO */
 void prom_adjust_ranges(struct linux_prom_ranges *, int,
-                         struct linux_prom_ranges *, int);
+			 struct linux_prom_ranges *, int);
 #endif
 #if 0
 /* These yield IOMMU mappings in consistent mode. */
@@ -201,7 +201,7 @@ int sbus_request_irq(
 	unsigned int irq,
 	irqreturn_t (*handler)(int, void *),
 	irqreturn_t (*threadfn)(int, void *),
-        unsigned long irqflags, 
+	unsigned long irqflags, 
 	const char * devname,
 	void *dev_id );
 void sbus_free_irq ( unsigned int irq, void *dev_id );

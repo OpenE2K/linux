@@ -22,7 +22,7 @@
 
 
 int native_mkctxt_prepare_hw_user_stacks(void __user *user_func,
-		void *args, u64 args_size, size_t d_stack_sz, int format,
+		void __user *args, u64 args_size, size_t d_stack_sz, int format,
 		void __user *tramp_ps_frames, void __user *ps_frames,
 		e2k_mem_crs_t __user *cs_frames, const void __user *uc_link)
 {
@@ -79,19 +79,20 @@ int native_mkctxt_prepare_hw_user_stacks(void __user *user_func,
 
 	for (i = 0; i < args_size / 16; i++) {
 		u64 val_lo, val_hi;
-		u8 tag_lo, tag_hi, tag;
+		u32 tag;
 
 		if (IS_ALIGNED((unsigned long) args, 16)) {
-			load_qvalue_and_tagq((unsigned long) (args + 16 * i),
-					&val_lo, &val_hi, &tag_lo, &tag_hi);
+			if (get_user_tagged_16(val_lo, val_hi, tag, args + 16 * i))
+				return -EFAULT;
 		} else {
 			/* Can happen in 32 and 64 bit modes */
-			load_value_and_tagd(args + 16 * i, &val_lo, &tag_lo);
-			load_value_and_tagd(args + 16 * i + 8, &val_hi, &tag_hi);
+			u32 tag_lo, tag_hi;
+			if (get_user_tagged_8(val_lo, tag_lo, (u64 __user *) (args + 16 * i)) ||
+			    get_user_tagged_8(val_hi, tag_hi, (u64 __user *) (args + 16 * i + 8)))
+				return -EFAULT;
+			tag = (tag_hi << 4) | tag_lo;
 		}
-		tag = (tag_hi << 4) | tag_lo;
-		DebugCTX_STACK("register arguments: 0x%llx 0x%llx\n",
-				val_lo, val_hi);
+		DebugCTX_STACK("register arguments: 0x%llx 0x%llx\n", val_lo, val_hi);
 
 
 		ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
@@ -104,9 +105,10 @@ int native_mkctxt_prepare_hw_user_stacks(void __user *user_func,
 
 	if (2 * i < args_size / 8) {
 		u64 val;
-		u8 tag;
+		u32 tag;
 
-		load_value_and_tagd(args + 16 * i, &val, &tag);
+		if (get_user_tagged_8(val, tag, (u64 __user *) (args + 16 * i)))
+			return -EFAULT;
 
 		ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
 		ret = __put_user_tagged_8(val, tag,

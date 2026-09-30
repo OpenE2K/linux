@@ -13,15 +13,23 @@
 #include <asm/kvm/proc_context_types.h>
 #include <asm/copy-hw-stacks.h>
 
+#define MAX_ARGS_SIZE 1024
 static inline int
-kvm_mkctxt_prepare_hw_user_stacks(void __user *user_func, void *args,
+kvm_mkctxt_prepare_hw_user_stacks(void __user *user_func, void __user *args,
 		u64 args_size, size_t d_stack_sz, int format,
 		void __user *tramp_ps_frames, void __user *ps_frames,
 		e2k_mem_crs_t __user *cs_frames, const void __user *uc_link)
 {
 	unsigned long tramp_ps_frames_k, ps_frames_k, cs_frames_k;
 	struct page *pg_tramp_ps_frames, *pg_ps_frames, *pg_cs_frames;
+	char args_buf[MAX_ARGS_SIZE];
 	int ret = 0;
+
+	if (args_size > MAX_ARGS_SIZE)
+		return -EINVAL;
+
+	if (copy_from_user_with_tags(args_buf, args, args_size))
+		return -EFAULT;
 
 	/* Get kernel address for procedure stack */
 	pg_tramp_ps_frames = get_user_addr_to_kernel_page((unsigned long) tramp_ps_frames);
@@ -57,7 +65,7 @@ kvm_mkctxt_prepare_hw_user_stacks(void __user *user_func, void *args,
 
 	kvm_proc_ctxt_hw_stacks_t hw_stacks = {
 		.user_func = user_func,
-		.args = args,
+		.args = args_buf,
 		.args_size = args_size,
 		.d_stack_sz = d_stack_sz,
 		.format = format,

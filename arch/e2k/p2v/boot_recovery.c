@@ -180,8 +180,6 @@ boot_recovery_mem_init(bool bsp, int cpuid, bootblock_struct_t *bootblock,
 	 * old state of bootblock info and flags
 	 */
 	if (BOOT_IS_BSP(bsp)) {
-		bootblock->kernel_flags &=
-			~(RECOVERY_BB_FLAG | NO_READ_IMAGE_BB_FLAG);
 		bootblock->boot_flags &=
 			~(RECOVERY_BB_FLAG | NO_READ_IMAGE_BB_FLAG);
 		write_back_CACHE_L12();

@@ -489,8 +489,8 @@ static void flush_tlb_kernel_range_info(void *arg)
 void native_flush_tlb_kernel_range(unsigned long start, unsigned long end)
 {
 	struct flush_tlb_info info = {
-		start = start,
-		end = end
+		.start = start,
+		.end = end
 	};
 
 	on_each_cpu(flush_tlb_kernel_range_info, &info, 1);
@@ -509,8 +509,8 @@ EXPORT_SYMBOL(native_flush_tlb_kernel_range);
 void native_flush_tlb_kernel_range_nmi(unsigned long start, unsigned long end)
 {
 	struct flush_tlb_info info = {
-		start = start,
-		end = end
+		.start = start,
+		.end = end
 	};
 
 	nmi_on_each_cpu(flush_tlb_kernel_range_info, &info, 1, 0);

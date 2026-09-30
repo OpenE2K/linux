@@ -78,8 +78,15 @@ static int is_cy14b101p_exist(void)
 static int register_spi_devices(void)
 {
 #ifdef CONFIG_OF
-	if (of_have_populated_dt())
+	if (of_have_populated_dt()) {
+#ifdef CONFIG_E2K
+		/* All device trees must mention RTC if available. */
+		if (bootblock_virt->info.bios.devtree)
+			return 0;
+#else
 		return 0;
+#endif
+	}
 #endif
 	/* Declare SPI devices to the SPI core */
 	if (!is_cy14b101p_exist())

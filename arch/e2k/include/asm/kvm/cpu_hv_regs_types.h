@@ -96,10 +96,10 @@ typedef	union virt_ctrl_cu {
 					INTC_CU_UNCOND_EVENT_MAX)
 typedef union {
 	struct {
-		u64 evn_c	: INTC_CU_COND_EVENT_MAX;
-		u64 exc_c	: INTC_CU_COND_EXC_MAX;
-		u64 evn_u	: INTC_CU_UNCOND_EVENT_MAX;
-		u64 hi_half	: 32;
+		u64 evn_c	: 16;
+		u64 exc_c	: 8;
+		u64 evn_u	: 8;
+		u64 tir_fz	: 1;
 	};
 	struct {
 		/* evn_c fields */
@@ -113,7 +113,7 @@ typedef union {
 		u64 rw_sclkm3		: 1;
 		u64 rw_dbg		: 1;
 		u64 hcem		: 1;
-		u64 virt		: 1;
+		u64 virt		: 1;	/* [10] */
 		u64 stop		: 1;
 		u64 hret_last_wish	: 1;
 		u64 __reserved_evn_c	: 3;
@@ -122,7 +122,7 @@ typedef union {
 		u64 exc_data_debug	: 1;
 		u64 exc_instr_page	: 1;
 		u64 exc_data_page	: 1;
-		u64 exc_mova		: 1;
+		u64 exc_mova		: 1;	/* [20] */
 		u64 exc_interrupt	: 1;
 		u64 exc_nm_interrupt	: 1;
 		u64 __reserved_exc_c	: 1;
@@ -133,11 +133,8 @@ typedef union {
 		u64 rr			: 1;
 		u64 rw			: 1;
 		u64 exc_mem_error	: 1;
-		u64 wait_trap		: 1;
+		u64 wait_trap		: 1;	/* [30] */
 		u64 dbg			: 1;
-		/* high half of hdr_lo */
-		u64 tir_fz		: 1;
-		u64 __reserved		: 31;
 	};
 	u64 word;
 } intc_info_cu_hdr_lo_t;
@@ -331,6 +328,7 @@ typedef union {
 
 /* Possible values for `INTC_INFO_CU[2 * j].event_code' */
 typedef enum info_cu_event_code {
+	/* Can be used by hypervisor to skip entry */
 	ICE_FORCED = 0,
 	ICE_READ_CU = 1,
 	ICE_WRITE_CU = 2,
@@ -344,7 +342,6 @@ typedef u64 intc_info_cu_entry_hi_t;
 typedef struct e2k_intc_info_cu_entry {
 	intc_info_cu_entry_lo_t lo;
 	intc_info_cu_entry_hi_t hi;
-	bool no_restore;
 } intc_info_cu_entry_t;
 
 #define INTC_INFO_CU_MAX	6
@@ -364,7 +361,7 @@ typedef union {
 		u64 __reserved	: 31;
 	};
 	u64 word;
-} g_preempt_tmr_t;
+} e2k_g_preempt_tmr_t;
 
 #endif /* __KERNEL__ */
 

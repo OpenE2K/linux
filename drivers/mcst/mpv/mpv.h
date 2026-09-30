@@ -101,7 +101,7 @@ unsigned char gen_mode_reg_ioh2[MAX_IOH2_VER + 1]  = {0x14};
  
 typedef struct __raw_wqueue {
 	struct task_struct *task;
-        struct list_head task_list;
+	struct list_head task_list;
 } raw_wqueue_t;
 
 typedef struct mpv_intrk
@@ -124,6 +124,10 @@ typedef struct mpv_intrk
 	int		prev_time_clk;
 	/* common number of interrupts register value */
 	int		intpts_cnt;
+	/* monotonic time when interrupt was appear in controler */
+	long long	intr_appear_raw;
+	/* real time when interrupt was appear in controler */
+	long long	intr_appear_real;
 	/* interval of interrupts genarated by MPV */
 	long long	interv_gen_ns;
 	/* don't leave cpu < wait_on_cpu mcs*/
@@ -157,7 +161,7 @@ typedef struct mpv_state_struct {
 	unsigned char		prev_time_reg[10];
 
 	int			oncpu_irq; /* irq mask saved for old mpv */
-	int			psecs_per_corr_clck;
+	long long		fsecs_per_mpvclock; /* femtoseconds/mpvclock */
 	int			intr_assemble;
 	mpv_intrk_t		kdata_intr[MPV_NUM_IN_INTR];
 	struct list_head	any_in_task_list;

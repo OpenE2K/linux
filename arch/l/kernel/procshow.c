@@ -129,16 +129,17 @@ static int bootdata_proc_show(struct seq_file *m, void *data)
 	seq_printf(m,
 		"boot_ver='%s'\n"
 		"mb_type='%s' (0x%x)\n"
-		"chipset_type='%s'\n"
+		"chipset_type='IOHUB'\n"
 		"cpu_type='%s'\n"
 		"cache_lines_damaged=%lu\n"
+		"reset_type=0x%x\n"
 		"%s%s%s",
 		bootblock_virt->info.bios.boot_ver,
 		mcst_mb_name,
 		bootblock_virt->info.bios.mb_type,
-		GET_CHIPSET_TYPE_NAME(bootblock_virt->info.bios.chipset_type),
 		GET_CPU_TYPE_NAME(bootblock_virt->info.bios.cpu_type),
 		(unsigned long)bootblock_virt->info.bios.cache_lines_damaged,
+		bootblock_virt->info.bios.reset_type,
 		strlen(uuidstr) ? uuidstr : "",
 		strlen(macstr) ? macstr : "",
 		strlen(serstr) ? serstr : "");

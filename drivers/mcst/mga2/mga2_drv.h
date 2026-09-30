@@ -159,6 +159,7 @@ struct mga2_gem_object {
 	dma_addr_t dma_addr;
 	struct sg_table *sgt;
 	struct page **pages;
+	enum dma_data_direction dma_dir;
 
 	/**
 	 * @read_domains: Read memory domains.
@@ -214,10 +215,12 @@ int mga2_cursor_move(struct drm_crtc *crtc, int x, int y);
 
 void mga2_cursor_show(struct drm_crtc *crtc, u32 addr);
 void mga2_cursor_hide(struct drm_crtc *crtc);
-extern void mga2_gem_free_object(struct drm_gem_object *obj);
-extern int mga2_dumb_create(struct drm_file *file,
+void mga2_gem_free_object(struct drm_gem_object *obj);
+int mga2_dumb_create(struct drm_file *file,
 			    struct drm_device *dev,
 			    struct drm_mode_create_dumb *args);
+int mga2_gem_dumb_map_offset(struct drm_file *file, struct drm_device *dev,
+			    u32 handle, u64 *offset);
 
 #define DRM_FILE_PAGE_OFFSET ((0xFFFFFFFUL >> PAGE_SHIFT) + 1)
 
@@ -250,6 +253,8 @@ int mga2_gem_mmap_ioctl(struct drm_device *dev, void *data,
 			struct drm_file *filp);
 int mga2_gem_sync_ioctl(struct drm_device *dev, void *data,
 			struct drm_file *filp);
+int mga2_virt_to_handle(struct drm_device *drm, void *data,
+			struct drm_file *file);
 
 #define MGA2_PCI_PROTO	0
 #define MGA2_P2_PROTO	1

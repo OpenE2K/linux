@@ -28,50 +28,6 @@
 #define DBG(x...)
 #endif
 
-/* Hardware gained partial support for no_snoop mode only
- * in iset v6 so assume conservatively that on these cpus
- * we have such devices.
- *
- * Upon boot we will recheck this assumption by scanning
- * through all PCIe devices and checking whether they declare
- * "Enable No Snoop" (see check_for_no_snoop_devices()). */
-bool use_pcie_no_snoop = CONFIG_CPU_ISET_MIN >= 7;
-EXPORT_SYMBOL(use_pcie_no_snoop);
-
-static bool use_pcie_no_snoop_forced = false;
-
-int init_pcie_no_snoop(void)
-{
-	/* For generic kernels we have to initialize dynamically */
-	if (!use_pcie_no_snoop_forced)
-		use_pcie_no_snoop = cpu_has(CPU_FEAT_ISET_V7);
-	return 1;
-}
-pure_initcall(init_pcie_no_snoop);
-
-static int __init pcie_no_snoop_setup(char *str)
-{
-	if (!cpu_has(CPU_FEAT_ISET_V7)) {
-		pr_warn("pcie_no_snoop= option is supported only since iset v7\n");
-		return 1;
-	}
-
-	if (!strcmp(str, "enable")) {
-		use_pcie_no_snoop = true;
-	} else if (!strcmp(str, "disable")) {
-		use_pcie_no_snoop = false;
-	} else {
-		pr_warn("Unable to parse pcie_no_snoop=\n");
-		return 1;
-	}
-
-	pr_info("PCIe Enable No Snoop %s from cmdline\n",
-			(use_pcie_no_snoop) ? "enabled" : "disabled");
-	use_pcie_no_snoop_forced = true;
-	return 1;
-}
-__setup("pcie_no_snoop=", pcie_no_snoop_setup);
-
 /*
  * Propagate PCIe No Snoop setting into actual PCI
  */
@@ -88,28 +44,22 @@ static void fixup_pcie_no_snoop(struct pci_dev *dev)
 		}
 
 		if (!pci_read_config_word(dev, 0x40, &reg) &&
-		    !pci_write_config_word(dev, 0x40,
-				(use_pcie_no_snoop) ? (reg & ~0x10) : (reg | 0x10))) {
-			pci_info(dev, "%s PCIe Enable No Snoop\n",
-					(use_pcie_no_snoop) ? "setting" : "clearing");
+		    !pci_write_config_word(dev, 0x40, (reg | 0x10))) {
+			pci_info(dev, "clearing PCIe Enable No Snoop\n");
 		} else {
 			pci_err(dev, "WARNING: failed to write PCIe No Snoop\n");
 		}
 	} else if (pci_is_pcie(dev)) {
 		/* Normal case */
-		if (!use_pcie_no_snoop && !pcie_capability_clear_word(dev, PCI_EXP_DEVCTL,
-							PCI_EXP_DEVCTL_NOSNOOP_EN) ||
-		    use_pcie_no_snoop && !pcie_capability_set_word(dev, PCI_EXP_DEVCTL,
-							PCI_EXP_DEVCTL_NOSNOOP_EN)) {
-			pci_info(dev, "%s PCIe Enable No Snoop\n",
-					(use_pcie_no_snoop) ? "setting" : "clearing");
+		if (!pcie_capability_clear_word(dev, PCI_EXP_DEVCTL,
+						PCI_EXP_DEVCTL_NOSNOOP_EN)) {
+			pci_info(dev, "clearing PCIe Enable No Snoop\n");
 		} else {
 			pci_err(dev, "WARNING: failed to write PCIe No Snoop\n");
 		}
 	}
 }
 DECLARE_PCI_FIXUP_EARLY(PCI_ANY_ID, PCI_ANY_ID, fixup_pcie_no_snoop);
-
 
 char *pcibios_setup(char *str)
 {

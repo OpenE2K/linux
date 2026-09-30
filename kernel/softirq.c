@@ -27,10 +27,6 @@
 #include <linux/tick.h>
 #include <linux/irq.h>
 #include <linux/wait_bit.h>
-#ifdef CONFIG_MCST_RT
-#include <linux/sched/rt.h>
-#include <linux/mcst_rt.h>
-#endif 
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/irq.h>
@@ -482,17 +478,6 @@ asmlinkage __visible void do_softirq(void)
 }
 
 #endif /* !CONFIG_PREEMPT_RT */
-
-#ifdef CONFIG_MCST_RT
-void wakeup_delayed_softirq(int cpu)
-{
-	/* Called in idle or in __schedule with preempt_disabled */
-	struct task_struct *tsk = __this_cpu_read(ksoftirqd);
-	if (tsk && tsk->state != TASK_RUNNING)
-		wake_up_process(tsk);
-}
-#endif
-
 
 /*
  * We restart softirq processing for at most MAX_SOFTIRQ_RESTART times,

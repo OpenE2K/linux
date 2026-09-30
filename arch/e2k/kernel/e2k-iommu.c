@@ -285,7 +285,7 @@ static struct dte *dev_to_dte(struct e2k_iommu *i, struct device *dev)
 # define IOMMU_PTBAR_PRESENT		(1 << 0)
 
 #define E2K_IOMMU_DTBAR		SIC_iommu_dtba_lo
-# define IOMMU_DTBAR_DFLT_SZ	(E2K_DTE_MAX_BUS_NR << 2)
+# define IOMMU_DTBAR_DFLT_SZ	((E2K_DTE_MAX_BUS_NR & 0xff) << 2)
 # define IOMMU_DTBAR_CASHABLE_DTE	(1 << 1)
 # define IOMMU_DTBAR_PRESENT	(1 << 0)
 
@@ -838,7 +838,6 @@ static const struct pci_device_id e2c3_devices[] = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_3D_IMAGINATION_GX6650)},
 	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_IMAGINATION_VXE)},
 	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_IMAGINATION_VXD)},
-	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_VP9_BIGEV2)},
 	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_VP9_G2)},
 	{ }	/* terminate list */
 };
@@ -1079,7 +1078,7 @@ static int e2k_iommu_map(struct iommu_domain *iommu_domain,
 
 static size_t e2k_iommu_unmap(struct iommu_domain *iommu_domain,
 				unsigned long iova, size_t size,
-     				struct iommu_iotlb_gather *gather)
+				struct iommu_iotlb_gather *gather)
 {
 	struct e2k_iommu_domain *d = to_e2k_domain(iommu_domain);
 	size_t unmapped;

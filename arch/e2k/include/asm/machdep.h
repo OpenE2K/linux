@@ -18,6 +18,7 @@
 #include <asm/sections.h>
 #include <asm/mmu_types.h>
 
+
 #ifdef __KERNEL__
 
 struct cpuinfo_e2k;
@@ -94,8 +95,6 @@ typedef struct machdep {
 					unsigned long not_restore_gregs_mask);
 
 	void (*save_dimtp)(union e2k_dimtp *);
-	void (*restore_dimtp)(const union e2k_dimtp *);
-	void (*clear_dimtp)(void);
 
 	void (*save_kvm_context)(struct kvm_vcpu_arch *);
 	void (*restore_kvm_context)(const struct kvm_vcpu_arch *);
@@ -192,7 +191,7 @@ CPUHAS(CPU_HWBUG_CLW,
 		false,
 		cpu == IDR_E2S_MDL && revision == 0 ||
 			cpu == IDR_E12C_MDL && revision == 0 ||
-			cpu == IDR_E16C_MDL && revision == 0 ||
+			cpu == IDR_E16C_MDL && revision <= 1 ||
 			cpu == IDR_E2C3_MDL && revision <= 1);
 /* #78411 - Sometimes exc_illegal_instr_addr is generated
  * instead of exc_instr_page_miss.
@@ -299,6 +298,12 @@ CPUHAS(CPU_HWBUG_FALSE_SS,
 		cpu == IDR_E2S_MDL && revision <= 2 ||
 			cpu == IDR_E8C_MDL && revision <= 2 ||
 			cpu == IDR_E1CP_MDL || cpu == IDR_E8C2_MDL);
+/* #105047/rm 27379 - optimized DMA mode %sic_hw1.dma_wr_glue_en does not work.
+ * Workaround - disable it. */
+CPUHAS(CPU_HWBUG_DMA_WR_GLUE,
+		IS_ENABLED(CONFIG_E2K_MACHINE) || CONFIG_CPU_ISET_MIN >= 6,
+		IS_ENABLED(CONFIG_CPU_E8C2),
+		cpu == IDR_E8C2_MDL);
 /* #117649 - false exc_data_debug are generated based on _previous_
  * values in ld/st address registers.
  * Workaround - forbid data breakpoint on the first 31 bytes
@@ -319,6 +324,13 @@ CPUHAS(CPU_HWBUG_TLB_FLUSH_L1D,
 		IS_ENABLED(CONFIG_E2K_MACHINE),
 		IS_ENABLED(CONFIG_CPU_E8C2),
 		cpu == IDR_E8C2_MDL);
+/* #120921 - cannot simultaneously clear %sclkm1.mode and set %sclkm1.mdiv.
+ * Workaround - clear %sclkm1.mode, wait for %sclkr, then set %sclkm1.mdiv */
+CPUHAS(CPU_HWBUG_SCLKM1_WRITE,
+		IS_ENABLED(CONFIG_E2K_MACHINE),
+		IS_ENABLED(CONFIG_CPU_E2C3) || IS_ENABLED(CONFIG_E16C) ||
+			IS_ENABLED(CONFIG_CPU_E12C),
+		cpu == IDR_E2C3_MDL || cpu == IDR_E16C_MDL || cpu == IDR_E12C_MDL);
 /* #121311 - asynchronous entries in INTC_INFO_MU always have "pm" bit set.
  * Workaround - use "pm" bit saved in guest's chain stack. */
 CPUHAS(CPU_HWBUG_GUEST_ASYNC_PM,
@@ -397,9 +409,26 @@ CPUHAS(CPU_HWBUG_C3_WAIT_MA_C,
 		IS_ENABLED(CONFIG_CPU_E2S) || IS_ENABLED(CONFIG_CPU_E8C) ||
 			IS_ENABLED(CONFIG_CPU_E1CP),
 		cpu == IDR_E2S_MDL || cpu == IDR_E8C_MDL || cpu == IDR_E1CP_MDL);
+/* #127983 - sclkr "int" mode does not work when cpu core is paused (C3 state).
+ * Workaround - pause cpuidle when using "int" mode */
+CPUHAS(CPU_HWBUG_SCLKR_INT_C3,
+		IS_ENABLED(CONFIG_E2K_MACHINE),
+		IS_ENABLED(CONFIG_CPU_E2S) || IS_ENABLED(CONFIG_CPU_E8C) ||
+			IS_ENABLED(CONFIG_CPU_E1CP) || IS_ENABLED(CONFIG_CPU_E8C2),
+		cpu == IDR_E2S_MDL || cpu == IDR_E8C_MDL ||
+			cpu == IDR_E1CP_MDL || cpu == IDR_E8C2_MDL);
 /* #128127 - Intercepting SCLKM3 write does not prevent guest from writing it.
  * Workaround - Update SH_SCLKM3 in intercept handler */
 CPUHAS(CPU_HWBUG_VIRT_SCLKM3_INTC,
+		!IS_ENABLED(CONFIG_CPU_E12C) && !IS_ENABLED(CONFIG_CPU_E16C) &&
+			!IS_ENABLED(CONFIG_CPU_E2C3),
+		false,
+		cpu == IDR_E12C_MDL && revision == 0 ||
+			cpu == IDR_E16C_MDL && revision == 0 ||
+			cpu == IDR_E2C3_MDL && revision == 0);
+/* #128142 - code 0 in INTC_INFO_CU[2*i].event_code hangs hardware.
+ * Workaround - manually remove such entries from list */
+CPUHAS(CPU_HWBUG_INTC_INFO_CU_0,
 		!IS_ENABLED(CONFIG_CPU_E12C) && !IS_ENABLED(CONFIG_CPU_E16C) &&
 			!IS_ENABLED(CONFIG_CPU_E2C3),
 		false,
@@ -451,12 +480,17 @@ CPUHAS(CPU_HWBUG_VIRT_PSIZE_INTERCEPTION,
  * Workaround - do not use "las"/"sas"/"st_rel", and add 5 nops after "lal".
  * #133605 - "lal"/"las"/"sas"/"sal" barriers do not work in certain conditions.
  * Workaround - add {nop} before them.
+ * #159721 - a pair of store instruction with specific MAS do not work.
+ * Workaround - insert four instructions between such stores.
  *
- * Note that #133605 workaround is split into two parts:
- * CPU_NO_HWBUG_SOFT_WAIT - for e16c/e2c3
+ * Note that #133605/#159721 workarounds are split into several parts:
+ * CPU_NO_HWBUG_SOFT_WAIT - for e16c/e2c3/e12c
+ * CPU_NO_HWBUG_STORE_RELEASE - for e16c/e2c3/e12c
  * CPU_HWBUG_SOFT_WAIT_E8C2 - for e8c2
- * This is done because it is very convenient to merge #130066, #134351
- * and #133605 bugs workarounds together for e16c/e2c3. */
+ * CPU_HWBUG_STORE_MAS - for e16c/e2c3/e12c
+ *
+ * This is done because it is very convenient to merge all workarounds
+ * together for e16c/e12c/e2c3. */
 CPUHAS(CPU_NO_HWBUG_SOFT_WAIT,
 		!IS_ENABLED(CONFIG_CPU_E12C) && !IS_ENABLED(CONFIG_CPU_E16C) &&
 			!IS_ENABLED(CONFIG_CPU_E2C3),
@@ -464,6 +498,20 @@ CPUHAS(CPU_NO_HWBUG_SOFT_WAIT,
 		!(cpu == IDR_E12C_MDL && revision == 0 ||
 		  cpu == IDR_E16C_MDL && revision == 0 ||
 		  cpu == IDR_E2C3_MDL && revision == 0));
+CPUHAS(CPU_NO_HWBUG_STORE_RELEASE,
+		!IS_ENABLED(CONFIG_CPU_E12C) && !IS_ENABLED(CONFIG_CPU_E16C) &&
+			!IS_ENABLED(CONFIG_CPU_E2C3),
+		true,
+		!(cpu == IDR_E12C_MDL && revision == 0 ||
+		  cpu == IDR_E16C_MDL && revision <= 2 ||
+		  cpu == IDR_E2C3_MDL && revision <= 2));
+CPUHAS(CPU_HWBUG_STORE_MAS,
+		!IS_ENABLED(CONFIG_CPU_E12C) && !IS_ENABLED(CONFIG_CPU_E16C) &&
+			!IS_ENABLED(CONFIG_CPU_E2C3),
+		false,
+		cpu == IDR_E12C_MDL && revision == 0 ||
+			cpu == IDR_E16C_MDL && revision <= 2 ||
+			cpu == IDR_E2C3_MDL && revision <= 2);
 CPUHAS(CPU_HWBUG_SOFT_WAIT_E8C2,
 		IS_ENABLED(CONFIG_E2K_MACHINE),
 		IS_ENABLED(CONFIG_CPU_E8C2),
@@ -499,18 +547,51 @@ CPUHAS(CPU_HWBUG_C3_CREDITS_L3,
 		IS_ENABLED(CONFIG_E2K_MACHINE),
 		IS_ENABLED(CONFIG_CPU_E8C) || IS_ENABLED(CONFIG_CPU_E8C2),
 		cpu == IDR_E8C_MDL || cpu == IDR_E8C2_MDL);
-/* #137536 - intercept (or interrupt), after writing CR, while hardware is
- * waiting for fill CF may corrupt all other CRs
+/* #137536 - intercept (or interrupt), after writing CR which in turn is
+ * blocked in hardware by previous FILL CF, may corrupt all other CRs.
  * Workaround - add wait ma_c=1 to the same instruction, as CR write
- * This workaround covers most possible cases, but not all of them */
-CPUHAS(CPU_HWBUG_INTC_CR_WRITE,
-		!IS_ENABLED(CONFIG_CPU_E12C) && !IS_ENABLED(CONFIG_CPU_E16C) &&
-			!IS_ENABLED(CONFIG_CPU_E2C3),
+ * There are some variants:
+ *  - In guest add barrier to every CR write and another before all writes;
+ *  - In host v5/v6 add barrier to the first CR write only and another before all writes;
+ *  - In host v3/v4 add barrier to the first CR write only.
+ *
+ * Split workaround accordingly: CPU_HWBUG_CR_BEFORE_WRITES determines whether
+ * additional `wait` before all writes is required and CPU_HWBUG_CR_EVERY_WRITE/
+ * CPU_HWBUG_CR_FIRST_WRITE determine whether `wait` is needed for `rwd %cr`.
+ *
+ * CPU_NO_HWBUG_CR_WRITE is compile-time combination of all of the above,
+ * so if it is set then bug is not possible (but not the other way around). */
+CPUHAS(CPU_HWBUG_CR_BEFORE_WRITES,
+		CONFIG_CPU_ISET_MIN >= 7,
+		false,
+		cpu == IDR_E12C_MDL && revision == 0 ||
+		cpu == IDR_E16C_MDL && revision == 0 ||
+		cpu == IDR_E2C3_MDL && revision == 0 ||
+		cpu == IDR_E8C2_MDL ||
+		is_hardware_guest &&
+			(cpu == IDR_E2S_MDL || cpu == IDR_E8C_MDL || cpu == IDR_E1CP_MDL));
+CPUHAS(CPU_HWBUG_CR_EVERY_WRITE,
+		CONFIG_CPU_ISET_MIN >= 7,
 		false,
 		(cpu == IDR_E12C_MDL && revision == 0 ||
 		 cpu == IDR_E16C_MDL && revision == 0 ||
-		 cpu == IDR_E2C3_MDL && revision == 0) &&
+		 cpu == IDR_E2C3_MDL && revision == 0 ||
+		 cpu == IDR_E2S_MDL || cpu == IDR_E8C_MDL ||
+		 cpu == IDR_E1CP_MDL || cpu == IDR_E8C2_MDL) &&
 			is_hardware_guest);
+CPUHAS(CPU_HWBUG_CR_FIRST_WRITE,
+		CONFIG_CPU_ISET_MIN >= 7,
+		false,
+		(cpu == IDR_E12C_MDL && revision == 0 ||
+		 cpu == IDR_E16C_MDL && revision == 0 ||
+		 cpu == IDR_E2C3_MDL && revision == 0 ||
+		 cpu == IDR_E2S_MDL || cpu == IDR_E8C_MDL ||
+		 cpu == IDR_E1CP_MDL || cpu == IDR_E8C2_MDL) &&
+			!is_hardware_guest);
+CPUHAS(CPU_NO_HWBUG_CR_WRITE,
+		true,
+		CONFIG_CPU_ISET_MIN >= 7,
+		true);
 /* #142262 - tagged 'ldw' instruction does not work
  * Workaround - insert 4 bubbles between tagged 'ldw' and potentially
  * aliasing previous 'stw'. */
@@ -518,7 +599,7 @@ CPUHAS(CPU_HWBUG_TAGGED_LDW,
 		!IS_ENABLED(CONFIG_CPU_E16C) && !IS_ENABLED(CONFIG_CPU_E12C) &&
 			!IS_ENABLED(CONFIG_CPU_E2C3),
 		false,
-		cpu == IDR_E16C_MDL && revision <= 1 ||
+		cpu == IDR_E16C_MDL && revision <= 2 ||
 			cpu == IDR_E2C3_MDL && revision <= 1 ||
 			cpu == IDR_E12C_MDL && revision == 0);
 /* e8c2 implementation of flush_tlb_page does not wait for the finish
@@ -552,12 +633,6 @@ CPUHAS(CPU_HWBUG_EXC_DEBUG,
 		IS_ENABLED(CONFIG_E2K_MACHINE),
 		CONFIG_CPU_ISET_MIN <= 6,
 		iset_ver <= E2K_ISET_V6);
-/* #144224 - sclkm1.div is 1 MHz less sametimes
- * Workaround - use previous correct frequency */
-CPUHAS(CPU_HWBUG_SCLKM1_DIV,
-		IS_ENABLED(CONFIG_E2K_MACHINE),
-		IS_ENABLED(CONFIG_CPU_E8C2) || IS_ENABLED(CONFIG_CPU_E2C3),
-		cpu == IDR_E8C2_MDL);
 /* #143614 - Secondary bus reset is broken on some PCIe bridges
  * Workaround - do not use it */
 CPUHAS(CPU_HWBUG_SECONDARY_BUS_RESET,
@@ -597,6 +672,39 @@ CPUHAS(CPU_HWBUG_CODE_PLACEMENT,
  * by writing us_cl_up value to us_cl_b, and immediately restoring usd_lo */
 CPUHAS(CPU_HWBUG_CLW_LOW_RESTORE,
 		IS_ENABLED(CONFIG_E2K_MACHINE),
+		IS_ENABLED(CONFIG_CPU_E2C3) || IS_ENABLED(CONFIG_CPU_E12C) ||
+			IS_ENABLED(CONFIG_CPU_E16C),
+		cpu == IDR_E2C3_MDL || cpu == IDR_E12C_MDL ||
+			cpu == IDR_E16C_MDL);
+/* #157558 - HCALL improperly switches compilation units, leading to bad
+ * CUIR/GD/CUD and sometimes to a spurious 'exc_illegal_instr_addr' trap on
+ * first IP of host hypercall handler.
+ *
+ * Workaround - ignore spurious interrupt and switch compilation unit with
+ * 'done'; it's not guaranteed because trap is generated only when guest's
+ * CUD.prot=1 and guest's CUD/GD are missing from hypervisor page tables. */
+CPUHAS(CPU_HWBUG_HCALL_EXC_ILL_INSTR_ADDR,
+		!IS_ENABLED(CONFIG_CPU_E2C3) && !IS_ENABLED(CONFIG_CPU_E12C) &&
+			!IS_ENABLED(CONFIG_CPU_E16C),
+		false,
+		cpu == IDR_E2C3_MDL && revision <= 2 ||
+			cpu == IDR_E16C_MDL && revision <= 1 ||
+			cpu == IDR_E12C_MDL && revision == 0);
+/* #163114 - atomics can cause unexpected exc_data_page in guest.
+ * Workaround - use address before issuing "lock wait" load. */
+CPUHAS(CPU_NO_HWBUG_ATOMIC_SPURIOUS_FAULT,
+		/* If editing this please also update condition for BEFORE_ATOMIC() */
+		!IS_ENABLED(CONFIG_CPU_E2C3) && !IS_ENABLED(CONFIG_CPU_E12C) &&
+			!IS_ENABLED(CONFIG_CPU_E16C),
+		true,
+		!is_hardware_guest ||
+			(cpu != IDR_E2C3_MDL && cpu != IDR_E12C_MDL && cpu != IDR_E16C_MDL));
+/* #164666 - "wait int=1" instruction can trigger falsely.
+ * Workaround - issue it under closed all interrupts, and avoid
+ * `ibranch(d) ? #MLOCK [|| %cmp] [|| %clp]` instructions right
+ * before it. */
+CPUHAS(CPU_HWBUG_WAIT_INT,
+		IS_ENABLED(CONFIG_E2K_MACHINE) || CONFIG_CPU_ISET_MIN >= 7,
 		IS_ENABLED(CONFIG_CPU_E2C3) || IS_ENABLED(CONFIG_CPU_E12C) ||
 			IS_ENABLED(CONFIG_CPU_E16C),
 		cpu == IDR_E2C3_MDL || cpu == IDR_E12C_MDL ||
@@ -694,6 +802,11 @@ CPUHAS(CPU_FEAT_PAGE_TABLE_V6,
 		IS_ENABLED(CONFIG_E2K_MACHINE) || CONFIG_CPU_ISET_MIN >= 6,
 		IS_ENABLED(CONFIG_MMU_PT_V6),
 		machine->mmu_pt_v6);
+/* Atomic operations are supported by ldrd/strd */
+CPUHAS(CPU_FEAT_ATOMIC_LDRD,
+		IS_ENABLED(CONFIG_E2K_MACHINE) || CONFIG_CPU_ISET_MIN >= 6,
+		CONFIG_CPU_ISET_MIN >= 6,
+		iset_ver >= E2K_ISET_V6);
 /* Optimized version of machine.iset check */
 CPUHAS(CPU_FEAT_ISET_V5,
 		IS_ENABLED(CONFIG_E2K_MACHINE) || CONFIG_CPU_ISET_MIN >= 5,
@@ -703,6 +816,11 @@ CPUHAS(CPU_FEAT_ISET_V6,
 		IS_ENABLED(CONFIG_E2K_MACHINE) || CONFIG_CPU_ISET_MIN >= 6,
 		CONFIG_CPU_ISET_MIN >= 6,
 		iset_ver >= E2K_ISET_V6);
+/* CPU_FEAT_ISET_NOT_V6 == !CPU_FEAT_ISET_V6 == "Is this <v6 cpu?" */
+CPUHAS(CPU_FEAT_ISET_NOT_V6,
+		IS_ENABLED(CONFIG_E2K_MACHINE) || CONFIG_CPU_ISET_MIN >= 6,
+		CONFIG_CPU_ISET_MIN < 6,
+		iset_ver < E2K_ISET_V6);
 CPUHAS(CPU_FEAT_ISET_V7,
 		IS_ENABLED(CONFIG_E2K_MACHINE) || CONFIG_CPU_ISET_MIN >= 7,
 		CONFIG_CPU_ISET_MIN >= 7,
@@ -712,6 +830,16 @@ CPUHAS(CPU_FEAT_ISET_NOT_V7,
 		IS_ENABLED(CONFIG_E2K_MACHINE) || CONFIG_CPU_ISET_MIN >= 7,
 		CONFIG_CPU_ISET_MIN < 7,
 		iset_ver < E2K_ISET_V7);
+/*
+ * #143130; rm 29416 - the ability to calibrate voltmeters VM has been implemented.
+ * VM0 CH0 is used for calibration in e2c3, e16c version >= 2, e12c version >= 1. */
+CPUHAS(CPU_FEAT_IMPROVED_VM_V6,
+		!IS_ENABLED(CONFIG_CPU_E12C) && !IS_ENABLED(CONFIG_CPU_E16C) &&
+			!IS_ENABLED(CONFIG_CPU_E2C3),
+		false,
+		cpu == IDR_E12C_MDL && revision >= 1 ||
+			cpu == IDR_E16C_MDL && revision >= 2 ||
+			cpu == IDR_E2C3_MDL && revision >= 2);
 CPUHAS(CPU_FEAT_GLOBAL_IRQ_MASK,
 		true,
 		IS_ENABLED(CONFIG_GLOBAL_IRQ_MASK) ||
@@ -755,7 +883,8 @@ extern machdep_t	machine;
 extern pt_struct_t	pgtable_struct;
 
 #if defined E2K_P2V && !defined CONFIG_BOOT_E2K
-# define boot_machine		(boot_get_vo_value(machine))
+static __attribute__((unused)) void *boot_va_to_pa(void *virt_pnt);
+# define boot_machine		(*((typeof(machine) *) boot_va_to_pa(&machine)))
 # define boot_pgtable_struct	((pt_struct_t)boot_get_vo_value(pgtable_struct))
 # define boot_pgtable_struct_p	boot_vp_to_pp(&pgtable_struct)
 #else
@@ -766,7 +895,7 @@ extern pt_struct_t	pgtable_struct;
 
 /* Returns true in guest running with hardware virtualization support */
 #if CONFIG_CPU_ISET_MIN >= 3 && !defined E2K_P2V
-# define IS_HV_GM()	(cpu_has(CPU_FEAT_ISET_V6) && READ_CORE_MODE_REG().gmi)
+# define IS_HV_GM()	(READ_CORE_MODE_REG().gmi)
 #else
 # define IS_HV_GM()	(machine.gmi)
 #endif
@@ -794,8 +923,6 @@ extern void restore_gregs_on_mask_v3(struct e2k_global_regs *, bool dirty_bgr,
 extern void restore_gregs_on_mask_v5(struct e2k_global_regs *, bool dirty_bgr,
 					unsigned long mask_not_restore);
 extern void save_dimtp_v6(union e2k_dimtp *);
-extern void restore_dimtp_v6(const union e2k_dimtp *);
-extern void clear_dimtp_v6(void);
 extern void save_kvm_context_v6(struct kvm_vcpu_arch *);
 extern void restore_kvm_context_v6(const struct kvm_vcpu_arch *);
 extern void qpswitchd_sm(int);

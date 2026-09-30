@@ -96,7 +96,7 @@ static void *nvram_panic_seq_start(struct seq_file *f, loff_t *pos)
 	 * it just has to be non-NULL and not IS_ERR
 	 * in the success case.
 	*/
-        return *pos == 0 ? &nvram_panic_seq_start: NULL;
+	return *pos == 0 ? &nvram_panic_seq_start: NULL;
 }
 
 static void *nvram_panic_seq_next(struct seq_file *f, void *v, loff_t *pos)
@@ -213,8 +213,8 @@ static const struct proc_ops proc_nvram_panic_operations = {
 
 static int __init start_nvram_panic_area_setup(char *str)
 {
-        start_nvram_panic_area = memparse(str, &str);
-        return 1;
+	start_nvram_panic_area = memparse(str, &str);
+	return 1;
 }
 
 __setup("panic2nvram-start=", start_nvram_panic_area_setup);
@@ -222,8 +222,8 @@ __setup("panic2nvram-start=", start_nvram_panic_area_setup);
 
 static int __init size_nvram_panic_area_setup(char *str)
 {
-        size_nvram_panic_area = memparse(str, &str);
-        return 1;
+	size_nvram_panic_area = memparse(str, &str);
+	return 1;
 }
 
 __setup("panic2nvram-size=", size_nvram_panic_area_setup);

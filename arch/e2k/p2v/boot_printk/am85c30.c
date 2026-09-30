@@ -34,7 +34,7 @@ extern serial_console_opts_t	am85c30_serial_boot_console;
 static inline void
 am85c30_com_outb(u64 iomem_addr, u8 byte)
 {
- 	boot_writeb(byte, (void __iomem *)iomem_addr);
+	boot_writeb(byte, (void __iomem *)iomem_addr);
 }
 
 static inline u8

@@ -1,8 +1,9 @@
 /*
  * SPDX-License-Identifier: GPL-2.0
  * Copyright (c) 2023 MCST
- *
- **************** E2K PROTECTED MODE SPECIFIC ERROR MESSAGES *****************
+ */
+
+/**************** E2K PROTECTED MODE SPECIFIC ERROR MESSAGES *****************
  *
  * NB> Add new messages at the bottom because message index is used as ID and tests depend on these.
  *

@@ -485,6 +485,10 @@ swiotlb_late_init_with_tbl(char *tlb, unsigned long nslabs)
 #endif
 	unsigned long i, bytes;
 
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	spin_lock_init(&__io_tlb_lock[node]);
+#endif
+
 	bytes = nslabs << IO_TLB_SHIFT;
 
 	io_tlb_nslabs = nslabs;

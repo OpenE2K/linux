@@ -43,9 +43,6 @@
 #include <asm/tag_mem.h>
 #endif
 
-#ifdef CONFIG_MCST_RT
-#include <linux/mcst_rt.h>
-#endif
 
 #include <asm/trace.h>
 
@@ -323,7 +320,7 @@ user_address_to_pva(struct task_struct *tsk, e2k_addr_t address)
 		pr_err("PGD  0x%px = 0x%lx none or bad for address 0x%lx\n",
 			pgd, pgd_val(*pgd), address);
 		goto out;
-        }
+	}
 
 	pud = pud_offset(pgd, address);
 	if (user_pud_huge(*pud)) {
@@ -770,28 +767,20 @@ void print_address_page_tables(unsigned long address, int last_level_only)
 	}
 }
 
-struct page *e2k_virt_to_page(const void *kaddrp)
+phys_addr_t e2k_virt_to_phys(const void *kaddrp)
 {
 	e2k_addr_t kaddr = (e2k_addr_t)kaddrp;
 
-	if (kaddr >= PAGE_OFFSET && kaddr < PAGE_OFFSET + MAX_PM_SIZE) {
-		return phys_to_page(__pa(kaddrp));
-	}
-	if (kaddr >= KERNEL_BASE && kaddr <= KERNEL_END) {
-		return phys_to_page(__pa_symbol(kaddrp));
-	}
-	if (is_vmalloc_addr(kaddrp)) {
-		return vmalloc_to_page(kaddrp);
-	}
-	if (kaddr < TASK_SIZE) {
-		panic("%s(): address 0x%px is not kernel address\n",
-			__func__, kaddrp);
-	}
-	panic("%s(): address 0x%px is invalid kernel address\n",
-		__func__, kaddrp);
+	if (kaddr >= PAGE_OFFSET && kaddr < PAGE_OFFSET + MAX_PM_SIZE)
+		return __pa(kaddrp);
+	if (kaddr >= KERNEL_BASE && kaddr <= KERNEL_END)
+		return __pa_symbol(kaddrp);
+	if (is_vmalloc_addr(kaddrp))
+		return page_to_phys(vmalloc_to_page(kaddrp)) + offset_in_page(kaddrp);
+	if (kaddr < TASK_SIZE)
+		panic("%s(): address 0x%px is not kernel address\n", __func__, kaddrp);
+	panic("%s(): address 0x%px is invalid kernel address\n", __func__, kaddrp);
 }
-
-EXPORT_SYMBOL(e2k_virt_to_page);
 
 #ifndef	CONFIG_CLW_ENABLE
 #define	terminate_CLW_operation(regs)
@@ -1382,8 +1371,9 @@ unsigned long remap_e2k_stack(unsigned long addr,
 	 * Try to expand without remapping
 	 */
 	vma = vma_to_resize(addr, old_size, new_size, MREMAP_FIXED, &charged);
-	if (WARN_ON_ONCE(IS_ERR(vma))) {
-		ret = PTR_ERR(vma);
+	if (IS_ERR_VALUE(vma)) {
+		ret = (unsigned long)PTR_ERR(vma);
+		WARN_ONCE((long)ret != -ENOMEM, "ret = %ld\n", (long)ret);
 		goto out_unlock;
 	}
 
@@ -2419,11 +2409,11 @@ void do_trap_cellar(struct pt_regs *regs, int only_system_tc)
 		/*
 		 * We continue to do_trap_cellar() after user's sig handler
 		 * to work for next trap in trap_cellar.
-	 	 * If user's sighandler, for example, do nothing
-	 	 * then we should do that call user's sighandler
-	 	 * once more for the same trap.
+		 * If user's sighandler, for example, do nothing
+		 * then we should do that call user's sighandler
+		 * once more for the same trap.
 		 * So trap->curr_cnt is here the same for which
-	 	 * user's sighandler worked. 
+		 * user's sighandler worked. 
 		 */
 		if ((3 * trap->curr_cnt) >= tc_count)
 			return;
@@ -2838,7 +2828,34 @@ static notrace void double_return_efault(void)
 {
 	e2k_cr0_hi_t cr0_hi = READ_CR0_HI_REG();
 	cr0_hi.ip = (unsigned long) return_efault >> 3;
+	alternative("", "wait ma_c=1", CPU_HWBUG_CR_BEFORE_WRITES, "memory");
 	WRITE_CR0_HI_REG(cr0_hi);
+}
+
+/**
+ * controlled_user_access - is this from special kernel-to-user access
+ *			    (get_user, copy_to_user, ...)
+ * @regs: pt_regs for this trap
+ */
+static bool controlled_user_access(const struct pt_regs *regs)
+{
+	unsigned long trap_ip = get_trap_ip(regs);
+
+	/* get_user/put_user case: */
+	if (search_exception_tables(trap_ip))
+		return true;
+
+	/* UACCESS_FN_CALL case. */
+	if (trap_ip >= (unsigned long)__uaccess_start &&
+	    trap_ip < (unsigned long)__uaccess_end) {
+		return true;
+	}
+
+	/* SET_USR_PFAULT case: */
+	if (current->thread.usr_pfault_jump)
+		return true;
+
+	return false;
 }
 
 /**
@@ -3034,10 +3051,13 @@ int pf_force_sig_info(const char *reason, int si_signo, int si_code,
 	return PFR_SIGPENDING;
 }
 
-static int clear_valid_on_spec_load_one(struct vm_area_struct *vma,
-		unsigned long addr,  struct pt_regs *regs, bool *unlocked)
+static int clear_valid_on_spec_load_one(struct mm_struct *mm,
+		struct vm_area_struct *vma, unsigned long addr,
+		const struct pt_regs *regs, bool *unlocked, bool write_lock)
 {
-	struct mm_struct *mm = current->mm;
+	struct vm_area_struct *vma_prev, *vma_next;
+	unsigned long pmd_down = round_down(addr, PMD_SIZE);
+	unsigned long pmd_up = round_up(addr + 1, PMD_SIZE);
 	unsigned long area_start, area_end;
 	pgd_t *pgd;
 	pud_t *pud;
@@ -3050,15 +3070,10 @@ static int clear_valid_on_spec_load_one(struct vm_area_struct *vma,
 	 */
 	if (!vma) {
 		/* This is a speculative load from unmapped area */
-		struct vm_area_struct *vma_prev;
-		vma = find_vma_prev(mm, addr, &vma_prev);
+		vma_next = find_vma_prev(mm, addr, &vma_prev);
+
 		area_start = (vma_prev) ? vma_prev->vm_end : 0;
-		area_end = TASK_SIZE;
-	} else if (addr < vma->vm_start) {
-		/* This is a speculative load from unmapped area */
-		area_start = (vma->vm_prev) ? vma->vm_prev->vm_end : 0;
-		area_end = vma->vm_start;
-		vma = NULL;
+		area_end = (vma_next) ? vma_next->vm_start : TASK_SIZE;
 	} else {
 		/* Check that this is a speculative load from PROT_NONE mapping */
 		if (vma->vm_flags & (VM_READ | VM_EXEC | VM_WRITE))
@@ -3078,7 +3093,7 @@ static int clear_valid_on_spec_load_one(struct vm_area_struct *vma,
 	pgd = pgd_offset(mm, addr);
 	/* Check if we can mark whole pgd invalid */
 	if (pgd_none(*pgd) && round_down(addr, PGDIR_SIZE) >= area_start &&
-			round_up(addr, PGDIR_SIZE) <= area_end) {
+			round_up(addr + 1, PGDIR_SIZE) <= area_end) {
 		spin_lock(&mm->page_table_lock);
 		if (pgd_none(*pgd) && pgd_valid(*pgd)) {
 			pgd_t entry = pgd_mknotvalid(*pgd);
@@ -3097,7 +3112,7 @@ static int clear_valid_on_spec_load_one(struct vm_area_struct *vma,
 		return 0;
 	/* Check if we can mark whole pud invalid */
 	if (pud_none(*pud) && round_down(addr, PUD_SIZE) >= area_start &&
-			round_up(addr, PUD_SIZE) <= area_end) {
+			round_up(addr + 1, PUD_SIZE) <= area_end) {
 		spin_lock(&mm->page_table_lock);
 		if (pud_none(*pud) && pud_valid(*pud)) {
 			pud_t entry = pud_mknotvalid(*pud);
@@ -3115,8 +3130,7 @@ static int clear_valid_on_spec_load_one(struct vm_area_struct *vma,
 	if (pmd_trans_huge(*pmd))
 		return 0;
 	/* Check if we can mark whole pmd invalid */
-	if (pmd_none(*pmd) && round_down(addr, PMD_SIZE) >= area_start &&
-			round_up(addr, PMD_SIZE) <= area_end) {
+	if (pmd_none(*pmd) && pmd_down >= area_start && pmd_up <= area_end) {
 		spinlock_t *ptl;
 		if (vma && is_vm_hugetlb_page(vma)) {
 			pte_t *huge_pte = (pte_t *) pmd;
@@ -3134,7 +3148,19 @@ static int clear_valid_on_spec_load_one(struct vm_area_struct *vma,
 		goto out_success;
 	}
 
-	split_huge_pmd(vma, pmd, addr);
+	if (vma) {
+		split_huge_pmd(vma, pmd, addr);
+	} else {
+		/* Use another vma within same pmd if possible. */
+		if (vma_prev && vma_prev->vm_end > pmd_down) {
+			split_huge_pmd(vma_prev, pmd, vma_prev->vm_end - 1);
+		} else if (vma_next && vma_next->vm_start < pmd_up) {
+			split_huge_pmd(vma_prev, pmd, vma_next->vm_start);
+		} else {
+			WARN_ONCE(1, "Could not split pmd for semi-spec. load from invalid area, address: 0x%lx, pmd boundaries: 0x%lx - 0x%lx\n",
+					addr, pmd_down, pmd_up);
+		}
+	}
 
 	/*
 	 * Use pte_alloc() instead of pte_alloc_map().  We can't run
@@ -3182,8 +3208,12 @@ out_success:
 	return PFR_IGNORE;
 
 oom:
-	mmap_read_unlock(current->mm);
 	*unlocked = true;
+	if (write_lock) {
+		mmap_write_unlock(mm);
+	} else {
+		mmap_read_unlock(mm);
+	}
 
 	/* OOM killer could have killed us */
 	pagefault_out_of_memory();
@@ -3201,62 +3231,72 @@ oom:
  * In the case of a race we will try clearing the valid bit again the
  * next time we get a page fault on half-spec. load.
  *
+ * Releases mmap_sem.
+ *
  * Returns:
  *   PFR_SIGPENDING: if this process was killed by Out-of-Memory handler;
  *   PFR_IGNORE: if the valid bit was cleared (or some race prevented us
  *               from clearing it);
  *   0: otherwise.
  */
-static int clear_valid_on_spec_load(unsigned long address,
+static int clear_valid_on_spec_load_and_unlock(unsigned long address,
 		struct vm_area_struct *vma, struct pt_regs *regs,
-		union pf_mode mode, int addr_num, bool *unlocked)
-{
-	int ret;
-
-	if (!is_spec_load_fault(mode))
-		return 0;
-
-	ret = clear_valid_on_spec_load_one(vma, address, regs, unlocked);
-	if (ret || *unlocked)
-		return ret;
-
-	if (addr_num > 1) {
-		unsigned long addr_hi = PAGE_ALIGN(address);
-		if (vma && vma->vm_end <= addr_hi)
-			vma = vma->vm_next;
-		ret = clear_valid_on_spec_load_one(vma, addr_hi, regs, unlocked);
-		if (ret)
-			return ret;
-	}
-
-	return 0;
-}
-
-__cold
-static int bad_area(const char *reason, unsigned long address,
-		    struct pt_regs *regs, union pf_mode mode,
-		    int addr_num, int si_code)
+		union pf_mode mode, int addr_num, bool write_lock)
 {
 	struct mm_struct *mm = current->mm;
-	struct vm_area_struct *vma;
 	bool unlocked = false;
 	int ret;
 
-	/*
-	 * __do_munmap() could change mmap_sem writelock to mmap_sem readlock, so one
-	 * need to take mmap_sem writelock to process with page table in
-	 * clear_valid_on_spec_load_one().
-	 */
-	mmap_read_unlock(mm);
-	mmap_write_lock(mm);
+	if (!is_spec_load_fault(mode)) {
+		ret = 0;
+		goto out_unlock;
+	}
 
-	vma = find_vma(mm, address);
+	ret = clear_valid_on_spec_load_one(mm, vma, address, regs, &unlocked, write_lock);
+	if (ret || unlocked)
+		goto out_unlock;
 
-	ret = clear_valid_on_spec_load(address, vma, regs, mode, addr_num, &unlocked);
+	if (addr_num > 1) {
+		unsigned long addr_hi = PAGE_ALIGN(address);
 
-	if (!unlocked)
-		mmap_write_unlock(mm);
+		vma = find_vma(mm, addr_hi);
+		if (addr_hi < vma->vm_start)
+			vma = NULL;
 
+		ret = clear_valid_on_spec_load_one(mm, vma, addr_hi, regs, &unlocked, write_lock);
+	} else {
+		ret = 0;
+	}
+
+out_unlock:
+	if (!unlocked) {
+		unlocked = true;
+		if (write_lock) {
+			mmap_write_unlock(mm);
+		} else {
+			mmap_read_unlock(mm);
+		}
+	}
+
+	return ret;
+}
+
+/*
+ * Releases mmap_sem
+ */
+__cold
+static int bad_area(const char *reason, unsigned long address,
+		    struct vm_area_struct *vma, struct pt_regs *regs,
+		    union pf_mode mode, int addr_num, int si_code, bool write_lock)
+{
+	int ret;
+
+	if (write_lock)
+		mmap_assert_write_locked(current->mm);
+	else
+		mmap_assert_locked(current->mm);
+
+	ret = clear_valid_on_spec_load_and_unlock(address, vma, regs, mode, addr_num, write_lock);
 	if (ret)
 		return ret;
 
@@ -3716,13 +3756,6 @@ int do_page_fault(struct pt_regs *const regs, e2k_addr_t address,
 	    regs->trap->nr_page_fault_exc == exc_instr_page_prot_num)
 		flags |= FAULT_FLAG_INSTRUCTION;
 
-#ifdef CONFIG_MCST_RT
-	if ((rts_act_mask & RTS_PGFLT_RTWRN && rt_task(current)) ||
-			rts_act_mask & RTS_PGFLT_WRN)
-		pr_info("page fault while RTS mode %lx in %d/%s addr=%08lx\n",
-			rts_act_mask, current->pid, current->comm, address);
-#endif
-
 	if (address >= TASK_SIZE)
 		return handle_kernel_address(address, regs, mode, ftype);
 
@@ -3783,19 +3816,41 @@ retry:
 	DebugPF("find_vma() returned 0x%px\n", vma);
 
 	if (!vma || address < vma->vm_start) {
-#ifdef CONFIG_SOFTWARE_SWAP_TAGS
-		if (is_tags_area_addr(address)) {
-			DebugPF("fault address 0x%lx is from "
-				"tags virtual space\n", address);
-			vma = create_tags_vma(mm, tag_to_virt(address));
-			if (!vma)
-				return pf_out_of_memory(address, regs, mode);
-		} else 
-#endif
-		{
-			return bad_area("vma not found", address, regs,
-					mode, addr_num, SEGV_MAPERR);
+		if (!is_spec_load_fault(mode)) {
+			return bad_area("vma not found", address, NULL, regs,
+					mode, addr_num, SEGV_MAPERR, false);
 		}
+
+		/*
+		 * There is a race:
+		 * 1) thread1 calls sys_munmap, detaches vma and downgrades
+		 * mmap_sem to read.
+		 * 2) thread2 enters page fault from semispec. load on address
+		 * being unmapped by thread1 and locks mmap_sem for reading.
+		 * It does not find vma.
+		 * 3) thread1 calls destructor for pte/pmd page and frees
+		 * corresponding spinlock.
+		 * 4) thread2 tries to lock the same page from bad_area() ->
+		 * clear_valid_on_spec_load() - use-after-free.
+		 *
+		 * Avoid race by re-acquiring semaphore with write permissions.
+		 */
+		mmap_read_unlock(mm);
+		mmap_write_lock(mm);
+
+		/* Check again since there is a window for another thread's mmap */
+		vma = find_vma(mm, address);
+		if (!vma || address < vma->vm_start) {
+			return bad_area("vma not found", address, NULL, regs,
+					mode, addr_num, SEGV_MAPERR, true);
+		}
+
+		mmap_write_downgrade(mm);
+	}
+
+	if (!mode.user && !controlled_user_access(regs)) {
+		return bad_area("raw access from kernel to user",
+				address, vma, regs, mode, addr_num, SEGV_MAPERR, false);
 	}
 
 #ifdef CONFIG_MAKE_ALL_PAGES_VALID
@@ -3810,7 +3865,7 @@ retry:
 		if (instr_page && AS(ftype).illegal_page) {
 			tracing_off();
 			return bad_area("instruction page protection for valid address",
-					address, regs, mode, addr_num, SEGV_MAPERR);
+					address, vma, regs, mode, addr_num, SEGV_MAPERR, false);
 		}
 
 		/* bug #102076: now this situation is possible */
@@ -3823,7 +3878,7 @@ retry:
 				AS(ftype).illegal_page ||
 				ftype_test_sw_fault(ftype))) {
 			return bad_area("trap with bad fault type for valid address",
-					address, regs, mode, addr_num, SEGV_ACCERR);
+					address, vma, regs, mode, addr_num, SEGV_ACCERR, false);
 		}
 	}
 #endif	/* CONFIG_MAKE_ALL_PAGES_VALID */
@@ -3871,7 +3926,8 @@ retry:
 		const char *str;
 
 		if ((str = access_error(vma, address, regs, mode, instr_page)))
-			return bad_area(str, address, regs, mode, addr_num, SEGV_ACCERR);
+			return bad_area(str, address, vma, regs, mode,
+					addr_num, SEGV_ACCERR, false);
 
 		fault = handle_mm_fault(vma, address, flags, regs);
 		DebugPF("handle_mm_fault() returned %x\n", fault);
@@ -3910,8 +3966,8 @@ retry:
 				if (!vma || vma->vm_start > address) {
 					DebugNAO("end address is not valid (has not VMA)\n");
 					return bad_area("vma not found for second page of unaligned access",
-							address, regs, mode,
-							addr_num, SEGV_MAPERR);
+							address, vma, regs, mode, addr_num,
+							SEGV_MAPERR, false);
 				}
 			}
 		}
@@ -4985,7 +5041,7 @@ enum exec_mmu_ret execute_mmu_operations(trap_cellar_t *tcellar,
 			IS_ENABLED(CONFIG_KVM_GUEST_KERNEL)) {
 		unsigned long address_lo_hva;
 		int size = tc_cond_to_size(cond);
-		int size_lo = min(PAGE_SIZE - (int)offset_in_page(address), size);
+		int size_lo = min((int) (PAGE_SIZE - offset_in_page(address)), size);
 		bool is_write = is_s_f || store;
 
 		ret = convert_pv_gva_to_hva(&address_lo_hva, is_write,
@@ -5061,6 +5117,34 @@ enum exec_mmu_ret execute_mmu_operations(trap_cellar_t *tcellar,
 		}
 
 		if (!ret) {
+			if (radr && (unsigned long) radr < PAGE_OFFSET) {
+				unsigned long ts_flag;
+				tc_cond_t cond;
+				tc_mask_t mask;
+
+				regs->trap->nr_page_fault_exc = exc_data_page_num;
+
+				AW(mask) = 0;
+
+				AW(cond) = 0;
+				cond.store = 1;
+				cond.fmt = LDST_BYTE_FMT;
+
+				raw_all_irq_restore(flags);
+
+				ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
+				ret = do_page_fault(regs, (unsigned long) radr, cond, mask, 0,
+						    NULL);
+				clear_ts_flag(ts_flag);
+
+				if (ret == PFR_SIGPENDING) {
+					ret = EXEC_MMU_STOP;
+					goto out;
+				}
+
+				raw_all_irq_save(flags);
+			}
+
 			if (load_to_rf)
 				COPY_STACKS_TO_MEMORY();
 			ret = do_recovery_load(regs, tcellar, next_tcellar,
@@ -5078,6 +5162,7 @@ enum exec_mmu_ret execute_mmu_operations(trap_cellar_t *tcellar,
 
 	raw_all_irq_restore(flags);
 
+out:
 	regs->flags.exec_mmu_op = 0;
 	regs->flags.exec_mmu_op_nested = 0;
 

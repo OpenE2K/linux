@@ -44,7 +44,7 @@ int machdep_setup_features(int cpu, int revision)
 	if (iset_ver == ELBRUS_GENERIC_ISET)
 		return 1;
 
-	if (iset_ver < E2K_ISET_V6 || IS_ENABLED(CONFIG_KVM_GUEST_KERNEL))
+	if (IS_ENABLED(CONFIG_KVM_GUEST_KERNEL))
 		is_hardware_guest = false;
 	else
 		is_hardware_guest = ((e2k_core_mode_t)

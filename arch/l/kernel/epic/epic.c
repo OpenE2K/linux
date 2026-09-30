@@ -6,6 +6,7 @@
 #include <linux/clockchips.h>
 #include <linux/irq.h>
 #include <linux/syscore_ops.h>
+#include <linux/seq_file.h>
 
 #include <asm/epic.h>
 #include <asm/smp.h>
@@ -347,6 +348,13 @@ int get_cepic_timer_frequency(void)
 	return cepic_timer_freq;
 }
 
+void cpuinfo_epic(struct seq_file *m)
+{
+	if (cpu_has(CPU_FEAT_EPIC)) {
+		seq_printf(m, " epic=%u", cepic_timer_freq);
+	}
+}
+
 /*
  * E2K depends on the "hard" cpu number to determine NUMA node,
  * so we must exclude the influence of the order in which all
@@ -439,13 +447,10 @@ __visible void __irq_entry epic_smp_timer_interrupt(struct pt_regs *regs)
 		cur_time = ktime_to_ns(ktime_get());
 		if (cur_time > next_time + DELTA_NS) {
 			per_cpu(next_rt_intr, cpu) = 0;
-		} else if (cur_time > next_time - DELTA_NS &&
-				cur_time < next_time + DELTA_NS) {
-			/*
-			 * set 1 -- must do timer later
-			 * in do_postpone_tick()
-			 */
-			per_cpu(next_rt_intr, cpu) = 1;
+			per_cpu(must_do_timer, cpu) = 0;
+		} else if (cur_time > next_time - DELTA_NS) {
+			/* must do timer later in do_postpone_tick() */
+			per_cpu(must_do_timer, cpu) = 1;
 			set_irq_regs(old_regs);
 			ack_epic_irq();
 			/* if do_postpone_tick() will not called: */

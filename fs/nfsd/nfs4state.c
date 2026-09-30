@@ -1823,8 +1823,12 @@ static u32 nfsd4_get_drc_mem(struct nfsd4_channel_attrs *ca, struct nfsd_net *nn
 	 */
 	scale_factor = max_t(unsigned int, 8, nn->nfsd_serv->sv_nrthreads);
 
+#ifndef CONFIG_MCST
 	avail = clamp_t(unsigned long, avail, slotsize,
 			total_avail/scale_factor);
+#else
+	avail = __clamp(avail, slotsize, total_avail/scale_factor);
+#endif
 	num = min_t(int, num, avail / slotsize);
 	num = max_t(int, num, 1);
 	nfsd_drc_mem_used += num * slotsize;

@@ -34,6 +34,39 @@
 
 #include <asm/5level-fixup.h>
 
+
+extern u32 save_tags_from_data(u64 *datap, u8 *tagp);
+extern void restore_tags_for_data(u64 *datap, u8 *tagp);
+
+extern int e2k_swap_save_tags(struct page *page);
+extern void e2k_swap_restore_tags(swp_entry_t entry, struct page *page);
+extern void e2k_swap_invalidate_tags(int type, pgoff_t offset);
+extern void e2k_swap_invalidate_tags_area(int type);
+
+
+#define __HAVE_ARCH_PREPARE_TO_SWAP
+static inline int arch_prepare_to_swap(struct page *page)
+{
+	return e2k_swap_save_tags(page);
+}
+
+#define __HAVE_ARCH_SWAP_INVALIDATE
+static inline void arch_swap_invalidate_page(int type, pgoff_t offset)
+{
+	e2k_swap_invalidate_tags(type, offset);
+}
+
+static inline void arch_swap_invalidate_area(int type)
+{
+	e2k_swap_invalidate_tags_area(type);
+}
+
+#define __HAVE_ARCH_SWAP_RESTORE
+static inline void arch_swap_restore(swp_entry_t entry, struct page *page)
+{
+	e2k_swap_restore_tags(entry, page);
+}
+
 /*
  * e2k doesn't have any external MMU info: the kernel page
  * tables contain all the necessary information.

@@ -14,9 +14,9 @@
 
 #ifdef __ptr64__
 #define	LINUX_SYSCALL_TRAPNUM LINUX_SYSCALL64_TRAPNUM
-#else /* !__ptr64__ */
+#elif defined __ptr32__
 #define	LINUX_SYSCALL_TRAPNUM LINUX_SYSCALL32_TRAPNUM
-#endif  /* __ptr64__ */
+#endif
 
 #define	LINUX_SYSCALL_TRAPNUM_OLD	4	/* Deprecated */
 #define LINUX_SYSCALL32_TRAPNUM		1	/* Use E2K trap entry #1 */
@@ -238,7 +238,7 @@
 #define __NR_getdents64		220
 #define __NR_fcntl64		221
 #define __NR_core		222	/* for analys kernel core */
-#define __NR_macctl		223	/* MCST trust linux	*/
+
 #define __NR_newfstatat		224
 #define __NR_emergency		225
 #define __NR_e2k_sigsetjmp	226	/* setjmp  e2k specific */
@@ -271,7 +271,7 @@
 #define __NR_set_backtrace	252
 #define __NR_get_backtrace	253
 #define __NR_access_hw_stacks	254
-#define	__NR_el_posix		255
+
 #define __NR_io_uring_setup	256
 #define __NR_io_uring_enter	257
 #define __NR_io_uring_register	258

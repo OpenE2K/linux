@@ -1,6 +1,5 @@
- # SPDX-License-Identifier: GPL-2.0
- # Copyright (c) 2023 MCST
- 
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2023 MCST
 
 #
 # Ported in Linux by Alexey V. Sitnikov, alexmipt@mcst.ru, MCST, 2006

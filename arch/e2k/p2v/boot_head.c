@@ -125,12 +125,7 @@ static void boot_setup_machine_cpu_features(struct machdep *machine)
 	guest_cpu = cpu;
 #endif
 
-	if (iset_ver >= E2K_ISET_V6) {
-		e2k_core_mode_t core_mode = BOOT_READ_CORE_MODE_REG();
-		is_hardware_guest = core_mode.gmi;
-	} else {
-		is_hardware_guest = false;
-	}
+	is_hardware_guest = BOOT_READ_CORE_MODE_REG().gmi;
 
 	start = (cpuhas_initcall_t *) __cpuhas_initcalls;
 	end = (cpuhas_initcall_t *) __cpuhas_initcalls_end;
@@ -214,8 +209,6 @@ void __init_recv boot_setup_iset_features(struct machdep *machine)
 		machine->save_kvm_context = &save_kvm_context_v6;
 		machine->restore_kvm_context = &restore_kvm_context_v6;
 		machine->save_dimtp = &save_dimtp_v6;
-		machine->restore_dimtp = &restore_dimtp_v6;
-		machine->clear_dimtp = &clear_dimtp_v6;
 	}
 
 	if (machine->native_iset_ver < E2K_ISET_V5) {
@@ -616,7 +609,7 @@ boot_startup(bool bsp, bootblock_struct_t *bootblock)
 	boot_info_t	*boot_info = NULL;
 	u16		signature;
 #ifdef	CONFIG_RECOVERY
-	int	recovery = bootblock->kernel_flags & RECOVERY_BB_FLAG;
+	int	recovery = bootblock->boot_flags & RECOVERY_BB_FLAG;
 #else	/* ! CONFIG_RECOVERY  */
 	#define		recovery	0
 #endif	/* CONFIG_RECOVERY */
@@ -683,7 +676,7 @@ boot_startup(bool bsp, bootblock_struct_t *bootblock)
 #if defined(DEBUG_BOOT_INFO) && DEBUG_BOOT_INFO
 	if (bsp)
 		do_boot_printk("bootblock 0x%x, flags 0x%x\n",
-				bootblock, bootblock->kernel_flags);
+				bootblock, bootblock->boot_flags);
 #endif
 
 	/*

@@ -208,7 +208,7 @@ static void lms_set_termios(struct uart_port *port, struct ktermios *termios,
 //	s->init_pins(port, termios->c_cflag);
 
 	if ((termios->c_cflag & CREAD) != 0)
-              lms_start_rx(port);
+	      lms_start_rx(port);
 
 	spin_unlock_irqrestore(&port->lock, flags);
 }
@@ -317,7 +317,7 @@ static void lms_transmit_chars(struct lms_port *port)
 
 		/* Don't copy pas the end of the source buffer */
 		if (count > SERIAL_XMIT_SIZE - port->gs.xmit_tail)
-                	count = SERIAL_XMIT_SIZE - port->gs.xmit_tail;
+			count = SERIAL_XMIT_SIZE - port->gs.xmit_tail;
 
 		/* If for one reason or another, we can't copy more data, we're done! */
 		if (count == 0)
@@ -572,7 +572,7 @@ static int lms_set_real_termios(void *ptr)
 }
 
 static int lms_ioctl(struct tty_struct * tty, struct file * filp, 
-                     unsigned int cmd, unsigned long arg)
+		     unsigned int cmd, unsigned long arg)
 {
 	int rc;
 	struct lms_port *port = tty->driver_data;
@@ -584,11 +584,11 @@ static int lms_ioctl(struct tty_struct * tty, struct file * filp,
 	switch (cmd) {
 	case TIOCGSOFTCAR:
 		rc = put_user(((tty->termios->c_cflag & CLOCAL) ? 1 : 0),
-		              (unsigned int *) arg);
+			      (unsigned int *) arg);
 		break;
 	case TIOCSSOFTCAR:
 		if ((rc = verify_area(VERIFY_READ, (void *) arg,
-		                      sizeof(int))) == 0) {
+				      sizeof(int))) == 0) {
 			get_user(ival, (unsigned int *) arg);
 			tty->termios->c_cflag =
 				(tty->termios->c_cflag & ~CLOCAL) |
@@ -597,44 +597,44 @@ static int lms_ioctl(struct tty_struct * tty, struct file * filp,
 		break;
 	case TIOCGSERIAL:
 		if ((rc = verify_area(VERIFY_WRITE, (void *) arg,
-		                      sizeof(struct serial_struct))) == 0)
+				      sizeof(struct serial_struct))) == 0)
 			gs_getserial(&port->gs, (struct serial_struct *) arg);
 		break;
 	case TIOCSSERIAL:
 		if ((rc = verify_area(VERIFY_READ, (void *) arg,
-		                      sizeof(struct serial_struct))) == 0)
+				      sizeof(struct serial_struct))) == 0)
 			rc = gs_setserial(&port->gs,
 					  (struct serial_struct *) arg);
 		break;
 	case TIOCMGET:
 		if ((rc = verify_area(VERIFY_WRITE, (void *) arg,
-		                      sizeof(unsigned int))) == 0) {
+				      sizeof(unsigned int))) == 0) {
 			ival = lms_getsignals(port);
 			put_user(ival, (unsigned int *) arg);
 		}
 		break;
 	case TIOCMBIS:
 		if ((rc = verify_area(VERIFY_READ, (void *) arg,
-		                      sizeof(unsigned int))) == 0) {
+				      sizeof(unsigned int))) == 0) {
 			get_user(ival, (unsigned int *) arg);
 			lms_setsignals(port, ((ival & TIOCM_DTR) ? 1 : -1),
-			                     ((ival & TIOCM_RTS) ? 1 : -1));
+					     ((ival & TIOCM_RTS) ? 1 : -1));
 		}
 		break;
 	case TIOCMBIC:
 		if ((rc = verify_area(VERIFY_READ, (void *) arg,
-		                      sizeof(unsigned int))) == 0) {
+				      sizeof(unsigned int))) == 0) {
 			get_user(ival, (unsigned int *) arg);
 			lms_setsignals(port, ((ival & TIOCM_DTR) ? 0 : -1),
-			                     ((ival & TIOCM_RTS) ? 0 : -1));
+					     ((ival & TIOCM_RTS) ? 0 : -1));
 		}
 		break;
 	case TIOCMSET:
 		if ((rc = verify_area(VERIFY_READ, (void *) arg,
-		                      sizeof(unsigned int))) == 0) {
+				      sizeof(unsigned int))) == 0) {
 			get_user(ival, (unsigned int *)arg);
 			lms_setsignals(port, ((ival & TIOCM_DTR) ? 1 : 0),
-			                     ((ival & TIOCM_RTS) ? 1 : 0));
+					     ((ival & TIOCM_RTS) ? 1 : 0));
 		}
 		break;
 
@@ -653,7 +653,7 @@ static int lms_read_proc(char *page, char **start, off_t off, int count,
 {
 	int len = 0;
 	
-        len += sprintf(page, "LMS INFO:0.1\n");
+	len += sprintf(page, "LMS INFO:0.1\n");
 
 	return len;
 }

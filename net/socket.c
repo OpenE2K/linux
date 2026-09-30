@@ -3533,10 +3533,11 @@ static int ptr128_ethtool_ioctl(struct net *net, struct ptr128_ifreq __user *ifr
 	u64 rule_cnt = 0, actual_rule_cnt;
 	u64 ethcmd;
 	e2k_ptr_t dscr;
+	unsigned int tags;
 	int ret;
 
-	if (get_user(dscr.lo, &ifr128->ifr_ifru.ifru_data_dscr.lo) ||
-		get_user(dscr.hi, &ifr128->ifr_ifru.ifru_data_dscr.hi))
+	if (get_user_tagged_16(dscr.lo, dscr.hi, tags, &ifr128->ifr_ifru.ifru_data_dscr)
+			|| tags != ETAGAPQ)
 		return -EFAULT;
 
 	ptr128_rxnfc = (struct ptr128_ethtool_rxnfc *)E2K_PTR_PTR(dscr);
@@ -3650,24 +3651,28 @@ static int ptr128_ethtool_ioctl(struct net *net, struct ptr128_ifreq __user *ifr
 static int ptr128_siocwandev(struct net *net, struct ptr128_ifreq __user *uifr128)
 {
 	e2k_ptr_t dscr;
-	struct ifreq ifr;
+	union {
+		struct ptr128_ifreq ptr128_ifr;
+		struct ifreq ifr;
+	} k_ifr;
 	void __user *saved;
+	unsigned int tags;
 	int err;
 
-	if (copy_from_user(&ifr, uifr128, sizeof(struct ptr128_ifreq)))
+	if (copy_from_user(&k_ifr.ptr128_ifr, uifr128, sizeof(struct ptr128_ifreq)))
 		return -EFAULT;
 
-	if (get_user(dscr.lo, &uifr128->ifr_settings.dscr.lo) ||
-		get_user(dscr.hi, &uifr128->ifr_settings.dscr.hi))
+	if (get_user_tagged_16(dscr.lo, dscr.hi, tags, &k_ifr.ptr128_ifr.ifr_settings.dscr)
+			|| tags != ETAGAPQ)
 		return -EFAULT;
 
-	saved = ifr.ifr_settings.ifs_ifsu.raw_hdlc;
-	ifr.ifr_settings.ifs_ifsu.raw_hdlc = (raw_hdlc_proto *) E2K_PTR_PTR(dscr);
+	saved = k_ifr.ifr.ifr_settings.ifs_ifsu.raw_hdlc;
+	k_ifr.ifr.ifr_settings.ifs_ifsu.raw_hdlc = (raw_hdlc_proto *) E2K_PTR_PTR(dscr);
 
-	err = dev_ioctl(net, SIOCWANDEV, &ifr, NULL);
+	err = dev_ioctl(net, SIOCWANDEV, &k_ifr.ifr, NULL);
 	if (!err) {
-		ifr.ifr_settings.ifs_ifsu.raw_hdlc = saved;
-		if (copy_to_user(uifr128, &ifr, sizeof(struct ptr128_ifreq)))
+		k_ifr.ifr.ifr_settings.ifs_ifsu.raw_hdlc = saved;
+		if (copy_to_user(uifr128, &k_ifr, sizeof(struct ptr128_ifreq)))
 			err = -EFAULT;
 	}
 	return err;
@@ -3679,11 +3684,12 @@ static int ptr128_ifr_data_ioctl(struct net *net, unsigned int cmd,
 {
 	struct ifreq ifreq;
 	e2k_ptr_t dscr;
+	unsigned int tags;
 
 	if (copy_from_user(ifreq.ifr_name, u_ifreq128->ifr_name, IFNAMSIZ))
 		return -EFAULT;
-	if (get_user(dscr.lo, &u_ifreq128->ifr_ifru.ifru_data_dscr.lo) ||
-		get_user(dscr.hi, &u_ifreq128->ifr_ifru.ifru_data_dscr.hi))
+	if (get_user_tagged_16(dscr.lo, dscr.hi, tags, &u_ifreq128->ifr_ifru.ifru_data_dscr)
+			|| tags != ETAGAPQ)
 		return -EFAULT;
 	ifreq.ifr_data = (void *) E2K_PTR_PTR(dscr);
 

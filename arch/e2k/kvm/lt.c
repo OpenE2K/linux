@@ -12,20 +12,11 @@
 #include <linux/slab.h>
 #include <linux/math64.h>
 #include <linux/pci.h>
-#include <asm/kvm/runstate.h>
 #include <asm/e2k_debug.h>
-#include <asm/sclkr.h>  /* get  redpill value*/
 
 #include "ioepic.h"
 #include "irq.h"
 #include "lt.h"
-
-#define mod_64(x, y) ((x) % (y))
-
-#define PRId64 "d"
-#define PRIx64 "llx"
-#define PRIu64 "u"
-#define PRIo64 "o"
 
 #undef	DEBUG_COUNT_MODE
 #undef	DebugCOUNT
@@ -130,16 +121,6 @@ static inline struct kvm_lt *wd_timer_to_lt(struct kvm_timer *timer)
 	return container_of(timer, struct kvm_lt, wd_timer);
 }
 
-static inline u64 cycles_to_count(struct kvm_lt *lt, u64 cycles)
-{
-	return mul_u64_u32_div(cycles, lt->frequency, lt->ticks_per_sec);
-}
-
-static inline u64 count_to_cycles(struct kvm_lt *lt, u64 counter)
-{
-	return mul_u64_u32_div(counter, lt->ticks_per_sec, lt->frequency);
-}
-
 static int lt_get_sys_timer_limits(struct kvm_lt *lt, u64 *limitp, u64 *startp)
 {
 	u32 start, limit;
@@ -164,7 +145,9 @@ static int lt_get_sys_timer_limits(struct kvm_lt *lt, u64 *limitp, u64 *startp)
 			start = MIN_SYS_TIMER_COUNT;
 		}
 	}
-	ASSERT(limit > start);
+	if (WARN_ON_ONCE(limit <= start))
+		return -ENOTSUPP;
+
 	*limitp = limit;
 	*startp = start;
 	return 0;
@@ -226,19 +209,14 @@ static int lt_get_timer_limits(struct kvm_lt *lt, struct kvm_timer *timer,
 static u64 kvm_get_up_to_date_timer(struct kvm_vcpu *vcpu, struct kvm_lt *lt,
 					struct kvm_timer *timer)
 {
-	u64 running_time;
-	s64 running_cycles;
-	s64 running_ns, host_ns;
-	s64 cycles, host_cycles;
-	ktime_t now;
+	s64 host_ns;
 	u64 now_ns;
-	u64 counter, host_counter;
+	u64 host_counter;
 	u64 start64, limit64;
-	u32 start, limit, start_count, new_count;
+	u32 start, limit, new_count;
 	u64 prescaler;
 	int miss_times;
 	unsigned long flags;
-	struct kvm_arch *ka = &vcpu->kvm->arch;
 
 	ASSERT(timer != NULL);
 	ASSERT(vcpu != NULL);
@@ -249,55 +227,30 @@ static u64 kvm_get_up_to_date_timer(struct kvm_vcpu *vcpu, struct kvm_lt *lt,
 		raw_spin_unlock_irqrestore(&timer->lock, flags);
 		return 0;
 	}
-	start_count = timer->start_count;
-	running_time = kvm_do_get_guest_vcpu_running_time(vcpu);
-	cycles = get_cycles();
-	now = timer->timer.base->get_time();
-	now_ns = ktime_to_ns(now);
-	/* sh_sclkm3 - summary time when each vcpu of guest was out of cpu */
-	if (!redpill)
-		now_ns -= ka->sh_sclkm3;
-	DebugVCOUNT("%s : running cycles at start 0x%llx, now 0x%llx, "
-		"current cycles 0x%llx, start counter 0x%x period ns 0x%llx\n",
-		timer->name, timer->running_time, running_time,
-		cycles, start_count, timer->period);
-	DebugVCOUNT("%s : host start time at nsec 0x%llx, now 0x%llx\n",
-		timer->name, timer->host_start_ns, now_ns);
 
-	running_cycles = running_time - timer->running_time;
-	if (running_cycles < 0) {
-		/* BUG(); probably it starts on or migrate to other VCPU/CPU */
-		running_cycles = 0;
-	}
-	running_ns = cycles_2nsec(running_cycles);
+	now_ns = ktime_to_ns(timer->timer.base->get_time());
 	host_ns = now_ns - timer->host_start_ns;
-	if (host_ns < 0) {
-		/* BUG(); probably it starts on or migrate to other CPU */
-		host_ns = 0;
-	}
-	host_cycles = nsecs_2cycles(host_ns);
-	DebugVCOUNT("%s : current running cycles 0x%llx ns 0x%llx\n",
-		timer->name, running_cycles, running_ns);
-	DebugVCOUNT("%s : host    running cycles 0x%llx ns 0x%llx\n",
-		timer->name, host_cycles, host_ns);
+
+	DebugVCOUNT("%s : host start time at nsec 0x%llx, now 0x%llx\n"
+		    "%s : host    running 0x%llx\n",
+		    timer->name, timer->host_start_ns, now_ns, timer->name, host_ns);
 
 	lt_get_timer_limits(lt, timer, &limit64, &start64);
 	limit = limit64;
 	start = start64;
-	ASSERT(limit > start);
+
+	if (WARN_ON_ONCE(limit <= start))
+		return -ENOTSUPP;
 
 	if (timer->type == kvm_wd_timer_type)
 		prescaler = lt->regs.wd_prescaler.wd_c + 1;
 	else
 		prescaler = 1;
 
-	counter = cycles_to_count(lt, running_cycles) / prescaler + start_count;
-	host_counter = cycles_to_count(lt, host_cycles) / prescaler +
-		start_count;
-
+	host_counter = mul_u64_u32_div(host_ns, lt->frequency, NSEC_PER_SEC) /
+			prescaler + timer->start_count;
 	if (host_counter > limit) {
-		miss_times = (host_counter - limit) / (limit - start);
-		new_count = mod_64(host_counter - limit, limit - start);
+		miss_times =  div_u64_rem(host_counter - limit, limit - start, &new_count);
 		new_count += start;
 	} else {
 		miss_times = 0;
@@ -315,125 +268,36 @@ static u64 kvm_get_up_to_date_timer(struct kvm_vcpu *vcpu, struct kvm_lt *lt,
 	}
 	timer->start_count = new_count;
 	timer->host_start_ns = now_ns;
-	timer->running_time = running_time;
 
 	raw_spin_unlock_irqrestore(&timer->lock, flags);
 
-	DebugCOUNT("%s : guest running cycles 0x%llx "
-		"counter 0x%llx : %lld%%\n",
-		timer->name, running_cycles, counter,
-		(counter * 100) / host_counter);
-	DebugCOUNT("%s : host  running cycles 0x%llx counter 0x%llx\n",
-		timer->name, host_cycles, host_counter);
 	if (miss_times > 0) {
-		DebugHRTM("%s : host counter 0x%llx limit 0x%x start 0x%x "
-			"miss times %d : new counter 0x%x\n",
-			timer->name, host_counter, limit, start, miss_times,
-			new_count);
+		DebugHRTM("%s : host counter 0x%llx limit 0x%x start 0x%x miss times %d : new counter 0x%x\n",
+			timer->name, host_counter, limit, start, miss_times, new_count);
 	} else {
-		DebugHRTM("%s : host counter 0x%llx limit 0x%x start 0x%x "
-			"new counter 0x%x\n",
-			timer->name, host_counter, limit, start,
-			new_count);
+		DebugHRTM("%s : host counter 0x%llx limit 0x%x start 0x%x new counter 0x%x\n",
+			timer->name, host_counter, limit, start, new_count);
 	}
 
 	return host_counter;
 }
+
 static u64 kvm_get_up_to_date_count(struct kvm_vcpu *vcpu, struct kvm_lt *lt,
 					struct kvm_timer *timer)
 {
-	s64 host_ns, host_cycles;
-	u64 host_counter;
-	ktime_t now;
-	u64 now_ns;
-	u64 start, limit, new_count;
-	struct kvm_arch *ka = &vcpu->kvm->arch;
-#if DEBUG_COUNT_MODE
-	s64 running_time, running_cycles, running_ns, cycles, counter;
-	int miss_times = 0;
-	unsigned long flags;
+	u64 host_ns = ktime_get_ns() - timer->host_start_ns;
+	u64 host_counter = mul_u64_u32_div(host_ns, lt->frequency, NSEC_PER_SEC);
 
-	ASSERT(timer != NULL);
-	ASSERT(vcpu != NULL);
-	raw_local_irq_save(flags);
-	running_time = kvm_do_get_guest_vcpu_running_time(vcpu);
-	cycles = get_cycles();
-	now = ktime_get();
-	raw_local_irq_restore(flags);
-#else
-	now = ktime_get();
-#endif
-	now_ns = ktime_to_ns(now);
-	/* sh_sclkm3 - summary time when each vcpu of guest was out of cpu */
-	if (!redpill)
-		now_ns -= ka->sh_sclkm3;
-	DebugCOUNT("%s : running cycles at start 0x%llx, now 0x%llx, "
-		"current cycles 0x%llx\n",
-		timer->name, timer->running_time, running_time, cycles);
-	DebugCOUNT("%s : host start time at nsec 0x%llx, now 0x%llx\n",
-		timer->name, timer->host_start_ns, now_ns);
-
-	timer->vcpu = vcpu;
-#if DEBUG_COUNT_MODE
-	running_cycles = running_time - timer->running_time;
-	ASSERT(running_cycles >= 0);
-	running_ns = cycles_2nsec(running_cycles);
-#endif
-	host_ns = now_ns - timer->host_start_ns;
-	if (redpill)
-		ASSERT(host_ns >= 0);
-	host_cycles = nsecs_2cycles(host_ns);
-	DebugCOUNT("%s : current running cycles 0x%llx ns 0x%llx\n",
-		timer->name, running_cycles, running_ns);
-	DebugCOUNT("%s : host    running cycles 0x%llx ns 0x%llx\n",
-		timer->name, host_cycles, host_ns);
-
-	lt_get_timer_limits(lt, timer, &limit, &start);
-#if DEBUG_COUNT_MODE
-	ASSERT(limit > start);
-
-	counter = cycles_to_count(lt, running_cycles);
-#endif
-	host_counter = cycles_to_count(lt, host_cycles);
-	DebugCOUNT("%s : host  cycles 0x%llx counter 0x%llx\n",
-		timer->name, host_cycles, host_counter);
-	DebugCOUNT("%s : guest cycles 0x%llx counter 0x%llx : %lld%%\n",
-		timer->name, running_cycles, counter,
-		(counter * 100) / host_counter);
-
-	if (host_counter > limit) {
-#if DEBUG_COUNT_MODE
-		miss_times = (host_counter - limit) / ((limit + 1) - start);
-#endif
-		new_count = mod_64(host_counter - limit, (limit + 1) - start);
-	} else {
-		new_count = host_counter;
-	}
-
-	/* update counter value */
-	if (timer->type == kvm_reset_timer_type) {
-		lt->regs.reset_counter_lo.rs_c = new_count & 0xffffffff;
-		lt->regs.reset_counter_hi.rs_c = (new_count >> 32) & 0xffffffff;
-	} else if (timer->type == kvm_power_timer_type) {
-		lt->regs.power_counter_lo.pw_c = new_count & 0xffffffff;
-		lt->regs.power_counter_hi.pw_c = (new_count >> 32) & 0xffffffff;
-	} else {
+	if (timer->type != kvm_reset_timer_type && timer->type != kvm_power_timer_type) {
+		/* Do not forget to handle lt_get_timer_limits() if
+		 * other timer types are needed here */
 		pr_err("%s(): %d is unsupported or invalid timer type\n",
 			__func__, timer->type);
 	}
 
-#if DEBUG_COUNT_MODE
-	if (miss_times > 0) {
-		DebugHRTM("%s : host counter 0x%llx limit 0x%llx start 0x%llx "
-			"miss times %d : new counter 0x%llx\n",
-			timer->name, host_counter, limit, start, miss_times,
-			new_count);
-	} else {
-		DebugVCOUNT("%s : host counter 0x%llx limit 0x%llx "
-			"start 0x%llx new counter 0x%llx\n",
-			timer->name, host_counter, limit, start, new_count);
-	}
-#endif
+	timer->vcpu = vcpu;
+
+	DebugCOUNT("%s : host    running ns 0x%llx\n", timer->name, host_ns);
 
 	return host_counter;
 }
@@ -501,14 +365,12 @@ static u64 update_power_counter_value(struct kvm_vcpu *vcpu, struct kvm_lt *lt)
 
 static void start_lt_timer(struct kvm_vcpu *vcpu, struct kvm_lt *lt,
 				struct kvm_timer *lt_timer,
-				u32 start_count, u64 cycles_period,
+				u32 start_count, u64 count_period,
 				bool start_hrtimer)
 {
 	ktime_t now;
-	u64 ns_period;
 
-	ns_period = cycles_2nsec(cycles_period);
-
+	u64 ns_period = mul_u64_u32_div(count_period, NSEC_PER_SEC, lt->frequency);
 	if (ns_period == 0) {
 		lt_timer->period = 0;
 		return;
@@ -530,42 +392,29 @@ static void start_lt_timer(struct kvm_vcpu *vcpu, struct kvm_lt *lt,
 	lt_timer->period = ns_period;
 	now = lt_timer->timer.base->get_time();
 	lt_timer->host_start_ns = ktime_to_ns(now);
-	lt_timer->running_time =
-		kvm_get_guest_vcpu_running_time(vcpu);
-	if (start_hrtimer) {
-		hrtimer_start(&lt_timer->timer,
-				ktime_add_ns(now, ns_period),
-				HRTIMER_MODE_ABS);
-		lt_timer->hrtimer_started = true;
-	} else {
-		lt_timer->hrtimer_started = false;
-	}
-	DebugSYSTM("%s hrtimer is %s at host ns 0x%llx start count 0x%x, "
-		"period 0x%llx\n",
-		lt_timer->name,
-		(lt_timer->hrtimer_started) ? "started" : "not started",
-		lt_timer->host_start_ns, start_count, ns_period);
-	DebugSYSTM("%s        running time cycles 0x%llx\n",
-		lt_timer->name, lt_timer->running_time);
 
-	DebugSYSTM("%s freq is %" PRId64 "Mhz, now 0x%016" PRIx64 ", "
-		"timer period cycles 0x%" PRIx64 ", nsec %lldns, "
-		"expire @ 0x%016" PRIx64 ".\n",
-		lt_timer->name, lt->frequency, ktime_to_ns(now),
-		cycles_period, lt_timer->period,
-		ktime_to_ns(ktime_add_ns(now, lt_timer->period)));
+	if (start_hrtimer) {
+		hrtimer_start(&lt_timer->timer, ktime_add_ns(now, ns_period),
+				HRTIMER_MODE_ABS);
+	}
+	lt_timer->hrtimer_started = start_hrtimer;
+
+	DebugSYSTM("%s hrtimer is %s at host ns 0x%llx start count 0x%x, period 0x%llx\n"
+		   "%s freq is %u Mhz, now 0x%016llx, timer period count 0x%llx nsec %lld, expire @ 0x%016llx.\n",
+		   lt_timer->name, (lt_timer->hrtimer_started) ? "started" : "not started",
+		   lt_timer->host_start_ns, start_count, ns_period, lt_timer->name,
+		   lt->frequency, ktime_to_ns(now), count_period, lt_timer->period,
+		   ktime_to_ns(ktime_add_ns(now, lt_timer->period)));
 }
 
-static void restart_sys_timer(struct kvm_vcpu *vcpu, struct kvm_lt *lt,
-				u32 start_count)
+static void restart_sys_timer(struct kvm_vcpu *vcpu, struct kvm_lt *lt, u32 start_count)
 {
 	u64 limit;
-	u64 increments, cycles_increments;
+	u64 increments;
 
 	hrtimer_cancel(&lt->sys_timer.timer);
 	kthread_flush_work(&lt->sys_timer.expired);
-	DebugSYSTM("COUNTER hrtimer canceled at now 0x%llx\n",
-		ktime_to_ns(ktime_get()));
+	DebugSYSTM("COUNTER hrtimer canceled at now 0x%llx\n", ktime_get_ns());
 
 	lt->regs.counter.c = start_count;
 
@@ -577,13 +426,10 @@ static void restart_sys_timer(struct kvm_vcpu *vcpu, struct kvm_lt *lt,
 	limit = (start_count <= lt->regs.counter_limit.c_l) ?
 			lt->regs.counter_limit.c_l : MAX_SYS_TIMER_COUNT;
 	increments = limit - start_count;
-	cycles_increments = count_to_cycles(lt, increments);
-	DebugSYSTM("COUNTER from 0x%x to limit 0x%llx, increments: 0x%llx "
-		"cycles 0x%llx\n",
-		lt->regs.counter.c, limit, increments, cycles_increments);
-	start_lt_timer(vcpu, lt, &lt->sys_timer,
-			start_count, cycles_increments,
-			true	/* start hrtimer */);
+	DebugSYSTM("COUNTER from 0x%x to limit 0x%llx, increments: 0x%llx\n",
+			lt->regs.counter.c, limit, increments);
+	start_lt_timer(vcpu, lt, &lt->sys_timer, start_count,
+		       increments, true /* start hrtimer */);
 }
 
 static void reset_sys_timer(struct kvm_vcpu *vcpu, struct kvm_lt *lt)
@@ -594,7 +440,7 @@ static void reset_sys_timer(struct kvm_vcpu *vcpu, struct kvm_lt *lt)
 static void restart_wd_timer(struct kvm_vcpu *vcpu, struct kvm_lt *lt)
 {
 	u32 limit;
-	u64 increments, cycles_increments;
+	u64 increments;
 
 	hrtimer_cancel(&lt->wd_timer.timer);
 	kthread_flush_work(&lt->wd_timer.expired);
@@ -609,13 +455,10 @@ static void restart_wd_timer(struct kvm_vcpu *vcpu, struct kvm_lt *lt)
 	ASSERT(lt->regs.wd_counter.wd_c == 0 && limit > 0);
 	increments = limit;
 	increments *= (lt->regs.wd_prescaler.wd_c + 1);
-	cycles_increments = count_to_cycles(lt, increments);
-	DebugWD("WD_COUNTER from 0x%x to limit 0x%x, increments: 0x%llx "
-		"* prescaler 0x%x cycles 0x%llx w_out_e %d\n",
+	DebugWD("WD_COUNTER from 0x%x to limit 0x%x, increments: 0x%llx * prescaler 0x%x w_out_e %d\n",
 		lt->regs.wd_counter.wd_c, limit, increments,
-		lt->regs.wd_prescaler.wd_c + 1, cycles_increments,
-		lt->regs.wd_control.w_out_e);
-	start_lt_timer(vcpu, lt, &lt->wd_timer, 0, cycles_increments,
+		lt->regs.wd_prescaler.wd_c + 1, lt->regs.wd_control.w_out_e);
+	start_lt_timer(vcpu, lt, &lt->wd_timer, 0, increments,
 			!!(lt->regs.wd_control.w_out_e));
 }
 
@@ -685,15 +528,13 @@ static int lt_mmio_read(struct kvm_vcpu *vcpu, struct kvm_io_device *this,
 	lt_reg_debug("address 0x%llx, offset %02x, len %d to %px\n",
 		address, offset, len, data);
 
-	if (!lt_in_range(lt, address))
+	if (!lt_in_range(lt, address) || (len != 4 && len != 8))
 		return -EOPNOTSUPP;
 
 	if (len == 8) {
 		/* 8 bytes access */
 		return lt_mmio_read_64(vcpu, lt, offset, data);
 	}
-
-	ASSERT(len == 4); /* 4 bytes access */
 
 	mutex_lock(&lt->lock);
 	switch (offset) {
@@ -1027,14 +868,14 @@ static void do_lt_sys_timer(struct kvm_vcpu *vcpu, void *data)
 	struct kvm_lt *lt = data;
 	u64 counter;
 
-	ASSERT(lt->regs.counter_control.s_s);
+	if (WARN_ON_ONCE(!lt->regs.counter_control.s_s))
+		return;
 
 	counter = kvm_get_up_to_date_timer(vcpu, lt, &lt->sys_timer);
 
 	if (lt->regs.counter_limit.c_l != 0) {
 		if (counter < lt->regs.counter_limit.c_l) {
-			DebugHRTM("counter 0x%llx did not reach 0x%x "
-				"limit value",
+			DebugHRTM("counter 0x%llx did not reach 0x%x limit value",
 				counter, lt->regs.counter_limit.c_l);
 		}
 	} else {
@@ -1058,8 +899,7 @@ static void do_lt_sys_timer(struct kvm_vcpu *vcpu, void *data)
 
 	if (lt->regs.counter.l) {
 		lt->sys_timer.work = kvm_set_reset_irq_timer_work;
-		kthread_queue_work(lt->sys_timer.worker,
-					&lt->sys_timer.expired);
+		kthread_queue_work(lt->sys_timer.worker, &lt->sys_timer.expired);
 	}
 }
 
@@ -1108,8 +948,7 @@ enum hrtimer_restart lt_timer_fn(struct kvm_lt *lt, struct kvm_timer *ktimer)
 
 	if (ktimer->t_ops->is_periodic(ktimer)) {
 		hrtimer_add_expires_ns(&ktimer->timer, period);
-		DebugSYSTM("%s periodic timer restarted "
-			"at host ns 0x%llx expires at 0x%llx\n",
+		DebugSYSTM("%s periodic timer restarted at host ns 0x%llx expires at 0x%llx\n",
 			ktimer->name, ktimer->host_start_ns,
 			hrtimer_get_expires_ns(&ktimer->timer));
 		return HRTIMER_RESTART;
@@ -1183,8 +1022,7 @@ static const struct kvm_timer_ops lt_wd_timer_ops = {
 	.timer_fn	= do_lt_wd_timer,
 };
 
-struct kvm_lt *kvm_create_lt(struct kvm *kvm, int node_id, u32 ticks_per_sec,
-				u32 sys_timer_freq)
+struct kvm_lt *kvm_create_lt(struct kvm *kvm, int node_id, u32 sys_timer_freq)
 {
 	struct kvm_lt *lt;
 	pid_t pid_nr;
@@ -1198,7 +1036,6 @@ struct kvm_lt *kvm_create_lt(struct kvm *kvm, int node_id, u32 ticks_per_sec,
 	mutex_init(&lt->lock);
 
 	lt->kvm = kvm;
-	lt->ticks_per_sec = ticks_per_sec;
 	lt->frequency = sys_timer_freq;
 
 	pid_nr = task_pid_nr(current);
@@ -1231,11 +1068,9 @@ struct kvm_lt *kvm_create_lt(struct kvm *kvm, int node_id, u32 ticks_per_sec,
 
 	lt->reset_count.name = "reset counter";
 	lt->reset_count.type = kvm_reset_timer_type;
-	lt->reset_count.running_time = 0;	/* from reset */
 
 	lt->power_count.name = "power counter";
 	lt->power_count.type = kvm_power_timer_type;
-	lt->power_count.running_time = 0;	/* from power */
 
 	kvm_lt_reset(lt);
 
@@ -1260,26 +1095,23 @@ int kvm_lt_set_base(struct kvm *kvm, int node_id, unsigned long new_base)
 		lt_freq = 500000;
 
 	if (lt == NULL) {
-		kvm_create_lt(kvm, node_id, cpu_freq_hz,
-			lt_freq	/* now fixed, but is better to pass */
-				/* qemu as machine parameter and */
-				/* repass from qemu to KVM through ioctl() */);
+		kvm_create_lt(kvm, node_id, lt_freq);
 		lt = kvm_get_lt(kvm, node_id);
 		if (lt == NULL) {
-			pr_err("%s(): sys timer node #%d is not yet created, "
-				"ignore setup\n",
+			pr_err("%s(): sys timer node #%d is not yet created, ignore setup\n",
 				__func__, node_id);
 			return -ENODEV;
 		}
 	}
-	if (lt->base_address == new_base) {
-		pr_info("%s(): sys timer node #%d base 0x%lx is the same, "
-			"so ignore update\n",
-			__func__, node_id, new_base);
-		return 0;
-	}
 
 	mutex_lock(&kvm->slots_lock);
+
+	/* Ignore if base did not change or we see -1 (trying to get PCI BAR size) */
+	if (lt->base_address == new_base || (new_base & 0xffffffff) == 0xffffffff) {
+		ret = 0;
+		goto out_unlock;
+	}
+
 	if (lt->base_address != 0) {
 		/* base address was already set, so update */
 		kvm_io_bus_unregister_dev(kvm, KVM_MMIO_BUS, &lt->dev);
@@ -1288,6 +1120,7 @@ int kvm_lt_set_base(struct kvm *kvm, int node_id, unsigned long new_base)
 	kvm_iodevice_init(&lt->dev, &lt_mmio_ops);
 	ret = kvm_io_bus_register_dev(kvm, KVM_MMIO_BUS, new_base,
 				      LT_MMIO_LENGTH, &lt->dev);
+out_unlock:
 	mutex_unlock(&kvm->slots_lock);
 	if (ret < 0) {
 		kvm_set_lt(kvm, node_id, NULL);

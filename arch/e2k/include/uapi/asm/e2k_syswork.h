@@ -51,6 +51,7 @@ typedef struct icache_range {
 	unsigned long long	end;
 } icache_range_t;
 
+#ifndef __ptr128__
 #define e2k_syswork(arg1, arg2, arg3)                                   \
 ({                                                                      \
 	long __res;                                                     \
@@ -58,5 +59,6 @@ typedef struct icache_range {
 			arg1, arg2, arg3);                              \
 	(int)__res;                                                     \
 })
+#endif
 
 #endif /* _UAPI_E2K_SYSWORK_H_ */

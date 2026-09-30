@@ -117,6 +117,7 @@ aploader:
 // Trap Cellar
 	std	%r0, [0x0] 71
 	std	%r4, [0x00000050] 71
+	{ wait all_c=1; nop 3 }
 	addd	%dr4, MMU_TRAP_CELLAR_MAX_SIZE * 8, %dr4
 	std	%dr4, [free_memory_p]
 

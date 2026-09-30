@@ -69,6 +69,7 @@ extern	cpuinfo_e2k_t	cpu_data[NR_CPUS];
 typedef struct thread_struct {
 	/* Used as a temporary area for !CPU_FEAT_FILL_INSTRUCTION case */
 	struct {
+		e2k_cr0_lo_t cr0_lo;
 		e2k_cr0_hi_t cr0_hi;
 		e2k_cr1_lo_t cr1_lo;
 		e2k_cr1_hi_t cr1_hi;

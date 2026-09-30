@@ -860,6 +860,13 @@ static pageout_t pageout(struct page *page, struct address_space *mapping)
 
 	return PAGE_CLEAN;
 }
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+void pageout4sanit(struct page *page)
+{
+	pageout(page, page_mapping(page));
+}
+EXPORT_SYMBOL(pageout4sanit);
+#endif
 
 /*
  * Same as remove_mapping, but if the page is removed from the mapping, it

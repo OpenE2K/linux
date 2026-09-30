@@ -394,7 +394,7 @@ static int __set_mode(struct mgam83fb_par *p)
 		break;
 	case 24 :
 		ctrl |= CTRL_CD_24BPP;
-                DEBUG_MSG("mga: revision = %d\n", p->vers.revision);
+		DEBUG_MSG("mga: revision = %d\n", p->vers.revision);
 		if (p->vers.revision >= VER_05_2009
 		    && p->vers.revision != MGA_MODEL_PMUP2_0
 		    && p->vers.revision != MGA_MODEL_PMUP2_1){
@@ -660,7 +660,7 @@ mgam83fb_ioctl(struct fb_info *info,
 		return 0;
 	   case FBIOALLOC_DMA_MEM:
 		if (!par->video_buf.ioaddr) {
-	                if (copy_from_user(&dmem, argp, sizeof(dmem))) {
+			if (copy_from_user(&dmem, argp, sizeof(dmem))) {
 				DEBUG_IOCTL_MSG("mgam83fb_ioctl: can't copy_from_user\n");
 				return -EFAULT;
 			}
@@ -807,7 +807,7 @@ static int mgam83fb_mmap(struct fb_info *info, struct vm_area_struct *vma)
 
 	if (off >= 0x80000000) {
 		if (vma->vm_end - vma->vm_start > p->video_buf.size) {
-                        DEBUG_MMAP_MSG("%s: Len to map too big 0x%x > 0x%x\n", 
+			DEBUG_MMAP_MSG("%s: Len to map too big 0x%x > 0x%x\n", 
 					__FUNCTION__, len, p->video_buf.size);
 			return -EINVAL;
 		}
@@ -825,11 +825,11 @@ static int mgam83fb_mmap(struct fb_info *info, struct vm_area_struct *vma)
 				pgprot_writecombine(vma->vm_page_prot);
 #endif
 		if (remap_pfn_range(vma, vma->vm_start,
-                                off >> PAGE_SHIFT,
-                                vma->vm_end - vma->vm_start, vma->vm_page_prot)) {
+				off >> PAGE_SHIFT,
+				vma->vm_end - vma->vm_start, vma->vm_page_prot)) {
 			DEBUG_MMAP_MSG("Mapping failed\n");
-                       return -EAGAIN;
-                }
+		       return -EAGAIN;
+		}
 
 		DEBUG_MMAP_MSG("mgam83fb_mmap: mapping done successfully"
 			" to addr 0x%08lx\n", vma->vm_start);
@@ -857,7 +857,7 @@ static int mgam83fb_mmap(struct fb_info *info, struct vm_area_struct *vma)
 	pfn = off >> PAGE_SHIFT;
 #endif
 	if (io_remap_pfn_range(vma, vma->vm_start, pfn,
-			     	vma->vm_end - vma->vm_start, vma->vm_page_prot)) {
+				vma->vm_end - vma->vm_start, vma->vm_page_prot)) {
 		DEBUG_MMAP_MSG("Mapping failed\n");
 		return -EAGAIN;
 	}
@@ -1545,11 +1545,11 @@ static void mgam83fb_remove(struct pci_dev *dev)
 	}
 	for (rnum = 0; rnum != 2; rnum++) {
 		if (d_image[rnum].size != 0){
-		        mapend = virt_to_page((d_image[rnum].virt_addr) + 
+			mapend = virt_to_page((d_image[rnum].virt_addr) + 
 					(PAGE_SIZE << get_order(d_image[rnum].size)) - 1);
-		        for (map = virt_to_page((d_image[rnum].virt_addr)); map <= mapend; map++) {
-		                ClearPageReserved(map);
-		        }
+			for (map = virt_to_page((d_image[rnum].virt_addr)); map <= mapend; map++) {
+				ClearPageReserved(map);
+			}
 			pci_unmap_single(p->pdev, d_image[rnum].dma_addr, 
 					d_image[rnum].size, PCI_DMA_FROMDEVICE);
 			free_pages(d_image[rnum].virt_addr, get_order(d_image[rnum].size));
@@ -1572,8 +1572,8 @@ static void mgam83fb_remove(struct pci_dev *dev)
 	framebuffer_release(info);
 
 	/* First time when we load driver drvdata is NULL, but if we reload it,
- 	 * we get garbage here, because drvdata is not cleared after driver unload
- 	 */
+	 * we get garbage here, because drvdata is not cleared after driver unload
+	 */
 	pci_set_drvdata(dev, NULL);	
 }
 
@@ -1784,7 +1784,7 @@ void spill_regs(struct mgam83fb_par* p){
 
 int mgafb_proc_read(char *buf, char **start, off_t off, int count, int *eof, void *data)
 {
- 	struct mgam83fb_par* p = (struct mgam83fb_par* )data;
+	struct mgam83fb_par* p = (struct mgam83fb_par* )data;
 	int len = 0;
 	int i = 0;
 	u32 bpp = p->info->var.bits_per_pixel;	
@@ -1928,22 +1928,22 @@ int mgafb_proc_read(char *buf, char **start, off_t off, int count, int *eof, voi
 		 /* getting all regs  */
 #if 1
 		spill_regs(p);
-                if (start == 0x1000){
-                        s = regs_buf;
-                        for (i = 0; i != PAGE_SIZE; i++){
-                                *buf = *s;
-                                buf++;
-                                s++;
-                                len++;
-                        }
-                        return len;
-                }
+		if (start == 0x1000){
+			s = regs_buf;
+			for (i = 0; i != PAGE_SIZE; i++){
+				*buf = *s;
+				buf++;
+				s++;
+				len++;
+			}
+			return len;
+		}
 #endif
 
 		/* getting framebuffer */
 		screen_length = ((p->info->var.yres_virtual) *
-                        (p->info->var.xres_virtual) *
-                                        (bpp >> 3)); /* in bytes */
+			(p->info->var.xres_virtual) *
+					(bpp >> 3)); /* in bytes */
 		if (off >= screen_length)
 				return 0;
 		if (count > (screen_length - off))
@@ -1965,7 +1965,7 @@ int mgafb_proc_read(char *buf, char **start, off_t off, int count, int *eof, voi
 
 int mgafb_proc_write(struct file *file, const char *buffer, unsigned long count, void *data)
 {
- 	struct mgam83fb_par* p = (struct mgam83fb_par*)data;
+	struct mgam83fb_par* p = (struct mgam83fb_par*)data;
 	char kern_buf[PROC_INPUT_MAX_LEN] = { 0, };
 	char *new_buf;
 	unsigned int reg;
@@ -1985,9 +1985,9 @@ int mgafb_proc_write(struct file *file, const char *buffer, unsigned long count,
 #if 1 /* (writing register) */
 	if (count <= 32){
 		if (copy_from_user(&rgval, buffer, 4)) {
-                	ERROR_MSG( "Failed to copy from user\n" );
-                	return -EFAULT;
-                }
+			ERROR_MSG( "Failed to copy from user\n" );
+			return -EFAULT;
+		}
 	}
 
 	if (count == 1){ 	MMIO_WRITE(p, REG_STAT, rgval);   return 4;}
@@ -2017,13 +2017,13 @@ int mgafb_proc_write(struct file *file, const char *buffer, unsigned long count,
 		return 0;
 #endif
 #if 0
-        if ( !count || count > PROC_INPUT_MAX_LEN ) {
+	if ( !count || count > PROC_INPUT_MAX_LEN ) {
 		ERROR_MSG( "Command length is too big\n" );
 		return -EINVAL;
 	}
-        if ( copy_from_user( &kern_buf, buffer, count ) ) {
+	if ( copy_from_user( &kern_buf, buffer, count ) ) {
 		ERROR_MSG( "Failed to copy from user\n" );
-                return -EFAULT;
+		return -EFAULT;
 	}
 
 	if ( sscanf( kern_buf, "CTRL=0x%x", &reg ) == 1 || sscanf( kern_buf, "CTRL=0x%x", &reg ) == 1 ) {
@@ -2123,30 +2123,30 @@ int mgafb_proc_write(struct file *file, const char *buffer, unsigned long count,
 #endif
 
 #if 0 /* no dma mode (buffer like in dma) (source is file) */
-                screen_length = (p->info->var.yres_virtual) *
-                                (p->info->var.xres_virtual)*(bpp >> 3); /* in bytes */
+		screen_length = (p->info->var.yres_virtual) *
+				(p->info->var.xres_virtual)*(bpp >> 3); /* in bytes */
 		d_image.size = screen_length;
 		d_image.virt_addr = __get_free_pages(GFP_KERNEL | GFP_DMA,
-                                                get_order(d_image.size));
+						get_order(d_image.size));
 
 		st = (u8 *)d_image.virt_addr;
-                sf = (u8 *)buffer;
+		sf = (u8 *)buffer;
 
 		if ( copy_from_user( st, sf, d_image.size ) ) {
-                	ERROR_MSG( "Failed to copy from user\n" );
-                	return -EFAULT;
-                }
-                st = (u8 *)p->info->screen_base;
-                sf = (u8 *)d_image.virt_addr;
+			ERROR_MSG( "Failed to copy from user\n" );
+			return -EFAULT;
+		}
+		st = (u8 *)p->info->screen_base;
+		sf = (u8 *)d_image.virt_addr;
 		
-                for (i = 0; i != d_image.size; i++)
-                {
-                	*st = *sf;
-                	st++;
-                	sf++;
-                	vbl++;
-                }
-                free_pages(d_image.virt_addr, get_order(d_image.size));
+		for (i = 0; i != d_image.size; i++)
+		{
+			*st = *sf;
+			st++;
+			sf++;
+			vbl++;
+		}
+		free_pages(d_image.virt_addr, get_order(d_image.size));
 #endif
 #if 0  /* dma mode (source is file) */
 		d_image.size = (p->info->var.yres_virtual) * 
@@ -2166,7 +2166,7 @@ int mgafb_proc_write(struct file *file, const char *buffer, unsigned long count,
 
 		if ( copy_from_user( st, sf, d_image.size ) ) {
 				ERROR_MSG( "Failed to copy from user\n" );
-		                return -EFAULT;
+				return -EFAULT;
 			}
 
 		vbl = d_image.size;
@@ -2174,7 +2174,7 @@ int mgafb_proc_write(struct file *file, const char *buffer, unsigned long count,
 		while (MMIO_READ(p, BBR0) & PROCESS){
 		}
 		dpitch = (p->info->var.xres_virtual) * (bpp >> 3);
-                spitch = dpitch;
+		spitch = dpitch;
 	
 		MMIO_WRITE(p, BBR1, ((p->info->var.yres_virtual << 16) | 
 					((p->info->var.xres_virtual) * (bpp >> 3))));
@@ -2193,72 +2193,72 @@ int mgafb_proc_write(struct file *file, const char *buffer, unsigned long count,
 		free_pages(d_image.virt_addr, get_order(d_image.size));
 #endif
 #if 0  /* dma mode (source is framebuffer) */
-                while (MMIO_READ(p, BBR0) & PROCESS){
-                }
-                dpitch = (p->info->var.xres_virtual) * (bpp >> 3);
-                spitch = dpitch;
+		while (MMIO_READ(p, BBR0) & PROCESS){
+		}
+		dpitch = (p->info->var.xres_virtual) * (bpp >> 3);
+		spitch = dpitch;
 
-                MMIO_WRITE(p, BBR1, ((p->info->var.yres_virtual << 16) |
-                                        ((p->info->var.xres_virtual) * (bpp >> 3))));
-                MMIO_WRITE(p, BBR2, p->mem.base);
-                MMIO_WRITE(p, BBR3, 0);
-                MMIO_WRITE(p, BBR4, (dpitch << 16) | spitch);
-                command |= ( ROP_05 | SDMA_EN | START);
+		MMIO_WRITE(p, BBR1, ((p->info->var.yres_virtual << 16) |
+					((p->info->var.xres_virtual) * (bpp >> 3))));
+		MMIO_WRITE(p, BBR2, p->mem.base);
+		MMIO_WRITE(p, BBR3, 0);
+		MMIO_WRITE(p, BBR4, (dpitch << 16) | spitch);
+		command |= ( ROP_05 | SDMA_EN | START);
 
-                MMIO_WRITE(p, BBR0, command);
+		MMIO_WRITE(p, BBR0, command);
 
 		spill_regs(p);
 
-                while ( MMIO_READ(p, BBR0) & PROCESS) {
-                }
-                pci_unmap_single(p->pdev, d_image.dma_addr,
-                                d_image.size, PCI_DMA_FROMDEVICE);
-                free_pages(d_image.virt_addr, get_order(d_image.size));
+		while ( MMIO_READ(p, BBR0) & PROCESS) {
+		}
+		pci_unmap_single(p->pdev, d_image.dma_addr,
+				d_image.size, PCI_DMA_FROMDEVICE);
+		free_pages(d_image.virt_addr, get_order(d_image.size));
 #endif
 #if 0  /* dma - dma mode (source is file) */
-                d_image.size = (p->info->var.yres_virtual) *
-                                (p->info->var.xres_virtual)*(bpp >> 3); /* in bytes */
-                d_image.virt_addr = __get_free_pages(GFP_KERNEL | GFP_DMA,
-                                                get_order(d_image.size));
-                mapend = virt_to_page ((d_image.virt_addr) +
-                                        (PAGE_SIZE << get_order(d_image.size)) - 1);
-                for (map = virt_to_page((d_image.virt_addr)); map <= mapend; map++)
-                        SetPageReserved(map);
-                d_image.dma_addr = pci_map_single(p->pdev,
-                                (void *)d_image.virt_addr, d_image.size,
-                                                        PCI_DMA_FROMDEVICE);
+		d_image.size = (p->info->var.yres_virtual) *
+				(p->info->var.xres_virtual)*(bpp >> 3); /* in bytes */
+		d_image.virt_addr = __get_free_pages(GFP_KERNEL | GFP_DMA,
+						get_order(d_image.size));
+		mapend = virt_to_page ((d_image.virt_addr) +
+					(PAGE_SIZE << get_order(d_image.size)) - 1);
+		for (map = virt_to_page((d_image.virt_addr)); map <= mapend; map++)
+			SetPageReserved(map);
+		d_image.dma_addr = pci_map_single(p->pdev,
+				(void *)d_image.virt_addr, d_image.size,
+							PCI_DMA_FROMDEVICE);
 
-                st = (u8 *)d_image.virt_addr;
-                sf = (u8 *)buffer;
+		st = (u8 *)d_image.virt_addr;
+		sf = (u8 *)buffer;
 
-                if ( copy_from_user( st, sf, d_image.size ) ) {
-                                ERROR_MSG( "Failed to copy from user\n" );
-                                return -EFAULT;
-                        }
+		if ( copy_from_user( st, sf, d_image.size ) ) {
+				ERROR_MSG( "Failed to copy from user\n" );
+				return -EFAULT;
+			}
 
-                vbl = d_image.size;
+		vbl = d_image.size;
 
-                while (MMIO_READ(p, BBR0) & PROCESS){
-                }
+		while (MMIO_READ(p, BBR0) & PROCESS){
+		}
 
 		dpitch = (p->info->var.xres_virtual) * (bpp >> 3);
 		spitch = dpitch;
 
-                MMIO_WRITE(p, BBR1, ((p->info->var.yres_virtual << 16) |
-                                        ((p->info->var.xres_virtual) * (bpp >> 3))));
-                MMIO_WRITE(p, BBR2, d_image.dma_addr);
-                MMIO_WRITE(p, BBR3, p->mem.base);
-                MMIO_WRITE(p, BBR4, (dpitch << 16) | spitch);
-                command |= ( ROP_05 | SDMA_EN | DDMA_EN | START);
+		MMIO_WRITE(p, BBR1, ((p->info->var.yres_virtual << 16) |
+					((p->info->var.xres_virtual) * (bpp >> 3))));
+		MMIO_WRITE(p, BBR2, d_image.dma_addr);
+		MMIO_WRITE(p, BBR3, p->mem.base);
+		MMIO_WRITE(p, BBR4, (dpitch << 16) | spitch);
+		command |= ( ROP_05 | SDMA_EN | DDMA_EN | START);
 		
 		spill_regs(p);
-                MMIO_WRITE(p, BBR0, command);
+		MMIO_WRITE(p, BBR0, command);
 
-                while ( MMIO_READ(p, BBR0) & PROCESS) {
-                }
-                pci_unmap_single(p->pdev, d_image.dma_addr,
-                                d_image.size, PCI_DMA_FROMDEVICE);
-                free_pages(d_image.virt_addr, get_order(d_image.size));
+		while ( MMIO_READ(p, BBR0) & PROCESS) {
+		}
+		pci_unmap_single(p->pdev, d_image.dma_addr,
+				d_image.size, PCI_DMA_FROMDEVICE);
+		free_pages(d_image.virt_addr, get_order(d_image.size));
 #endif
 	return vbl;
 }
@@ -2271,7 +2271,7 @@ void __proc_init( struct mgam83fb_par* p )
 	// TODO not index but pci slot id
 	sprintf( buf, PROC_FILENAME "%d", p->index );
 	
-        entry = create_proc_entry( buf, 0, &proc_root );
+	entry = create_proc_entry( buf, 0, &proc_root );
 
 	if ( entry ) {
 		entry->data = (void*)p;

@@ -1,6 +1,6 @@
- # SPDX-License-Identifier: GPL-2.0
- # Copyright (c) 2023 MCST
- 
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2023 MCST
+
 #
 # Makefile for the linux kernel.
 # /arch/e2k/kernel
@@ -93,7 +93,7 @@ obj-y	+=	trap_table.o ttable.o process.o copy-hw-stacks.o \
 		rtc.o e2k.o trace.o nmi.o getsp.o alternative.o convert_array.o \
 		protected_syscalls.o clean_aps.o binfmt_elf32_3P.o binfmt_elf64_3P.o\
 		fill_handler_entry.o proc_context_stacks.o e2k-iommu.o kdebugfs.o \
-		e8c_sensors.o e2c3_sensors.o
+		e8c_sensors.o e2c3_sensors.o sched_clock.o devtree.o
 
 obj-$(CONFIG_COMPAT) += sys_32.o
 obj-$(CONFIG_HAVE_HW_BREAKPOINT) += hw_breakpoint.o
@@ -143,6 +143,7 @@ ifeq ($(call cc-option-yn,-fno-semi-spec-ld -fno-spec-ld),y)
 else
 	CFLAGS_kexec.o += -fno-ld-spec
 endif
+CFLAGS_REMOVE_kexec.o := -fprofile-generate-kernel $(call cc-option,-fsemi-spec-ld)
 
 GCOV_PROFILE_kexec.o := n # Since it disables virtual memory
 

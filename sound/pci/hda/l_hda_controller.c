@@ -59,7 +59,7 @@ to_hda_pcm_stream(struct snd_pcm_substream *substream)
  * DAI ops
  */
 static void azx_hda_shutdown(struct snd_pcm_substream *substream,
-                                            struct snd_soc_dai *dai)
+					    struct snd_soc_dai *dai)
 {
 	struct azx *chip = dai->dev->driver_data;
 	struct azx_dev *azx_dev = get_azx_dev(substream);
@@ -92,7 +92,7 @@ unlock:
 }
 
 static int azx_hda_hw_free(struct snd_pcm_substream *substream,
-                                        struct snd_soc_dai *dai)
+					struct snd_soc_dai *dai)
 {
 	struct azx_dev *azx_dev = get_azx_dev(substream);
 	int err;
@@ -126,7 +126,7 @@ static unsigned int l_snd_hdac_make_cmd(u32 addr, hda_nid_t nid,
 }
 
 static int azx_hda_prepare(struct snd_pcm_substream *substream,
-                                           struct snd_soc_dai *dai)
+					   struct snd_soc_dai *dai)
 {
 	struct azx *chip = dai->dev->driver_data;
 	struct azx_dev *azx_dev = get_azx_dev(substream);
@@ -194,7 +194,7 @@ static int azx_hda_prepare(struct snd_pcm_substream *substream,
 	case 32:
 		fmt |= 4<<4;
 	default:
-        break;
+	break;
 	}
 	if (runtime->channels > 0 && runtime->channels <= 16) {
 		fmt |= (runtime->channels - 1);
@@ -386,7 +386,7 @@ static struct snd_pcm_hardware azx_pcm_hw = {
 
 #define MAX_PREALLOC_SIZE (32 * 1024 * 1024)
 static int azx_hda_startup(struct snd_pcm_substream *substream,
-                                        struct snd_soc_dai *dai)
+					struct snd_soc_dai *dai)
 {
 	struct hda_pcm_stream *hinfo = to_hda_pcm_stream(substream);
 	struct azx *chip = dai->dev->driver_data;
@@ -469,7 +469,7 @@ static int azx_hda_startup(struct snd_pcm_substream *substream,
 	if (size > MAX_PREALLOC_SIZE)
 		size = MAX_PREALLOC_SIZE;
 	snd_pcm_lib_preallocate_pages(substream, type,
-                    dai->dev, size, MAX_PREALLOC_SIZE);
+		    dai->dev, size, MAX_PREALLOC_SIZE);
 
 	return 0;
 
@@ -597,7 +597,7 @@ static int azx_rirb_get_response(struct hdac_bus *bus, unsigned int addr,
 	if (!bus->polling_mode && bus->poll_count < 2) {
 		dev_dbg(&chip->pci->dev,
 			"azx_get_response timeout, polling \
-            the codec once: last cmd=0x%08x\n",
+	    the codec once: last cmd=0x%08x\n",
 			bus->last_cmd[addr]);
 		do_poll = 1;
 		bus->poll_count++;
@@ -608,7 +608,7 @@ static int azx_rirb_get_response(struct hdac_bus *bus, unsigned int addr,
 	if (!bus->polling_mode) {
 		dev_warn(&chip->pci->dev,
 			 "azx_get_response timeout, switching \
-             to polling mode: last cmd=0x%08x\n",
+	     to polling mode: last cmd=0x%08x\n",
 			 bus->last_cmd[addr]);
 		bus->polling_mode = 1;
 		goto again;
@@ -653,7 +653,7 @@ static int azx_rirb_get_response(struct hdac_bus *bus, unsigned int addr,
 
 	dev_err(&chip->pci->dev,
 		"azx_get_response timeout, switching \
-        to single_cmd mode: last cmd=0x%08x\n",
+	to single_cmd mode: last cmd=0x%08x\n",
 		bus->last_cmd[addr]);
 	chip->single_cmd = 1;
 	hbus->response_reset = 0;

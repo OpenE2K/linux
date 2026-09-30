@@ -534,9 +534,13 @@ extern int __get_user_bad(void) __attribute__((noreturn));
 
 extern int __put_user_bad(void) __attribute__((noreturn));
 
-/* __put_user() but caller must manually switch to user page tables.
+/*
+ * __put_user() but caller must manually switch to user page tables.
  * Useful in protected fast syscalls since we can't access user space
- * directly (PTE.int_pr prohibits that) but page tables are from user. */
+ * directly (PTE.int_pr prohibits that) but page tables are from user.
+ *
+ * Returns -EFAULT on unhandled page fault and 0 otherwise.
+ */
 #define __put_user_switched_pt(x, ptr) \
 ({									\
 	__typeof__(*(ptr)) __user *__pusp_ptr = (ptr);			\
@@ -828,8 +832,40 @@ clear_user_with_tags(void __user *ptr, unsigned long length, unsigned long tag)
 
 #ifdef CONFIG_PROTECTED_MODE
 
+#define MAKE_AP_LO(area_base, area_size, off, access)	\
+({							\
+	e2k_ptr_lo_t __lo;				\
+	AW(__lo) = 0UL;					\
+	__lo.base = area_base;				\
+	__lo.rw     = access;				\
+	__lo.itag   = E2K_AP_ITAG;			\
+	AW(__lo);					\
+})
+
+#define MAKE_AP_HI(area_base, area_size, offs, access) 	\
+({							\
+	e2k_ptr_hi_t __hi;				\
+	AW(__hi)         = 0UL;				\
+	__hi.size   = area_size;			\
+	__hi.curptr = offs;				\
+	AW(__hi);					\
+})
+
+static inline e2k_ptr_t MAKE_AP(u64 base, u64 len)
+{
+	if (unlikely(!access_ok(base, len))) {
+		base = 0;
+		len = 0;
+	}
+
+	e2k_ptr_t ptr = {{0}};
+	ptr.lo = 0L | ((base & E2K_VA_MASK) | ((u64)E2K_AP_ITAG << 61) | ((u64)RW_ENABLE << 59));
+	ptr.hi = 0L | ((len & 0xFFFFFFFF) << 32);
+	return ptr;
+}
+
 static inline __must_check int PUT_USER_AP(e2k_ptr_t __user *ptr, u64 base,
-        u64 len, u64 off, u64 rw)
+	u64 len, u64 off, u64 rw)
 {
 	u64 tmp_lo, tmp_hi;
 	u32 tag;

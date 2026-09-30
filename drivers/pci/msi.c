@@ -1112,8 +1112,6 @@ EXPORT_SYMBOL(pci_disable_msi);
 #ifdef CONFIG_MCST
 static const struct pci_device_id r2000p_msix_buglist[] = {
 	{ PCI_VDEVICE(MCST_TMP, 0x803d), .driver_data = 9 },
-	{ PCI_VDEVICE(MCST_TMP, PCI_DEVICE_ID_MCST_3D_VIVANTE_R2000P),
-					.driver_data = 4 },
 	{ /* sentinel */ }
 };
 #endif

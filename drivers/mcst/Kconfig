@@ -1,14 +1,7 @@
- # SPDX-License-Identifier: GPL-2.0
- # Copyright (c) 2023 MCST
- 
-menu "Elbrus MCST Device Drivers"
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2023 MCST
 
-config R2000P_EDAC
-	tristate "r2000+ processor Error Detection And Correction (EDAC) driver"
-	depends on PCI && E90S
-	default m
-	select EDAC
-	select EDAC_DEBUG
+menu "Elbrus MCST Device Drivers"
 
 config DRM_MGA25
 	tristate "MGA 2.5 and higher video adapter"
@@ -124,12 +117,6 @@ config APKPWR
 	help
 	  Driver for MUP-4C power supply module (used in APK-NT4C and APK-PC4C).
 
-config MEM2ALLOC
-	tristate "DMA memory allocator"
-	default m
-	help
-	  DMA memory allocator.
-
 config HANTRODEC
 	tristate "Google hantrodec VP9 driver"
 	default m
@@ -172,27 +159,6 @@ config VXD_FPGA
         def_bool y
         depends on IMGTEC
 
-config MCST_GPU_IMGTEC
-        tristate "MCST support Imagination`s GPU support for E2C3 SoC"
-        select DRM_VM
-        depends on IMGTEC
-        default m
-choice
-        prompt "Choice Imagination`s GPU module version to build"
-        default MCST_GPU_IMGTEC_R5878540
-
-        config MCST_GPU_IMGTEC_R4991288
-                bool "Rogue_DDK_Linux_WS_REL_1.9@4991288 with desktop OpenGL"
-        	depends on IMGTEC
-        config MCST_GPU_IMGTEC_R5878540
-                bool "Rogue_DDK_Linux_WS_REL_1.13@5878540 w/o desktop OpenGL"
-        	depends on IMGTEC
-endchoice
-source "drivers/mcst/gpu-imgtec.r4991288/Kconfig"
-source "drivers/mcst/gpu-imgtec.r5878540/Kconfig"
-
-source "drivers/mcst/gpu-viv/Kconfig"
-
 source "drivers/mcst/smi/Kconfig"
 
 config SMI_PWM
@@ -215,13 +181,6 @@ config SENSORS_EMC2305
 
 	  This driver can also be built as a module.  If so, the module
 	  will be called emc2305.
-
-config PMC_R2KP
-	bool "R2000+ Power Management Controller"
-	depends on E90S
-	default y #
-	help
-	  Power Management Controller (PMC) for MCST R2000+ (E90S/SPARC v9) CPU
 
 config HW_CHECK
 	tristate "Hardware checker (ipcc, mem, bitrate, pins) for engineers"

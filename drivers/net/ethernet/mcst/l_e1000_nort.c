@@ -79,18 +79,20 @@ MODULE_LICENSE("GPL v2");
 
 /*
  * Set the number of Tx and Rx buffers, using Log_2(# buffers).
- * Reasonable default values are 16 Tx buffers, and 256 Rx buffers.
- * That translates to 4 (16 == 2^^4) and 8 (256 == 2^^8).
+ * Maximum Tx buffers - 512 (9)
+ * Maximum Rx buffers - 512 (9)
  */
-#ifndef E1000_LOG_TX_BUFFERS
-#define E1000_LOG_TX_BUFFERS	8 /*4*/
-#define E1000_LOG_RX_BUFFERS	9 /*8*/
-#endif /* E1000_LOG_TX_BUFFERS */
+#define E1000_MAX_LOG_TX_BUFFERS	9
+#define E1000_LOG_TX_BUFFERS		9
+#define E1000_MAX_LOG_RX_BUFFERS	9
+#define E1000_LOG_RX_BUFFERS		9
 
+#define MAX_TX_RING_SIZE	(1 << (E1000_MAX_LOG_TX_BUFFERS))
 #define TX_RING_SIZE		(1 << (E1000_LOG_TX_BUFFERS))
 #define TX_RING_MOD_MASK	(TX_RING_SIZE - 1)
 
 #define TX_HISTERESIS		4
+#define MAX_RX_RING_SIZE	(1 << (E1000_MAX_LOG_RX_BUFFERS))
 #define RX_RING_SIZE		(1 << (E1000_LOG_RX_BUFFERS))
 #define RX_RING_MOD_MASK	(RX_RING_SIZE - 1)
 
@@ -980,7 +982,7 @@ static void e1000_print_phy(struct e1000_private *ep, u32 id)
 	} else if ((id & MICREL_PHY_ID_MASK) == PHY_ID_KSZ9021) {
 		dev_info(&pdev->dev,
 			 "found phy id 0x%08X - Micrel KSZ9021\n", id);
-	} else if ((id & NATSEMI_PHY_ID_MASK) == DP83865_PHY_ID) {
+	} else if (id == DP83865_PHY_ID) {
 		dev_info(&pdev->dev,
 			 "found phy id 0x%08X - NatSemi DP83865\n", id);
 	} else if (id == DP83867_PHY_ID) {
@@ -2580,8 +2582,6 @@ static int e1000_open(struct net_device *dev)
 		goto err_free_ring;
 	}
 
-	netif_carrier_on(dev);
-
 	if (netif_msg_ifup(ep))
 		dev_info(&dev->dev, "%s: ok\n", __func__);
 
@@ -2715,8 +2715,6 @@ static const struct net_device_ops e1000_netdev_ops = {
 static int e1000_get_link_ksettings(struct net_device *dev,
 				    struct ethtool_link_ksettings *cmd)
 {
-	struct e1000_private *ep = netdev_priv(dev);
-
 	if (!dev->phydev) {
 		dev_warn_once(&dev->dev, "phydev not init\n");
 		return -ENODEV;
@@ -2729,7 +2727,6 @@ static int e1000_get_link_ksettings(struct net_device *dev,
 static int e1000_set_link_ksettings(struct net_device *dev,
 				    const struct ethtool_link_ksettings *cmd)
 {
-	struct e1000_private *ep = netdev_priv(dev);
 	int r = -EOPNOTSUPP;
 
 	if (!dev->phydev) {
@@ -2787,12 +2784,10 @@ static u32 e1000_get_link(struct net_device *dev)
 static void e1000_get_ringparam(struct net_device *dev,
 				struct ethtool_ringparam *ering)
 {
-	struct e1000_private *ep = netdev_priv(dev);
-
-	ering->tx_max_pending = TX_RING_SIZE - 1;
-	ering->tx_pending = (ep->cur_tx - ep->dirty_tx) & TX_RING_MOD_MASK;
-	ering->rx_max_pending = RX_RING_SIZE - 1;
-	ering->rx_pending = ep->cur_rx & RX_RING_MOD_MASK;
+	ering->tx_max_pending = MAX_TX_RING_SIZE;
+	ering->tx_pending = TX_RING_SIZE;
+	ering->rx_max_pending = MAX_RX_RING_SIZE;
+	ering->rx_pending = RX_RING_SIZE;
 }
 
 static void e1000_get_strings(struct net_device *dev, u32 stringset, u8 *data)
@@ -3294,7 +3289,7 @@ static int e1000_init_dma_ba(struct e1000_private *ep)
 
 	/* low 32 bits DMA addr*/
 	init_block_addr_part = (ep->dma_addr + offsetof(struct e1000_dma_area,
-		    		init_block)) & 0xffffffff;
+				init_block)) & 0xffffffff;
 	e1000_write_e_base_address(ep, init_block_addr_part);
 	if (e1000_debug & NETIF_MSG_PROBE)
 		dev_dbg(&ep->pci_dev->dev,
@@ -3578,53 +3573,6 @@ err_release_region:
 	return ret;
 }
 
-
-static char *rt = NULL;
-#define MAX_NUM_L_E1000_RT	32
-static void *l_1000_rts[MAX_NUM_L_E1000_RT];
-static int num_l_e1000_rt;
-
-static int is_rt_device(struct pci_dev *pdev, int bar)
-{
-	char *s = rt;
-	int inst;
-
-retry :
-	if (s == NULL) {
-		return 0;
-	}
-	s = strstr(s, pci_name(pdev));
-	if (s == NULL) {
-		return 0;
-	}
-	s += strlen(pci_name(pdev));
-	if (*s != '#') {
-		goto yes;
-	}
-	s++;
-	inst = simple_strtol(s, NULL, 10);
-	if (inst == bar) {
-		goto yes;
-	}
-	goto retry;
-yes:
-	return 1;
-}
-
-static int was_rt_device(void *ep)
-{
-	int i;
-	for (i = 0; i < num_l_e1000_rt; i++) {
-		if (l_1000_rts[i] == ep) {
-			return 1;
-		}
-	}
-	return 0;
-}
-
-#define IS_RT_DEVICE(pdev) (rt && strstr(rt, pci_name(pdev)))
-module_param(rt, charp, 0444);
-
 static int e1000_probe_pci_bar(struct pci_dev *pdev,
 			       const struct pci_device_id *ent,
 			       int bar, struct msix_entry *msix_entries,
@@ -3670,25 +3618,7 @@ static int e1000_probe_pci_bar(struct pci_dev *pdev,
 		return -ENOMEM;
 	}
 
-	if (is_rt_device(pdev, bar)) {
-		if (num_l_e1000_rt >= (MAX_NUM_L_E1000_RT - 1)) {
-			dev_warn(&pdev->dev,
-				 "l_e1000: max rt devices reached.\n");
-			err = -ENOMEM;
-		} else {
-			struct net_device *dev = dev_get_drvdata(&pdev->dev);
-			err = e1000_rt_probe1(ioaddr, base_ioaddr, 1, pdev, res,
-					      bar, msix_entries, msi_status);
-			if (err >= 0) {
-				dev = dev_get_drvdata(&pdev->dev);
-				l_1000_rts[num_l_e1000_rt] = netdev_priv(dev);
-				num_l_e1000_rt++;
-			}
-		}
-	} else {
-		err = e1000_probe1(ioaddr, base_ioaddr, 1, pdev, res,
-				   bar, msix_entries, msi_status);
-	}
+	err = e1000_probe1(ioaddr, base_ioaddr, 1, pdev, res, bar, msix_entries, msi_status);
 
 	if (err < 0) {
 		iounmap(base_ioaddr);
@@ -3860,11 +3790,6 @@ static void e1000_remove(struct pci_dev *pdev)
 	l_e1000_dbg_board_exit(ep);
 #endif /*CONFIG_DEBUG_FS*/
 
-	if (was_rt_device(ep)) {
-		e1000_rt_remove(pdev);
-		return;
-	}
-
 	/* close */
 	netif_carrier_off(dev);
 	if (dev->phydev) {
@@ -3938,7 +3863,7 @@ static void e1000_shutdown(struct pci_dev *pdev)
 	int i;
 	unsigned long flags;
 
-	if (netif_running(dev)) {
+	if (!(dev->priv_flags & IFF_NO_QUEUE) && netif_running(dev)) {
 		napi_disable(&ep->napi);
 		netif_stop_queue(dev);
 
@@ -4057,7 +3982,7 @@ static void l_e1000_sysctl_register(void)
 	if (l_e1000_sysctl_header) {
 	    return;
 	}
-        l_e1000_sysctl_header = register_sysctl_table(l_e1000_root_table);
+	l_e1000_sysctl_header = register_sysctl_table(l_e1000_root_table);
 }
 
 static void l_e1000_sysctl_unregister(void)

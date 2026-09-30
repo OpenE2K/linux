@@ -1278,6 +1278,7 @@ static inline void prepare_guest_fast_ttable_entry_crs(struct kvm_vcpu *vcpu,
 	AS(cr1_lo).cui = KERNEL_CODES_INDEX;
 
 	/* Write back new chain stack frame parameters to cr */
+	alternative("", "wait ma_c=1", CPU_HWBUG_CR_BEFORE_WRITES, "memory");
 	WRITE_CR0_LO_REG(cr0_lo);
 	WRITE_CR0_HI_REG(cr0_hi);
 	WRITE_CR1_LO_REG(cr1_lo);

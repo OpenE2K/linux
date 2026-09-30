@@ -114,7 +114,7 @@ static void __mga2_vid_dpms(struct drm_crtc *crtc,
 	case DRM_MODE_CONNECTOR_VGA:
 	case DRM_MODE_CONNECTOR_DVID:
 		ctrl &= ~((MGA2_VID0_B_MODE_ALL <<
-			 	MGA2_VID0_B_MODE_OFFSET) |
+				MGA2_VID0_B_MODE_OFFSET) |
 			(MGA2_VID0_B_STROBE_DELAY_ALL <<
 				MGA2_VID0_B_STROBE_DELAY_OFFSET) |
 			MGA2_VID0_B_2XDDR_EN_RESYNC);
@@ -179,7 +179,7 @@ static void __mga25_vid_dpms(struct drm_crtc *crtc,
 	struct mga2 *mga2 = crtc->dev->dev_private;
 	struct mga2_crtc *mcrtc = to_mga2_crtc(crtc);
 	void __iomem *vid_regs = mga2->regs + mga2->info->vid_regs_base +
-			 	mga2_get_vid(connector) * MGA2_VID0_SZ;
+				mga2_get_vid(connector) * MGA2_VID0_SZ;
 	u32 omux = rvidc(MUX), mux = 0, i;
 	u32 ctrl = rvidc(CTRL) & ~MGA2_VID0_B_ENABLE;
 

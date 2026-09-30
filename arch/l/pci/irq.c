@@ -866,13 +866,13 @@ static int pcibios_lookup_irq(struct pci_dev *dev, int assign)
 			continue;
 		if (info->irq[pin].link == pirq) {
 			/* We refuse to override the dev->irq information. Give a warning! */
-		    	if ( dev2->irq && dev2->irq != irq && \
+			if ( dev2->irq && dev2->irq != irq && \
 			(!(pci_probe & PCI_USE_PIRQ_MASK) || \
 			((1 << dev2->irq) & mask)) ) {
-		    		printk(KERN_INFO "IRQ routing conflict for %s, have irq %d, want irq %d\n",
+				printk(KERN_INFO "IRQ routing conflict for %s, have irq %d, want irq %d\n",
 				       pci_name(dev2), dev2->irq, irq);
-		    		continue;
-		    	}
+				continue;
+			}
 			dev2->irq = irq;
 			pirq_penalty[irq]++;
 			if (dev != dev2)

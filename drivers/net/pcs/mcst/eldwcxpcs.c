@@ -677,7 +677,8 @@ static int pcs_read_c45(struct pci_dev *pdev, unsigned char *mgb_ioaddr,
 	writel((readl(mgb_ioaddr + MGIO_CSR) & ~MG_W1C_MASK) | MG_RRDY,
 	       mgb_ioaddr + MGIO_CSR);
 	rd = (0x2UL << MGIO_CS_OFF) |
-	     (reg_num & ((0x1fUL << MGIO_REG_AD_OFF) | 0xffff)) |
+	     (((reg_num >> MII_DEVADDR_C45_SHIFT) & 0x1fUL) << MGIO_REG_AD_OFF) |
+	     (reg_num & MII_REGADDR_C45_MASK) |
 	     ((mii_id & 0x1f) << MGIO_PHY_AD_OFF);
 	writel(rd, mgb_ioaddr + MGIO_DATA);
 	if (wait_rrdy(mgb_ioaddr))
@@ -711,7 +712,8 @@ static void pcs_write_c45(struct pci_dev *pdev, unsigned char *mgb_ioaddr,
 	writel((readl(mgb_ioaddr + MGIO_CSR) & ~MG_W1C_MASK) | MG_RRDY,
 	       mgb_ioaddr + MGIO_CSR);
 	wr = (0x2 << MGIO_CS_OFF) |
-	     (reg_num & ((0x1f << MGIO_REG_AD_OFF) | 0xffff)) |
+	     (((reg_num >> MII_DEVADDR_C45_SHIFT) & 0x1fUL) << MGIO_REG_AD_OFF) |
+	     (reg_num & MII_REGADDR_C45_MASK) |
 	     ((mii_id & 0x1f) << MGIO_PHY_AD_OFF);
 	writel(wr, mgb_ioaddr + MGIO_DATA);
 	if (wait_rrdy(mgb_ioaddr))
@@ -973,6 +975,64 @@ static int chk_cmdline(void)
 
 	return 0;
 } /* chk_cmdline */
+
+void eldwcxpcs_mpll_reinit(struct pci_dev *pdev, unsigned char *ioaddr)
+{
+	u16 val;
+	int node;
+	u16 reg;
+
+	if (!pdev)
+		return;
+
+	node = dev_to_node(&pdev->dev);
+
+	if (node < 0)
+		node = 0; /* nn */
+
+	if (node >= MAX_NUMNODES) {
+		dev_warn(&pdev->dev,
+			 "eldwcxpcs: node = %d >= MAX_NUMNODES (%d), no mpll reinit!\n",
+			 node, MAX_NUMNODES);
+		return;
+	}
+
+	if (PCI_FUNC(pdev->devfn) != 0)
+		return;
+
+	/* 1./2. Wait RST to 1'h0 */
+	pcs0_wait1reset(pdev, ioaddr);
+
+	/* 1. Initializing the DWC_xpcs Core */
+	/* PCS Reset */
+	val = pcs_read_c45(pdev, ioaddr, SR_XS_PCS_CTRL1);
+	pcs_write_c45(pdev, ioaddr, SR_XS_PCS_CTRL1, val | SR_XS_RST(1));
+	val = pcs_read_c45(pdev, ioaddr, SR_XS_PCS_CTRL1);
+	/* Wait RST (SR_XS_PCS_CTRL1) to 1'h0 */
+	if (pcs0_wait1reset(pdev, ioaddr) == 0) {
+		pr_info(KBUILD_MODNAME " %s: reset PCS0 - done\n",
+			dev_name(&pdev->dev));
+	}
+	mdelay(1);
+
+	pcs_raw_init_pll(pdev, ioaddr, node);
+
+	/* Vendor specific software reset 1! */
+	pcs0_vs_reset(pdev, ioaddr);
+
+	/* wait for MPLL started */
+	mdelay(100);
+	reg = (u16)pcs_read_c45(pdev, ioaddr,
+				VR_XS_PMA_Gen5_12G_16G_MISC_STS);
+	pr_info(KBUILD_MODNAME ": MPLL A%s B%s (0x%04X)",
+		((reg >> 9) & 1) ? "+" : "-",
+		((reg >> 10) & 1) ? "+" : "-",
+		reg);
+
+	/* Vendor specific software reset 2! */
+	pcs0_vs_reset(pdev, ioaddr);
+}
+EXPORT_SYMBOL(eldwcxpcs_mpll_reinit);
 
 static const struct of_device_id eldwcxpcs_of_match[] = {
 	{ .compatible = "mcst,eldwcxpcs" },

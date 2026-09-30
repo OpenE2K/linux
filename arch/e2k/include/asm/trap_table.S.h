@@ -41,7 +41,7 @@
  * This is needed to flush SLT before trying to load anything.
  */
 #define SWITCH_HW_STACKS_SYSCALL() \
-	KERNEL_ENTRY(TSK_TI_, %r0 /* syscall number */, 1 /* crp */) \
+	KERNEL_ENTRY(TSK_TI_, %r0 /* syscall number */, 1 /* crp */, 0 /* hw_trap */) \
 	SWITCH_HW_STACKS( \
 		/* switch unconditionally */ \
 		cmpesb 0, 0 \
@@ -131,6 +131,33 @@
 		rrd %osr0, GCURTASK ? ~ %pred0; \
 	}
 
+#ifdef CONFIG_KVM_HOST_MODE
+# define CHECK_HWBUG_HCALL_EXC_ILL_INSTR_ADDR(pred) \
+	ALTERNATIVE_1_ALTINSTR \
+		/* CPU_HWBUG_HCALL_EXC_ILL_INSTR_ADDR version */ \
+		{ \
+			nop 1; /* rrd -> usage */ \
+			rrd %cr0.hi, %g18; \
+		} \
+		{ \
+			andd %g18, CR0_IP_MASK, %g18; \
+		} \
+		{ \
+			cmpedb,0 %g18, [hcall_entry0], pred; \
+		} \
+	ALTERNATIVE_2_OLDINSTR \
+		/* Default version - do nothing */ \
+		{ \
+			cmpedb,0 0, 1, pred; \
+		} \
+	ALTERNATIVE_3_FEATURE(CPU_HWBUG_HCALL_EXC_ILL_INSTR_ADDR) \
+	{ \
+		ibranch done_to_hcall ? pred; \
+	}
+#else	/* !CONFIG_KVM_HOST_MODE */
+# define CHECK_HWBUG_HCALL_EXC_ILL_INSTR_ADDR(pred)	;
+#endif	/* CONFIG_KVM_HOST_MODE */
+
 /**
  * KERNEL_ENTRY - prepare to switch hardware stacks and issue necessary barriers
  * @prefix: where to save %g to
@@ -146,54 +173,77 @@
  *  - flush generations table with `crp`;
  *  - wait for AAU/DTLB buffer to flush so that we can write MMU regs in kernel.
  */
-#define KERNEL_ENTRY(prefix, nr_syscall, issue_crp) \
+#define KERNEL_ENTRY(prefix, nr_syscall, issue_crp, hw_trap) \
 	/* \
 	 * Important: the first memory access in kernel is store, not load. \
 	 * This is needed to flush SLT before trying to load anything. \
 	 */ \
-	{ \
-.ifnb nr_syscall; \
-		disp %ctpr1, 0f; \
-		/* This check must correspond with the check in \
-		 * arch_ptrace_stop() before clearing saved %g. */ \
-		cmpesb nr_syscall, __NR_sigreturn, %pred0; \
-.endif; \
-	} \
 	ALTERNATIVE_1_ALTINSTR \
 		/* iset v5 version - save qp registers extended part */ \
 		{ \
-			stgdq,sm %qg18, 0, prefix##G_MY_CPU_OFFSET; \
-			qpswitchd,1,sm GCPUOFFSET, GCPUOFFSET; \
-			qpswitchd,4,sm GCPUID_PREEMPT, GCPUID_PREEMPT; \
+			stgdq,sm %qg16, 0, TSK_G_TMP_TAG; \
 		} \
 		{ \
-			stgdq,sm %qg16, 0, prefix##G_VCPU_STATE; \
-			qpswitchd,1,sm GVCPUSTATE, GVCPUSTATE; \
-			qpswitchd,4,sm GCURTASK, GCURTASK; \
+			nop 1; \
+			rrd %osr0, GCURTASK; \
+			stgdqp,sm %qpg17, 0, prefix##G17; \
+		} \
+		/* Bug 116851 - all strqp must be speculative if dealing with tags */ \
+		{ \
+			strqp,2,sm %qpg16, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G16; \
+			ldrd,5 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | (TSK_G_TMP_TAG + 8), %dg16; \
+		} \
+		{ \
+			nop 3; \
+			strqp,2,sm %qpg18, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G18; \
+			strqp,5,sm %qpg19, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G19; \
+		} \
+		{ \
+			strd,2,sm %dg16, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G17; \
 		} \
 	ALTERNATIVE_2_OLDINSTR \
 		/* Original instruction - save only 16 bits */ \
 		{ \
-			stgdq,sm %qg18, 0, prefix##G_MY_CPU_OFFSET; \
-			movfi,1 GCPUOFFSET, GCPUOFFSET; \
-			movfi,4 GCPUID_PREEMPT, GCPUID_PREEMPT; \
+			nop 3; \
+			stgdq,sm %qg16, 0, prefix##G16; \
+			movfi,1 %xg16, %dg16; \
+			movfi,4 %xg17, %dg17; \
 		} \
 		{ \
-			stgdq,sm %qg16, 0, prefix##G_VCPU_STATE; \
-			movfi,1 GVCPUSTATE, GVCPUSTATE; \
-			movfi,4 GCURTASK, GCURTASK; \
+			rrd %osr0, GCURTASK; \
+			stgdq,sm %qg16, 0, prefix##G17; \
+		} \
+		{ \
+			nop 3; \
+			strd,2 %dg18, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G18; \
+			strd,5 %dg19, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G19; \
+			movfi,1 %xg18, %dg18; \
+			movfi,4 %xg19, %dg19; \
+		} \
+		{ \
+			strd,2 %dg18, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G18_EXT; \
+			strd,5 %dg19, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G19_EXT; \
+		} \
+		{ \
+			nop 3; \
+			ldrd,0 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | prefix##G16_EXT, %dg18; \
+			ldrd,3 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | prefix##G17, %dg19; \
+		} \
+		{ \
+			strd,2 %dg18, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G17; \
+			strd,5 %dg19, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G16_EXT; \
 		} \
 	ALTERNATIVE_3_FEATURE(CPU_FEAT_QPREG) \
-	{ \
-		rrd %osr0, %dg18; \
-		stgdq,sm %qg18, 0, prefix##G_CPU_ID_PREEMPT; \
-	} \
 	{ \
 		/* 'crp' instruction also clears %rpr besides the generations \
 		 * table, so make sure we preserve %rpr value. */ \
 		.if issue_crp; rrd %rpr.lo, %dg16; .endif; \
-		stgdq,sm %qg16, 0, prefix##G_TASK; \
 	} \
+.ifne hw_trap; \
+	/* Assumes that only %g16-%g17 has been modified with kernel \
+	 * values above in CPU_FEAT_QPREG case.  Will modify %g18. */ \
+	CHECK_HWBUG_HCALL_EXC_ILL_INSTR_ADDR(%pred3); \
+.endif; \
 	{ \
 		/* #144498: wait for activity in DTLB/AAU to stop, which
 		 * must be done before accessing MMU registers (e.g. writing \
@@ -221,7 +271,6 @@
 	} \
 	{ \
 		rwd %dg19, %rpr.hi; \
-		.ifnb nr_syscall; ct %ctpr1 ? ~ %pred0; .endif; \
 	} \
 .else; \
 	/* CPU_HWBUG_INTERSECTING_L1_ACCESSES - \
@@ -232,27 +281,7 @@
 		wait all_e=1; \
 	} \
 .ifnb nr_syscall; .error "@nr_syscall set without @issue_crp"; .endif; \
-.endif; \
-	{ \
-		ldrd,0 %dg18, TAGGED_MEM_LOAD_REC_OPC | prefix##G_VCPU_STATE_EXT, %dg16; \
-		ldrd,2 %dg18, TAGGED_MEM_LOAD_REC_OPC | prefix##G_TASK, %dg17; \
-	} \
-	ALTERNATIVE "{ nop 2 }", "{ nop 3 }", CPU_FEAT_ISET_V6; \
-	{ \
-		addd,1 %dg18, 0, GCURTASK; \
-		strd,2 %dg16, %dg18, TAGGED_MEM_STORE_REC_OPC | prefix##G_TASK; \
-		strd,5 %dg17, %dg18, TAGGED_MEM_STORE_REC_OPC | prefix##G_VCPU_STATE_EXT; \
-	} \
-	{ \
-		ldrd,0 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | prefix##G_MY_CPU_OFFSET_EXT, %dg18; \
-		ldrd,2 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | prefix##G_CPU_ID_PREEMPT, %dg19; \
-	} \
-	ALTERNATIVE "{ nop 2 }", "{ nop 3 }", CPU_FEAT_ISET_V6; \
-	{ \
-		strd,2 %dg18, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G_CPU_ID_PREEMPT; \
-		strd,5 %dg19, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G_MY_CPU_OFFSET_EXT; \
-	} \
-0:
+.endif;
 
 #define HANDLER_TRAMPOLINE(ctprN, scallN, fn, wbsL) \
 	/* Force load OSGD->GD. Alternative is to use non-0 CUI for kernel */ \
@@ -266,7 +295,7 @@
 	 * Important: the first memory access in kernel is store, not load. \
 	 * This is needed to flush SLT before trying to load anything. \
 	 */ \
-	KERNEL_ENTRY(TSK_TI_, /* not a syscall */, 1 /* crp */) \
+	KERNEL_ENTRY(TSK_TI_, /* not a syscall */, 1 /* crp */, 0 /* hw_trap */) \
 	{ \
 		disp ctprN, fn; \
 	} \

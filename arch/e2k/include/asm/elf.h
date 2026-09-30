@@ -254,7 +254,7 @@ do {									\
 		}							\
 	} else	{							\
 		current->thread.flags &= ~(E2K_FLAG_PROTECTED_MODE |	\
-                                           E2K_FLAG_3P_ELF32);          \
+					   E2K_FLAG_3P_ELF32);          \
 	}								\
 	if ((ex).e_ident[EI_CLASS] == ELFCLASS32)                       \
 		current->thread.flags |= E2K_FLAG_32BIT;                \

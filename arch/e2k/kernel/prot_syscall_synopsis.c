@@ -738,9 +738,6 @@ const struct prot_syscall_arg_attrs prot_syscall_arg_masks[NR_syscalls + 1] = {
 	[__NR_fcntl64] =
 		{ 0xFFFFFF02040400,	/*	fcntl64	221		II?	*/
 					0, 0, 0, 0, 0, 0 },
-	[__NR_macctl] =
-		{ 0xFFFFFF04010400,	/*	macctl	223		IPI	*/
-					0, 0, 0, 0, 0, 0 },
 	[__NR_newfstatat] =
 		{ 0xFFFF0401030400,	/*	newfstatat 224		ISPI	*/
 					0, 0, sizeof(struct stat), 0, 0, 0 },
@@ -820,9 +817,6 @@ const struct prot_syscall_arg_attrs prot_syscall_arg_masks[NR_syscalls + 1] = {
 		{ 0xFF010001010000,	/*	access_hw_stacks 254	LPPLP	*/
 					0, sizeof(unsigned long long), -4,
 					0, sizeof(unsigned long), 0 },
-	[__NR_el_posix] =
-		{ 0xFF040202020400,	/*	el_posix	255	I???I	*/
-					0, 0, 0, 0, 0, 0 },
 
 	[__NR_io_uring_setup] =		{ 0xFFFFFFFF010400, /* #256	IP	*/
 					0, sizeof(struct io_uring_params), 0, 0, 0, 0 },
@@ -1038,7 +1032,7 @@ const struct prot_syscall_arg_attrs prot_syscall_arg_masks[NR_syscalls + 1] = {
 		{ 0xFFFFFF01010100,	/*	getcpu	327		PPP	*/
 					0, 0, 0, 0, 0, 0 },
 	[__NR_move_pages] =
-		{ 0x04010101000000,	/*	move_pages 328		LLPPPI	*/
+		{ 0x04010101000400,	/*	move_pages 328		iLPPPi	*/
 					0, 0, 0, 0, 0, 0 },
 	[__NR_splice] =
 		{ 0x04000104010400,	/*	splice	329		IPIPLI	*/
@@ -1603,7 +1597,7 @@ const char *sys_call_ID_to_name[NR_syscalls] = {
 	"getdents64",	/* 220 */
 	"fcntl64",	/* 221 */
 	"core",		/* place holder / ni_syscal */
-	"macctl",	/* 223 */
+	"RESERVED",	/* 223 */
 	"newfstatat",
 	"emergency",	/* 225 place holder / ni_syscal */
 	"e2k_setjmp",	/* ditto */
@@ -1635,7 +1629,7 @@ const char *sys_call_ID_to_name[NR_syscalls] = {
 	"set_backtrace",
 	"get_backtrace",
 	"access_hw_stacks",
-	"el_posix",	/* 255 */
+	"RESERVED",	/* 255 */
 	"io_uring_setup",
 	"io_uring_enter",
 	"io_uring_register",

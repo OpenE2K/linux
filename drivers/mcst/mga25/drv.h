@@ -132,7 +132,7 @@ struct mga25_crtc {
 
 	struct drm_pending_vblank_event *event;
 
-	struct drm_gem_object *fb_unref_gem;
+	struct drm_gem_object *fb_unref_gem[DRM_PLANE_TYPE_CURSOR + 1];
 
 	bool force_mode_changed;
 
@@ -162,7 +162,7 @@ struct mga25_gem_object {
 	dma_addr_t dma_addr;
 	struct sg_table *sgt;
 	struct page **pages;
-
+	enum dma_data_direction dma_dir;
 	/**
 	 * @read_domains: Read memory domains.
 	 *
@@ -179,7 +179,6 @@ struct mga25_gem_object {
 	u16 write_domain;
 
 	struct dma_resv resv;
-
 	/**
 	 * @hw_unref_time: The time, when the object can be safely freed.
 	 */
@@ -220,10 +219,12 @@ int mga25_cursor_move(struct drm_crtc *crtc, int x, int y);
 
 void mga25_cursor_show(struct drm_crtc *crtc, u32 addr);
 void mga25_cursor_hide(struct drm_crtc *crtc);
-extern void mga25_gem_free_object(struct drm_gem_object *obj);
-extern int mga25_dumb_create(struct drm_file *file,
+void mga25_gem_free_object(struct drm_gem_object *obj);
+int mga25_dumb_create(struct drm_file *file,
 			    struct drm_device *dev,
 			    struct drm_mode_create_dumb *args);
+int mga25_gem_dumb_map_offset(struct drm_file *file, struct drm_device *dev,
+			    u32 handle, u64 *offset);
 
 #define DRM_FILE_PAGE_OFFSET ((0xFFFFFFFUL >> PAGE_SHIFT) + 1)
 
@@ -250,6 +251,7 @@ int mga25_gem_sync_ioctl(struct drm_device *dev, void *data,
 			struct drm_file *filp);
 int mga25_virt_to_handle(struct drm_device *drm, void *data,
 			struct drm_file *file);
+
 #define MGA2_PCI_PROTO	0
 #define MGA20_PROTO	1
 #define MGA20		2
@@ -410,5 +412,4 @@ int mga25_pll_compute(const struct mga25_pll *pll,
 			 u32 *post_div_p);
 
 int __mga25_sync(struct mga2 *mga2);
-
 #endif	/*__MGA2_DRV_H__*/

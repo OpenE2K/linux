@@ -15,20 +15,15 @@
 #include <linux/spinlock.h>
 #include <linux/spi/spi.h>
 #if defined(CONFIG_MCST)
-#include <linux/kthread.h>
-#include <linux/clocksource.h>
-#if defined(CONFIG_E2K)
+#if defined CONFIG_E2K && defined CONFIG_SCLKR_CLOCKSOURCE
 #include <asm/sclkr.h>
 #endif
 #if defined(CONFIG_E90S)
+#include <linux/kthread.h>
 #include <asm-l/clk_rt.h>
 #endif
-#include <asm/bootinfo.h>
 #endif
 
-#ifdef CONFIG_E2K
-#include <asm/rtc.h>
-#endif
 #include <asm/uaccess.h>
 
 
@@ -104,9 +99,6 @@ static int fm33256_set_time(struct device *dev, struct rtc_time *rtc_tm);
 #define match_bit(val)	(val & ALARM_MATCH_BIT)
 
 static int irq_enabled = 0;
-#if defined(CONFIG_MCST)
-static atomic_t rtc4clk_src = ATOMIC_INIT(0); 
-#endif
 
 static unsigned long epoch = 2000;	/* year corresponding to 0x00	*/
 
@@ -252,6 +244,14 @@ static int fm33256_proc(struct device *dev, struct seq_file *seq)
 #define fm33256_proc	NULL
 #endif
 
+#if defined CONFIG_E2K && defined CONFIG_SCLKR_CLOCKSOURCE || defined CONFIG_E90S
+static bool used_for_clk(struct device *dev)
+{
+	struct rtc_device *rtc = dev_get_drvdata(dev);
+	return READ_ONCE(clk_rtc) == rtc;
+}
+#endif
+
 static int fm33256_alarm_irq_enable(struct device *dev, unsigned int enable)
 {
 	int ret;
@@ -261,12 +261,9 @@ static int fm33256_alarm_irq_enable(struct device *dev, unsigned int enable)
 		return -EINVAL;
 
 	if (enable) {
-#if defined(CONFIG_MCST)
-		if (atomic_read(&rtc4clk_src) && dev->id == 0) {
-			pr_warn("fm33256_alarm_irq_enable: "
-				"RTC is used for SCLKR. "
-				"Alarm functionality is disabled\n");
-			WARN_ONCE(1, "RTC is used for SCLKR.");
+#if defined CONFIG_E2K && defined CONFIG_SCLKR_CLOCKSOURCE || defined CONFIG_E90S
+		if (used_for_clk(dev)) {
+			dev_warn(dev, "fm33256_alarm_irq_enable: RTC is used for SCLKR. Alarm functionality is disabled\n");
 			return -EINVAL;
 		}
 #endif
@@ -295,41 +292,29 @@ static struct rtc_class_ops fm33256_ops = {
 	.ioctl			= fm33256_ioctl,
 	.alarm_irq_enable	= fm33256_alarm_irq_enable,
 };
-#if defined(CONFIG_MCST)
-static void init_pps(struct spi_device *spi)
+
+#if defined CONFIG_E2K && defined CONFIG_SCLKR_CLOCKSOURCE || defined CONFIG_E90S
+static void init_pps(struct spi_device *spi, struct rtc_device *rtc)
 {
 	u8 c;
-	struct rtc_device *rtc = devm_rtc_allocate_device(&spi->dev);
 
 	fm33256_read(&spi->dev, FM_RTC_CONTROL, &c);
-#if defined(CONFIG_E2K)
-	if (machine.native_iset_ver >= E2K_ISET_V3 &&
-		(sclkr_mode == -1 || sclkr_mode == SCLKR_RTC) &&
-		/* only first RTC is used for SCLKR while there is now flag which */
-		(atomic_cmpxchg(&rtc4clk_src, 0, 1) == 0)) {
-		static struct task_struct *sclkregistask;
-		int error;
-
+#if defined CONFIG_E2K && defined CONFIG_SCLKR_CLOCKSOURCE
+	if ((sclkr_mode == SCLKR_UNINITIALIZED || sclkr_mode == SCLKR_RTC) &&
+			/* only first RTC is used for SCLKR while there is now flag which */
+			cmpxchg(&clk_rtc, NULL, rtc) == NULL) {
 		c &= ~FM_CC_AL_SW;
 		fm33256_write(&spi->dev, c, FM_COMPANION_CONTROL);
-		sclkregistask = kthread_run(sclk_register,
-			(void *)SCLKR_RTC, "sclkregister");
-		if (IS_ERR(sclkregistask)) {
-			error = PTR_ERR(sclkregistask);
-			pr_err(KERN_ERR "Failed to start sclk register"
-				" thread, error: %d\n", error);
+		if (!sclk_register_rtc()) {
+			fm33256_ops.set_alarm = NULL;
+			dev_warn(&spi->dev, "used for clocksource, alarm functionality is disabled\n");
 		}
-		((struct rtc_class_ops *)(rtc->ops))->set_alarm = NULL;
-		pr_warn("RTC is used for SCLKR. "
-			"Alarm functionality will be disabled\n");
-		dev_warn(&spi->dev, "RTC dev.id=%d is used for clocksource."
-					" Alarm functionality is disabled\n", spi->dev.id);
 	}
 #endif  /* E2K */
 #if defined(CONFIG_E90S)
 	if (clk_rt_enabled() &&
-		/* only first RTC is used for SCLKR while there is now flag which */
-		atomic_cmpxchg(&rtc4clk_src, 0, 1) == 0) {
+			/* only first RTC is used for SCLKR while there is now flag which */
+			cmpxchg(&clk_rtc, NULL, rtc) == NULL) {
 		int	error;
 		static struct task_struct *clk_rt_registask;
 
@@ -339,9 +324,7 @@ static void init_pps(struct spi_device *spi)
 			(void *)CLK_RT_RTC, "clk_rt_register");
 		if (IS_ERR(clk_rt_registask)) {
 			error = PTR_ERR(clk_rt_registask);
-			pr_err(KERN_ERR "Failed to start"
-				" clk_rt register"
-				" thread, error: %d\n", error);
+			pr_err("Failed to start clk_rt register thread, error: %d\n", error);
 		}
 		pr_warn("RTC is used for clocksource. "
 			"Alarm functionality is disabled\n");
@@ -349,7 +332,7 @@ static void init_pps(struct spi_device *spi)
 	return;
 #endif	/* CONFIG_E90S */
 }
-#endif		/* CONFIG_MCST */
+#endif
 
 static int fm33256_probe(struct spi_device *spi)
 {
@@ -386,9 +369,10 @@ static int fm33256_probe(struct spi_device *spi)
 
 	ret = ret ?: fm33256_read(&spi->dev, FM_COMPANION_CONTROL, &c);
 	c = (c & ~FM_CC_F_RATE_MASK) | FM_CC_F_RATE_1HZ;
-#if defined(CONFIG_MCST)
-	init_pps(spi);
+#if defined CONFIG_E2K && defined CONFIG_SCLKR_CLOCKSOURCE || defined CONFIG_E90S
+	init_pps(spi, rtc);
 #endif
+
 	/* Set frequency to 1 Hz, disable periodic interrupts */
 	c |= FM_CC_AL_SW;
 	ret = ret ?: fm33256_write(&spi->dev, c, FM_COMPANION_CONTROL);
@@ -420,52 +404,29 @@ static int fm33256_probe(struct spi_device *spi)
 	return 0;
 }
 
+#if defined CONFIG_E2K && defined CONFIG_SCLKR_CLOCKSOURCE || defined CONFIG_E90S
 static int fm33256_remove(struct spi_device *spi)
 {
-	return 0;
-}
-
-#if defined(CONFIG_E2K) && defined(CONFIG_MCST)
-#ifdef CONFIG_PM
-static int fm33256_rtc_suspend(struct device *dev)
-{
-	dev_warn(dev, "DEBUG: fm33256_rtc_suspend.\n");
-	if (strcmp(curr_clocksource->name, "sclkr") == 0) {
-		if (timekeeping_notify(&lt_cs)) {
-			pr_warn("susp_sclkr: can't set lt clocksourse\n");
-		}
+	if (used_for_clk(&spi->dev)) {
+# ifdef CONFIG_SCLKR_CLOCKSOURCE
+		sclk_unregister_rtc();
+# endif
+		WRITE_ONCE(clk_rtc, NULL);
 	}
+
 	return 0;
 }
-
-static int fm33256_rtc_resume(struct device *dev)
-{
-	struct spi_device *spi = to_spi_device(dev);
-
-	dev_warn(dev, "DEBUG: fm33256_rtc_resume.\n");
-	init_pps(spi);
-	return 0;
-}
-#else
-#define fm33256_rtc_suspend NULL
-#define fm33256_rtc_resume NULL
 #endif
-static const struct dev_pm_ops fm33256_pm_ops = {
-	.suspend = fm33256_rtc_suspend,
-	.resume = fm33256_rtc_resume,
-};
-#endif	/* CONFIG_MCST */
 
 static struct spi_driver fm33256_driver = {
 	.driver = {
 		.name = "rtc-fm33256",
 		.owner  = THIS_MODULE,
-#if defined(CONFIG_E2K) && defined(CONFIG_MCST)
-		.pm = &fm33256_pm_ops,
-#endif	/* CONFIG_MCST */
 	},
 	.probe = fm33256_probe,
+#if defined CONFIG_E2K && defined CONFIG_SCLKR_CLOCKSOURCE || defined CONFIG_E90S
 	.remove = fm33256_remove,
+#endif
 };
 
 static int __init fm33256_init(void)

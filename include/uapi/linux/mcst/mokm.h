@@ -495,8 +495,8 @@ int mokm_read (int fd, int* pool, int** read_array, int* buf_num)
 
 	*buf_num = -1;
 	if ((res = ioctl(fd, MOKM_IOC_RD_BUF, &num)) < 0) {
-        *buf_num = -1;
-        *read_array = NULL;
+	*buf_num = -1;
+	*read_array = NULL;
 		return res;
 	}
 

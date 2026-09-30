@@ -1,6 +1,6 @@
- # SPDX-License-Identifier: GPL-2.0
- # Copyright (c) 2023 MCST
- 
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2023 MCST
+
 #
 # For a description of the syntax of this configuration file,
 # see Documentation/kbuild/kconfig-language.txt.
@@ -75,17 +75,11 @@ config MCST
 	bool "MCST additions"
 	default y
 
-config MCST_4RT
-	bool "MCST additions for RT without rt-patch"
-	default y
-	help
-	  Say Y here to enable support RT additions
-	  such as rts_mode, rts_mask, EL_RT_CPU, EL_SET_MLOCK_CONTROL.
-	  It helps to get hard rt properties for OS with
-	  as well as without Ingo Molner's rt-patch.
-
 config CLKR_CLOCKSOURCE
 	def_bool E90S
+
+config LT_CLOCKSOURCE
+	def_bool E2K || E90S
 
 config CLKR_SYNCHRONIZATION_WARNING
 	bool
@@ -127,7 +121,7 @@ config L_PCI_QUIRKS
 config L_PMC
 	tristate "Elbrus-1C+ Power Management Controller"
 	depends on E2K
-	select CPU_FREQ if !MCST_RT
+	select CPU_FREQ
 	select PM_OPP
 	default m
 	help
@@ -136,8 +130,8 @@ config L_PMC
 config S2_PMC
 	bool "R2000 Power Management Controller (S2 PMC)"
 	depends on E90S
-	select CPU_IDLE  if !MCST_RT
-	select CPU_FREQ  if !MCST_RT
+	select CPU_IDLE
+	select CPU_FREQ
 	default y # we need s2_get_freq_mult() for r2000
 	help
 	 Power Management Controller (PMC) for MCST R2000 (E90S/SPARC v9) CPU
@@ -205,7 +199,9 @@ config OF
 	default y
 	select DTC if E2K
 	select OF_EARLY_FLATTREE
+	select TIMER_OF
 	select PROC_DEVICETREE
+	select OF_DYNAMIC
 	select OF_FLATTREE if E90S
 	select OF_ADDRESS if E90S
 	help

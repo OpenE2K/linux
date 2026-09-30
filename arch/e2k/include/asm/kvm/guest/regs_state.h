@@ -325,6 +325,7 @@ do { \
 #ifdef	CONFIG_KVM_GUEST_KERNEL
 /* It is pure guest kernel */
 
+#define SET_GREGS_EMPTY(global, local)	do { } while (0)
 #define	INIT_G_REGS(skip_k_gregs) KVM_INIT_G_REGS(skip_k_gregs)
 #define	BOOT_INIT_G_REGS()	BOOT_KVM_INIT_G_REGS()
 

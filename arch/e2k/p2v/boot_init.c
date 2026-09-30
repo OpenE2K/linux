@@ -288,7 +288,7 @@ boot_do_get_next_node_bank(int node,	/* only for node # info */
 {
 	bank_info_t	*bank_info;
 	e2k_size_t	bank_size;
-	int		bank = 0;
+	int		bank;
 
 	if (node_banks_info == NULL || node_banks_ind_p == NULL) {
 		/* no more main banks on node, switch to extended partition */
@@ -323,7 +323,7 @@ boot_do_get_next_node_bank(int node,	/* only for node # info */
 	if (unlikely(node_banks_info_ex == NULL ||
 				node_banks_ind_ex_p == NULL)) {
 		BOOT_BUG("No extended partition of phys. memory banks info\n");
-	} else if ((node = *node_banks_ind_ex_p) < L_MAX_PHYS_BANKS_EX) {
+	} else if ((bank = *node_banks_ind_ex_p) < L_MAX_PHYS_BANKS_EX) {
 		bank_info = &node_banks_info_ex[bank];
 		bank_size = bank_info->size;
 		if (bank_size == 0) {

@@ -8,6 +8,8 @@
  * based on general lib/string.c
  */
 
+ #include <asm/p2v/boot_v2p.h>
+
 #include <linux/types.h>
 #include <linux/kernel.h>
 #include <linux/string.h>

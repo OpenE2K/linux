@@ -63,8 +63,7 @@
 	NATIVE_WRITE_OSGD_HI_REG_VALUE(OSGD_hi.OSGD_hi_half); \
 })
 #define	NATIVE_WRITE_OSGD_REG_VALUE(OSGD_hi_value, OSGD_lo_value) \
-	NATIVE_SET_DSREGS_CLOSED_NOEXC(osgd.lo, osgd.hi, \
-			OSGD_lo_value, OSGD_hi_value, 5, 7)
+	NATIVE_SET_DSREGS_CLOSED(osgd.lo, osgd.hi, OSGD_lo_value, OSGD_hi_value)
 #define	NATIVE_WRITE_OSGD_REG(OSGD_hi, OSGD_lo) \
 ({ \
 	NATIVE_WRITE_OSGD_REG_VALUE(OSGD_hi.OSGD_hi_half, \
@@ -173,6 +172,18 @@
 #define	NATIVE_NV_NOIRQ_WRITE_CR1_HI_REG_VALUE(CR1_hi_value) \
 		NATIVE_SET_CR_CLOSED_NOEXC(cr1.hi, CR1_hi_value)
 
+static __always_inline void native_write_cr(e2k_cr0_lo_t cr0_lo, e2k_cr0_hi_t cr0_hi,
+		e2k_cr1_lo_t cr1_lo, e2k_cr1_hi_t cr1_hi)
+{
+	NATIVE_SET_CR_REGS(cr0_lo, cr0_hi, cr1_lo, cr1_hi);
+}
+
+static __always_inline void native_write_cr__no_wait(e2k_cr0_lo_t cr0_lo,
+		e2k_cr0_hi_t cr0_hi, e2k_cr1_lo_t cr1_lo, e2k_cr1_hi_t cr1_hi)
+{
+	NATIVE_SET_CR_REGS__NO_WAIT(cr0_lo, cr0_hi, cr1_lo, cr1_hi);
+}
+
 /*
  * Read/write word Procedure Chain Stack Harware Top Pointer (PCSHTP)
  */
@@ -246,9 +257,9 @@ native_read_TIR_hi_reg(void)
 #define	NATIVE_NV_READ_USD_HI_REG_VALUE()	NATIVE_GET_DSREG_OPEN(usd.hi)
 
 #define	NATIVE_NV_WRITE_USD_LO_REG_VALUE(USD_lo_value) \
-		NATIVE_SET_DSREG_OPEN(usd.lo, USD_lo_value)
+		NATIVE_SET_DSREG_WAIT(usd.lo, USD_lo_value)
 #define	NATIVE_NV_WRITE_USD_HI_REG_VALUE(USD_hi_value) \
-		NATIVE_SET_DSREG_OPEN(usd.hi, USD_hi_value)
+		NATIVE_SET_DSREG_WAIT(usd.hi, USD_hi_value)
 
 #define	NATIVE_NV_WRITE_USBR_USD_REG_VALUE(usbr, usd_hi, usd_lo) \
 do { \
@@ -400,7 +411,7 @@ extern void native_write_SCLKM2_reg_value(unsigned long reg_value);
  */
 #define	NATIVE_READ_RPR_LO_REG_VALUE()	NATIVE_GET_DSREG_OPEN(rpr.lo)
 #define	NATIVE_READ_RPR_HI_REG_VALUE()	NATIVE_GET_DSREG_OPEN(rpr.hi)
-#define	NATIVE_READ_SBBP_REG_VALUE()	NATIVE_GET_DSREG_OPEN(sbbp)
+#define	NATIVE_READ_SBBP_REG_VALUE()	NATIVE_GET_DSREG_CLOSED(sbbp)
 #define	NATIVE_WRITE_SBBP_REG_VALUE(x)	\
 		NATIVE_SET_DSREG_CLOSED_EXC(sbbp, (x), 0, 0)
 

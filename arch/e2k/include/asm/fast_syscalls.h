@@ -124,6 +124,7 @@ static __always_inline long kvm_return_from_fast_syscall(thread_info_t *ti, long
 	AS(cr1_lo).psr = AW(E2K_KERNEL_PSR_DISABLED_ALL);
 	AS(cr1_lo).cui = KERNEL_CODES_INDEX;
 
+	alternative("", "wait ma_c=1", CPU_HWBUG_CR_BEFORE_WRITES, "memory");
 	WRITE_CR0_LO_REG(cr0_lo);
 	WRITE_CR0_HI_REG(cr0_hi);
 	WRITE_CR1_LO_REG(cr1_lo);
@@ -252,7 +253,7 @@ static __always_inline enum fast_gettime_return fast_get_time_precise(
 static __always_inline int fast_get_time_coarse(
 		time64_t *ts_tv_sec, long *ts_tv_nsec, bool monotonic)
 {
-	u64 secs, nsecs, seq;
+	u64 secs = 0, nsecs = 0, seq = 0;
 
 	do {
 		seq = fastsys_read_begin(&fsys_data);
@@ -354,19 +355,19 @@ int protected_fast_sys_gettimeofday(u32 tags, u64 usd_lo,
 		u64 arg2, u64 arg3, u64 arg4, u64 arg5);
 int protected_fast_sys_getcpu(u32 tags, u64 usd_lo, u64 arg2, u64 arg3, u64 arg4, u64 arg5);
 int protected_fast_sys_siggetmask(u32 tags, u64 usd_lo, u64 arg2, u64 arg3, size_t sigsetsize);
-int protected_fast_sys_getcontext(u32 tags, u64 usd_lo, u64 arg2, u64 arg3, size_t sigsetsize);
+int protected_fast_sys_getcontext(u32 tags, u64 usd_lo, u64 arg2, u64 arg3, size_t sigsetsize,
+				  u64 unused, u64 prev_cr1_lo);
 
 /* Inlined handlers for fast syscalls */
 
-notrace __section(".entry.text")
+notrace __interrupt __section(".entry.text")
 static __always_inline int fast_sys_getcontext(struct ucontext __user *ucp,
 					size_t sigsetsize)
 {
 	struct thread_info *ti = READ_CURRENT_REG();
 	struct task_struct *task = thread_info_task(ti);
-
-	register u64 pcsp_lo, pcsp_hi;
-	register u32 fpcr, fpsr, pfpfr;
+	u64 pcsp_lo, pcsp_hi, psp_lo, psp_hi, sbr, cr1_lo;
+	u32 fpcr, fpsr, pfpfr;
 	u64 set, key;
 
 	BUILD_BUG_ON(sizeof(task->blocked.sig[0]) != 8);
@@ -384,18 +385,23 @@ static __always_inline int fast_sys_getcontext(struct ucontext __user *ucp,
 	if (unlikely(ret))
 		return ret;
 
-	E2K_GETCONTEXT(fpcr, fpsr, pfpfr, pcsp_lo, pcsp_hi);
+	E2K_GETCONTEXT(fpcr, fpsr, pfpfr, pcsp_lo, pcsp_hi, psp_lo, psp_hi, sbr, cr1_lo);
 
 	/* We want stack to point to user frame that called us */
 	pcsp_hi -= SZ_OF_CR;
+	psp_hi -= ((e2k_cr1_lo_t) { .word = cr1_lo }).wbs * EXT_4_NR_SZ;
 
+	/* Can use `|=` because __put_user_switched_pt can return only -EFAULT error */
 	ret = __put_user_switched_pt(set, (u64 __user *) &ucp->uc_sigmask);
-	ret = unlikely(ret) ? ret : __put_user_switched_pt(key, &ucp->uc_mcontext.sbr);
-	ret = unlikely(ret) ? ret : __put_user_switched_pt(pcsp_lo, &ucp->uc_mcontext.pcsp_lo);
-	ret = unlikely(ret) ? ret : __put_user_switched_pt(pcsp_hi, &ucp->uc_mcontext.pcsp_hi);
-	ret = unlikely(ret) ? ret : __put_user_switched_pt(fpcr, &ucp->uc_extra.fpcr);
-	ret = unlikely(ret) ? ret : __put_user_switched_pt(fpsr, &ucp->uc_extra.fpsr);
-	return unlikely(ret) ? ret : __put_user_switched_pt(pfpfr, &ucp->uc_extra.pfpfr);
+	ret |= __put_user_switched_pt(key, uc_coroutine_key_64(ucp));
+	ret |= __put_user_switched_pt(pcsp_lo, &ucp->uc_mcontext.pcsp_lo);
+	ret |= __put_user_switched_pt(pcsp_hi, &ucp->uc_mcontext.pcsp_hi);
+	ret |= __put_user_switched_pt(psp_lo, &ucp->uc_mcontext.psp_lo);
+	ret |= __put_user_switched_pt(psp_hi, &ucp->uc_mcontext.psp_hi);
+	ret |= __put_user_switched_pt(sbr, &ucp->uc_mcontext.sbr);
+	ret |= __put_user_switched_pt(fpcr, &ucp->uc_extra.fpcr);
+	ret |= __put_user_switched_pt(fpsr, &ucp->uc_extra.fpsr);
+	return ret | __put_user_switched_pt(pfpfr, &ucp->uc_extra.pfpfr);
 }
 
 notrace __section(".entry.text")
@@ -405,7 +411,7 @@ static __always_inline int native_do_fast_sys_set_return(u64 ip, int flags)
 	struct task_struct *const task = thread_info_task(ti);
 	e2k_pcsp_lo_t pcsp_lo;
 	e2k_pcsp_hi_t pcsp_hi;
-	e2k_cr0_hi_t cr0_hi;
+	u64 cr0_hi;
 	e2k_mem_crs_t __user *frame, *base;
 	u64 prev_ip, counter;
 	int ret;
@@ -427,11 +433,11 @@ static __always_inline int native_do_fast_sys_set_return(u64 ip, int flags)
 	do {
 		--frame;
 
-		ret = __get_user_switched_pt(AW(cr0_hi), &AW(frame->cr0_hi));
+		ret = __get_user_switched_pt(cr0_hi, &AW(frame->cr0_hi));
 		if (unlikely(ret))
 			return ret;
 
-		prev_ip = AS(cr0_hi).ip << 3;
+		prev_ip = cr0_hi & ~0x7;
 	} while (unlikely(prev_ip >= TASK_SIZE && frame > base));
 
 	/* No user frames above? */
@@ -439,13 +445,13 @@ static __always_inline int native_do_fast_sys_set_return(u64 ip, int flags)
 		return -EPERM;
 
 	/* Modify stack */
-	AS(cr0_hi).ip = ip >> 3;
+	cr0_hi = (ip & ~0x7) | (cr0_hi & 0x7);
 	do {
 		counter = READ_ONCE(task->thread.traps_count);
 
 		E2K_FLUSHC;
 
-		ret = __put_user_switched_pt(AW(cr0_hi), &AW(frame->cr0_hi));
+		ret = __put_user_switched_pt(cr0_hi, &AW(frame->cr0_hi));
 		if (unlikely(ret))
 			return ret;
 	} while (unlikely(counter != READ_ONCE(task->thread.traps_count)));
@@ -460,13 +466,13 @@ static __always_inline int native_do_fast_sys_set_return(u64 ip, int flags)
 #endif
 
 #ifdef CONFIG_COMPAT
-notrace __section(".entry.text")
+notrace __interrupt __section(".entry.text")
 static __always_inline int compat_fast_sys_getcontext(struct ucontext_32 __user *ucp,
 					size_t sigsetsize)
 {
 	struct thread_info *ti = READ_CURRENT_REG();
 	struct task_struct *task = thread_info_task(ti);
-	u64 pcsp_lo, pcsp_hi;
+	u64 pcsp_lo, pcsp_hi, psp_lo, psp_hi, sbr, cr1_lo;
 	u32 fpcr, fpsr, pfpfr;
 	int ret;
 	union {
@@ -490,20 +496,24 @@ static __always_inline int compat_fast_sys_getcontext(struct ucontext_32 __user 
 	if (unlikely(ret))
 		return ret;
 
-	E2K_GETCONTEXT(fpcr, fpsr, pfpfr, pcsp_lo, pcsp_hi);
+	E2K_GETCONTEXT(fpcr, fpsr, pfpfr, pcsp_lo, pcsp_hi, psp_lo, psp_hi, sbr, cr1_lo);
 
 	/* We want stack to point to user frame that called us */
 	pcsp_hi -= SZ_OF_CR;
+	psp_hi -= ((e2k_cr1_lo_t) { .word = cr1_lo }).wbs * EXT_4_NR_SZ;
 
+	/* Can use `|=` because __put_user_switched_pt can return only -EFAULT error */
 	ret = __put_user_switched_pt(set.word[0], &((u32 *) &ucp->uc_sigmask)[0]);
-	ret = unlikely(ret) ? ret : __put_user_switched_pt(set.word[1],
-						&((u32 *) &ucp->uc_sigmask)[1]);
-	ret = unlikely(ret) ? ret : __put_user_switched_pt(key, &ucp->uc_mcontext.sbr);
-	ret = unlikely(ret) ? ret : __put_user_switched_pt(pcsp_lo, &ucp->uc_mcontext.pcsp_lo);
-	ret = unlikely(ret) ? ret : __put_user_switched_pt(pcsp_hi, &ucp->uc_mcontext.pcsp_hi);
-	ret = unlikely(ret) ? ret : __put_user_switched_pt(fpcr, &ucp->uc_extra.fpcr);
-	ret = unlikely(ret) ? ret : __put_user_switched_pt(fpsr, &ucp->uc_extra.fpsr);
-	return unlikely(ret) ? ret : __put_user_switched_pt(pfpfr, &ucp->uc_extra.pfpfr);
+	ret |= __put_user_switched_pt(set.word[1], &((u32 *) &ucp->uc_sigmask)[1]);
+	ret |= __put_user_switched_pt(key, uc_coroutine_key_32(ucp));
+	ret |= __put_user_switched_pt(pcsp_lo, &ucp->uc_mcontext.pcsp_lo);
+	ret |= __put_user_switched_pt(pcsp_hi, &ucp->uc_mcontext.pcsp_hi);
+	ret |= __put_user_switched_pt(psp_lo, &ucp->uc_mcontext.psp_lo);
+	ret |= __put_user_switched_pt(psp_hi, &ucp->uc_mcontext.psp_hi);
+	ret |= __put_user_switched_pt(sbr, &ucp->uc_mcontext.sbr);
+	ret |= __put_user_switched_pt(fpcr, &ucp->uc_extra.fpcr);
+	ret |= __put_user_switched_pt(fpsr, &ucp->uc_extra.fpsr);
+	return ret | __put_user_switched_pt(pfpfr, &ucp->uc_extra.pfpfr);
 }
 #endif
 

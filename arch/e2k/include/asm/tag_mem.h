@@ -111,7 +111,7 @@ extern void free_swap_info_struct(swap_page_info_t* info);
 static inline void
 remove_swap_info_from_page(struct page* page) {
 	swap_page_info_t *info;
-        do {
+	do {
 		info = get_swap_info_from_page(page);
 		free_swap_info_struct(info);
 	} while (PageWithSwapInfo(page));
@@ -303,16 +303,16 @@ do_restore_mem_area_tags(e2k_addr_t data_addr, e2k_addr_t tags_addr,
 			q_tag.qw_mem_tag = tags_dw;
 			tags_dw >>= (sizeof (mem_tag_t) * 8);
 			if (!copy_data) {
-                        /* After E2K_PUTTAGD must STRONGLY follow STORE_TAG asm
-                         * to avoid compiler's problems */
+			/* After E2K_PUTTAGD must STRONGLY follow STORE_TAG asm
+			 * to avoid compiler's problems */
 			E2K_STORE_TAGGED_QWORD(&data_area[0],
-                                     q_dw_lo, q_dw_hi, 
-                                     q_tag.dw_lo_mem_tag, q_tag.dw_hi_mem_tag);
-                            
+				     q_dw_lo, q_dw_hi, 
+				     q_tag.dw_lo_mem_tag, q_tag.dw_hi_mem_tag);
+			    
 			} else {
-                                E2K_STORE_TAGGED_QWORD(&copy_area[0],
-                                     q_dw_lo, q_dw_hi, 
-                                     q_tag.dw_lo_mem_tag, q_tag.dw_hi_mem_tag);
+				E2K_STORE_TAGGED_QWORD(&copy_area[0],
+				     q_dw_lo, q_dw_hi, 
+				     q_tag.dw_lo_mem_tag, q_tag.dw_hi_mem_tag);
 				copy_area += 2;
 			}
 			data_area += 2;

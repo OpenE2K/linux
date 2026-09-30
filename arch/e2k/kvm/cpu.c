@@ -235,19 +235,20 @@ e2k_idr_t kvm_vcpu_get_idr(const struct kvm_vcpu *vcpu)
 	kvm_guest_info_t *guest_info = &vcpu->kvm->arch.guest_info;
 	e2k_idr_t idr = read_IDR_reg();
 
-	if (guest_info->is_stranger) {
-		/* update IDR in accordance with guest machine CPUs type */
-		idr.IDR_mdl = guest_info->cpu_mdl;
-		idr.IDR_rev = guest_info->cpu_rev;
-		idr.IDR_ms_core = vcpu->vcpu_id;
-		idr.IDR_ms_pn = 0; /* FIXME: is not implemented NUMA node id */
-		if (unlikely(guest_info->cpu_iset < E2K_ISET_V3)) {
-			/* set IDR.hw_virt to mark guest mode because of */
-			/* CPUs of iset V2 have not CORE_MODE register */
-			idr.IDR_ms_hw_virt = vcpu->kvm->arch.is_hv;
-		}
-
-		DebugCUREG("guest IDR was changed: 0x%llx\n", idr.IDR_reg);
+	if (idr.mdl == guest_info->cpu_mdl) {
+		/* In native case must report actual revision to apply
+		 * needed workarounds and distinguish engineering samples. */
+	} else {
+		/* Update IDR in accordance with guest machine CPUs type */
+		idr.mdl = guest_info->cpu_mdl;
+		idr.rev = guest_info->cpu_rev;
+	}
+	idr.core = vcpu->vcpu_id;
+	idr.pn = 0;	/* FIXME: is not implemented NUMA node id */
+	if (guest_info->cpu_iset < E2K_ISET_V3) {
+		/* Set IDR.hw_virt to mark guest mode because
+		 * iset V2 CPUs do not have CORE_MODE register */
+		idr.hw_virt = vcpu->kvm->arch.is_hv;
 	}
 
 	return idr;
@@ -606,6 +607,7 @@ startup_pv_vcpu(struct kvm_vcpu *vcpu, guest_hw_stack_t *stack_regs,
 
 	NATIVE_NV_NOIRQ_WRITE_CUTD_REG(cutd);
 
+	alternative("", "wait ma_c=1", CPU_HWBUG_CR_BEFORE_WRITES, "memory");
 	NATIVE_NV_NOIRQ_WRITE_CR0_LO_REG(cr0_lo);
 	NATIVE_NV_NOIRQ_WRITE_CR0_HI_REG(cr0_hi);
 	NATIVE_NV_NOIRQ_WRITE_CR1_LO_REG(cr1_lo);
@@ -2630,8 +2632,7 @@ void kvm_switch_debug_regs(struct kvm_sw_cpu_context *sw_ctxt,
 		NATIVE_WRITE_DIBCR_REG(b_dibcr);
 		NATIVE_WRITE_DDBCR_REG(b_ddbcr);
 	}
-	if (machine.restore_dimtp)
-		machine.restore_dimtp(&b_dimtp);
+	restore_dimtp(b_dimtp);
 
 	sw_ctxt->dibcr = a_dibcr;
 	sw_ctxt->ddbcr = a_ddbcr;

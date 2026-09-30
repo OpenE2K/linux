@@ -109,6 +109,7 @@ typedef void *__e2k_ptr_t;
 
 #ifndef	__ASSEMBLY__
 
+#ifndef __ptr128__
 typedef unsigned long __e2k_syscall_arg_t;
 
 #define E2K_SYSCALL_CLOBBERS \
@@ -352,6 +353,8 @@ typedef unsigned long __e2k_syscall_arg_t;
 	__res;							\
 })
 
+#endif /* !__ptr128__ */
+
 #define rd_sclkr() \
 ({ \
 	register __e2k_u64_t sclkr_v;				\
@@ -362,6 +365,7 @@ typedef unsigned long __e2k_syscall_arg_t;
 			(E2K_GET_DSREG(sclkm1) & 0xffffffff);	\
 	res;							\
 })
+
 #endif /* !__ASSEMBLY__ */
 
 

@@ -418,7 +418,7 @@ probe_memory_region(boot_info_t *boot_info, e2k_addr_t start_addr,
 #endif	/* CONFIG_E2K_SIC */
 			/*
 			    !!! WARNING !!! NEEDSWORK !!!
-		 	    Improper tagged variable handling!
+			    Improper tagged variable handling!
 			 */
 			NATIVE_WRITE_MAS_D(addr, tmpvar, MAS_IOADDR);
 
@@ -455,7 +455,7 @@ probe_memory_region(boot_info_t *boot_info, e2k_addr_t start_addr,
 
 				/*
 				    !!! WARNING !!! NEEDSWORK !!!
-		 		    Improper tagged variable handling!
+				    Improper tagged variable handling!
 				 */
 				NATIVE_WRITE_MAS_D(addr, tmpvar, MAS_IOADDR);
 				rom_putc('\n');
@@ -2056,68 +2056,68 @@ static void configure_node_io_routing(int node, int link)
        rt_pciio.E2K_RT_PCIIO_reg = 0;
 
        if (node == 0) {
-               rt_ioapic0_reg = SIC_rt_ioapic0;
-               rt_ioapic1_reg = SIC_rt_ioapic1;
-               rt_ioapic2_reg = SIC_rt_ioapic2;
-               rt_ioapic3_reg = SIC_rt_ioapic3;
-               rt_pcim0_reg = SIC_rt_pcim0;
-               rt_pcim1_reg = SIC_rt_pcim1;
-               rt_pcim2_reg = SIC_rt_pcim2;
-               rt_pcim3_reg = SIC_rt_pcim3;
-               rt_pciio0_reg = SIC_rt_pciio0;
-               rt_pciio1_reg = SIC_rt_pciio1;
-               rt_pciio2_reg = SIC_rt_pciio2;
-               rt_pciio3_reg = SIC_rt_pciio3;
+	       rt_ioapic0_reg = SIC_rt_ioapic0;
+	       rt_ioapic1_reg = SIC_rt_ioapic1;
+	       rt_ioapic2_reg = SIC_rt_ioapic2;
+	       rt_ioapic3_reg = SIC_rt_ioapic3;
+	       rt_pcim0_reg = SIC_rt_pcim0;
+	       rt_pcim1_reg = SIC_rt_pcim1;
+	       rt_pcim2_reg = SIC_rt_pcim2;
+	       rt_pcim3_reg = SIC_rt_pcim3;
+	       rt_pciio0_reg = SIC_rt_pciio0;
+	       rt_pciio1_reg = SIC_rt_pciio1;
+	       rt_pciio2_reg = SIC_rt_pciio2;
+	       rt_pciio3_reg = SIC_rt_pciio3;
        } else if (node == 1) {
-               rt_ioapic0_reg = SIC_rt_ioapic3;
-               rt_ioapic1_reg = SIC_rt_ioapic0;
-               rt_ioapic2_reg = SIC_rt_ioapic1;
-               rt_ioapic3_reg = SIC_rt_ioapic2;
-               rt_pcim0_reg = SIC_rt_pcim3;
-               rt_pcim1_reg = SIC_rt_pcim0;
-               rt_pcim2_reg = SIC_rt_pcim1;
-               rt_pcim3_reg = SIC_rt_pcim2;
-               rt_pciio0_reg = SIC_rt_pciio3;
-               rt_pciio1_reg = SIC_rt_pciio0;
-               rt_pciio2_reg = SIC_rt_pciio1;
-               rt_pciio3_reg = SIC_rt_pciio2;
+	       rt_ioapic0_reg = SIC_rt_ioapic3;
+	       rt_ioapic1_reg = SIC_rt_ioapic0;
+	       rt_ioapic2_reg = SIC_rt_ioapic1;
+	       rt_ioapic3_reg = SIC_rt_ioapic2;
+	       rt_pcim0_reg = SIC_rt_pcim3;
+	       rt_pcim1_reg = SIC_rt_pcim0;
+	       rt_pcim2_reg = SIC_rt_pcim1;
+	       rt_pcim3_reg = SIC_rt_pcim2;
+	       rt_pciio0_reg = SIC_rt_pciio3;
+	       rt_pciio1_reg = SIC_rt_pciio0;
+	       rt_pciio2_reg = SIC_rt_pciio1;
+	       rt_pciio3_reg = SIC_rt_pciio2;
        } else if (node == 2) {
-               rt_ioapic0_reg = SIC_rt_ioapic2;
-               rt_ioapic1_reg = SIC_rt_ioapic3;
-               rt_ioapic2_reg = SIC_rt_ioapic0;
-               rt_ioapic3_reg = SIC_rt_ioapic1;
-               rt_pcim0_reg = SIC_rt_pcim2;
-               rt_pcim1_reg = SIC_rt_pcim3;
-               rt_pcim2_reg = SIC_rt_pcim0;
-               rt_pcim3_reg = SIC_rt_pcim1;
-               rt_pciio0_reg = SIC_rt_pciio2;
-               rt_pciio1_reg = SIC_rt_pciio3;
-               rt_pciio2_reg = SIC_rt_pciio0;
-               rt_pciio3_reg = SIC_rt_pciio1;
+	       rt_ioapic0_reg = SIC_rt_ioapic2;
+	       rt_ioapic1_reg = SIC_rt_ioapic3;
+	       rt_ioapic2_reg = SIC_rt_ioapic0;
+	       rt_ioapic3_reg = SIC_rt_ioapic1;
+	       rt_pcim0_reg = SIC_rt_pcim2;
+	       rt_pcim1_reg = SIC_rt_pcim3;
+	       rt_pcim2_reg = SIC_rt_pcim0;
+	       rt_pcim3_reg = SIC_rt_pcim1;
+	       rt_pciio0_reg = SIC_rt_pciio2;
+	       rt_pciio1_reg = SIC_rt_pciio3;
+	       rt_pciio2_reg = SIC_rt_pciio0;
+	       rt_pciio3_reg = SIC_rt_pciio1;
        } else if (node == 3) {
-               rt_ioapic0_reg = SIC_rt_ioapic1;
-               rt_ioapic1_reg = SIC_rt_ioapic2;
-               rt_ioapic2_reg = SIC_rt_ioapic3;
-               rt_ioapic3_reg = SIC_rt_ioapic0;
-               rt_pcim0_reg = SIC_rt_pcim1;
-               rt_pcim1_reg = SIC_rt_pcim2;
-               rt_pcim2_reg = SIC_rt_pcim3;
-               rt_pcim3_reg = SIC_rt_pcim0;
-               rt_pciio0_reg = SIC_rt_pciio1;
-               rt_pciio1_reg = SIC_rt_pciio2;
-               rt_pciio2_reg = SIC_rt_pciio3;
-               rt_pciio3_reg = SIC_rt_pciio0;
+	       rt_ioapic0_reg = SIC_rt_ioapic1;
+	       rt_ioapic1_reg = SIC_rt_ioapic2;
+	       rt_ioapic2_reg = SIC_rt_ioapic3;
+	       rt_ioapic3_reg = SIC_rt_ioapic0;
+	       rt_pcim0_reg = SIC_rt_pcim1;
+	       rt_pcim1_reg = SIC_rt_pcim2;
+	       rt_pcim2_reg = SIC_rt_pcim3;
+	       rt_pcim3_reg = SIC_rt_pcim0;
+	       rt_pciio0_reg = SIC_rt_pciio1;
+	       rt_pciio1_reg = SIC_rt_pciio2;
+	       rt_pciio2_reg = SIC_rt_pciio3;
+	       rt_pciio3_reg = SIC_rt_pciio0;
        } else {
-               rom_printk("configure_node_io_routing() invalid node #%d\n",
-                       node);
-               return;
+	       rom_printk("configure_node_io_routing() invalid node #%d\n",
+		       node);
+	       return;
        }
        domain = node_iohub_to_domain(node, link);
 
        /* configure own link of the NODE to access to own ioapic space */
        rt_ioapic.E2K_RT_IOAPIC_bgn = domain;
        early_sic_write_node_iolink_nbsr_reg(node, link, SIC_rt_ioapic0,
-                                               rt_ioapic.E2K_RT_IOAPIC_reg);
+					       rt_ioapic.E2K_RT_IOAPIC_reg);
 	DebugIORT("NODE #%d IO link #%d: IO-APIC router set from 0x%X\n",
 		node, link, domain);
        pcim_bgn = PCI_MEM_DOMAIN_START(domain);
@@ -2125,7 +2125,7 @@ static void configure_node_io_routing(int node, int link)
        rt_pcim.E2K_RT_PCIM_bgn = (pcim_bgn) >> E2K_SIC_ALIGN_RT_PCIM;
        rt_pcim.E2K_RT_PCIM_end = (pcim_end - 1) >> E2K_SIC_ALIGN_RT_PCIM;
        early_sic_write_node_iolink_nbsr_reg(node, link, SIC_rt_pcim0,
-                                               rt_pcim.E2K_RT_PCIM_reg);
+					       rt_pcim.E2K_RT_PCIM_reg);
 	DebugIORT("NODE #%d IO link #%d: PCI-MM router set from 0x%X "
 		"to 0x%X\n",
 		node, link, pcim_bgn, pcim_end);
@@ -2134,131 +2134,131 @@ static void configure_node_io_routing(int node, int link)
        rt_pciio.E2K_RT_PCIIO_bgn = (pcim_bgn) >> E2K_SIC_ALIGN_RT_PCIIO;
        rt_pciio.E2K_RT_PCIIO_end = (pcim_end - 1) >> E2K_SIC_ALIGN_RT_PCIIO;
        early_sic_write_node_iolink_nbsr_reg(node, link, SIC_rt_pciio0,
-                                               rt_pciio.E2K_RT_PCIIO_reg);
+					       rt_pciio.E2K_RT_PCIIO_reg);
 	DebugIORT("NODE #%d IO link #%d: PCI-IO router set from 0x%X "
 		"to 0x%X\n",
 		node, link, pcim_bgn, pcim_end);
 
        if (node != 0 && (phys_node_pres_map & 0x1)) {  // node #0 is present
-               /* configure link the NODE to access to ioapic space NODE 0 */
-               domain = node_iohub_to_domain(0, link);
-               rt_ioapic.E2K_RT_IOAPIC_bgn = domain;
-               early_sic_write_node_iolink_nbsr_reg(node, link, rt_ioapic0_reg,
-                                               rt_ioapic.E2K_RT_IOAPIC_reg);
+	       /* configure link the NODE to access to ioapic space NODE 0 */
+	       domain = node_iohub_to_domain(0, link);
+	       rt_ioapic.E2K_RT_IOAPIC_bgn = domain;
+	       early_sic_write_node_iolink_nbsr_reg(node, link, rt_ioapic0_reg,
+					       rt_ioapic.E2K_RT_IOAPIC_reg);
 		DebugIORT("NODE #%d IO link #%d: router to IO-APIC node #0 set "
 			"from 0x%X\n",
 			node, link, domain);
-               pcim_bgn = PCI_MEM_DOMAIN_START(domain);
-               pcim_end = PCI_MEM_DOMAIN_END(domain);
-               rt_pcim.E2K_RT_PCIM_bgn = (pcim_bgn) >> E2K_SIC_ALIGN_RT_PCIM;
-               rt_pcim.E2K_RT_PCIM_end =
-                       (pcim_end - 1) >> E2K_SIC_ALIGN_RT_PCIM;
-               early_sic_write_node_iolink_nbsr_reg(node, link, rt_pcim0_reg,
-                                               rt_pcim.E2K_RT_PCIM_reg);
+	       pcim_bgn = PCI_MEM_DOMAIN_START(domain);
+	       pcim_end = PCI_MEM_DOMAIN_END(domain);
+	       rt_pcim.E2K_RT_PCIM_bgn = (pcim_bgn) >> E2K_SIC_ALIGN_RT_PCIM;
+	       rt_pcim.E2K_RT_PCIM_end =
+		       (pcim_end - 1) >> E2K_SIC_ALIGN_RT_PCIM;
+	       early_sic_write_node_iolink_nbsr_reg(node, link, rt_pcim0_reg,
+					       rt_pcim.E2K_RT_PCIM_reg);
 		DebugIORT("NODE #%d IO link #%d: router to PCI-MM node #0 set "
 			"from 0x%X\n",
 			node, link, pcim_bgn, pcim_end);
-               pcim_bgn = PCI_IO_DOMAIN_START(domain);
-               pcim_end = PCI_IO_DOMAIN_END(domain);
-               rt_pciio.E2K_RT_PCIIO_bgn =
-                       (pcim_bgn) >> E2K_SIC_ALIGN_RT_PCIIO;
-               rt_pciio.E2K_RT_PCIIO_end =
-                       (pcim_end - 1) >> E2K_SIC_ALIGN_RT_PCIIO;
-               early_sic_write_node_iolink_nbsr_reg(node, link, rt_pciio0_reg,
-                                               rt_pciio.E2K_RT_PCIIO_reg);
+	       pcim_bgn = PCI_IO_DOMAIN_START(domain);
+	       pcim_end = PCI_IO_DOMAIN_END(domain);
+	       rt_pciio.E2K_RT_PCIIO_bgn =
+		       (pcim_bgn) >> E2K_SIC_ALIGN_RT_PCIIO;
+	       rt_pciio.E2K_RT_PCIIO_end =
+		       (pcim_end - 1) >> E2K_SIC_ALIGN_RT_PCIIO;
+	       early_sic_write_node_iolink_nbsr_reg(node, link, rt_pciio0_reg,
+					       rt_pciio.E2K_RT_PCIIO_reg);
 		DebugIORT("NODE #%d IO link #%d: router to PCI-IO node #0 set "
 			"from 0x%X\n",
 			node, link, pcim_bgn, pcim_end);
        }
        if (node != 1 && (phys_node_pres_map & 0x2)) {  // node #1 is present
-               /* configure link the NODE to access to ioapic space NODE 1 */
-               domain = node_iohub_to_domain(1, link);
-               rt_ioapic.E2K_RT_IOAPIC_bgn = domain;
-               early_sic_write_node_iolink_nbsr_reg(node, link, rt_ioapic1_reg,
-                                               rt_ioapic.E2K_RT_IOAPIC_reg);
+	       /* configure link the NODE to access to ioapic space NODE 1 */
+	       domain = node_iohub_to_domain(1, link);
+	       rt_ioapic.E2K_RT_IOAPIC_bgn = domain;
+	       early_sic_write_node_iolink_nbsr_reg(node, link, rt_ioapic1_reg,
+					       rt_ioapic.E2K_RT_IOAPIC_reg);
 		DebugIORT("NODE #%d IO link #%d: router to IO-APIC node #1 set "
 			"from 0x%X\n",
 			node, link, domain);
-               pcim_bgn = PCI_MEM_DOMAIN_START(domain);
-               pcim_end = PCI_MEM_DOMAIN_END(domain);
-               rt_pcim.E2K_RT_PCIM_bgn = (pcim_bgn) >> E2K_SIC_ALIGN_RT_PCIM;
-               rt_pcim.E2K_RT_PCIM_end =
-                       (pcim_end - 1) >> E2K_SIC_ALIGN_RT_PCIM;
-               early_sic_write_node_iolink_nbsr_reg(node, link, rt_pcim1_reg,
-                                               rt_pcim.E2K_RT_PCIM_reg);
+	       pcim_bgn = PCI_MEM_DOMAIN_START(domain);
+	       pcim_end = PCI_MEM_DOMAIN_END(domain);
+	       rt_pcim.E2K_RT_PCIM_bgn = (pcim_bgn) >> E2K_SIC_ALIGN_RT_PCIM;
+	       rt_pcim.E2K_RT_PCIM_end =
+		       (pcim_end - 1) >> E2K_SIC_ALIGN_RT_PCIM;
+	       early_sic_write_node_iolink_nbsr_reg(node, link, rt_pcim1_reg,
+					       rt_pcim.E2K_RT_PCIM_reg);
 		DebugIORT("NODE #%d IO link #%d: router to PCI-MM node #1 set "
 			"from 0x%X\n",
 			node, link, pcim_bgn, pcim_end);
-               pcim_bgn = PCI_IO_DOMAIN_START(domain);
-               pcim_end = PCI_IO_DOMAIN_END(domain);
-               rt_pciio.E2K_RT_PCIIO_bgn =
-                       (pcim_bgn) >> E2K_SIC_ALIGN_RT_PCIIO;
-               rt_pciio.E2K_RT_PCIIO_end =
-                       (pcim_end - 1) >> E2K_SIC_ALIGN_RT_PCIIO;
-               early_sic_write_node_iolink_nbsr_reg(node, link, rt_pciio1_reg,
-                                               rt_pciio.E2K_RT_PCIIO_reg);
+	       pcim_bgn = PCI_IO_DOMAIN_START(domain);
+	       pcim_end = PCI_IO_DOMAIN_END(domain);
+	       rt_pciio.E2K_RT_PCIIO_bgn =
+		       (pcim_bgn) >> E2K_SIC_ALIGN_RT_PCIIO;
+	       rt_pciio.E2K_RT_PCIIO_end =
+		       (pcim_end - 1) >> E2K_SIC_ALIGN_RT_PCIIO;
+	       early_sic_write_node_iolink_nbsr_reg(node, link, rt_pciio1_reg,
+					       rt_pciio.E2K_RT_PCIIO_reg);
 		DebugIORT("NODE #%d IO link #%d: router to PCI-IO node #1 set "
 			"from 0x%X\n",
 			node, link, pcim_bgn, pcim_end);
        }
        if (node != 2 && (phys_node_pres_map & 0x4)) {  // node #2 is present
-               /* configure link the NODE to access to ioapic space NODE 2 */
-               domain = node_iohub_to_domain(2, link);
-               rt_ioapic.E2K_RT_IOAPIC_bgn = domain;
-               early_sic_write_node_iolink_nbsr_reg(node, link, rt_ioapic2_reg,
-                                               rt_ioapic.E2K_RT_IOAPIC_reg);
+	       /* configure link the NODE to access to ioapic space NODE 2 */
+	       domain = node_iohub_to_domain(2, link);
+	       rt_ioapic.E2K_RT_IOAPIC_bgn = domain;
+	       early_sic_write_node_iolink_nbsr_reg(node, link, rt_ioapic2_reg,
+					       rt_ioapic.E2K_RT_IOAPIC_reg);
 		DebugIORT("NODE #%d IO link #%d: router to IO-APIC node #2 set "
 			"from 0x%X\n",
 			node, link, domain);
-               pcim_bgn = PCI_MEM_DOMAIN_START(domain);
-               pcim_end = PCI_MEM_DOMAIN_END(domain);
-               rt_pcim.E2K_RT_PCIM_bgn = (pcim_bgn) >> E2K_SIC_ALIGN_RT_PCIM;
-               rt_pcim.E2K_RT_PCIM_end =
-                       (pcim_end - 1) >> E2K_SIC_ALIGN_RT_PCIM;
-               early_sic_write_node_iolink_nbsr_reg(node, link, rt_pcim2_reg,
-                                               rt_pcim.E2K_RT_PCIM_reg);
+	       pcim_bgn = PCI_MEM_DOMAIN_START(domain);
+	       pcim_end = PCI_MEM_DOMAIN_END(domain);
+	       rt_pcim.E2K_RT_PCIM_bgn = (pcim_bgn) >> E2K_SIC_ALIGN_RT_PCIM;
+	       rt_pcim.E2K_RT_PCIM_end =
+		       (pcim_end - 1) >> E2K_SIC_ALIGN_RT_PCIM;
+	       early_sic_write_node_iolink_nbsr_reg(node, link, rt_pcim2_reg,
+					       rt_pcim.E2K_RT_PCIM_reg);
 		DebugIORT("NODE #%d IO link #%d: router to PCI-MM node #2 set "
 			"from 0x%X\n",
 			node, link, pcim_bgn, pcim_end);
-               pcim_bgn = PCI_IO_DOMAIN_START(domain);
-               pcim_end = PCI_IO_DOMAIN_END(domain);
-               rt_pciio.E2K_RT_PCIIO_bgn =
-                       (pcim_bgn) >> E2K_SIC_ALIGN_RT_PCIIO;
-               rt_pciio.E2K_RT_PCIIO_end =
-                       (pcim_end - 1) >> E2K_SIC_ALIGN_RT_PCIIO;
-               early_sic_write_node_iolink_nbsr_reg(node, link, rt_pciio2_reg,
-                                               rt_pciio.E2K_RT_PCIIO_reg);
+	       pcim_bgn = PCI_IO_DOMAIN_START(domain);
+	       pcim_end = PCI_IO_DOMAIN_END(domain);
+	       rt_pciio.E2K_RT_PCIIO_bgn =
+		       (pcim_bgn) >> E2K_SIC_ALIGN_RT_PCIIO;
+	       rt_pciio.E2K_RT_PCIIO_end =
+		       (pcim_end - 1) >> E2K_SIC_ALIGN_RT_PCIIO;
+	       early_sic_write_node_iolink_nbsr_reg(node, link, rt_pciio2_reg,
+					       rt_pciio.E2K_RT_PCIIO_reg);
 		DebugIORT("NODE #%d IO link #%d: router to PCI-IO node #2 set "
 			"from 0x%X\n",
 			node, link, pcim_bgn, pcim_end);
        }
        if (node != 3 && (phys_node_pres_map & 0x8)) {  // node #3 is present
-               /* configure link the NODE to access to ioapic space NODE 3 */
-               domain = node_iohub_to_domain(3, link);
-               rt_ioapic.E2K_RT_IOAPIC_bgn = domain;
-               early_sic_write_node_iolink_nbsr_reg(node, link, rt_ioapic3_reg,
-                                               rt_ioapic.E2K_RT_IOAPIC_reg);
+	       /* configure link the NODE to access to ioapic space NODE 3 */
+	       domain = node_iohub_to_domain(3, link);
+	       rt_ioapic.E2K_RT_IOAPIC_bgn = domain;
+	       early_sic_write_node_iolink_nbsr_reg(node, link, rt_ioapic3_reg,
+					       rt_ioapic.E2K_RT_IOAPIC_reg);
 		DebugIORT("NODE #%d IO link #%d: router to IO-APIC node #3 set "
 			"from 0x%X\n",
 			node, link, domain);
-               pcim_bgn = PCI_MEM_DOMAIN_START(domain);
-               pcim_end = PCI_MEM_DOMAIN_END(domain);
-               rt_pcim.E2K_RT_PCIM_bgn = (pcim_bgn) >> E2K_SIC_ALIGN_RT_PCIM;
-               rt_pcim.E2K_RT_PCIM_end =
-                       (pcim_end - 1) >> E2K_SIC_ALIGN_RT_PCIM;
-               early_sic_write_node_iolink_nbsr_reg(node, link, rt_pcim3_reg,
-                                               rt_pcim.E2K_RT_PCIM_reg);
+	       pcim_bgn = PCI_MEM_DOMAIN_START(domain);
+	       pcim_end = PCI_MEM_DOMAIN_END(domain);
+	       rt_pcim.E2K_RT_PCIM_bgn = (pcim_bgn) >> E2K_SIC_ALIGN_RT_PCIM;
+	       rt_pcim.E2K_RT_PCIM_end =
+		       (pcim_end - 1) >> E2K_SIC_ALIGN_RT_PCIM;
+	       early_sic_write_node_iolink_nbsr_reg(node, link, rt_pcim3_reg,
+					       rt_pcim.E2K_RT_PCIM_reg);
 		DebugIORT("NODE #%d IO link #%d: router to PCI-MM node #3 set "
 			"from 0x%X\n",
 			node, link, pcim_bgn, pcim_end);
-               pcim_bgn = PCI_IO_DOMAIN_START(domain);
-               pcim_end = PCI_IO_DOMAIN_END(domain);
-               rt_pciio.E2K_RT_PCIIO_bgn =
-                       (pcim_bgn) >> E2K_SIC_ALIGN_RT_PCIIO;
-               rt_pciio.E2K_RT_PCIIO_end =
-                       (pcim_end - 1) >> E2K_SIC_ALIGN_RT_PCIIO;
-               early_sic_write_node_iolink_nbsr_reg(node, link, rt_pciio3_reg,
-                                               rt_pciio.E2K_RT_PCIIO_reg);
+	       pcim_bgn = PCI_IO_DOMAIN_START(domain);
+	       pcim_end = PCI_IO_DOMAIN_END(domain);
+	       rt_pciio.E2K_RT_PCIIO_bgn =
+		       (pcim_bgn) >> E2K_SIC_ALIGN_RT_PCIIO;
+	       rt_pciio.E2K_RT_PCIIO_end =
+		       (pcim_end - 1) >> E2K_SIC_ALIGN_RT_PCIIO;
+	       early_sic_write_node_iolink_nbsr_reg(node, link, rt_pciio3_reg,
+					       rt_pciio.E2K_RT_PCIIO_reg);
 		DebugIORT("NODE #%d IO link #%d: router to PCI-IO node #3 set "
 			"from 0x%X\n",
 			node, link, pcim_bgn, pcim_end);
@@ -2271,11 +2271,11 @@ static void configure_io_routing(void)
        int link;
 
        for (node = 0; node < MAX_NUMNODES; node ++) {
-               if (!(phys_node_pres_map & (1 << node)))
-                       continue;
-               for_each_iolink_of_node(link) {
-                       configure_node_io_routing(node, link);
-               }
+	       if (!(phys_node_pres_map & (1 << node)))
+		       continue;
+	       for_each_iolink_of_node(link) {
+		       configure_node_io_routing(node, link);
+	       }
        }
 }
 #elif	defined(CONFIG_E2K_LEGACY_SIC)
@@ -2313,29 +2313,29 @@ static void configure_node_io_link(int node)
        int domain;
 
        if (node == 0) {
-               rt_lcfg0_reg = SIC_rt_lcfg0;
-               rt_lcfg1_reg = SIC_rt_lcfg1;
-               rt_lcfg2_reg = SIC_rt_lcfg2;
-               rt_lcfg3_reg = SIC_rt_lcfg3;
+	       rt_lcfg0_reg = SIC_rt_lcfg0;
+	       rt_lcfg1_reg = SIC_rt_lcfg1;
+	       rt_lcfg2_reg = SIC_rt_lcfg2;
+	       rt_lcfg3_reg = SIC_rt_lcfg3;
        } else if (node == 1) {
-               rt_lcfg0_reg = SIC_rt_lcfg3;
-               rt_lcfg1_reg = SIC_rt_lcfg0;
-               rt_lcfg2_reg = SIC_rt_lcfg1;
-               rt_lcfg3_reg = SIC_rt_lcfg2;
+	       rt_lcfg0_reg = SIC_rt_lcfg3;
+	       rt_lcfg1_reg = SIC_rt_lcfg0;
+	       rt_lcfg2_reg = SIC_rt_lcfg1;
+	       rt_lcfg3_reg = SIC_rt_lcfg2;
        } else if (node == 2) {
-               rt_lcfg0_reg = SIC_rt_lcfg2;
-               rt_lcfg1_reg = SIC_rt_lcfg3;
-               rt_lcfg2_reg = SIC_rt_lcfg0;
-               rt_lcfg3_reg = SIC_rt_lcfg1;
+	       rt_lcfg0_reg = SIC_rt_lcfg2;
+	       rt_lcfg1_reg = SIC_rt_lcfg3;
+	       rt_lcfg2_reg = SIC_rt_lcfg0;
+	       rt_lcfg3_reg = SIC_rt_lcfg1;
        } else if (node == 3) {
-               rt_lcfg0_reg = SIC_rt_lcfg1;
-               rt_lcfg1_reg = SIC_rt_lcfg2;
-               rt_lcfg2_reg = SIC_rt_lcfg3;
-               rt_lcfg3_reg = SIC_rt_lcfg0;
+	       rt_lcfg0_reg = SIC_rt_lcfg1;
+	       rt_lcfg1_reg = SIC_rt_lcfg2;
+	       rt_lcfg2_reg = SIC_rt_lcfg3;
+	       rt_lcfg3_reg = SIC_rt_lcfg0;
        } else {
-               rom_printk("configure_node_io_link() invalid node #%d\n",
-                       node);
-               return;
+	       rom_printk("configure_node_io_link() invalid node #%d\n",
+		       node);
+	       return;
        }
 
        /* configure own link cfg of the NODE to access to own io link */
@@ -2353,61 +2353,61 @@ static void configure_node_io_link(int node)
 						E2K_RT_LCFG_reg(rt_lcfg));
 
        if (node != 0 && (phys_node_pres_map & 0x1)) {  // node #0 is present
-               /* configure link cfg the NODE to access to io link of NODE 0 */
+	       /* configure link cfg the NODE to access to io link of NODE 0 */
 		E2K_RT_LCFG_reg(rt_lcfg) = early_sic_read_node_nbsr_reg(node,
 						rt_lcfg0_reg);
-               iolink_on = 0;
-               for_each_iolink_of_node(link) {
-                       domain = node_iohub_to_domain(0, link);
-                       if ((online_iohubs_map & (1 << domain)) ||
-                                       (online_rdmas_map & (1 << domain)))
-                               iolink_on |= 1;
-               }
+	       iolink_on = 0;
+	       for_each_iolink_of_node(link) {
+		       domain = node_iohub_to_domain(0, link);
+		       if ((online_iohubs_map & (1 << domain)) ||
+				       (online_rdmas_map & (1 << domain)))
+			       iolink_on |= 1;
+	       }
 		E2K_RT_LCFG_vio(rt_lcfg) = iolink_on;
 		early_sic_write_node_nbsr_reg(node, rt_lcfg0_reg,
 						E2K_RT_LCFG_reg(rt_lcfg));
        }
        if (node != 1 && (phys_node_pres_map & 0x2)) {  // node #1 is present
-               /* configure link cfg the NODE to access to io link of NODE 1 */
+	       /* configure link cfg the NODE to access to io link of NODE 1 */
 		E2K_RT_LCFG_reg(rt_lcfg) = early_sic_read_node_nbsr_reg(node,
 								rt_lcfg1_reg);
-               iolink_on = 0;
-               for_each_iolink_of_node(link) {
-                       domain = node_iohub_to_domain(1, link);
-                       if ((online_iohubs_map & (1 << domain)) ||
-                                       (online_rdmas_map & (1 << domain)))
-                               iolink_on |= 1;
-               }
+	       iolink_on = 0;
+	       for_each_iolink_of_node(link) {
+		       domain = node_iohub_to_domain(1, link);
+		       if ((online_iohubs_map & (1 << domain)) ||
+				       (online_rdmas_map & (1 << domain)))
+			       iolink_on |= 1;
+	       }
 		E2K_RT_LCFG_vio(rt_lcfg) = iolink_on;
 		early_sic_write_node_nbsr_reg(node, rt_lcfg1_reg,
 						E2K_RT_LCFG_reg(rt_lcfg));
        }
        if (node != 2 && (phys_node_pres_map & 0x4)) {  // node #2 is present
-               /* configure link cfg the NODE to access to io link of NODE 2 */
+	       /* configure link cfg the NODE to access to io link of NODE 2 */
 		E2K_RT_LCFG_reg(rt_lcfg) = early_sic_read_node_nbsr_reg(node,
 								rt_lcfg2_reg);
-               iolink_on = 0;
-               for_each_iolink_of_node(link) {
-                       domain = node_iohub_to_domain(2, link);
-                       if ((online_iohubs_map & (1 << domain)) ||
-                                       (online_rdmas_map & (1 << domain)))
-                               iolink_on |= 1;
-               }
+	       iolink_on = 0;
+	       for_each_iolink_of_node(link) {
+		       domain = node_iohub_to_domain(2, link);
+		       if ((online_iohubs_map & (1 << domain)) ||
+				       (online_rdmas_map & (1 << domain)))
+			       iolink_on |= 1;
+	       }
 		E2K_RT_LCFG_vio(rt_lcfg) = iolink_on;
 		early_sic_write_node_nbsr_reg(node, rt_lcfg2_reg,
 						E2K_RT_LCFG_reg(rt_lcfg));
        }
        if (node != 3 && (phys_node_pres_map & 0x8)) {  // node #3 is present
-               /* configure link cfg the NODE to access to io link of NODE 3 */
+	       /* configure link cfg the NODE to access to io link of NODE 3 */
 		E2K_RT_LCFG_reg(rt_lcfg) = early_sic_read_node_nbsr_reg(node,
 								rt_lcfg3_reg);
-               iolink_on = 0;
-               for_each_iolink_of_node(link) {
-                       domain = node_iohub_to_domain(3, link);
-                       if ((online_iohubs_map & (1 << domain)) ||
-                                       (online_rdmas_map & (1 << domain)))
-                               iolink_on |= 1;
-               }
+	       iolink_on = 0;
+	       for_each_iolink_of_node(link) {
+		       domain = node_iohub_to_domain(3, link);
+		       if ((online_iohubs_map & (1 << domain)) ||
+				       (online_rdmas_map & (1 << domain)))
+			       iolink_on |= 1;
+	       }
 		E2K_RT_LCFG_vio(rt_lcfg) = iolink_on;
 		early_sic_write_node_nbsr_reg(node, rt_lcfg3_reg,
 						E2K_RT_LCFG_reg(rt_lcfg));
@@ -2419,9 +2419,9 @@ static void configure_io_links(void)
        int node;
 
        for (node = 0; node < MAX_NUMNODES; node ++) {
-               if (!(phys_node_pres_map & (1 << node)))
-                       continue;
-               configure_node_io_link(node);
+	       if (!(phys_node_pres_map & (1 << node)))
+		       continue;
+	       configure_node_io_link(node);
        }
 }
 
@@ -2443,70 +2443,70 @@ static void scan_iolink_config(int node, int link)
        link_on = 0;
 
        io_link.E2K_IOL_CSR_reg =
-               early_sic_read_node_iolink_nbsr_reg(node, link, SIC_iol_csr);
+	       early_sic_read_node_iolink_nbsr_reg(node, link, SIC_iol_csr);
        src_mode = io_link.E2K_IOL_CSR_mode;
        rom_printk("Node #%d IO LINK #%d is", node, link);
        if (io_link.E2K_IOL_CSR_mode == IOHUB_IOL_MODE) {
-               io_hub.E2K_IO_CSR_reg =
-                       early_sic_read_node_iolink_nbsr_reg(node, link,
-                                                               SIC_io_csr);
-               if (io_hub.E2K_IO_CSR_ch_on)
-                       link_on = 1;
+	       io_hub.E2K_IO_CSR_reg =
+		       early_sic_read_node_iolink_nbsr_reg(node, link,
+							       SIC_io_csr);
+	       if (io_hub.E2K_IO_CSR_ch_on)
+		       link_on = 1;
        } else {
-               rdma.E2K_RDMA_CS_reg =
-                       early_sic_read_node_iolink_nbsr_reg(node, link,
-                                                               SIC_rdma_cs);
-               if (rdma.E2K_RDMA_CS_ch_on)
-                       link_on = 1;
+	       rdma.E2K_RDMA_CS_reg =
+		       early_sic_read_node_iolink_nbsr_reg(node, link,
+							       SIC_rdma_cs);
+	       if (rdma.E2K_RDMA_CS_ch_on)
+		       link_on = 1;
        }
        if (!link_on) {
-               if (src_mode == IOHUB_IOL_MODE) {
-                       possible_iohubs_map |=
-                               (1 << node_iohub_to_domain(node, link));
-                       possible_iohubs_num ++;
-                       rom_printk(" IOHUB controller");
-               } else {
-                       possible_rdmas_map |=
-                               (1 << node_iohub_to_domain(node, link));
-                       possible_rdmas_num ++;
-                       rom_printk(" RDMA controller");
-               }
-               rom_printk(" OFF\n");
-               return;
+	       if (src_mode == IOHUB_IOL_MODE) {
+		       possible_iohubs_map |=
+			       (1 << node_iohub_to_domain(node, link));
+		       possible_iohubs_num ++;
+		       rom_printk(" IOHUB controller");
+	       } else {
+		       possible_rdmas_map |=
+			       (1 << node_iohub_to_domain(node, link));
+		       possible_rdmas_num ++;
+		       rom_printk(" RDMA controller");
+	       }
+	       rom_printk(" OFF\n");
+	       return;
        }
 
        ab_type = io_link.E2K_IOL_CSR_abtype;
        switch (ab_type) {
        case IOHUB_ONLY_IOL_ABTYPE:
-               rom_printk(" IO HUB controller ON connected to IOHUB");
-               dst_mode = IOHUB_IOL_MODE;
-               break;
+	       rom_printk(" IO HUB controller ON connected to IOHUB");
+	       dst_mode = IOHUB_IOL_MODE;
+	       break;
        case RDMA_ONLY_IOL_ABTYPE:
-               rom_printk(" RDMA controller ON connected to RDMA");
-               dst_mode = RDMA_IOL_MODE;
-               break;
+	       rom_printk(" RDMA controller ON connected to RDMA");
+	       dst_mode = RDMA_IOL_MODE;
+	       break;
        case RDMA_IOHUB_IOL_ABTYPE:
-               rom_printk(" RDMA controller ON connected to IOHUB/RDMA");
-               dst_mode = RDMA_IOL_MODE;
-               break;
+	       rom_printk(" RDMA controller ON connected to IOHUB/RDMA");
+	       dst_mode = RDMA_IOL_MODE;
+	       break;
        default:
-               rom_printk(" %s controller ON connected to unknown controller",
-                       (src_mode == IOHUB_IOL_MODE) ? "IO HUB" : "RDMA");
-               dst_mode = src_mode;
-               break;
+	       rom_printk(" %s controller ON connected to unknown controller",
+		       (src_mode == IOHUB_IOL_MODE) ? "IO HUB" : "RDMA");
+	       dst_mode = src_mode;
+	       break;
        }
 
        if (src_mode != dst_mode) {
-               io_link.E2K_IOL_CSR_mode = dst_mode;
-               early_sic_write_node_iolink_nbsr_reg(node, link, SIC_iol_csr,
-                                               io_link.E2K_IOL_CSR_reg);
+	       io_link.E2K_IOL_CSR_mode = dst_mode;
+	       early_sic_write_node_iolink_nbsr_reg(node, link, SIC_iol_csr,
+					       io_link.E2K_IOL_CSR_reg);
        }
        if (dst_mode == IOHUB_IOL_MODE) {
-               online_iohubs_map |= (1 << node_iohub_to_domain(node, link));
-               online_iohubs_num ++;
+	       online_iohubs_map |= (1 << node_iohub_to_domain(node, link));
+	       online_iohubs_num ++;
        } else {
-               online_rdmas_map |= (1 << node_iohub_to_domain(node, link));
-               online_rdmas_num ++;
+	       online_rdmas_map |= (1 << node_iohub_to_domain(node, link));
+	       online_rdmas_num ++;
        }
        rom_printk("\n");
 }
@@ -2753,7 +2753,7 @@ void jump(void)
 	/* Boot info goes under loader's C-stack and below kernel code. */
 	bootblock = (bootblock_struct_t *)
 			_PAGE_ALIGN_DOWN((e2k_addr_t)free_memory_p,
-			 			E2K_BOOTINFO_PAGE_SIZE);
+						E2K_BOOTINFO_PAGE_SIZE);
 	free_memory_p = (char *)((e2k_addr_t)bootblock +
 					sizeof(bootblock_struct_t));
 	boot_info = &bootblock->info;
@@ -2893,11 +2893,8 @@ void jump(void)
 			boot_info->kernel_args_string);
 
 		/* Creation of bios info records. */
-		memcpy(bios_info->signature, BIOS_INFO_SIGNATURE,
-			(int)bios_strlen(BIOS_INFO_SIGNATURE) + 1);
 		memcpy(bios_info->boot_ver, BOOT_VER_STR,
 			(int)bios_strlen(BOOT_VER_STR) + 1);
-		bios_info->chipset_type = CHIPSET_TYPE_IOHUB;
 		if (NATIVE_IS_MACHINE_E2S)
 			bios_info->cpu_type = CPU_TYPE_E2S;
 		else if (NATIVE_IS_MACHINE_E8C)
@@ -2960,7 +2957,7 @@ void jump(void)
 
 #ifdef CONFIG_BIOS
 #ifdef CONFIG_ENABLE_ELBRUS_PCIBIOS
-        pci_bios();
+	pci_bios();
 #endif
 #endif
 
@@ -2970,7 +2967,7 @@ void jump(void)
 
 #ifdef CONFIG_BIOS
 #if defined(CONFIG_E2K_LEGACY_SIC)
-        video_bios();
+	video_bios();
 #endif	/* CONFIG_E2K_LEGACY_SIC */
 #endif
 
@@ -3184,6 +3181,8 @@ set_kernel_image_pointers(void)
 	 * physical addresses
 	 */
 
+	AW(reg_lo) = 0;
+	AW(reg_hi) = 0;
 	reg_lo.CUD_lo_base = kernel_areabase;
 	reg_lo.CUD_lo_c = E2K_CUD_CHECKED_FLAG;
 	reg_lo._CUD_lo_rw = E2K_CUD_RW_PROTECTIONS;
@@ -3194,6 +3193,8 @@ set_kernel_image_pointers(void)
 	NATIVE_WRITE_OSCUD_HI_REG_VALUE(reg_hi.OSCUD_hi_half);
 	NATIVE_WRITE_OSCUD_LO_REG_VALUE(reg_lo.OSCUD_lo_half);
 
+	AW(reg_lo) = 0;
+	AW(reg_hi) = 0;
 	reg_lo.GD_lo_base = kernel_areabase;
 	reg_lo._GD_lo_rw = E2K_GD_RW_PROTECTIONS;
 	reg_hi.GD_hi_size = kernel_areasize;

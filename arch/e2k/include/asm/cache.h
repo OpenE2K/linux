@@ -49,8 +49,16 @@
 
 #define INTERNODE_CACHE_BYTES	(1 << INTERNODE_CACHE_SHIFT)
 
-#define cache_line_size()	_max3_(L1_CACHE_BYTES, L2_CACHE_BYTES, \
-				       L3_CACHE_BYTES)
+/*
+ * No easy way to get cache size on all processors
+ * so return the maximum possible to be safe.
+ */
+#define ARCH_DMA_MINALIGN (1 << INTERNODE_CACHE_SHIFT)
+
+/* For saving tagged qwords.  Cannot use `max()` so calculate manually */
+#define ARCH_SLAB_MINALIGN	16
+
+#define cache_line_size()	_max3_(L1_CACHE_BYTES, L2_CACHE_BYTES, L3_CACHE_BYTES)
 
 #define __read_mostly __attribute__((__section__(".data..read_mostly")))
 

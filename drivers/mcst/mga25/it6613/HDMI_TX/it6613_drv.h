@@ -659,23 +659,23 @@
 #define REG_TX_PKG_MPGINFO_SUM 0x8F
 
 #define REG_TX_AUDCHST_MODE    0x91 // 191 REG_TX_AUD_CHSTD[2:0] 6:4
-                                 //     REG_TX_AUD_CHSTC 3
-                                 //     REG_TX_AUD_NLPCM 2
-                                 //     REG_TX_AUD_MONO 0
+				 //     REG_TX_AUD_CHSTC 3
+				 //     REG_TX_AUD_NLPCM 2
+				 //     REG_TX_AUD_MONO 0
 #define REG_TX_AUDCHST_CAT     0x92 // 192 REG_TX_AUD_CHSTCAT 7:0
 #define REG_TX_AUDCHST_SRCNUM  0x93 // 193 REG_TX_AUD_CHSTSRC 3:0
 #define REG_TX_AUD0CHST_CHTNUM 0x94 // 194 REG_TX_AUD0_CHSTCHR 7:4
-                                 //     REG_TX_AUD0_CHSTCHL 3:0
+				 //     REG_TX_AUD0_CHSTCHL 3:0
 #define REG_TX_AUD1CHST_CHTNUM 0x95 // 195 REG_TX_AUD1_CHSTCHR 7:4
-                                 //     REG_TX_AUD1_CHSTCHL 3:0
+				 //     REG_TX_AUD1_CHSTCHL 3:0
 #define REG_TX_AUD2CHST_CHTNUM 0x96 // 196 REG_TX_AUD2_CHSTCHR 7:4
-                                 //     REG_TX_AUD2_CHSTCHL 3:0
+				 //     REG_TX_AUD2_CHSTCHL 3:0
 #define REG_TX_AUD3CHST_CHTNUM 0x97 // 197 REG_TX_AUD3_CHSTCHR 7:4
-                                 //     REG_TX_AUD3_CHSTCHL 3:0
+				 //     REG_TX_AUD3_CHSTCHL 3:0
 #define REG_TX_AUDCHST_CA_FS   0x98 // 198 REG_TX_AUD_CHSTCA 5:4
-                                 //     REG_TX_AUD_CHSTFS 3:0
+				 //     REG_TX_AUD_CHSTFS 3:0
 #define REG_TX_AUDCHST_OFS_WL  0x99 // 199 REG_TX_AUD_CHSTOFS 7:4
-                                 //     REG_TX_AUD_CHSTWL 3:0
+				 //     REG_TX_AUD_CHSTWL 3:0
 
 /////////////////////////////////////////////////////////////////////
 // Macro

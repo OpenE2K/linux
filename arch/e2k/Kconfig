@@ -1,6 +1,6 @@
- # SPDX-License-Identifier: GPL-2.0
- # Copyright (c) 2023 MCST
- 
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2023 MCST
+
 #
 # For a description of the syntax of this configuration file,
 # see Documentation/kbuild/kconfig-language.txt.
@@ -69,6 +69,7 @@ config E2K
 	select ARCH_WEAK_RELEASE_ACQUIRE
 	select DCACHE_WORD_ACCESS
 	select DMA_REMAP
+	select ARCH_HAS_DMA_WRITE_COMBINE
 	select EDAC_SUPPORT
 	select GENERIC_IDLE_POLL_SETUP
 	select GENERIC_IRQ_PROBE
@@ -425,7 +426,7 @@ config E2K_MINVER_V7
 	bool "Elbrus v7"
 	help
 	  This options enables kernel with minimally supported Elbrus v7
-	  CPU architecture (Elbrus 32c, 8v7 and later).
+	  CPU architecture (Elbrus 8v7 and later).
 endchoice
 
 
@@ -942,9 +943,8 @@ config CMDLINE_EXTEND
 endchoice
 
 config CMDLINE
-	string "Kernel command line arguments string"
-	depends on CMDLINE_OVERWRITE || CMDLINE_EXTEND
 	string "Command line of kernel's builtin boot"
+	depends on CMDLINE_OVERWRITE || CMDLINE_EXTEND
 	default "root=/dev/sda3 console=ttyS0,115200 init=/root/init.sh ipv6.disable=1 usbcore.nousb raid=noautodetect force_C3"
 
 #
@@ -1020,9 +1020,6 @@ config GENERIC_TIME
 	def_bool y
 
 config GENERIC_TIME_VSYSCALL
-	def_bool y
-
-config GENERIC_CMOS_UPDATE
 	def_bool y
 
 config GENERIC_CLOCKEVENTS

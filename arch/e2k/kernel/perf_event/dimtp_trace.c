@@ -124,7 +124,6 @@ static int dimtp_event_init(struct perf_event *event)
 {
 	struct perf_event_attr *attr = &event->attr;
 	dimtp_config_attr_t config = { .word = event->attr.config };
-	struct dimtp_pmu *dimtp_pmu = to_dimtp_pmu(event->pmu);
 
 	if (attr->type != event->pmu->type)
 		return -ENOENT;
@@ -340,7 +339,7 @@ static void dimtp_start(struct perf_event *event, int flags)
 	dimtp.ind = PERF_IDX2OFF(handle->head, buf);
 	dimtp.size = limit;
 	dimtp.rw = 3;
-	machine.restore_dimtp(&dimtp);
+	restore_dimtp(dimtp);
 
 	AW(dimcr) = 0;
 	dimcr.mode = config.mode;
@@ -429,8 +428,7 @@ static void dimtp_del(struct perf_event *event, int flags)
 {
 	dimtp_stop(event, PERF_EF_UPDATE);
 
-	BUG_ON((__this_cpu_read(perf_monitors_used) & (DIM0 | DIM1) !=
-			(DIM0 | DIM1)));
+	BUG_ON((__this_cpu_read(perf_monitors_used) & (DIM0 | DIM1)) != (DIM0 | DIM1));
 	__this_cpu_write(cpu_events[0], NULL);
 	__this_cpu_and(perf_monitors_used, ~(DIM0 | DIM1));
 }

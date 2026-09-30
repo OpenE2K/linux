@@ -117,7 +117,7 @@ static inline unsigned int user_hcall_init(void)
 	linux_hcem = 1 << LINUX_HCALL_GENERIC_TRAPNUM;
 
 	/* Light hypercalls aren't used with hardware virtualization support */
-	if (!cpu_has(CPU_FEAT_ISET_V6))
+	if (!cpu_has(CPU_FEAT_ISET_V6) || IS_ENABLED(CONFIG_TEST_HYPERCALLS_LOOP))
 		linux_hcem |= 1 << LINUX_HCALL_LIGHT_TRAPNUM;
 
 	return linux_hcem;

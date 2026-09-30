@@ -61,7 +61,7 @@
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
-int do_hret_last_wish_intc(struct kvm_vcpu *vcpu, struct pt_regs *regs)
+int intc_hret_last_wish(struct kvm_vcpu *vcpu, struct pt_regs *regs)
 {
 	struct trap_pt_regs *trap = regs->trap;
 	unsigned long flags;

@@ -243,6 +243,125 @@ static inline void kvm_switch_hv_mmu_pt_regs(struct kvm_sw_cpu_context *sw_ctxt)
 	sw_ctxt->sh_u_vptb = u_vptb;
 }
 
+static inline void kvm_switch_hv_mmu_mtrr_regs(struct kvm_sw_cpu_context *sw_ctxt)
+{
+	mmu_reg_t mtrr_deftype;
+	mmu_reg_t mtrr_fix_64k_00000;
+	mmu_reg_t mtrr_fix_16k_80000;
+	mmu_reg_t mtrr_fix_16k_a0000;
+	mmu_reg_t mtrr_fix_4k_c0000;
+	mmu_reg_t mtrr_fix_4k_c8000;
+	mmu_reg_t mtrr_fix_4k_d0000;
+	mmu_reg_t mtrr_fix_4k_d8000;
+	mmu_reg_t mtrr_fix_4k_e0000;
+	mmu_reg_t mtrr_fix_4k_e8000;
+	mmu_reg_t mtrr_fix_4k_f0000;
+	mmu_reg_t mtrr_fix_4k_f8000;
+	mmu_reg_t mtrr_physbase0;
+	mmu_reg_t mtrr_physbase1;
+	mmu_reg_t mtrr_physbase2;
+	mmu_reg_t mtrr_physbase3;
+	mmu_reg_t mtrr_physbase4;
+	mmu_reg_t mtrr_physbase5;
+	mmu_reg_t mtrr_physbase6;
+	mmu_reg_t mtrr_physbase7;
+	mmu_reg_t mtrr_physmask0;
+	mmu_reg_t mtrr_physmask1;
+	mmu_reg_t mtrr_physmask2;
+	mmu_reg_t mtrr_physmask3;
+	mmu_reg_t mtrr_physmask4;
+	mmu_reg_t mtrr_physmask5;
+	mmu_reg_t mtrr_physmask6;
+	mmu_reg_t mtrr_physmask7;
+
+	mtrr_deftype = NATIVE_READ_MMU_MTRR_DEFTYPE_REG();
+	mtrr_fix_64k_00000 = NATIVE_READ_MMU_MTRR_FIX_64K_00000_REG();
+	mtrr_fix_16k_80000 = NATIVE_READ_MMU_MTRR_FIX_16K_80000_REG();
+	mtrr_fix_16k_a0000 = NATIVE_READ_MMU_MTRR_FIX_16K_A0000_REG();
+	mtrr_fix_4k_c0000 = NATIVE_READ_MMU_MTRR_FIX_4K_C0000_REG();
+	mtrr_fix_4k_c8000 = NATIVE_READ_MMU_MTRR_FIX_4K_C8000_REG();
+	mtrr_fix_4k_d0000 = NATIVE_READ_MMU_MTRR_FIX_4K_D0000_REG();
+	mtrr_fix_4k_d8000 = NATIVE_READ_MMU_MTRR_FIX_4K_D8000_REG();
+	mtrr_fix_4k_e0000 = NATIVE_READ_MMU_MTRR_FIX_4K_E0000_REG();
+	mtrr_fix_4k_e8000 = NATIVE_READ_MMU_MTRR_FIX_4K_E8000_REG();
+	mtrr_fix_4k_f0000 = NATIVE_READ_MMU_MTRR_FIX_4K_F0000_REG();
+	mtrr_fix_4k_f8000 = NATIVE_READ_MMU_MTRR_FIX_4K_F8000_REG();
+	mtrr_physbase0 = NATIVE_READ_MMU_MTRR_PHYSBASE0_REG();
+	mtrr_physbase1 = NATIVE_READ_MMU_MTRR_PHYSBASE1_REG();
+	mtrr_physbase2 = NATIVE_READ_MMU_MTRR_PHYSBASE2_REG();
+	mtrr_physbase3 = NATIVE_READ_MMU_MTRR_PHYSBASE3_REG();
+	mtrr_physbase4 = NATIVE_READ_MMU_MTRR_PHYSBASE4_REG();
+	mtrr_physbase5 = NATIVE_READ_MMU_MTRR_PHYSBASE5_REG();
+	mtrr_physbase6 = NATIVE_READ_MMU_MTRR_PHYSBASE6_REG();
+	mtrr_physbase7 = NATIVE_READ_MMU_MTRR_PHYSBASE7_REG();
+	mtrr_physmask0 = NATIVE_READ_MMU_MTRR_PHYSMASK0_REG();
+	mtrr_physmask1 = NATIVE_READ_MMU_MTRR_PHYSMASK1_REG();
+	mtrr_physmask2 = NATIVE_READ_MMU_MTRR_PHYSMASK2_REG();
+	mtrr_physmask3 = NATIVE_READ_MMU_MTRR_PHYSMASK3_REG();
+	mtrr_physmask4 = NATIVE_READ_MMU_MTRR_PHYSMASK4_REG();
+	mtrr_physmask5 = NATIVE_READ_MMU_MTRR_PHYSMASK5_REG();
+	mtrr_physmask6 = NATIVE_READ_MMU_MTRR_PHYSMASK6_REG();
+	mtrr_physmask7 = NATIVE_READ_MMU_MTRR_PHYSMASK7_REG();
+
+	NATIVE_WRITE_MMU_MTRR_DEFTYPE_REG(sw_ctxt->mtrr_deftype);
+	NATIVE_WRITE_MMU_MTRR_FIX_64K_00000_REG(sw_ctxt->mtrr_fix_64k_00000);
+	NATIVE_WRITE_MMU_MTRR_FIX_16K_80000_REG(sw_ctxt->mtrr_fix_16k_80000);
+	NATIVE_WRITE_MMU_MTRR_FIX_16K_A0000_REG(sw_ctxt->mtrr_fix_16k_a0000);
+	NATIVE_WRITE_MMU_MTRR_FIX_4K_C0000_REG(sw_ctxt->mtrr_fix_4k_c0000);
+	NATIVE_WRITE_MMU_MTRR_FIX_4K_C8000_REG(sw_ctxt->mtrr_fix_4k_c8000);
+	NATIVE_WRITE_MMU_MTRR_FIX_4K_D0000_REG(sw_ctxt->mtrr_fix_4k_d0000);
+	NATIVE_WRITE_MMU_MTRR_FIX_4K_D8000_REG(sw_ctxt->mtrr_fix_4k_d8000);
+	NATIVE_WRITE_MMU_MTRR_FIX_4K_E0000_REG(sw_ctxt->mtrr_fix_4k_e0000);
+	NATIVE_WRITE_MMU_MTRR_FIX_4K_E8000_REG(sw_ctxt->mtrr_fix_4k_e8000);
+	NATIVE_WRITE_MMU_MTRR_FIX_4K_F0000_REG(sw_ctxt->mtrr_fix_4k_f0000);
+	NATIVE_WRITE_MMU_MTRR_FIX_4K_F8000_REG(sw_ctxt->mtrr_fix_4k_f8000);
+	NATIVE_WRITE_MMU_MTRR_PHYSBASE0_REG(sw_ctxt->mtrr_physbase0);
+	NATIVE_WRITE_MMU_MTRR_PHYSBASE1_REG(sw_ctxt->mtrr_physbase1);
+	NATIVE_WRITE_MMU_MTRR_PHYSBASE2_REG(sw_ctxt->mtrr_physbase2);
+	NATIVE_WRITE_MMU_MTRR_PHYSBASE3_REG(sw_ctxt->mtrr_physbase3);
+	NATIVE_WRITE_MMU_MTRR_PHYSBASE4_REG(sw_ctxt->mtrr_physbase4);
+	NATIVE_WRITE_MMU_MTRR_PHYSBASE5_REG(sw_ctxt->mtrr_physbase5);
+	NATIVE_WRITE_MMU_MTRR_PHYSBASE6_REG(sw_ctxt->mtrr_physbase6);
+	NATIVE_WRITE_MMU_MTRR_PHYSBASE7_REG(sw_ctxt->mtrr_physbase7);
+	NATIVE_WRITE_MMU_MTRR_PHYSMASK0_REG(sw_ctxt->mtrr_physmask0);
+	NATIVE_WRITE_MMU_MTRR_PHYSMASK1_REG(sw_ctxt->mtrr_physmask1);
+	NATIVE_WRITE_MMU_MTRR_PHYSMASK2_REG(sw_ctxt->mtrr_physmask2);
+	NATIVE_WRITE_MMU_MTRR_PHYSMASK3_REG(sw_ctxt->mtrr_physmask3);
+	NATIVE_WRITE_MMU_MTRR_PHYSMASK4_REG(sw_ctxt->mtrr_physmask4);
+	NATIVE_WRITE_MMU_MTRR_PHYSMASK5_REG(sw_ctxt->mtrr_physmask5);
+	NATIVE_WRITE_MMU_MTRR_PHYSMASK6_REG(sw_ctxt->mtrr_physmask6);
+	NATIVE_WRITE_MMU_MTRR_PHYSMASK7_REG(sw_ctxt->mtrr_physmask7);
+
+	sw_ctxt->mtrr_deftype = mtrr_deftype;
+	sw_ctxt->mtrr_fix_64k_00000 = mtrr_fix_64k_00000;
+	sw_ctxt->mtrr_fix_16k_80000 = mtrr_fix_16k_80000;
+	sw_ctxt->mtrr_fix_16k_a0000 = mtrr_fix_16k_a0000;
+	sw_ctxt->mtrr_fix_4k_c0000 = mtrr_fix_4k_c0000;
+	sw_ctxt->mtrr_fix_4k_c8000 = mtrr_fix_4k_c8000;
+	sw_ctxt->mtrr_fix_4k_d0000 = mtrr_fix_4k_d0000;
+	sw_ctxt->mtrr_fix_4k_d8000 = mtrr_fix_4k_d8000;
+	sw_ctxt->mtrr_fix_4k_e0000 = mtrr_fix_4k_e0000;
+	sw_ctxt->mtrr_fix_4k_e8000 = mtrr_fix_4k_e8000;
+	sw_ctxt->mtrr_fix_4k_f0000 = mtrr_fix_4k_f0000;
+	sw_ctxt->mtrr_fix_4k_f8000 = mtrr_fix_4k_f8000;
+	sw_ctxt->mtrr_physbase0 = mtrr_physbase0;
+	sw_ctxt->mtrr_physbase1 = mtrr_physbase1;
+	sw_ctxt->mtrr_physbase2 = mtrr_physbase2;
+	sw_ctxt->mtrr_physbase3 = mtrr_physbase3;
+	sw_ctxt->mtrr_physbase4 = mtrr_physbase4;
+	sw_ctxt->mtrr_physbase5 = mtrr_physbase5;
+	sw_ctxt->mtrr_physbase6 = mtrr_physbase6;
+	sw_ctxt->mtrr_physbase7 = mtrr_physbase7;
+	sw_ctxt->mtrr_physmask0 = mtrr_physmask0;
+	sw_ctxt->mtrr_physmask1 = mtrr_physmask1;
+	sw_ctxt->mtrr_physmask2 = mtrr_physmask2;
+	sw_ctxt->mtrr_physmask3 = mtrr_physmask3;
+	sw_ctxt->mtrr_physmask4 = mtrr_physmask4;
+	sw_ctxt->mtrr_physmask5 = mtrr_physmask5;
+	sw_ctxt->mtrr_physmask6 = mtrr_physmask6;
+	sw_ctxt->mtrr_physmask7 = mtrr_physmask7;
+}
+
 static inline unsigned long
 kvm_switch_to_guest_mmu_pid(struct kvm_vcpu *vcpu, thread_info_t *ti)
 {
@@ -386,6 +505,7 @@ static inline void kvm_switch_hv_mmu_regs(struct kvm_sw_cpu_context *sw_ctxt,
 	if (switch_tc) {
 		kvm_switch_mmu_tc_regs(sw_ctxt);
 	}
+	kvm_switch_hv_mmu_mtrr_regs(sw_ctxt);
 }
 
 static inline void

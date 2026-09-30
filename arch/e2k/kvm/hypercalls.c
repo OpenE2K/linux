@@ -254,6 +254,7 @@ kvm_switch_guest_thread_stacks(struct kvm_vcpu *vcpu, int gpid_nr, int gmmid_nr)
 		NATIVE_NV_WRITE_PSP_REG(next_gsw->psp_hi, next_gsw->psp_lo);
 		NATIVE_NV_WRITE_PCSP_REG(next_gsw->pcsp_hi, next_gsw->pcsp_lo);
 
+		alternative("", "wait ma_c=1", CPU_HWBUG_CR_BEFORE_WRITES, "memory");
 		NATIVE_NV_NOIRQ_WRITE_CR0_LO_REG(next_gsw->crs.cr0_lo);
 		NATIVE_NV_NOIRQ_WRITE_CR0_HI_REG(next_gsw->crs.cr0_hi);
 		NATIVE_NV_NOIRQ_WRITE_CR1_LO_REG(next_gsw->crs.cr1_lo);
@@ -394,6 +395,7 @@ static inline void update_wd_psise(unsigned long psize_value)
 {
 	e2k_cr1_lo_t cr1_lo = NATIVE_NV_READ_CR1_LO_REG();
 	cr1_lo.CR1_lo_wpsz = psize_value >> 4;
+	alternative("", "wait ma_c=1", CPU_HWBUG_CR_BEFORE_WRITES, "memory");
 	NATIVE_NV_NOIRQ_WRITE_CR1_LO_REG(cr1_lo);
 }
 
@@ -498,7 +500,7 @@ unsigned long kvm_light_hcalls(unsigned long hcall_num,
 		//native_set_sge();
 	}
 
-	if (!test_bit(hcall_num, unpriv_light_hcalls) &&
+	if ((hcall_num >= KVM_LIGHT_HCALLS_NUM || !test_bit(hcall_num, unpriv_light_hcalls)) &&
 			!capable(CAP_SYS_ADMIN)) {
 		ret = -EPERM;
 		goto skip_hcall;
@@ -630,6 +632,11 @@ unsigned long kvm_light_hcalls(unsigned long hcall_num,
 	case KVM_HCALL_TRACING_STOP:
 		tracing_off();
 		break;
+#ifdef CONFIG_TEST_HYPERCALLS_LOOP
+	case -1u:
+		ret = 0;
+		break;
+#endif
 	default:
 		ret = -ENOSYS;
 	}
@@ -741,6 +748,7 @@ switch_to_new_hv_vcpu_stacks(struct kvm_vcpu *vcpu,
 	psp_hi.PSP_hi_ind = 0;
 	pcsp_hi.PCSP_hi_ind = 0;
 
+	alternative("", "wait ma_c=1", CPU_HWBUG_CR_BEFORE_WRITES, "memory");
 	NATIVE_NV_NOIRQ_WRITE_CR0_LO_REG(cr0_lo);
 	NATIVE_NV_NOIRQ_WRITE_CR0_HI_REG(cr0_hi);
 	NATIVE_NV_NOIRQ_WRITE_CR1_LO_REG(cr1_lo);
@@ -957,9 +965,9 @@ unsigned long kvm_generic_hcalls(unsigned long hcall_num, unsigned long arg1,
 	g_usd_size = cr1_hi.CR1_hi_ussz << 4;
 
 	k_usd_lo = NATIVE_NV_READ_USD_LO_REG();
-	raw_local_irq_enable();
+	local_irq_enable();
 
-	if (!test_bit(hcall_num, unpriv_generic_hcalls) &&
+	if ((hcall_num >= KVM_GENERIC_HCALLS_NUM || !test_bit(hcall_num, unpriv_generic_hcalls)) &&
 			!capable(CAP_SYS_ADMIN)) {
 		pr_info_once("hcall #%lu is for root mode only\n", hcall_num);
 		ret = -EPERM;
@@ -1279,6 +1287,11 @@ unsigned long kvm_generic_hcalls(unsigned long hcall_num, unsigned long arg1,
 	case KVM_HCALL_REMOVE_CTX_SIGNAL_STACK:
 		kvm_remove_ctx_signal_stack(vcpu, (u64) arg1);
 		break;
+#ifdef CONFIG_TEST_HYPERCALLS_LOOP
+	case -1u:
+		ret = 0;
+		break;
+#endif
 	default:
 		pr_err_ratelimited("Bad hypercall #%li\n", hcall_num);
 		ret = -ENOSYS;
@@ -1290,11 +1303,11 @@ skip_hcall:
 		ret = 0;
 	}
 
-	raw_all_irq_disable();
+	all_irq_disable();
 	while (need_resched()) {
-		raw_all_irq_enable();
+		all_irq_enable();
 		schedule();
-		raw_all_irq_disable();
+		all_irq_disable();
 	}
 
 	/* It can be trap on hypercall handler (due to guest user address */
@@ -1433,3 +1446,20 @@ skip_hcall:
 
 	return ret;
 }
+
+#ifdef CONFIG_TEST_HYPERCALLS_LOOP
+static int test_hypercalls(void)
+{
+	int i;
+
+	if (!IS_HV_GM())
+		return 0;
+
+	for (i = 0; i < 10000; i++)
+		generic_hypercall0(-1u);
+	for (i = 0; i < 10000; i++)
+		light_hypercall0(-1u);
+	return 0;
+}
+arch_initcall(test_hypercalls);
+#endif

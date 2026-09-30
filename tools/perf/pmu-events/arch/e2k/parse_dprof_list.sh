@@ -1,6 +1,6 @@
- # SPDX-License-Identifier: GPL-2.0
- # Copyright (c) 2023 MCST
- 
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2023 MCST
+
 #!/bin/bash
 echo "["
 tr '\t' ' ' | tr -s ' ' ' ' | sed -e 's:":\\\\":g' -e '/^\s*$/d' | while read LINE; do

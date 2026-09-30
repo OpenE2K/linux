@@ -75,15 +75,142 @@ static void copy_jmp_regs(pt_regs_t *to, const pt_regs_t *from)
 	to->flags = from->flags;
 }
 
+
+
+static int setup_extra(struct extra_ucontext __user *extra, const pt_regs_t *user_regs)
+{
+	struct trap_pt_regs *trap = user_regs->trap;
+	struct k_sigaction *ka = &current_thread_info()->ksig.ka;
+	int rval, sc_need_rstrt = 0;
+	struct e2k_global_regs gregs;
+	unsigned long long g[32];
+	unsigned char gtag[32];
+	int i;
+
+	/* Fill unused fields with 0 */
+	if (__clear_user(extra, sizeof(*extra)))
+		return -EFAULT;
+
+	if (from_syscall(user_regs) &&
+			((user_regs->sys_rval == -ERESTARTNOINTR) ||
+			(user_regs->sys_rval == -ERESTARTSYS) &&
+			(ka->sa.sa_flags & SA_RESTART)))
+		sc_need_rstrt = 1;
+	rval = (rval) ?: __put_priv_user(sc_need_rstrt, &extra->sc_need_rstrt);
+
+	rval = (rval) ?: __put_priv_user(user_regs->stacks.pcsp_lo.base + SZ_OF_CR +
+				user_regs->stacks.pcsp_hi.ind - (u64) CURRENT_PCS_BASE(),
+				&extra->chain_stack_offset);
+	rval = (rval) ?: __put_priv_user(user_regs->stacks.psp_lo.base +
+				user_regs->stacks.psp_hi.ind - (u64) CURRENT_PS_BASE(),
+				&extra->proc_stack_offset);
+
+	if (trap) {
+		const e2k_aau_t *aau_regs = user_regs->aau_context;
+
+		rval = (rval) ?: __put_priv_user(trap->tc_count / 3, &extra->tc_count);
+		rval = (rval) ?: __put_priv_user(trap->curr_cnt, &extra->curr_cnt);
+
+		/* CTPR */
+		rval = (rval) ?: __put_priv_user(AW(user_regs->ctpr1), &extra->ctpr1);
+		rval = (rval) ?: __put_priv_user(AW(user_regs->ctpr2), &extra->ctpr2);
+		rval = (rval) ?: __put_priv_user(AW(user_regs->ctpr3), &extra->ctpr3);
+		if (cpu_has(CPU_FEAT_ISET_V6)) {
+			rval = (rval) ?: __put_priv_user(AW(user_regs->ctpr1_hi), &extra->ctpr1_hi);
+			rval = (rval) ?: __put_priv_user(AW(user_regs->ctpr2_hi), &extra->ctpr2_hi);
+			rval = (rval) ?: __put_priv_user(AW(user_regs->ctpr3_hi), &extra->ctpr3_hi);
+		}
+
+		rval = (rval) ?: __put_user(user_regs->lsr, &extra->lsr);
+		rval = (rval) ?: __put_user(user_regs->ilcr, &extra->ilcr);
+		if (cpu_has(CPU_FEAT_ISET_V5)) {
+			rval = (rval) ?: __put_user(user_regs->lsr1, &extra->lsr1);
+			rval = (rval) ?: __put_user(user_regs->ilcr1, &extra->ilcr1);
+		}
+
+		SAVE_AAU_REGS_FOR_PTRACE(user_regs, current_thread_info());
+		rval = (rval) ?: __put_user(AW(user_regs->aasr), &extra->aasr);
+		if (aau_regs && !rval) {
+			BUILD_BUG_ON(AADS_REGS_NUM != 32 || AAINDS_REGS_NUM != 16 ||
+				     AAINCRS_REGS_NUM != 8 || AALDIS_REGS_NUM != 64 ||
+				     AALDAS_REGS_NUM != 64 || AASTIS_REGS_NUM != 16);
+
+			if (__copy_to_user(extra->aad, aau_regs->aads,
+					   sizeof(aau_regs->aads)) ||
+			    __copy_to_user(extra->aaind, aau_regs->aainds,
+					   sizeof(aau_regs->aainds)) ||
+			    __copy_to_user(extra->aaldi, aau_regs->aaldi,
+					   sizeof(aau_regs->aaldi)) ||
+			    __copy_to_user(extra->aasti, aau_regs->aastis,
+					   sizeof(aau_regs->aastis))) {
+				return -EFAULT;
+			}
+
+			if (machine.native_iset_ver < E2K_ISET_V5) {
+				for (i = 0; i < AAINCRS_REGS_NUM; i++) {
+					rval = (rval) ?: __put_user((u32) aau_regs->aaincrs[i],
+								    &extra->aaincr[i]);
+				}
+			} else if (!rval) {
+				if (__copy_to_user(extra->aaincr, aau_regs->aaincrs,
+						    sizeof(aau_regs->aaincrs))) {
+					return -EFAULT;
+				}
+			}
+
+			rval = (rval) ?: __put_user(AW(aau_regs->aaldv), &extra->aaldv);
+			rval = (rval) ?: __put_user(AW(aau_regs->aaldm), &extra->aaldm);
+			rval = (rval) ?: __put_user(aau_regs->aafstr, &extra->aafstr);
+
+			for (i = 0; i < AALDAS_REGS_NUM; i++) {
+				rval = (rval) ?: __put_user(AW(current_thread_info()->aalda[i]),
+							    &extra->aalda[i]);
+			}
+		}
+	} else {
+		rval = (rval) ?: __put_priv_user(-1, &extra->curr_cnt);
+	}
+
+#ifdef CONFIG_GREGS_CONTEXT
+	if (rval)
+		return rval;
+	get_all_user_glob_regs(&gregs);
+	GET_GREGS_FROM_THREAD(g, gtag, gregs.g);
+	for (i = 16; i < 32; i++) {
+		rval = (rval) ?: __put_priv_user((u16) gregs.g[i].ext, &extra->gext[i - 16]);
+	}
+	if (__copy_to_user(&extra->g[0], &g[16], 16 * sizeof(g[0])) ||
+	    __copy_to_user(&extra->gtag[0], &gtag[16], 16 * sizeof(gtag[0]))) {
+		return -EFAULT;
+	}
+	if (machine.native_iset_ver >= E2K_ISET_V5) {
+		GET_GREGS_FROM_THREAD(g, gtag, &gregs.g[0].ext);
+		if (__copy_to_user(&extra->gext[0], &g[16], 16 * sizeof(g[0])) ||
+		    __copy_to_user(&extra->gext_tag[0], &gtag[16], 16 * sizeof(gtag[0]))) {
+			return -EFAULT;
+		}
+	}
+	rval = (rval) ?: __put_priv_user(AW(gregs.bgr), &extra->bgr);
+#endif /* CONFIG_GREGS_CONTEXT */
+
+	/* size of saved extra elements */
+	rval = (rval) ?: __put_priv_user(sizeof(struct extra_ucontext) - sizeof(int),
+					 &extra->sizeof_extra_uc);
+
+	return rval;
+}
+
 static int setup_frame(struct sigcontext __user *sigc,
 		struct extra_ucontext __user *extra, const pt_regs_t *user_regs)
 {
 	struct trap_pt_regs *trap = user_regs->trap;
-	register struct k_sigaction *ka = &current_thread_info()->ksig.ka;
 	int	rval;
 	int	i;
 	char	tag;
-	int	sc_need_rstrt = 0;
+
+	rval = setup_extra(extra, user_regs);
+	if (rval)
+		return rval;
 
 	rval = __put_priv_user(AS_WORD(user_regs->crs.cr0_lo), &sigc->cr0_lo);
 	rval = (rval) ?: __put_priv_user(AS_WORD(user_regs->crs.cr0_hi),
@@ -107,7 +234,7 @@ static int setup_frame(struct sigcontext __user *sigc,
 	rval = (rval) ?: __put_priv_user(AS_WORD(user_regs->stacks.pcsp_hi),
 					 &sigc->pcsp_hi);
 
-        /* for binary compiler */
+	/* for binary compiler */
 	if (unlikely(TASK_IS_BINCO(current))) {
 #ifdef CONFIG_SECONDARY_SPACE_SUPPORT
 		int mlt_num = trap ? trap->mlt_state.num : 0;
@@ -164,53 +291,14 @@ static int setup_frame(struct sigcontext __user *sigc,
 						&sigc->tir_lo[i]);
 		}
 
-		rval = (rval) ?: __put_priv_user(trap->tc_count / 3, &extra->tc_count);
-		rval = (rval) ?: __put_priv_user(trap->curr_cnt, &extra->curr_cnt);
-
-		/* CTPR */
-		rval = (rval) ?: __put_priv_user(AW(user_regs->ctpr1), &extra->ctpr1);
-		rval = (rval) ?: __put_priv_user(AW(user_regs->ctpr2), &extra->ctpr2);
-		rval = (rval) ?: __put_priv_user(AW(user_regs->ctpr3), &extra->ctpr3);
-		if (cpu_has(CPU_FEAT_ISET_V6)) {
-			rval = (rval) ?: __put_priv_user(AW(user_regs->ctpr1_hi), &extra->ctpr1_hi);
-			rval = (rval) ?: __put_priv_user(AW(user_regs->ctpr2_hi), &extra->ctpr2_hi);
-			rval = (rval) ?: __put_priv_user(AW(user_regs->ctpr3_hi), &extra->ctpr3_hi);
-		} else {
-			rval = (rval) ?: __put_priv_user(0, &extra->ctpr1_hi);
-			rval = (rval) ?: __put_priv_user(0, &extra->ctpr2_hi);
-			rval = (rval) ?: __put_priv_user(0, &extra->ctpr3_hi);
-		}
+		/* SBBP */
+		rval = (rval) ?: copy_to_user(sigc->sbbp, &trap->sbbp, sizeof(trap->sbbp));
 	} else {
 		rval = (rval) ?: __put_priv_user(0, &sigc->nr_TIRs);
 		rval = (rval) ?: __put_priv_user(0ULL, &sigc->tir_hi[0]);
 		rval = (rval) ?: __put_priv_user(0ULL, &sigc->tir_lo[0]);
-		rval = (rval) ?: __put_priv_user(0, &extra->tc_count);
-		rval = (rval) ?: __put_priv_user(-1, &extra->curr_cnt);
-		rval = (rval) ?: __put_priv_user(0, &extra->ctpr1);
-		rval = (rval) ?: __put_priv_user(0, &extra->ctpr2);
-		rval = (rval) ?: __put_priv_user(0, &extra->ctpr3);
-		rval = (rval) ?: __put_priv_user(0, &extra->ctpr1_hi);
-		rval = (rval) ?: __put_priv_user(0, &extra->ctpr2_hi);
-		rval = (rval) ?: __put_priv_user(0, &extra->ctpr3_hi);
+		rval = (rval) ?: clear_user(sigc->sbbp, sizeof(sigc->sbbp));
 	}
-
-	if (from_syscall(user_regs) &&
-			((user_regs->sys_rval == -ERESTARTNOINTR) ||
-			 (user_regs->sys_rval == -ERESTARTSYS) &&
-			 (ka->sa.sa_flags & SA_RESTART)))
-		sc_need_rstrt = 1;
-	rval = (rval) ?: __put_priv_user(sc_need_rstrt, &extra->sc_need_rstrt);
-
-	rval = (rval) ?: __put_priv_user(user_regs->stacks.pcsp_lo.base + SZ_OF_CR +
-				user_regs->stacks.pcsp_hi.ind - (u64) CURRENT_PCS_BASE(),
-				&extra->chain_stack_offset);
-	rval = (rval) ?: __put_priv_user(user_regs->stacks.psp_lo.base +
-				user_regs->stacks.psp_hi.ind - (u64) CURRENT_PS_BASE(),
-				&extra->proc_stack_offset);
-
-	/* size of saved extra elements */
-	rval = (rval) ?: __put_priv_user(sizeof(struct extra_ucontext) - sizeof(int),
-					 &extra->sizeof_extra_uc);
 
 	/* DAM */
 	BUILD_BUG_ON(sizeof(sigc->dam) != sizeof(current->thread.dam));
@@ -224,9 +312,13 @@ static int setup_frame(struct sigcontext __user *sigc,
 
 #ifdef CONFIG_PROTECTED_MODE
 static int setup_prot_frame(struct sigcontext_prot *sigc,
-				   const pt_regs_t *user_regs)
+		struct extra_ucontext __user *extra, const pt_regs_t *user_regs)
 {
 	int rval;
+
+	rval = setup_extra(extra, user_regs);
+	if (rval)
+		return rval;
 
 	rval = __put_priv_user(AS_WORD(user_regs->crs.cr0_lo), &sigc->cr0_lo);
 	rval = (rval) ?: __put_priv_user(AS_WORD(user_regs->crs.cr0_hi),
@@ -281,7 +373,8 @@ static int setup_rt_frame(rt_sigframe_t __user *frame,
 	if (TASK_IS_PROTECTED(current)) {
 		e2k_ptr_t ss_sp;
 
-		ret = setup_prot_frame(&frame->uc_prot.uc_mcontext, regs);
+		ret = setup_prot_frame(&frame->uc_prot.uc_mcontext,
+				       &frame->uc.uc_extra, regs);
 		ret = (ret) ?: __copy_to_priv_user(&frame->uc_prot.uc_sigmask,
 						   set, sizeof(*set));
 
@@ -1189,8 +1282,10 @@ int native_signal_setup(struct pt_regs *regs)
 	/*
 	 * For e2k applications g16-g31 registers are local, initialize them
 	 */
-	if (!TASK_IS_BINCO(current))
-		memset(&ti->k_gregs, 0, sizeof(ti->k_gregs));
+	if (!TASK_IS_BINCO(current)) {
+		clear_memory_8(&ti->k_gregs.g, sizeof(ti->k_gregs.g), ETAGEWD);
+		SET_GREGS_EMPTY(false, true);
+	}
 
 	DebugHS("signal handler: sig=%d siginfo=0x%px\n"
 		"\tIS_PROTECTED = 0x%lx\tsa_flags = 0x%lx\t->thread.flags=0x%lx\n",

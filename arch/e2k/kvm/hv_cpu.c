@@ -140,12 +140,10 @@ void init_hv_vcpu_intc_ctxt(struct kvm_vcpu *vcpu)
 	kvm_clear_vcpu_intc_TIRs_num(vcpu);
 	kvm_update_vcpu_intc_TIR(vcpu, 1, TIR_hi, TIR_lo);
 
+	/* Clean INTC_INFO_CU/MU before first GLAUNCH */
 	intc_ctxt->cu_num = -1;
 	intc_ctxt->mu_num = -1;
-
-	/* Clean INTC_INFO_CU/MU before first GLAUNCH */
 	kvm_set_intc_info_mu_is_updated(vcpu);
-	kvm_set_intc_info_cu_is_updated(vcpu);
 }
 
 void kvm_reset_mmu_intc_mode(struct kvm_vcpu *vcpu)
@@ -679,9 +677,11 @@ static int kvm_e2k_check_request(struct kvm_vcpu *vcpu, struct kvm_intc_cpu_cont
 		kvm_mmu_unload(vcpu, GP_ROOT_PT_FLAG);
 
 	/* Allocate a new GP_PPTB root (it may have been invalidated on memslot deletion) */
-	r = kvm_mmu_reload(vcpu, NULL, GP_ROOT_PT_FLAG);
-	if (unlikely(r))
-		return r;
+	if (kvm_check_request(KVM_REQ_MMU_RELOAD, vcpu)) {
+		r = kvm_mmu_reload(vcpu, NULL, GP_ROOT_PT_FLAG);
+		if (unlikely(r))
+			return r;
+	}
 
 	if (kvm_check_request(KVM_REQ_TLB_FLUSH, vcpu) || cpu_has(CPU_HWBUG_VIRT_TLU_IB)) {
 		trace_host_flush_tlb(vcpu);
@@ -701,12 +701,12 @@ static int kvm_e2k_check_request(struct kvm_vcpu *vcpu, struct kvm_intc_cpu_cont
 static void kvm_set_g_tmr(void)
 {
 	if (kvm_g_tmr) {
-		g_preempt_tmr_t tmr;
+		e2k_g_preempt_tmr_t tmr;
 
 		AW(tmr) = 0;
 		tmr.tmr = kvm_g_tmr;
 		tmr.v = 1;
-		WRITE_G_PREEMPT_TMR_REG(tmr);
+		write_G_PREEMPT_TMR_reg(tmr);
 	}
 
 }
@@ -731,7 +731,20 @@ int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 	if (unlikely(r))
 		return r;
 
-	raw_all_irq_disable();
+	/* Do not allow values forbidden by hardware. */
+	if (READ_SH_PCSHTP_REG_SVALUE() < -32) {
+		pr_emerg("kvm: SH_PCSHTP value 0x%llx is too small, halting guest\n",
+			READ_SH_PSHTP_REG_VALUE());
+		vcpu->arch.exit_reason = EXIT_REASON_VM_PANIC;
+		return -EINVAL;
+	}
+
+	all_irq_disable();
+	if (unlikely(kvm_rebooting)) {
+		all_irq_enable();
+		vcpu->arch.exit_shutdown_terminate = KVM_EXIT_E2K_SHUTDOWN;
+		return 0;
+	}
 
 	/*
 	 * Ensure we set mode to IN_GUEST_MODE after we disable
@@ -746,10 +759,15 @@ int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 
 	if (kvm_vcpu_exit_request(vcpu)) {
 		smp_store_mb(vcpu->mode, OUTSIDE_GUEST_MODE);
-		raw_all_irq_enable();
+		all_irq_enable();
 		vcpu->srcu_idx = srcu_read_lock(&vcpu->kvm->srcu);
 		return 0;
 	}
+
+	kvm_do_update_guest_vcpu_current_runstate(vcpu, RUNSTATE_running);
+
+	/* Return to user will enable interrupts */
+	trace_hardirqs_on();
 
 	/* Check if guest should enter trap handler after glaunch. */
 	g_th = calculate_g_th(&cu->header, intc_ctxt);
@@ -765,8 +783,7 @@ int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 		modify_intc_info_mu_data(intc_ctxt->mu, intc_ctxt->mu_num);
 		restore_intc_info_mu(intc_ctxt->mu, intc_ctxt->mu_num);
 	}
-	if (kvm_get_intc_info_cu_is_updated(vcpu))
-		restore_intc_info_cu(&intc_ctxt->cu, intc_ctxt->cu_num);
+	restore_intc_info_cu(&intc_ctxt->cu, intc_ctxt->cu_num);
 
 	/* MMU intercepts were handled, clear state for new intercepts */
 	kvm_clear_intc_mu_state(vcpu);
@@ -776,9 +793,6 @@ int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 	intc_ctxt->mu_num = -1;
 	intc_ctxt->cur_mu = -1;
 	kvm_reset_intc_info_mu_is_updated(vcpu);
-	kvm_reset_intc_info_cu_is_updated(vcpu);
-
-	kvm_do_update_guest_vcpu_current_runstate(vcpu, RUNSTATE_running);
 
 	/* Switch IRQ control to PSR and disable MI/NMIs */
 	NATIVE_WRITE_PSR_IRQ_BARRIER(AW(E2K_KERNEL_PSR_DISABLED_ALL));
@@ -798,8 +812,6 @@ int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 
 	/* See the comment in kvm_vcpu_exiting_guest_mode() */
 	smp_store_mb(vcpu->mode, OUTSIDE_GUEST_MODE);
-
-	kvm_do_update_guest_vcpu_current_runstate(vcpu, RUNSTATE_in_intercept);
 
 	/*
 	 * %sbbp LIFO stack is unfreezed by writing %TIR register,
@@ -824,6 +836,9 @@ int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 		NATIVE_DO_SAVE_UPSR_REG(guest_upsr);
 		DO_SAVE_GUEST_KERNEL_UPSR(gti, guest_upsr);
 	}
+
+	trace_hardirqs_off();
+	kvm_do_update_guest_vcpu_current_runstate(vcpu, RUNSTATE_in_intercept);
 
 	vcpu->srcu_idx = srcu_read_lock(&vcpu->kvm->srcu);
 

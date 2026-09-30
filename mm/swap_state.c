@@ -24,10 +24,6 @@
 #include <linux/shmem_fs.h>
 #include "internal.h"
 
-#ifdef CONFIG_E2K
-#include <asm/page_io.h>
-#endif
-
 /*
  * swapper_space is a fiction, retained to simplify the path through
  * vmscan's shrink_page_list.
@@ -271,27 +267,15 @@ fail:
 struct page *swap_sanit_page = NULL;
 EXPORT_SYMBOL(swap_sanit_page);
 
-u64 test_sntz_sect = 0;
-EXPORT_SYMBOL(test_sntz_sect);
-
-#ifdef CONFIG_E2K
-static void end_bio_tags_sntz(struct bio *bio)
-{
-	unlock_page(swap_sanit_page);
-	bio_put(bio);
-}
-#endif
-
 static void end_bio_sntz(struct bio *bio)
 {
 	unlock_page(swap_sanit_page);
-#ifndef CONFIG_E2K
 	bio_put(bio);
-#endif
 }
 
 static void sanitize_swap_page(struct page *page)
 {
+	struct swap_info_struct *sis = page_swap_info(page);
 	struct bio *bio;
 	struct block_device *bdev;
 
@@ -319,17 +303,11 @@ static void sanitize_swap_page(struct page *page)
 	count_vm_event(PSWPOUT);
 	bio_set_op_attrs(bio, REQ_OP_WRITE, 0);
 	bio_get(bio);
-	test_sntz_sect = bio->bi_iter.bi_sector;
 	submit_bio(bio);
 	wait_on_page_locked(swap_sanit_page);
 
 #ifdef CONFIG_E2K
-	lock_page(swap_sanit_page);
-	e2k_map_swap_page(swap_sanit_page, bio, &bdev);
-	bio_add_page(bio, swap_sanit_page, PAGE_SIZE / 8, 0);
-	bio->bi_end_io = end_bio_tags_sntz;
-	submit_bio(bio);
-	wait_on_page_locked(swap_sanit_page);
+	arch_swap_invalidate_page(sis->type, __page_file_index(page));
 #endif
 }
 #endif
@@ -422,15 +400,22 @@ void free_pages_and_swap_cache(struct page **pages, int nr)
 
 	lru_add_drain();
 #ifdef CONFIG_MCST_MEMORY_SANITIZE
-	for (i = 0; i < nr; i++) {
-		if (mem_san && PageSwapCache(pagep[i]))
-			sanitize_swap_page(pagep[i]);
-		free_swap_cache(pagep[i]);
+	if (mem_san) {
+		if (swap_sanit_page == NULL) {
+			swap_sanit_page = alloc_page(GFP_KERNEL);
+			memset(page_address(swap_sanit_page), SANITIZE_VALUE,
+					PAGE_SIZE);
+			pr_info("MCST_MEMORY_SANITIZE by SANITIZE_VALUE=0x%x\n",
+				SANITIZE_VALUE);
+		}
+		for (i = 0; i < nr; i++) {
+			if (PageSwapCache(pagep[i]))
+				sanitize_swap_page(pagep[i]);
+		}
 	}
-#else
+#endif
 	for (i = 0; i < nr; i++)
 		free_swap_cache(pagep[i]);
-#endif
 	release_pages(pagep, nr);
 }
 
@@ -641,11 +626,7 @@ struct page *read_swap_cache_async(swp_entry_t entry, gfp_t gfp_mask,
 			vma, addr, &page_was_allocated);
 
 	if (page_was_allocated)
-#ifdef CONFIG_E2K
-		e2k_swap_readpage(retpage);
-#else
 		swap_readpage(retpage, do_poll);
-#endif  /* CONFIG_E2K */
 
 	return retpage;
 }
@@ -763,16 +744,6 @@ struct page *swap_cluster_readahead(swp_entry_t entry, gfp_t gfp_mask,
 	if (end_offset >= si->max)
 		end_offset = si->max - 1;
  
-#ifdef CONFIG_E2K
-	/* If some pages has tags_page
-	 * DON'T read prefetch swap pages
-	 * (swap page may be readed but the tags not restored)
-	 */
-	if (check_tags(swp_type(entry), start_offset, end_offset)) {
-		goto skip;
-	}
-#endif
-
 	blk_start_plug(&plug);
 	for (offset = start_offset; offset <= end_offset ; offset++) {
 		/* Ok, do the async read-ahead now */

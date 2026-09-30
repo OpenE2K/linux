@@ -257,291 +257,22 @@ static void unlock_companion(int id)
 	spi_master_put(master);
 }
 
-static s32 __l_smbus_xfer(struct i2c_adapter *adap, u16 addr,
-		 unsigned short i2c_flags, char read_write,
-		 u8 command, int size, union i2c_smbus_data *data)
-{
-
-	struct l_i2c *l_i2c = i2c_get_adapdata(adap);
-	int ret = 0;
-	int i, len = 0;
-	int bus_id = adap->nr % l_i2c->adapters_nr;
-	unsigned int value;
-	unsigned char quick = 0;
-	void __iomem *daddr;
-
-	value = (unsigned int) addr;
-
-	if (i2c_flags & I2C_CLIENT_TEN) {
-		value <<= I2C_10BIT_ADDR_SHIFT;
-		value &= I2C_10BIT_ADDR_MASK;
-		value |= I2C_10BIT_ADDR_MODE;
-	} else {
-		value <<= I2C_7BIT_ADDR_SHIFT;
-		value &= I2C_7BIT_ADDR_MASK;
-	}
-
-	if ((read_write == I2C_SMBUS_WRITE) && (size != I2C_SMBUS_QUICK))
-		value |= I2C_TRANSACTION_TYPE_WRITE;
-
-	value |= I2C_DST_BUS(bus_id);
-	value &= ~I2C_START_BYTE_ON;
-
-	daddr = SMBDATA;
-
-	switch (size) {
-	case I2C_SMBUS_QUICK:
-		/* iohub i2c-spi controller does not support QUICK.
-		 * We emulate QUICK by BYTE_DATA, assuming QUICK
-		 * will be used ONLY for detecting hwmon sensors
-		 * on motherboard. Hwmon sensors (lm95231 etc.)
-		 * fortunaly have MANUFACTURER_ID and REVISION_ID
-		 * registers. Other possible chips (isl22317, pca953x etc.)
-		 * are to be instantiated explicitly in
-		 * instantiate_i2c_bus(busid). */
-		value |= I2C_TRANS_SIZE(1);
-		value |= I2C_TRANSACTION_TYPE_WRITE;
-		value |= I2C_DATA_PHASE_PRESENT;
-		w_i2c(value, SMBCONTROL);
-		writeb(HWMON_MAN_ID, daddr);
-		ret = l_i2c_transaction(adap);
-		if (ret)
-			goto out;
-
-		value &= ~(I2C_TRANSACTION_TYPE_WRITE);
-		w_i2c(value, SMBCONTROL);
-		size = IOHUB_QUICK;
-		break;
-	case I2C_SMBUS_BYTE:
-		if (read_write == I2C_SMBUS_WRITE) {
-			/* Write */
-			value |= I2C_TRANS_SIZE(1);
-			value |= I2C_DATA_PHASE_PRESENT;
-			w_i2c(value, SMBCONTROL);
-			writeb(command, daddr);
-		} else {
-			/* Read */
-			value |= I2C_TRANSACTION_TYPE_WRITE;
-			value &= ~(I2C_DATA_PHASE_PRESENT);
-			ret = l_i2c_transaction(adap);
-			if (ret)
-				goto out;
-
-			value &= ~(I2C_TRANSACTION_TYPE_WRITE);
-			w_i2c(value, SMBCONTROL);
-		}
-		size = IOHUB_BYTE;
-		break;
-	case I2C_SMBUS_BYTE_DATA:
-		if (read_write == I2C_SMBUS_WRITE) {
-			/* Write */
-			value |= I2C_TRANS_SIZE(2);
-			value |= I2C_DATA_PHASE_PRESENT;
-			w_i2c(value, SMBCONTROL);
-			writeb(command, daddr);
-			writeb(data->byte, (daddr + 1));
-		} else {
-			/* Read */
-			/* Use 10bit address mode to send command
-				in the low byte of address */
-			value |= ((unsigned int)command)
-					<< I2C_10BIT_ADDR_SHIFT;
-			value |= I2C_10BIT_ADDR_MODE;
-			value |= I2C_TRANS_SIZE(1);
-			value |= I2C_DATA_PHASE_PRESENT;
-			w_i2c(value, SMBCONTROL);
-		}
-		size = IOHUB_BYTE_DATA;
-		break;
-	case I2C_SMBUS_WORD_DATA:
-		if (read_write == I2C_SMBUS_WRITE) {
-			/* Write */
-			value |= I2C_TRANS_SIZE(3);
-			value |= I2C_DATA_PHASE_PRESENT;
-			w_i2c(value, SMBCONTROL);
-			writeb(command, daddr);
-			/* save endiannes */
-			memcpy_toio((daddr + 1), data, 2);
-
-		} else {
-			/* Read */
-			/* Use 10bit address mode to send command
-				in the low byte of address */
-			value |= ((unsigned int)command)
-					<< I2C_10BIT_ADDR_SHIFT;
-			value |= I2C_10BIT_ADDR_MODE;
-			value |= I2C_TRANS_SIZE(2);
-			value |= I2C_DATA_PHASE_PRESENT;
-			w_i2c(value, SMBCONTROL);
-		}
-		size = IOHUB_WORD_DATA;
-		break;
-	case I2C_SMBUS_BLOCK_DATA:
-		if (read_write == I2C_SMBUS_WRITE) { /* Write */
-			len = data->block[0];
-			if (len == 0 || len > (I2C_SMBUS_BLOCK_MAX - 1)) {
-				ret = -EINVAL;
-				goto out;
-			}
-			value |= I2C_TRANS_SIZE(len+1);
-			value |= I2C_DATA_PHASE_PRESENT;
-			w_i2c(value, SMBCONTROL);
-			writeb(command, daddr);
-			for (i = 1; i <= len; i++) {
-				writeb(data->block[i], (daddr + i));
-			}
-		} else { /* Read */
-			/* iohub controller does not support SMBUS_BLOCK.
-			 * Length comes in first byte so try to read max block
-			 */
-			len = I2C_SMBUS_BLOCK_MAX;
-			/* Use 10bit address mode to send command
-				in the low byte of address */
-			if (i2c_flags & I2C_CLIENT_TEN) {
-				ret = -EADDRNOTAVAIL;
-				goto out;
-			}
-			value |= ((unsigned int)command)
-					<< I2C_10BIT_ADDR_SHIFT;
-			value |= I2C_10BIT_ADDR_MODE;
-			value |= I2C_TRANS_SIZE(len);
-			value |= I2C_DATA_PHASE_PRESENT;
-			w_i2c(value, SMBCONTROL);
-		}
-		size = IOHUB_BLOCK_DATA;
-		break;
-	case I2C_SMBUS_I2C_BLOCK_DATA:
-		if (read_write == I2C_SMBUS_WRITE) {
-			/* Write */
-			len = data->block[0];
-			if (len == 0 || len > (I2C_SMBUS_BLOCK_MAX - 1)) {
-				ret = -EINVAL;
-				goto out;
-			}
-			value |= I2C_TRANS_SIZE(len+1);
-			value |= I2C_DATA_PHASE_PRESENT;
-			w_i2c(value, SMBCONTROL);
-			writeb(command, daddr);
-			for (i = 1; i <= len; i++) {
-				writeb(data->block[i], (daddr + 1 + i));
-			}
-		} else {
-			/* Read */
-			len = data->block[0];
-			if (len == 0 || len > I2C_SMBUS_BLOCK_MAX) {
-				ret = -EINVAL;
-				goto out;
-			}
-			/* Use 10bit address mode to send command
-				in the low byte of address */
-			if (i2c_flags & I2C_CLIENT_TEN) {
-				ret = -EADDRNOTAVAIL;
-				goto out;
-			}
-			value |= ((unsigned int)command)
-					<< I2C_10BIT_ADDR_SHIFT;
-			value |= I2C_10BIT_ADDR_MODE;
-
-			value |= I2C_TRANS_SIZE(len);
-			value &= ~(I2C_TRANSACTION_TYPE_WRITE);
-			value |= I2C_DATA_PHASE_PRESENT;
-
-			w_i2c(value, SMBCONTROL);
-		}
-		size = IOHUB_I2C_BLOCK_DATA;
-		break;
-
-	default:
-		dev_warn(&adap->dev, "Unsupported transaction %d\n", size);
-		ret = -EOPNOTSUPP;
-		goto out;
-	}
-
-	ret = l_i2c_transaction(adap);
-	if (ret)
-		goto out;
-
-	if ((read_write == I2C_SMBUS_WRITE) && (size != IOHUB_QUICK)) {
-		ret = 0;
-		goto out;
-	}
-
-	switch (size) {
-	case IOHUB_QUICK:
-		quick = readb(daddr);
-		break;
-	case IOHUB_BYTE:
-	case IOHUB_BYTE_DATA:
-		data->byte = readb(daddr);
-		break;
-	case IOHUB_WORD_DATA:
-		/* save endianess, do not use readw() */
-		memcpy_fromio(data, daddr, 2);
-		break;
-	case IOHUB_BLOCK_DATA:
-		len = readb(daddr);
-		data->block[0] = (unsigned char) len;
-		if (len == 0 || len > I2C_SMBUS_BLOCK_MAX) {
-			ret = -EPROTO;
-			goto out;
-		}
-
-		for (i = 1; i <= len; i++) {
-			data->block[i] = readb(daddr + i);
-		}
-		break;
-	case IOHUB_I2C_BLOCK_DATA:
-		data->block[0] = (unsigned char) len;
-		for (i = 0; i < len; i++) {
-			data->block[i + 1] = readb(daddr + i);
-		}
-		break;
-	}
-out:
-	return ret;
-}
-
-static s32 l_smbus_xfer(struct i2c_adapter *adap, u16 addr,
-		 unsigned short i2c_flags, char read_write,
-		 u8 command, int size, union i2c_smbus_data *data)
-{
-	struct l_i2c *l_i2c = i2c_get_adapdata(adap);
-	int retries = 0, ret = 0;
-	do {
-		/* Lock spi if we are going to use the common buffer
-		 * which may be in use by other I2C adapters or
-		 * by SPI controller. */
-		lock_companion(l_i2c->pdev->id);
-		ret = __l_smbus_xfer(adap, addr, i2c_flags,
-				read_write, command, size, data);
-		unlock_companion(l_i2c->pdev->id);
-		retries++;
-	} while (ret == -EAGAIN && retries < MAX_RETRIES);
-
-	if (ret == -EAGAIN)
-		dev_err(&adap->dev, "l_i2c_xfer: Failed to fix i2c bus "
-					"collisions. Retries %d\n", retries);
-	return ret;
-}
-
 static s32 l_i2c_xfer_one_msg(struct i2c_adapter *adap, struct i2c_msg *m)
 {
 	struct l_i2c *l_i2c = i2c_get_adapdata(adap);
 	int bus_id = adap->nr % l_i2c->adapters_nr;
-	int ret = 0, i;
+	int ret = 0;
 	int f = m->flags, len = m->len;
 	u32 v = m->addr;
 	u8 *buf = m->buf;
 	if (WARN_ON_ONCE(f & I2C_M_RECV_LEN))
 		return -EOPNOTSUPP;
 
+	v = (m->addr & 0xff) << I2C_7BIT_ADDR_SHIFT;
 	if (f & I2C_M_TEN) {
-		v <<= I2C_10BIT_ADDR_SHIFT;
-		v &= I2C_10BIT_ADDR_MASK;
+		v |= ((m->addr >> 8) & 0xff)
+				<< I2C_10BIT_ADDR_SHIFT;
 		v |= I2C_10BIT_ADDR_MODE;
-	} else {
-		v <<= I2C_7BIT_ADDR_SHIFT;
-		v &= I2C_7BIT_ADDR_MASK;
 	}
 
 	v |= I2C_DST_BUS(bus_id);
@@ -553,8 +284,8 @@ static s32 l_i2c_xfer_one_msg(struct i2c_adapter *adap, struct i2c_msg *m)
 	if (!(f & I2C_M_RD))
 		v |= I2C_TRANSACTION_TYPE_WRITE;
 
-	for (i = 0; i < len; i++)
-		writeb(buf[i], SMBDATA + i);
+	if (!(f & I2C_M_RD))
+		memcpy_toio(SMBDATA, buf, len);
 
 	w_i2c(v, SMBCONTROL);
 
@@ -565,9 +296,7 @@ static s32 l_i2c_xfer_one_msg(struct i2c_adapter *adap, struct i2c_msg *m)
 	if (!(f & I2C_M_RD))
 		goto out;
 
-	for (i = 0; i < len; i++)
-		buf[i] = readb(SMBDATA + i);
-
+	memcpy_fromio(buf, SMBDATA, len);
 out:
 	return ret;
 }
@@ -575,11 +304,26 @@ out:
 static int __l_i2c_xfer(struct i2c_adapter *adap,
 			   struct i2c_msg *p, int num)
 {
-	int i, ret = 0;
-	/* Controller can't send pmsg in a single transaction,
-	 * so split it into num transactions in hope
-	 * that slave will handle them.
-	 */
+	int i, ret = 0, num_ret = num;
+	int f = p[0].flags;
+	struct i2c_msg m;
+
+	if (num == 2 && p[0].len == 1 &&
+			!(f & I2C_M_RD) && !(f & I2C_M_TEN)) {
+		/* rm 33502: emulation of smbus-read:
+		 use 10bit address mode to send one byte
+		in the low byte of address */
+		int a = p[0].buf[0];
+		memcpy(&m, &p[1], sizeof(m));
+		p = &m;
+		p->flags |= I2C_M_TEN;
+		p->addr |= (a << 8);
+		num = 1;
+	}
+	/* Bug 114565, rm34303:
+	* Controller can't send pmsg in a single transaction,
+	* so split it into num transactions in hope (it works with eeprom at24)
+	* that slave will handle them.*/
 	for (i = 0; i < num && ret == 0; i++, p++) {
 		ret = l_i2c_xfer_one_msg(adap, p);
 		dev_dbg(&adap->dev,
@@ -592,22 +336,24 @@ static int __l_i2c_xfer(struct i2c_adapter *adap,
 	if (ret)
 		return ret;
 	else
-		return num;
+		return num_ret;
 }
 
 static int l_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg *pmsg, int num)
 {
 	struct l_i2c *l_i2c = i2c_get_adapdata(adap);
 	int retries = 0, ret = 0;
+	/* Lock spi if we are going to use the common buffer
+		* which may be in use by other I2C adapters or
+		* by SPI controller. */
+	lock_companion(l_i2c->pdev->id);
+
 	do {
-		/* Lock spi if we are going to use the common buffer
-		 * which may be in use by other I2C adapters or
-		 * by SPI controller. */
-		lock_companion(l_i2c->pdev->id);
 		ret = __l_i2c_xfer(adap, pmsg, num);
-		unlock_companion(l_i2c->pdev->id);
 		retries++;
 	} while (ret == -EAGAIN && retries < MAX_RETRIES);
+
+	unlock_companion(l_i2c->pdev->id);
 
 	if (ret == -EAGAIN)
 		dev_err(&adap->dev, "l_i2c_xfer: Failed to fix i2c bus"
@@ -617,14 +363,10 @@ static int l_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg *pmsg, int num)
 
 static u32 l_i2c_func(struct i2c_adapter *adap)
 {
-	return I2C_FUNC_I2C | I2C_FUNC_SMBUS_QUICK | I2C_FUNC_SMBUS_BYTE |
-			I2C_FUNC_SMBUS_BYTE_DATA | I2C_FUNC_SMBUS_WORD_DATA |
-			I2C_FUNC_SMBUS_I2C_BLOCK | I2C_FUNC_SMBUS_BLOCK_DATA |
-			I2C_FUNC_10BIT_ADDR;
+	return I2C_FUNC_I2C | I2C_FUNC_10BIT_ADDR | I2C_FUNC_SMBUS_EMUL;
 }
 
 static const struct i2c_algorithm l_i2c_algorithm = {
-	.smbus_xfer	= l_smbus_xfer,
 	.master_xfer	= l_i2c_xfer,
 	.functionality	= l_i2c_func,
 };

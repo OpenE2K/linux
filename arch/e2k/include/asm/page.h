@@ -205,7 +205,7 @@ extern phys_addr_t __pa_lm_debug(unsigned long);
 
 struct page;
 
-extern struct page *e2k_virt_to_page(const void *kaddr);
+extern phys_addr_t e2k_virt_to_phys(const void *kaddr);
 
 #define phys_to_page(paddr)	pfn_to_page((paddr) >> PAGE_SHIFT)
 #define page_to_phys(page)	(page_to_pfn(page) << PAGE_SHIFT)

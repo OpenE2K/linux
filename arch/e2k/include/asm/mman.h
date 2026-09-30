@@ -39,7 +39,7 @@ enum sma_mode {
 };
 
 int e2k_set_vmm_cui(struct mm_struct *mm, int cui,
-                    unsigned long code_base, unsigned long code_end);
+		    unsigned long code_base, unsigned long code_end);
 
 #define VM_HW_STACK_COMMON_FLAGS (VM_PRIVILEGED | VM_DONTEXPAND)
 #define VM_HW_STACK_PS_FLAGS	(VM_HW_STACK_COMMON_FLAGS | VM_HW_STACK_PS)

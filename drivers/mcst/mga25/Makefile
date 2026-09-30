@@ -1,8 +1,7 @@
- # SPDX-License-Identifier: GPL-2.0
- # Copyright (c) 2023 MCST
- 
-#
-# Makefile for the drm device driver.  This driver provides support for the
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2023 MCST
+
+# Makefile for the drm device driver. This driver provides support for the
 # Direct Rendering Infrmga2ructure (DRI) in XFree86 4.1.0 and higher.
 
 ccflags-y := -Werror -D_MCU_ -I$(srctree)/drivers/mcst/mga25/it6613

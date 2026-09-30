@@ -369,8 +369,9 @@ native_fast_tagged_memory_set(
 
 	AW(st_op) = strd_opcode;
 
-	if (CONFIG_CPU_ISET_MIN >= 5 && !((u64) addr & 0xf) && !(len & 0xf) &&
+	if (cpu_has(CPU_FEAT_QPREG) && !((u64) addr & 0xf) && !(len & 0xf) &&
 	    !st_op.fmt_h && st_op.fmt == LDST_QWORD_FMT) {
+		tag = (tag << 4) | tag;
 		ret = __recovery_memset_16(addr, val, tag, len, strd_opcode);
 	} else {
 		ret = __recovery_memset_8(addr, val, tag, len, strd_opcode);

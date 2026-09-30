@@ -74,11 +74,11 @@ struct mgam83fb_par {
 		uint8_t*	vbase;	// virtual address
 		unsigned int	len;
 	} i2c;
-        struct {
-                unsigned long   kvaddr;
-                unsigned long   ioaddr;
-                unsigned int    size;
-        } video_buf;
+	struct {
+		unsigned long   kvaddr;
+		unsigned long   ioaddr;
+		unsigned int    size;
+	} video_buf;
 
 	struct of_device *mgaop;
 	struct fb_info* info;
@@ -448,50 +448,50 @@ static struct ker_dma_mem *dma_mem_list = NULL;
 
 static int 
 mgam83fb_ioctl(struct fb_info *info, unsigned int cmd,
-         unsigned long arg)
+	 unsigned long arg)
 {
-        unsigned long kvaddr;
-        struct dma_mem          dmem;
-        int     order;
-        struct page *map, *mapend;
-        struct mgam83fb_par* par = (struct mgam83fb_par*)info->par;
-        void __user *argp = (void __user *)arg;
+	unsigned long kvaddr;
+	struct dma_mem          dmem;
+	int     order;
+	struct page *map, *mapend;
+	struct mgam83fb_par* par = (struct mgam83fb_par*)info->par;
+	void __user *argp = (void __user *)arg;
 
-        switch (cmd) {
-           case FBIOALLOC_DMA_MEM:
-                if (!par->video_buf.ioaddr) {
-                        if (copy_from_user(&dmem, argp, sizeof(dmem))) {
-                                return -EFAULT;
-                        }
-                        DEBUG_IOCTL_MSG("mgam83fb_ioctl: Ask to alloc 0x%lx bytes\n",
+	switch (cmd) {
+	   case FBIOALLOC_DMA_MEM:
+		if (!par->video_buf.ioaddr) {
+			if (copy_from_user(&dmem, argp, sizeof(dmem))) {
+				return -EFAULT;
+			}
+			DEBUG_IOCTL_MSG("mgam83fb_ioctl: Ask to alloc 0x%lx bytes\n",
 							(unsigned long)dmem.size);
-                        order = get_order(dmem.size);
-                        kvaddr = __get_free_pages(GFP_KERNEL | GFP_DMA, order);
+			order = get_order(dmem.size);
+			kvaddr = __get_free_pages(GFP_KERNEL | GFP_DMA, order);
 
-                        if (!kvaddr){
-                                DEBUG_IOCTL_MSG("mgam83fb_ioctl: failed to alloc dma buffer\n");
-                                return -ENOMEM;
-                        }
-                        mapend = virt_to_page (kvaddr + (PAGE_SIZE << order) - 1);
-                        for (map = virt_to_page(kvaddr); map <= mapend; map++) {
-                                SetPageReserved(map);
-                        }
-                        par->video_buf.ioaddr = dma_map_single(&par->mgaop->dev, (void *)kvaddr, dmem.size,
-                                                               DMA_BIDIRECTIONAL);
-                        par->video_buf.kvaddr = kvaddr;
-                        par->video_buf.size = dmem.size;
-                }
-                dmem.phys_addr = par->video_buf.ioaddr;
-                DEBUG_IOCTL_MSG("FBIOALLOC_DMA_MEM: kvaddr = 0x%08lx; dmem.phys_addr = 0x%08lx\n", kvaddr, dmem.phys_addr);
+			if (!kvaddr){
+				DEBUG_IOCTL_MSG("mgam83fb_ioctl: failed to alloc dma buffer\n");
+				return -ENOMEM;
+			}
+			mapend = virt_to_page (kvaddr + (PAGE_SIZE << order) - 1);
+			for (map = virt_to_page(kvaddr); map <= mapend; map++) {
+				SetPageReserved(map);
+			}
+			par->video_buf.ioaddr = dma_map_single(&par->mgaop->dev, (void *)kvaddr, dmem.size,
+							       DMA_BIDIRECTIONAL);
+			par->video_buf.kvaddr = kvaddr;
+			par->video_buf.size = dmem.size;
+		}
+		dmem.phys_addr = par->video_buf.ioaddr;
+		DEBUG_IOCTL_MSG("FBIOALLOC_DMA_MEM: kvaddr = 0x%08lx; dmem.phys_addr = 0x%08lx\n", kvaddr, dmem.phys_addr);
 
-                if (copy_to_user(argp, &dmem, sizeof(dmem))){
-                        DEBUG_IOCTL_MSG("mgam83fb_ioctl: failed to copy_to_user\n");
-                        return -EFAULT;
-                }
-                return 0;
-           default:
-                return -EINVAL;
-        }
+		if (copy_to_user(argp, &dmem, sizeof(dmem))){
+			DEBUG_IOCTL_MSG("mgam83fb_ioctl: failed to copy_to_user\n");
+			return -EFAULT;
+		}
+		return 0;
+	   default:
+		return -EINVAL;
+	}
 }
 
 #define	DEBUG_MMAP_MSG_ON	0
@@ -581,11 +581,11 @@ static int mgam83fb_mmap(struct fb_info *info, struct vm_area_struct *vma)
 #if defined (__sparc__)
 		if (remap_pfn_range(vma, vma->vm_start, 
 				MK_IOSPACE_PFN(p->mem.iospace, (off >> PAGE_SHIFT)),
-			     	vma->vm_end - vma->vm_start, vma->vm_page_prot))
+				vma->vm_end - vma->vm_start, vma->vm_page_prot))
 			return -EAGAIN;
 #else
 		if (remap_pfn_range(vma, vma->vm_start, off >> PAGE_SHIFT,
-			     	vma->vm_end - vma->vm_start, vma->vm_page_prot))
+				vma->vm_end - vma->vm_start, vma->vm_page_prot))
 			return -EAGAIN;
 #endif
 		DEBUG_MMAP_MSG("mgam83fb_mmap: mapping done successfully\n");		
@@ -640,8 +640,8 @@ static inline u32 flip_32 (u32 l)
 
 static inline u32 bitflip_32 (u32 l)
 {
-        return ((l&0x1)<<31)      | (((l>>1)&0x1)<<30) |
-               (((l>>2)&0x1)<<29) | (((l>>3)&0x1)<<28) |
+	return ((l&0x1)<<31)      | (((l>>1)&0x1)<<30) |
+	       (((l>>2)&0x1)<<29) | (((l>>3)&0x1)<<28) |
 	       (((l>>4)&0x1)<<27) | (((l>>5)&0x1)<<26) |
 	       (((l>>6)&0x1)<<25) | (((l>>7)&0x1)<<24) |
 	       (((l>>8)&0x1)<<23) | (((l>>9)&0x1)<<22) |
@@ -999,19 +999,19 @@ static int mga_sbus_remove(struct of_device *op)
 	/* or dev_get_drv_data(device); */
 	unsigned long length = 0;
 
-         if (p->video_buf.ioaddr) {
-                 struct page *map, *mapend;
-                 dma_unmap_single(&p->mgaop->dev, p->video_buf.ioaddr,
-                         p->video_buf.size, DMA_BIDIRECTIONAL);
-                 mapend = virt_to_page(p->video_buf.kvaddr + p->video_buf.size -1);
-                 for (map = virt_to_page(p->video_buf.kvaddr); map <= mapend; map++) {
-                         ClearPageReserved(map);
-                 }
-                 free_pages(p->video_buf.kvaddr, get_order(p->video_buf.size));
-                 p->video_buf.ioaddr = 0;
-                 p->video_buf.kvaddr = 0;
-                 p->video_buf.size = 0;
-         }
+	 if (p->video_buf.ioaddr) {
+		 struct page *map, *mapend;
+		 dma_unmap_single(&p->mgaop->dev, p->video_buf.ioaddr,
+			 p->video_buf.size, DMA_BIDIRECTIONAL);
+		 mapend = virt_to_page(p->video_buf.kvaddr + p->video_buf.size -1);
+		 for (map = virt_to_page(p->video_buf.kvaddr); map <= mapend; map++) {
+			 ClearPageReserved(map);
+		 }
+		 free_pages(p->video_buf.kvaddr, get_order(p->video_buf.size));
+		 p->video_buf.ioaddr = 0;
+		 p->video_buf.kvaddr = 0;
+		 p->video_buf.size = 0;
+	 }
 
 	if (info) {
 		// Turn of display
@@ -1047,25 +1047,25 @@ static int mga_sbus_remove(struct of_device *op)
 
 
 static const struct of_device_id mgam_sbus_match[] = {
-        {
-                .name = "mgam",
-        },
-        {
-                .name = "mga",
-        },
-        {
-                .name = " MGA/M",
-        },
-        {},
+	{
+		.name = "mgam",
+	},
+	{
+		.name = "mga",
+	},
+	{
+		.name = " MGA/M",
+	},
+	{},
 };
 
 MODULE_DEVICE_TABLE(of, mgam_sbus_match);
 
 static struct of_platform_driver mga_sbus_driver = {
-        .name           = "mgam83fb",
-        .match_table    = mgam_sbus_match,
-        .probe          = mga_sbus_probe,
-        .remove         = mga_sbus_remove,
+	.name           = "mgam83fb",
+	.match_table    = mgam_sbus_match,
+	.probe          = mga_sbus_probe,
+	.remove         = mga_sbus_remove,
 };
 
 
@@ -1078,18 +1078,18 @@ static int __init mga_sbus_init(void)
 {
 	printk("SBUS MGA video card driver loaded\n");
 #ifndef MODULE
-        char *option = NULL;
-        if (fb_get_options("mgam83fb", &option)) {
-                return -ENODEV;
+	char *option = NULL;
+	if (fb_get_options("mgam83fb", &option)) {
+		return -ENODEV;
 	}
 	mode_option = option;
 #endif
-        return of_register_driver(&mga_sbus_driver, &of_bus_type);
+	return of_register_driver(&mga_sbus_driver, &of_bus_type);
 }
 
 static void __exit mga_sbus_exit(void)
 {
-        of_unregister_driver(&mga_sbus_driver);
+	of_unregister_driver(&mga_sbus_driver);
 }
 
 module_init(mga_sbus_init);

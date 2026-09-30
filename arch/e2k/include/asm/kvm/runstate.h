@@ -177,9 +177,9 @@ kvm_update_guest_vcpu_runstate(struct kvm_vcpu *vcpu,
 {
 	unsigned long flags;
 
-	raw_local_irq_save(flags);
+	local_irq_save(flags);
 	kvm_do_update_guest_vcpu_runstate(vcpu, new_state, entry_time);
-	raw_local_irq_restore(flags);
+	local_irq_restore(flags);
 }
 /* Interrupts should be disabled by caller */
 static inline void
@@ -195,9 +195,9 @@ kvm_update_guest_vcpu_current_runstate(struct kvm_vcpu *vcpu, int new_state)
 {
 	unsigned long flags;
 
-	raw_local_irq_save(flags);
+	local_irq_save(flags);
 	kvm_do_update_guest_vcpu_current_runstate(vcpu, new_state);
-	raw_local_irq_restore(flags);
+	local_irq_restore(flags);
 }
 
 /* Interrupts should be disabled by caller */
@@ -216,9 +216,9 @@ kvm_init_guest_vcpu_runstate(struct kvm_vcpu *vcpu, int init_state)
 {
 	unsigned long flags;
 
-	raw_local_irq_save(flags);
+	local_irq_save(flags);
 	kvm_do_init_guest_vcpu_runstate(vcpu, init_state);
-	raw_local_irq_restore(flags);
+	local_irq_restore(flags);
 }
 
 static inline long
@@ -271,9 +271,9 @@ kvm_get_guest_vcpu_stolen_time(struct kvm_vcpu *vcpu)
 	s64 stolen_time;
 	unsigned long flags;
 
-	raw_local_irq_save(flags);
+	local_irq_save(flags);
 	stolen_time = kvm_do_get_guest_vcpu_stolen_time(vcpu);
-	raw_local_irq_restore(flags);
+	local_irq_restore(flags);
 
 	return stolen_time;
 }
@@ -319,9 +319,9 @@ kvm_get_guest_vcpu_running_time(struct kvm_vcpu *vcpu)
 	s64 running_time;
 	unsigned long flags;
 
-	raw_local_irq_save(flags);
+	local_irq_save(flags);
 	running_time = kvm_do_get_guest_vcpu_running_time(vcpu);
-	raw_local_irq_restore(flags);
+	local_irq_restore(flags);
 
 	return running_time;
 }

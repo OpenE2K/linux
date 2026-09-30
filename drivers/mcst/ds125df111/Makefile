@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2023 MCST
+
 #
 # DS125DF111 - Multi-Protocol 2-Channel 9.8..12.5 Gb/s Retimer
 #

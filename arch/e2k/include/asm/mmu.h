@@ -240,4 +240,8 @@ extern void debug_inject_half_spec_loads(bool check);
 static inline void debug_inject_half_spec_loads(bool check) { }
 #endif
 
+#ifdef CONFIG_CLW_ENABLE
+DECLARE_PER_CPU(bool, clw_enabled);
+#endif
+
 #endif /* _E2K_MMU_H_ */

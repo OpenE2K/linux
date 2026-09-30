@@ -2613,6 +2613,14 @@ struct hw_stacks {
 
 typedef union {
 	struct {
+		u64 lo : 32;
+		u64 hi : 32;
+	};
+	u64 word;
+} e2k_sclkr_t;
+
+typedef union {
+	struct {
 		u64 div    : 32;
 		u64 mdiv   : 1;
 		u64 mode   : 1;
@@ -2630,6 +2638,14 @@ typedef union {
 	};
 	u64 word;
 } e2k_sclkm1_t;
+
+typedef union {
+	struct {
+		u32 min;
+		u32 max;
+	};
+u64 word;
+} e2k_sclkm2_t;
 
 typedef enum cu_reg_no {
 	undef_cu_reg_no = -1,
@@ -2654,6 +2670,7 @@ typedef enum cu_reg_no {
 	DTARF_cu_reg_no = 0x4e,
 	DTART_cu_reg_no = 0x4f,
 	CU_HW0_cu_reg_no = 0x78,
+	CU_HW1_cu_reg_no = 0x79,
 } cu_reg_no_t;
 
 #endif /* ! __ASSEMBLY__ */

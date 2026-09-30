@@ -1,5 +1,9 @@
 /*
- * $Id: ide_config.h,v 1.1 2006/03/30 16:53:22 kostin Exp $
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
+/*
  * Southbridge configuration.
  * IDE Configuration Registers (Function 1)
  */

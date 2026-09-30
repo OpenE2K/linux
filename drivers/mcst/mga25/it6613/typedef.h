@@ -145,12 +145,12 @@ typedef union _VideoFormatCode
 {
     struct _VFC
     {
-        BYTE colorfmt:2 ;
-        BYTE interlace:1 ;
-        BYTE Colorimetry:1 ;
-        BYTE Quantization:1 ;
-        BYTE UpDownFilter:1 ;
-        BYTE Dither:1 ;
+	BYTE colorfmt:2 ;
+	BYTE interlace:1 ;
+	BYTE Colorimetry:1 ;
+	BYTE Quantization:1 ;
+	BYTE UpDownFilter:1 ;
+	BYTE Dither:1 ;
     } VFCCode ;
     unsigned char VFCByte ;
 } VideoFormatCode ;
@@ -226,104 +226,104 @@ typedef union _VideoFormatCode
 typedef union _AVI_InfoFrame
 {
     struct {
-        BYTE Type ;
-        BYTE Ver ;
-        BYTE Len ;
+	BYTE Type ;
+	BYTE Ver ;
+	BYTE Len ;
 
-        BYTE Scan:2 ;
-        BYTE BarInfo:2 ;
-        BYTE ActiveFmtInfoPresent:1 ;
-        BYTE ColorMode:2 ;
-        BYTE FU1:1 ;
+	BYTE Scan:2 ;
+	BYTE BarInfo:2 ;
+	BYTE ActiveFmtInfoPresent:1 ;
+	BYTE ColorMode:2 ;
+	BYTE FU1:1 ;
 
-        BYTE ActiveFormatAspectRatio:4 ;
-        BYTE PictureAspectRatio:2 ;
-        BYTE Colorimetry:2 ;
+	BYTE ActiveFormatAspectRatio:4 ;
+	BYTE PictureAspectRatio:2 ;
+	BYTE Colorimetry:2 ;
 
-        BYTE Scaling:2 ;
-        BYTE FU2:6 ;
+	BYTE Scaling:2 ;
+	BYTE FU2:6 ;
 
-        BYTE VIC:7 ;
-        BYTE FU3:1 ;
+	BYTE VIC:7 ;
+	BYTE FU3:1 ;
 
-        BYTE PixelRepetition:4 ;
-        BYTE FU4:4 ;
+	BYTE PixelRepetition:4 ;
+	BYTE FU4:4 ;
 
-        SHORT Ln_End_Top ;
-        SHORT Ln_Start_Bottom ;
-        SHORT Pix_End_Left ;
-        SHORT Pix_Start_Right ;
+	SHORT Ln_End_Top ;
+	SHORT Ln_Start_Bottom ;
+	SHORT Pix_End_Left ;
+	SHORT Pix_Start_Right ;
     } info ;
     struct {
-        BYTE AVI_HB[3] ;
-        BYTE AVI_DB[AVI_INFOFRAME_LEN] ;
+	BYTE AVI_HB[3] ;
+	BYTE AVI_DB[AVI_INFOFRAME_LEN] ;
     } pktbyte ;
 } AVI_InfoFrame ;
 
 typedef union _Audio_InfoFrame {
 
     struct {
-        BYTE Type ;
-        BYTE Ver ;
-        BYTE Len ;
+	BYTE Type ;
+	BYTE Ver ;
+	BYTE Len ;
 
-        BYTE AudioChannelCount:3 ;
-        BYTE RSVD1:1 ;
-        BYTE AudioCodingType:4 ;
+	BYTE AudioChannelCount:3 ;
+	BYTE RSVD1:1 ;
+	BYTE AudioCodingType:4 ;
 
-        BYTE SampleSize:2 ;
-        BYTE SampleFreq:3 ;
-        BYTE Rsvd2:3 ;
+	BYTE SampleSize:2 ;
+	BYTE SampleFreq:3 ;
+	BYTE Rsvd2:3 ;
 
-        BYTE FmtCoding ;
+	BYTE FmtCoding ;
 
-        BYTE SpeakerPlacement ;
+	BYTE SpeakerPlacement ;
 
-        BYTE Rsvd3:3 ;
-        BYTE LevelShiftValue:4 ;
-        BYTE DM_INH:1 ;
+	BYTE Rsvd3:3 ;
+	BYTE LevelShiftValue:4 ;
+	BYTE DM_INH:1 ;
     } info ;
 
     struct {
-        BYTE AUD_HB[3] ;
-        BYTE AUD_DB[AUDIO_INFOFRAME_LEN] ;
+	BYTE AUD_HB[3] ;
+	BYTE AUD_DB[AUDIO_INFOFRAME_LEN] ;
     } pktbyte ;
 
 } Audio_InfoFrame ;
 
 typedef union _MPEG_InfoFrame {
     struct {
-        BYTE Type ;
-        BYTE Ver ;
-        BYTE Len ;
+	BYTE Type ;
+	BYTE Ver ;
+	BYTE Len ;
 
-        ULONG MpegBitRate ;
+	ULONG MpegBitRate ;
 
-        BYTE MpegFrame:2 ;
-        BYTE Rvsd1:2 ;
-        BYTE FieldRepeat:1 ;
-        BYTE Rvsd2:3 ;
+	BYTE MpegFrame:2 ;
+	BYTE Rvsd1:2 ;
+	BYTE FieldRepeat:1 ;
+	BYTE Rvsd2:3 ;
     } info ;
     struct {
-        BYTE MPG_HB[3] ;
-        BYTE MPG_DB[MPEG_INFOFRAME_LEN] ;
+	BYTE MPG_HB[3] ;
+	BYTE MPG_DB[MPEG_INFOFRAME_LEN] ;
     } pktbyte ;
 } MPEG_InfoFrame ;
 
 // Source Product Description
 typedef union _SPD_InfoFrame {
     struct {
-        BYTE Type ;
-        BYTE Ver ;
-        BYTE Len ;
+	BYTE Type ;
+	BYTE Ver ;
+	BYTE Len ;
 
-        char VN[8] ; // vendor name character in 7bit ascii characters
-        char PD[16] ; // product description character in 7bit ascii characters
-        BYTE SourceDeviceInfomation ;
+	char VN[8] ; // vendor name character in 7bit ascii characters
+	char PD[16] ; // product description character in 7bit ascii characters
+	BYTE SourceDeviceInfomation ;
     } info ;
     struct {
-        BYTE SPD_HB[3] ;
-        BYTE SPD_DB[SPD_INFOFRAME_LEN] ;
+	BYTE SPD_HB[3] ;
+	BYTE SPD_DB[SPD_INFOFRAME_LEN] ;
     } pktbyte ;
 } SPD_InfoFrame ;
 

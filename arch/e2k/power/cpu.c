@@ -9,20 +9,14 @@
 
 #include <linux/suspend.h>
 
-#include <asm/sclkr.h>
-
-static unsigned long long suspended_sched_clock_value;
+#include <asm/sched_clock.h>
 
 void save_processor_state(void)
 {
-	if (use_sclkr_sched_clock())
-		suspended_sched_clock_value = sched_clock();
+	save_sched_clock_state();
 }
 
 void restore_processor_state(void)
 {
-	if (use_sclkr_sched_clock()) {
-		atomic64_set(&prev_sclkr.res, 0);
-		sclkr_sched_offset = suspended_sched_clock_value - read_sclkr_nosync();
-	}
+	restore_sched_clock_state();
 }

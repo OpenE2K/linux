@@ -161,9 +161,6 @@ struct azx {
 
 static inline bool azx_snoop(struct azx *chip)
 {
-#ifdef CONFIG_E2K
-	return !use_pcie_no_snoop || chip->snoop;
-#endif
 	return !IS_ENABLED(CONFIG_X86) || chip->snoop;
 }
 

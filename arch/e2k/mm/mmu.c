@@ -335,7 +335,7 @@ void native_flush_icache_range(e2k_addr_t start, e2k_addr_t end)
 		DebugIC("will flush_DCACHE_line() 0x%lx\n", addr);
 		__flush_DCACHE_line(addr);
 	}
-	flush_DCACHE_line_end();
+	flush_DCACHE_line_end(true);
 	E2K_FLUSH_PIPELINE();
 
 	DebugIC("finished: start 0x%lx end 0x%lx\n", start, end);
@@ -398,7 +398,7 @@ void native_flush_icache_page(struct vm_area_struct *vma, struct page *page)
 	__flush_DCACHE_line_offset(start, 13 * E2K_ICACHE_SET_SIZE);
 	__flush_DCACHE_line_offset(start, 14 * E2K_ICACHE_SET_SIZE);
 	__flush_DCACHE_line_offset(start, 15 * E2K_ICACHE_SET_SIZE);
-	flush_DCACHE_line_end();
+	flush_DCACHE_line_end(true);
 	E2K_FLUSH_PIPELINE();
 }
 
@@ -982,4 +982,80 @@ static int __init tlb_contents_create(void)
 	return 0;
 }
 late_initcall(tlb_contents_create);
+
+# ifdef CONFIG_CLW_ENABLE
+/* Make this variable per-cpu because it is read often and modified rarely */
+DEFINE_PER_CPU(bool, clw_enabled);
+
+static ssize_t read_clw_enabled(struct file *file, char __user *user_buf,
+				size_t count, loff_t *ppos)
+{
+	char buf[3];
+
+	if (this_cpu_read(clw_enabled))
+		buf[0] = '1';
+	else
+		buf[0] = '0';
+	buf[1] = '\n';
+	buf[2] = '\0';
+
+	return simple_read_from_buffer(user_buf, count, ppos, buf, 2);
+}
+
+/* Should be called with proper synchronization via the spinlock 'clw_enabled_modify_lock' */
+static void set_clw_enabled(bool enable)
+{
+	int cpu;
+
+	for_each_possible_cpu(cpu)
+		per_cpu(clw_enabled, cpu) = enable;
+}
+
+/* Spinlock for synchronization of concurrent calls to write_clw_enabled() */
+static DEFINE_SPINLOCK(clw_enabled_modify_lock);
+
+static ssize_t write_clw_enabled(struct file *file, const char __user *user_buf,
+				 size_t count, loff_t *ppos)
+{
+	bool enable;
+	int ret;
+
+	ret = kstrtobool_from_user(user_buf, count, &enable);
+	if (ret)
+		return ret;
+
+	spin_lock(&clw_enabled_modify_lock);
+
+	if (enable && !this_cpu_read(clw_enabled)) {
+		set_clw_enabled(true);
+		pr_info("CLW globally enabled\n");
+	} else if (!enable && this_cpu_read(clw_enabled)) {
+		set_clw_enabled(false);
+		pr_info("CLW globally disabled\n");
+	}
+
+	spin_unlock(&clw_enabled_modify_lock);
+
+	return count;
+}
+
+
+static const struct file_operations clw_enabled_fops = {
+	.read =		read_clw_enabled,
+	.write =	write_clw_enabled,
+	.open =		simple_open,
+	.llseek =	default_llseek,
+};
+
+static int __init clw_enabled_create(void)
+{
+	/* Omit synchronization because we are the only users of 'clw_enabled' at the moment */
+	set_clw_enabled(!cpu_has(CPU_HWBUG_CLW));
+
+	debugfs_create_file("clw_enabled", 0600, arch_debugfs_dir, NULL, &clw_enabled_fops);
+
+	return 0;
+}
+late_initcall(clw_enabled_create);
+# endif /* CONFIG_CLW_ENABLE */
 #endif /* CONFIG_DEBUG_FS */

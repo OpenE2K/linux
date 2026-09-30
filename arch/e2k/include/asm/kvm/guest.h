@@ -52,7 +52,7 @@ typedef	struct kvm_cpu_regs {
 	e2k_psp_lo_t	CPU_PSP_lo;	/* Procedure Stack Pointer */
 	e2k_psp_hi_t	CPU_PSP_hi;
 	e2k_pshtp_t	CPU_PSHTP;	/* Procedure Stack Hardware */
-      					/* Top Pointer */
+					/* Top Pointer */
 	e2k_pcsp_lo_t	CPU_PCSP_lo;	/* Procedure Chain Stack Pointer */
 	e2k_pcsp_hi_t	CPU_PCSP_hi;
 	e2k_cr0_lo_t	CPU_CR0_lo;	/* Current Chain Register */

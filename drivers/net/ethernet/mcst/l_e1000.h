@@ -232,7 +232,7 @@ typedef struct init_block {
 		       * 0x09 is max value (desc number = 512 if [3:0] >= 0x09)
 		       */
 } __attribute__((packed)) init_block_t; /* Must be 24 bytes exactly; E1000 works in LE mode, so  
-		 			* initialization must be in acordance with that */
+					* initialization must be in acordance with that */
 
 
 #define	L_E1000_NOMSI	0
@@ -240,7 +240,7 @@ typedef struct init_block {
 #define	L_E1000_MSIX	2
 
 extern int e1000_rt_probe1(unsigned long ioaddr, unsigned char *base_ioaddr,
-                int shared, struct pci_dev *pdev, struct resource *res,
+		int shared, struct pci_dev *pdev, struct resource *res,
 		int bar, struct msix_entry *msix_entries, int msi_status);
 extern void e1000_rt_remove(struct pci_dev *pdev);
 
