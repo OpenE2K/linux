@@ -21,6 +21,8 @@
 
 #ifdef __LCC__
 #define GCOV_COUNTERS			8
+#elif (__GNUC__ >= 15)
+#define GCOV_COUNTERS			10
 #elif (__GNUC__ >= 14)
 #define GCOV_COUNTERS			9
 #elif (__GNUC__ >= 10)

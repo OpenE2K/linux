@@ -427,11 +427,10 @@ static int vdec_s_parm(struct file *file, void *fh, struct v4l2_streamparm *a)
 	us_per_frame = timeperframe->numerator * (u64)USEC_PER_SEC;
 	do_div(us_per_frame, timeperframe->denominator);
 
-	if (!us_per_frame)
-		return -EINVAL;
-
+	us_per_frame = clamp(us_per_frame, 1, USEC_PER_SEC);
 	fps = (u64)USEC_PER_SEC;
 	do_div(fps, us_per_frame);
+	fps = min(VENUS_MAX_FPS, fps);
 
 	inst->fps = fps;
 	inst->timeperframe = *timeperframe;
@@ -767,18 +766,14 @@ static int vdec_session_init(struct venus_inst *inst)
 {
 	int ret;
 
-	ret = hfi_session_init(inst, inst->fmt_out->pixfmt);
-	if (ret == -EINVAL)
+	ret = venus_helper_session_init(inst);
+	if (ret == -EALREADY)
 		return 0;
 	else if (ret)
 		return ret;
 
 	ret = venus_helper_set_input_resolution(inst, frame_width_min(inst),
 						frame_height_min(inst));
-	if (ret)
-		goto deinit;
-
-	ret = venus_helper_init_codec_freq_data(inst);
 	if (ret)
 		goto deinit;
 

@@ -19,6 +19,7 @@
 #include <asm/processor.h>
 #include <linux/osq_lock.h>
 #include <linux/debug_locks.h>
+#include <linux/cleanup.h>
 
 struct ww_acquire_ctx;
 
@@ -229,5 +230,8 @@ mutex_trylock_recursive(struct mutex *lock);
 extern struct task_struct *get_mutex_owner(struct mutex *lock);
 extern void *get_mutex_ip(struct mutex *lock);
 #endif
+
+DEFINE_GUARD(mutex, struct mutex *, mutex_lock(_T), mutex_unlock(_T))
+DEFINE_FREE(mutex, struct mutex *, if (_T) mutex_unlock(_T))
 
 #endif /* __LINUX_MUTEX_H */
