@@ -261,10 +261,14 @@ __init __no_sanitize_address void setup_stack_print(void)
 /* Returns number of *not* copied bytes */
 static int careful_tagged_copy(volatile void *dst, volatile void *src, unsigned long sz)
 {
+	ldst_rec_op_t ld_opc = (IS_USER_ADDR(src))
+			? ldst_rec_userspace_tagged_load_8(CACHE_BYPASS_NONE, true)
+			: ldst_rec_tagged_load();
+	ldst_rec_op_t st_opc = ldst_rec_tagged_store();
+
 	SET_USR_PFAULT("$recovery_memcpy_fault", false);
-	size_t copied = fast_tagged_memory_copy_in_user((volatile void __force __user *)dst,
-							(volatile void __force __user *)src,
-							sz, NULL, 0);
+	size_t copied = native_fast_tagged_memory_copy((volatile void __force __user *)dst,
+			(volatile void __force __user *)src, sz, st_opc, ld_opc, 0);
 	RESTORE_USR_PFAULT(false);
 	return sz - copied;
 }
@@ -1317,26 +1321,27 @@ void notrace arch_trigger_cpumask_backtrace(const cpumask_t *mask,
 
 UACCESS_FN_DEFINE2(copy_crs_fn, e2k_mem_crs_t *, dst, const e2k_mem_crs_t *, src)
 {
+	ldst_rec_op_t priv_opc = PRIV_LDST_OPC();
 	e2k_cr0_t cr0;
 	e2k_cr1_t cr1;
 
 	if (IS_USER_ADDR(src)) {
-		const e2k_mem_crs_t __user *u_src = (const e2k_mem_crs_t __user __force *) src;
-		USER_LD(HI(cr0), &HI(u_src->cr0));
-		USER_LD(LO(cr0), &LO(u_src->cr0));
-		USER_LD(LO(cr1), &LO(u_src->cr1));
-		USER_LD(HI(cr1), &HI(u_src->cr1));
+		const e2k_mem_crs_t __priv *u_src = (const e2k_mem_crs_t __priv __force *) src;
+		PRIV_LD(HI(cr0), &HI(u_src->cr0), priv_opc);
+		PRIV_LD(LO(cr0), &LO(u_src->cr0), priv_opc);
+		PRIV_LD(LO(cr1), &LO(u_src->cr1), priv_opc);
+		PRIV_LD(HI(cr1), &HI(u_src->cr1), priv_opc);
 	} else {
 		cr0 = src->cr0;
 		cr1 = src->cr1;
 	}
 
 	if (IS_USER_ADDR(dst)) {
-		e2k_mem_crs_t __user *u_dst = (e2k_mem_crs_t __user __force *) dst;
-		USER_ST(LO(cr0), &LO(u_dst->cr0));
-		USER_ST(HI(cr0), &HI(u_dst->cr0));
-		USER_ST(LO(cr1), &LO(u_dst->cr1));
-		USER_ST(HI(cr1), &HI(u_dst->cr1));
+		e2k_mem_crs_t __priv *u_dst = (e2k_mem_crs_t __priv __force *) dst;
+		PRIV_ST(LO(cr0), &LO(u_dst->cr0), priv_opc);
+		PRIV_ST(HI(cr0), &HI(u_dst->cr0), priv_opc);
+		PRIV_ST(LO(cr1), &LO(u_dst->cr1), priv_opc);
+		PRIV_ST(HI(cr1), &HI(u_dst->cr1), priv_opc);
 	} else {
 		dst->cr0 = cr0;
 		dst->cr1 = cr1;

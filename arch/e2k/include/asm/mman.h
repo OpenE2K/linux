@@ -57,7 +57,7 @@ static inline unsigned long arch_calc_vm_prot_bits(unsigned long prot,
 	if (TASK_IS_PROTECTED(current)) {
 		cui = GET_CUI_FROM_INT_PROT(prot);
 		/* See comment before USER_LD() */
-		if (!IS_ENABLED(CONFIG_KVM_GUEST_KERNEL))
+		if (!cpu_has(CPU_FEAT_SAFE_UACCESS) && !IS_ENABLED(CONFIG_KVM_GUEST_KERNEL))
 			vm_flags |= VM_INT_PR;
 	} else {
 		cui = USER_CODES_UNPROT_INDEX(current);

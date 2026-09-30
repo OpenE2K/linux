@@ -1650,7 +1650,7 @@ static int e1000_rx(struct e1000_private *ep, int budget)
 	/* You may want to set other cpu for napi processing to get high
 	 * performance by means of command e.g for cpu 1 anf for eth4
 	 * echo 1 > /proc/sys/dev/l_e1000/napi_cpu/eth4 */
-	if (ep->napi_cpu >= 0 && !cpu_online((unsigned int)ep->napi_cpu))
+	if (ep->napi_cpu >= 0 && !cpu_online(ep->napi_cpu))
 		/* it was mistaken set of napi_cpu */
 		ep->napi_cpu = -1;
 	if (ep->napi_cpu >= 0) {

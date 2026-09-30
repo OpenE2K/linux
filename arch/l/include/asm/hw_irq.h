@@ -74,6 +74,6 @@ static inline void send_cleanup_vector(struct irq_cfg *c) { }
 static inline void irq_complete_move(struct irq_cfg *c) { }
 #endif
 
-void do_nmi(struct pt_regs * regs);
+void do_nmi(u32 nmi_reason);
 void do_IRQ(struct pt_regs * regs, unsigned int vector);
 #endif /* _ASM_L_HW_IRQ_H */

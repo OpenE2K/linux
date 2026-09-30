@@ -9,17 +9,15 @@
 
 #include "epic.h"
 
-static void unknown_nmi_error(unsigned int reason, struct pt_regs *regs)
+static void unknown_nmi_error(u32 reason)
 {
 	pr_warn("NMI received for unknown reason %x on CPU %d.\n",
 			reason, smp_processor_id());
 }
 
-noinline notrace void epic_do_nmi(struct pt_regs *regs)
+notrace u32 cepic_save_and_clear_nmi(void)
 {
-	union cepic_pnmirr reason;
-
-	reason.raw = epic_read_w(CEPIC_PNMIRR);
+	u32 reason = epic_read_w(CEPIC_PNMIRR);
 
 	/*
 	 * Immediately allow receiving of next NM interrupts.
@@ -38,7 +36,14 @@ noinline notrace void epic_do_nmi(struct pt_regs *regs)
 	 *
 	 * In this example cpu0 will never receive the second NMI.
 	 */
-	epic_write_w(CEPIC_PNMIRR, CEPIC_PNMIRR_BIT_MASK);
+	epic_write_w(CEPIC_PNMIRR, reason);
+
+	return reason;
+}
+
+noinline notrace void epic_do_nmi(u32 nmi_reason)
+{
+	union cepic_pnmirr reason =  { .raw = nmi_reason };
 
 	if (reason.nmi) {
 #ifdef CONFIG_E2K
@@ -49,5 +54,5 @@ noinline notrace void epic_do_nmi(struct pt_regs *regs)
 	}
 
 	if (reason.raw & CEPIC_PNMIRR_BIT_MASK)
-		unknown_nmi_error(reason.raw, regs);
+		unknown_nmi_error(reason.raw);
 }

@@ -2274,7 +2274,11 @@ retry:
 static int alloc_pool_huge_page(struct hstate *h, nodemask_t *nodes_allowed,
 				nodemask_t *node_alloc_noretry)
 {
+#ifdef CONFIG_MCST
+	struct page *page = NULL;
+#else
 	struct page *page;
+#endif
 	int nr_nodes, node;
 	gfp_t gfp_mask = htlb_alloc_mask(h) | __GFP_THISNODE;
 

@@ -11460,7 +11460,7 @@ static bool bnxt_tunl_check(struct bnxt *bp, struct sk_buff *skb, u8 l4_proto)
 		case htons(ETH_P_IP):
 			return true;
 		case htons(ETH_P_IPV6):
-#ifdef CONFIG_MCST
+#ifdef CONFIG_CC_IS_LCC
 			break;
 #else
 			fallthrough;

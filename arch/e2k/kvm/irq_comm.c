@@ -202,7 +202,7 @@ static int kvm_hw_epic_set_irq_vector(struct kvm_vcpu *vcpu, unsigned int vector
 {
 	if (vector >= CEPIC_PMIRR_NR_BITS || vector == 0) {
 		pr_err("Error: Invalid EPIC vector value %u\n", vector);
-		return -1;
+		return -EINVAL;
 	}
 
 	if (unlikely(epic_bgi_mode)) {
@@ -213,69 +213,69 @@ static int kvm_hw_epic_set_irq_vector(struct kvm_vcpu *vcpu, unsigned int vector
 			    &vcpu->arch.hw_ctxt.cepic->pmirr[epic_pmirr]);
 	}
 
-	return 1;
+	return 0;
 }
 
 /* VCPU is not running now. Set bit in the PNMIRR copy in hw context */
 static int kvm_hw_epic_set_smi(struct kvm_vcpu *vcpu)
 {
-	union cepic_pnmirr reg;
-
-	reg.raw = 0;
-	reg.smi = 1;
+	union cepic_pnmirr reg = {
+		.raw = 0,
+		.smi = 1,
+	};
 
 	atomic_or(reg.raw, &vcpu->arch.hw_ctxt.cepic->pnmirr);
 
-	return 1;
+	return 0;
 }
 
 static int kvm_hw_epic_set_nm_special(struct kvm_vcpu *vcpu)
 {
-	union cepic_pnmirr reg;
-
-	reg.raw = 0;
-	reg.nm_special = 1;
+	union cepic_pnmirr reg = {
+		.raw = 0,
+		.nm_special = 1,
+	};
 
 	atomic_or(reg.raw, &vcpu->arch.hw_ctxt.cepic->pnmirr);
 
-	return 1;
+	return 0;
 }
 
 static int kvm_hw_epic_set_nmi(struct kvm_vcpu *vcpu)
 {
-	union cepic_pnmirr reg;
-
-	reg.raw = 0;
-	reg.nmi = 1;
+	union cepic_pnmirr reg = {
+		.raw = 0,
+		.nmi = 1,
+	};
 
 	atomic_or(reg.raw, &vcpu->arch.hw_ctxt.cepic->pnmirr);
 
-	return 1;
+	return 0;
 }
 
 static int kvm_hw_epic_set_init(struct kvm_vcpu *vcpu)
 {
-	union cepic_pnmirr reg;
-
-	reg.raw = 0;
-	reg.init = 1;
+	union cepic_pnmirr reg = {
+		.raw = 0,
+		.init = 1,
+	};
 
 	atomic_or(reg.raw, &vcpu->arch.hw_ctxt.cepic->pnmirr);
 
-	return 1;
+	return 0;
 }
 
 static int kvm_hw_epic_set_startup(struct kvm_vcpu *vcpu, unsigned int vector)
 {
-	union cepic_pnmirr reg;
-
-	reg.raw = 0;
-	reg.startup = 1;
-	reg.startup_entry = vector & CEPIC_PNMIRR_STARTUP_ENTRY;
+	union cepic_pnmirr reg = {
+		.raw = 0,
+		.startup = 1,
+		.startup_entry = vector & CEPIC_PNMIRR_STARTUP_ENTRY,
+	};
 
 	atomic_or(reg.raw, &vcpu->arch.hw_ctxt.cepic->pnmirr);
 
-	return 1;
+	return 0;
 }
 
 /*
@@ -304,7 +304,7 @@ static int kvm_hw_epic_deliver_to_pirr(struct kvm_vcpu *vcpu, unsigned int vecto
 	default:
 		pr_err("IOEPIC: unsupported dlvm 0x%x (vect 0x%x)\n", dlvm,
 			vector);
-		return -1;
+		return -EINVAL;
 	}
 }
 #endif
@@ -316,8 +316,7 @@ u32 kvm_vcpu_to_full_cepic_id(const struct kvm_vcpu *vcpu)
 }
 
 /* VCPU is running now. Send an interrupt to guest through host's ICR */
-int kvm_hw_epic_deliver_to_icr(struct kvm_vcpu *vcpu, unsigned int vector,
-				u8 dlvm)
+int kvm_hw_epic_deliver_to_icr(struct kvm_vcpu *vcpu, unsigned int vector, u8 dlvm)
 {
 	union cepic_icr reg;
 
@@ -341,7 +340,7 @@ int kvm_hw_epic_deliver_to_icr(struct kvm_vcpu *vcpu, unsigned int vector,
 	 */
 	epic_write_d(CEPIC_ICR, reg.raw);
 
-	return 1;
+	return 0;
 }
 
 static int kvm_epic_match_dest(int cepic_id, int src, int short_hand, int dest)
@@ -401,16 +400,15 @@ int kvm_irq_delivery_to_sw_epic(struct kvm *kvm, int src,
 			if (ret >= 0) {
 				kvm_wake_up_irq(vcpu);
 			}
-			return ret;
+			return (ret >= 0) ? 0 : ret;
 		}
 	}
 
-	return -1;
+	return -ESRCH;
 }
 #endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #ifdef CONFIG_KVM_HW_VIRTUALIZATION
-//TODO fix this and all other delivery functions to return 0 on success and proper errno on error
 static int kvm_irq_delivery_to_hw_epic_single(struct kvm_vcpu *vcpu,
 		const struct kvm_cepic_irq *irq)
 {
@@ -424,8 +422,7 @@ static int kvm_irq_delivery_to_hw_epic_single(struct kvm_vcpu *vcpu,
 			vcpu->vcpu_id, vcpu->arch.epic_dat_active);
 
 	if (dat_active) {
-		ret = kvm_hw_epic_deliver_to_icr(vcpu,
-				irq->vector, irq->delivery_mode);
+		ret = kvm_hw_epic_deliver_to_icr(vcpu, irq->vector, irq->delivery_mode);
 		/*
 		 * Although kvm_irq_delivery_*() functions do set the
 		 * required condition for the target VCPU wake up
@@ -461,12 +458,11 @@ static int kvm_irq_delivery_to_hw_epic_single(struct kvm_vcpu *vcpu,
 		 */
 		epic_wait_icr_idle();
 	} else {
-		ret = kvm_hw_epic_deliver_to_pirr(vcpu,
-				irq->vector, irq->delivery_mode);
+		ret = kvm_hw_epic_deliver_to_pirr(vcpu, irq->vector, irq->delivery_mode);
 	}
 	raw_spin_unlock_irqrestore(&vcpu->arch.epic_dat_lock, flags);
 
-	if (ret == 1) {
+	if (!ret) {
 		/* In [dat_active] case the target vcpu will see
 		* the interrupt in kvm_vcpu_check_block() (see
 		* comment before kvm_arch_vcpu_blocking()). */
@@ -491,17 +487,17 @@ int kvm_irq_delivery_to_hw_epic(struct kvm *kvm, int src,
 		if (!kvm_epic_match_dest(cepic_id, src, shorthand, dest_id))
 			continue;
 
-		if (kvm_irq_delivery_to_hw_epic_single(vcpu, irq) == 1) {
+		if (!kvm_irq_delivery_to_hw_epic_single(vcpu, irq)) {
 			delivered = true;
 			/* Stop if there is a single destination */
 			if (shorthand == CEPIC_ICR_DST_FULL ||
-					shorthand == CEPIC_ICR_DST_SELF) {
+			    shorthand == CEPIC_ICR_DST_SELF) {
 				break;
 			}
 		}
 	}
 
-	return delivered ? 1 : -1;
+	return delivered ? 0 : -ESRCH;
 }
 
 #ifdef CONFIG_KVM_PARAVIRTUALIZATION
@@ -548,8 +544,7 @@ void kvm_deliver_cepic_epic_interrupt(void)
 {
 	struct kvm_cepic_irq irq;
 	union cepic_epic_int2 reg;
-	struct kvm *kvm;
-	struct kvm_vcpu *vcpu = current_thread_info()->vcpu;
+	struct kvm_vcpu *vcpu = kvm_get_running_vcpu();
 	/* Rely on CEPIC_EPIC_INT being delivered before migrations
 	 * (see comment in save_epic_context())	*/
 	u32 src = epic_read_guest_w(CEPIC_ID);
@@ -559,8 +554,7 @@ void kvm_deliver_cepic_epic_interrupt(void)
 	if (WARN_ONCE(!vcpu, "vcpu is NULL inside CEPIC_EPIC_INT handler"))
 		return;
 
-	kvm = vcpu->kvm;
-	if (WARN_ONCE(kvm->arch.vm_id != reg.gst_id,
+	if (WARN_ONCE(vcpu->kvm->arch.vm_id != reg.gst_id,
 			"Received CEPIC_EPIC_INT with bad gst_id %d\n", reg.gst_id))
 		return;
 
@@ -570,7 +564,7 @@ void kvm_deliver_cepic_epic_interrupt(void)
 	irq.delivery_mode = reg.dlvm;
 	irq.shorthand = reg.dst_sh;
 
-	kvm_irq_delivery_to_epic(kvm, src, &irq);
+	kvm_irq_delivery_to_epic(vcpu->kvm, src, &irq);
 }
 #else
 void kvm_int_violat_delivery_to_hw_epic(struct kvm *kvm)
@@ -666,11 +660,13 @@ int kvm_set_msi(struct kvm_kernel_irq_routing_entry *e,
 	DebugIRQ("IRQ #%d level %d line status %d\n",
 		irq_source_id, level, line_status);
 	if (!level)
-		return -1;
+		return -EOPNOTSUPP;
 
 	trace_kvm_e2k_msi(address, e->msi.data);
 
-	return kvm_set_pic_msi(e, kvm, irq_source_id, level, line_status);
+	int ret = kvm_set_pic_msi(e, kvm, irq_source_id, level, line_status);
+	/* This is what KVM UAPI expects */
+	return (ret) ? -1 : 1;
 }
 EXPORT_SYMBOL(kvm_set_msi);
 

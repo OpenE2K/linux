@@ -248,7 +248,7 @@ static int e2k_cpu_starting(unsigned int cpu)
 		sic_write_node_nbsr_reg(node, SIC_hw1, AW(sic_hw1));
 	}
 
-	if (cpu_has(CPU_HWBUG_CLW_ASYNC_UNALIGNED_STORE) ||
+	if (cpu_has(CPU_HWBUG_CLW_ASYNC) ||
 	    cpu_has(CPU_HWBUG_CLW_ASYNC_MTAG_DSBL) && native_read_MU_HW0_reg().v7.mtag_dsbl) {
 		e2k_mu_hw0_t mu_hw0 = native_read_MU_HW0_reg();
 		mu_hw0.v7.clw_async_dsbl = 1;

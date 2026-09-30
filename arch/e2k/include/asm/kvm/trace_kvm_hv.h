@@ -383,27 +383,26 @@ TRACE_EVENT(
 TRACE_EVENT(
 	irq_delivery,
 
-	TP_PROTO(unsigned int vector, unsigned int dlvm, int vcpu,
-		bool dam_active),
+	TP_PROTO(unsigned int vector, unsigned int dlvm, int vcpu, bool dat_active),
 
-	TP_ARGS(vector, dlvm, vcpu, dam_active),
+	TP_ARGS(vector, dlvm, vcpu, dat_active),
 
 	TP_STRUCT__entry(
 		__field(	u32,	vector	)
 		__field(	u32,	dlvm	)
 		__field(	int,	vcpu	)
-		__field(	bool,	dam_active	)
+		__field(	bool,	dat_active	)
 	),
 
 	TP_fast_assign(
 		__entry->vector = vector;
 		__entry->dlvm = dlvm;
 		__entry->vcpu = vcpu;
-		__entry->dam_active = dam_active;
+		__entry->dat_active = dat_active;
 	),
 
 	TP_printk("to vcpu %d via %s, vector 0x%x, dlvm %d", __entry->vcpu,
-		__entry->dam_active ? "icr" : "pmirr",
+		__entry->dat_active ? "icr" : "pmirr",
 		__entry->vector, __entry->dlvm)
 );
 

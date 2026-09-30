@@ -69,7 +69,6 @@ extern int do_page_fault(struct pt_regs *const regs, e2k_addr_t address,
 extern void do_trap_cellar(struct pt_regs *regs, int only_system_tc);
 
 extern irqreturn_t native_do_interrupt(struct pt_regs *regs);
-extern void do_nm_interrupt(struct pt_regs *regs);
 extern void do_mem_error(struct pt_regs *regs);
 extern void native_instr_page_fault(struct pt_regs *regs, tc_fault_type_t ftype,
 				    const int async_instr);

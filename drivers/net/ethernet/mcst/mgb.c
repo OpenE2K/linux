@@ -5740,7 +5740,6 @@ static void mgb_pcs_ethtool_ksettings_get(struct net_device *dev,
 					  struct ethtool_link_ksettings *cmd)
 {
 	struct mgb_private *ep = netdev_priv(dev);
-	u32 r = mgb_read_mgio_csr(ep);
 	u32 supported = 0, advertising = 0;
 	u16 an_status = mgb_pcs_read(ep, SR_AN_COMP_STS);
 	u16 an_control;

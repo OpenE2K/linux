@@ -109,9 +109,9 @@ int protected_fast_sys_clock_gettime(u32 tags, u64 usd_lo,
 		return FASTSYS_PROTECTED_FALLBACK(__NR_clock_gettime, tags,
 					 usd_lo, which_clock, arg3, arg4, arg5);
 
-	/* Can use `|=` because __put_user_switched_pt can return only -EFAULT error */
-	ret = __put_user_switched_pt(kts64_tv_sec, &tp->tv_sec);
-	return ret | __put_user_switched_pt(kts64_tv_nsec, &tp->tv_nsec);
+	/* Can use `|=` because put_user_switched_pt can return only -EFAULT error */
+	ret = put_user_switched_pt(kts64_tv_sec, &tp->tv_sec);
+	return ret | put_user_switched_pt(kts64_tv_nsec, &tp->tv_nsec);
 }
 
 notrace __interrupt __section(".entry.text")
@@ -146,9 +146,9 @@ int protected_fast_sys_gettimeofday(u32 tags, u64 usd_lo,
 	if (tz) {
 		typeof(sys_tz.tz_minuteswest) minuteswest = sys_tz.tz_minuteswest;
 		typeof(sys_tz.tz_dsttime) dsttime = sys_tz.tz_dsttime;
-		/* Can use `|=` because __put_user_switched_pt can return only -EFAULT error */
-		int ret = __put_user_switched_pt(minuteswest, &tz->tz_minuteswest);
-		return ret | __put_user_switched_pt(dsttime, &tz->tz_dsttime);
+		/* Can use `|=` because put_user_switched_pt can return only -EFAULT error */
+		int ret = put_user_switched_pt(minuteswest, &tz->tz_minuteswest);
+		return ret | put_user_switched_pt(dsttime, &tz->tz_dsttime);
 	} else {
 		return 0;
 	}
@@ -180,11 +180,11 @@ int protected_fast_sys_getcpu(u32 tags, u64 usd_lo __always_unused,
 	int ret = 0;
 	if (nodep) {
 		int node = cpu_to_node(cpu);
-		ret = __put_user_switched_pt(node, nodep);
+		ret = put_user_switched_pt(node, nodep);
 	}
-	/* Can use `|=` because __put_user_switched_pt can return only -EFAULT error */
+	/* Can use `|=` because put_user_switched_pt can return only -EFAULT error */
 	if (cpup)
-		ret |= __put_user_switched_pt(cpu, cpup);
+		ret |= put_user_switched_pt(cpu, cpup);
 
 	return 0;
 }
@@ -215,7 +215,7 @@ int protected_fast_sys_siggetmask(u32 tags, u64 usd_lo __always_unused,
 	if (unlikely((unsigned long)untagged_addr(oset) + sizeof(sigset_t) > user_addr_max()))
 		return -EFAULT;
 
-	return __put_user_switched_pt(set, oset);
+	return put_user_switched_pt(set, oset);
 }
 
 #if _NSIG != 64
@@ -264,16 +264,16 @@ int protected_fast_sys_getcontext(u32 tags, u64 usd_lo, u64 arg2, u64 arg3,
 			(((e2k_cr1_t) { .lo = cr1_lo_cur, .hi = 0 }).wbs +
 			 ((e2k_cr1_t) { .lo = cr1_lo, .hi = 0 }).wbs) * EXT_4_NR_SZ);
 
-	/* Can use `|=` because __put_user_switched_pt can return only -EFAULT error */
-	ret = __put_user_switched_pt(set, (u64 __user *) &ucp->uc_sigmask);
-	ret |= __put_user_switched_pt(key, uc_coroutine_key_128(ucp));
-	ret |= __put_user_switched_pt(LO(pcsp), &ucp->uc_mcontext.pcsp_lo);
-	ret |= __put_user_switched_pt(HI(pcsp), &ucp->uc_mcontext.pcsp_hi);
-	ret |= __put_user_switched_pt(LO(psp), &ucp->uc_mcontext.psp_lo);
-	ret |= __put_user_switched_pt(HI(psp), &ucp->uc_mcontext.psp_hi);
-	ret |= __put_user_switched_pt(sbr, &ucp->uc_mcontext.sbr);
-	ret |= __put_user_switched_pt(fpcr, &ucp->uc_extra.fpcr);
-	ret |= __put_user_switched_pt(fpsr, &ucp->uc_extra.fpsr);
-	return ret | __put_user_switched_pt(pfpfr, &ucp->uc_extra.pfpfr);
+	/* Can use `|=` because put_user_switched_pt can return only -EFAULT error */
+	ret = put_user_switched_pt(set, (u64 __user *) &ucp->uc_sigmask);
+	ret |= put_user_switched_pt(key, uc_coroutine_key_128(ucp));
+	ret |= put_user_switched_pt(LO(pcsp), &ucp->uc_mcontext.pcsp_lo);
+	ret |= put_user_switched_pt(HI(pcsp), &ucp->uc_mcontext.pcsp_hi);
+	ret |= put_user_switched_pt(LO(psp), &ucp->uc_mcontext.psp_lo);
+	ret |= put_user_switched_pt(HI(psp), &ucp->uc_mcontext.psp_hi);
+	ret |= put_user_switched_pt(sbr, &ucp->uc_mcontext.sbr);
+	ret |= put_user_switched_pt(fpcr, &ucp->uc_extra.fpcr);
+	ret |= put_user_switched_pt(fpsr, &ucp->uc_extra.fpsr);
+	return ret | put_user_switched_pt(pfpfr, &ucp->uc_extra.pfpfr);
 }
 

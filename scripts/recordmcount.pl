@@ -390,7 +390,7 @@ my $ip_new_regex = "^\\s*([0-9a-fA-F]+):\\s*\\n";
 my $branch_regex = "^\\s*[ir]branch";
 my $ct_regex = "^\\s*ct ";
 my $disp_regex = "^\\s*disp %(ctpr[1-3]),";
-my $mcount_disp_regex = "^\\s*[0-9a-fA-F]+:\\s*R_E2K_DISP\\s*_mcount";
+my $mcount_disp_regex = "^\\s*[0-9a-fA-F]+:\\s*R_E2K_DISP\\s*_?mcount";
 my $icall_regex = "^\\s*icall\\s";
 my $call_regex_begin = "^\\s*call %";
 my $call_regex_end = ", wbs = 0x[0-9a-fA-F]+";

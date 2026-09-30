@@ -8,8 +8,8 @@
 
 #include <linux/irq.h>
 
-noinline notrace void epic_do_nmi(struct pt_regs *regs);
-noinline notrace void apic_do_nmi(struct pt_regs *regs);
+noinline notrace void epic_do_nmi(u32 nmi_reason);
+noinline notrace void apic_do_nmi(u32 nmi_reason);
 
 unsigned int get_irr_epic(unsigned int);
 unsigned int get_irr_apic(unsigned int);

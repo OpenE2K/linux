@@ -3,19 +3,22 @@
  * Copyright (c) 2023 MCST
  */
 
-#include <linux/kernel.h>
-#include <linux/io.h>
-#include <linux/module.h>
+#include <linux/bits.h>
 #include <linux/err.h>
-#include <linux/platform_device.h>
 #include <linux/hwmon.h>
 #include <linux/hwmon-sysfs.h>
-#include <linux/mod_devicetable.h>
-#include <linux/bits.h>
+#include <linux/io.h>
+#include <linux/jiffies.h>
+#include <linux/kernel.h>
 #include <linux/kthread.h>
+#include <linux/module.h>
+#include <linux/mod_devicetable.h>
+#include <linux/mutex.h>
+#include <linux/platform_device.h>
 
 #include "pcsm.h"
 
+static struct pcsm_data *update_device(struct device *dev);
 
 enum pcsm_base_addr {
 	TERM_BASE = 0,
@@ -32,6 +35,15 @@ struct pcsm_data {
 	struct delayed_work pcsm_int_cleanup_work;
 	event_info_t pcs_events[PCS_EVENTS_MAX];
 	unsigned int pcs_events_count;
+	int temp[PMC_TERM_TS_MAX];
+	bool temp_err[PMC_TERM_TS_MAX];
+	int temp_max;
+	u8 pwm_regs[INST_COUNT][PCSM_PWM_REGS_COUNT];
+	int vm_table_val[VM_MAX_CHANNELS][VM_MAX_SENSORS];
+	const char * const *pmc_sys_events;
+	unsigned long last_updated;
+	struct mutex update_lock;
+	bool valid;
 };
 
 static const struct cpu_sensors *cpu_sensors __read_mostly;
@@ -317,18 +329,14 @@ static ssize_t show_fan(struct device *dev,
 			char *buf)
 {
 	struct sensor_device_attribute_2 *attr = to_sensor_dev_attr_2(devattr);
-	struct pcsm_data *data = dev_get_drvdata(dev);
+	struct pcsm_data *data = update_device(dev);
 	pwm_tach_control_regs_t control;
-
 	int nr = attr->nr;
 	int addr = attr->index;
 
-	u8 val_lo = read_pwm_data(data->base[FAN_BASE], nr, addr);
-	u8 val_hi = read_pwm_data(data->base[FAN_BASE], nr, addr + 1);
+	u16 val = (data->pwm_regs[nr][addr + 1] << 8) + data->pwm_regs[nr][addr];
 
-	u16 val = (val_hi << 8) + val_lo;
-
-	control.byte = read_pwm_data(data->base[FAN_BASE], nr, PCSM_MX_TACH_CTRL);
+	control.byte = data->pwm_regs[nr][PCSM_MX_TACH_CTRL];
 
 	if (control.posedge + control.negedge > 0)
 		val = val * ((control.time_interval) ? 6 : 60) /
@@ -355,9 +363,9 @@ static ssize_t show_fan_div(struct device *dev,
 			    char *buf)
 {
 	struct sensor_device_attribute_2 *attr = to_sensor_dev_attr_2(devattr);
-	struct pcsm_data *data = dev_get_drvdata(dev);
+	struct pcsm_data *data = update_device(dev);
 
-	unsigned long val = read_pwm_data(data->base[FAN_BASE], attr->nr, attr->index);
+	unsigned long val = data->pwm_regs[attr->nr][attr->index];
 
 	return snprintf(buf, PAGE_SIZE - 1, "%ld\n", DIV_FROM_REG(val));
 }
@@ -375,9 +383,13 @@ static ssize_t set_fan_div(struct device *dev,
 		return err;
 	}
 
+	mutex_lock(&data->update_lock);
+
 	val = clamp_val(PROCENT_TO_PWM(val), 0, 0x80);
 
 	write_pwm_data(data->base[FAN_BASE], attr->nr, attr->index, DIV_TO_REG(val));
+
+	mutex_unlock(&data->update_lock);
 
 	return count;
 }
@@ -388,16 +400,14 @@ static ssize_t show_pwm(struct device *dev,
 			char *buf)
 {
 	struct sensor_device_attribute_2 *attr = to_sensor_dev_attr_2(devattr);
-	struct pcsm_data *data = dev_get_drvdata(dev);
+	struct pcsm_data *data = update_device(dev);
 
 	int nr = attr->nr;
 	int addr = attr->index;
 
 	addr = addr ? addr : PCSM_RW_PWM_CURRENT;
 
-	u8 val = read_pwm_data(data->base[FAN_BASE], nr, addr);
-
-	return snprintf(buf, PAGE_SIZE - 1, "%d\n", PWM_TO_PROCENT(val));
+	return snprintf(buf, PAGE_SIZE - 1, "%d\n", PWM_TO_PROCENT(data->pwm_regs[nr][addr]));
 }
 
 
@@ -420,9 +430,13 @@ static ssize_t set_pwm(struct device *dev,
 		return err;
 	}
 
+	mutex_lock(&data->update_lock);
+
 	val = clamp_val(val, 0, 0x80);
 
 	write_pwm_data(data->base[FAN_BASE], nr, addr, PROCENT_TO_PWM(val));
+
+	mutex_unlock(&data->update_lock);
 
 	return count;
 }
@@ -433,14 +447,12 @@ static ssize_t show_pwm_byte(struct device *dev,
 			     char *buf)
 {
 	struct sensor_device_attribute_2 *attr = to_sensor_dev_attr_2(devattr);
-	struct pcsm_data *data = dev_get_drvdata(dev);
+	struct pcsm_data *data = update_device(dev);
 
 	int nr = attr->nr;
 	int addr = attr->index;
 
-	u8 val = read_pwm_data(data->base[FAN_BASE], nr, addr);
-
-	return snprintf(buf, PAGE_SIZE - 1, "0x%x\n", val);
+	return snprintf(buf, PAGE_SIZE - 1, "0x%x\n", data->pwm_regs[nr][addr]);
 }
 
 static ssize_t set_pwm_byte(struct device *dev,
@@ -466,7 +478,11 @@ static ssize_t set_pwm_byte(struct device *dev,
 		return -EINVAL;
 	}
 
+	mutex_lock(&data->update_lock);
+
 	write_pwm_data(data->base[FAN_BASE], nr, addr, val);
+
+	mutex_unlock(&data->update_lock);
 
 	return count;
 }
@@ -489,6 +505,8 @@ static ssize_t set_fan(struct device *dev,
 		return err;
 	}
 
+	mutex_lock(&data->update_lock);
+
 	control.byte = read_pwm_data(data->base[FAN_BASE], nr, PCSM_MX_TACH_CTRL);
 
 	val = val * 2 * (control.posedge + control.negedge) /
@@ -500,6 +518,8 @@ static ssize_t set_fan(struct device *dev,
 	write_pwm_data(data->base[FAN_BASE], nr, addr, val_lo);
 	write_pwm_data(data->base[FAN_BASE], nr, addr + 1, val_hi);
 
+	mutex_unlock(&data->update_lock);
+
 	return count;
 }
 
@@ -508,12 +528,12 @@ static ssize_t pwm_show_temp(struct device *dev,
 			     char *buf)
 {
 	struct sensor_device_attribute_2 *attr = to_sensor_dev_attr_2(devattr);
-	struct pcsm_data *data = dev_get_drvdata(dev);
+	struct pcsm_data *data = update_device(dev);
 
 	int nr = attr->nr;
 	int addr = attr->index;
 
-	u8 temp = read_pwm_data(data->base[FAN_BASE], nr, addr);
+	u8 temp = data->pwm_regs[nr][addr];
 
 	/* attr specific */
 	if (temp < 0) {
@@ -550,6 +570,8 @@ static ssize_t pwm_set_temp(struct device *dev,
 		return err;
 	}
 
+	mutex_lock(&data->update_lock);
+
 	value = clamp_val(value, 0, 128000);
 	temp = value % 1000 ? 1 : 0;
 	value = value / 1000;
@@ -557,13 +579,26 @@ static ssize_t pwm_set_temp(struct device *dev,
 
 	write_pwm_data(data->base[FAN_BASE], nr, addr, temp);
 
+	mutex_unlock(&data->update_lock);
+
 	return count;
+}
+
+static void update_pwm_regs(struct device *dev)
+{
+	struct pcsm_data *data = dev_get_drvdata(dev);
+	int i, j;
+
+
+	for (i = 0; i < ARRAY_SIZE(data->pwm_regs); i++) {
+		for (j = 0; j < ARRAY_SIZE(data->pwm_regs[i]); j++) {
+			data->pwm_regs[i][j] = read_pwm_data(data->base[FAN_BASE], i + 1, j);
+		}
+	}
 }
 
 static int temp_to_millidegrees(term_ts_regs_t v)
 {
-	if (!v.valid || v.fault)
-		return 0;
 	/* 9.3 fixed point */
 	return v.temp * 1000 / (1 << 3);
 }
@@ -573,31 +608,46 @@ static ssize_t pmc_show_temp(struct device *dev,
 			     char *buf)
 {
 	struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
-	struct pcsm_data *data = dev_get_drvdata(dev);
-	int addr = cpu_sensors->ts_map[attr->index].addr;
-	term_ts_regs_t reg = { .word = readl(data->base[TERM_BASE] + addr) };
+	struct pcsm_data *data = update_device(dev);
 
-	return snprintf(buf, PAGE_SIZE - 1, "%d\n", temp_to_millidegrees(reg));
+	if (data->temp_err[attr->index])
+		return -EIO;
+
+	return snprintf(buf, PAGE_SIZE - 1, "%d\n", data->temp[attr->index]);
 }
 
 static ssize_t pmc_show_temp_max(struct device *dev,
 				 struct device_attribute *devattr,
 				 char *buf)
 {
+	struct pcsm_data *data = update_device(dev);
+
+	return snprintf(buf, PAGE_SIZE - 1, "%d\n", data->temp_max);
+}
+
+static void update_temp(struct device *dev)
+{
 	struct pcsm_data *data = dev_get_drvdata(dev);
 	int index;
-	int ts_max = 0;
 
+	if (cpu_sensors == NULL)
+		return;
+
+	data->temp_max = PMC_TEPM_MIN;
 	for (index = 0; index < PMC_TERM_TS_MAX && cpu_sensors->ts_map[index].name; index++) {
 		term_ts_regs_t reg = { .word = readl(data->base[TERM_BASE] +
 						     cpu_sensors->ts_map[index].addr) };
-		int ts_val = temp_to_millidegrees(reg);
+		data->temp_err[index] = false;
+		if (!reg.valid || reg.fault) {
+			data->temp_err[index] = true;
+			continue;
+		}
 
-		if (ts_val > ts_max)
-			ts_max = ts_val;
+		data->temp[index] = temp_to_millidegrees(reg);
+
+		if (data->temp[index] > data->temp_max)
+			data->temp_max = data->temp[index];
 	}
-
-	return snprintf(buf, PAGE_SIZE - 1, "%d\n", ts_max);
 }
 
 #define VREF    1213
@@ -660,20 +710,23 @@ static void read_vm_data_v7(int (*vm_table_val)[VM_MAX_SENSORS],
 	}
 }
 
-static void pvt_read_vm_data(int (*vm_table_val)[VM_MAX_SENSORS],
-			     void __iomem *base)
+static void update_pvt_vm_data(struct device *dev)
 {
+	struct pcsm_data *data = dev_get_drvdata(dev);
+	void __iomem *base = data->base[VOLT_BASE];
+	int (*p_vm_table_val)[VM_MAX_SENSORS] = data->vm_table_val;
 	int ch, sn;
 
-	memset(vm_table_val[0], 0, sizeof(int)*VM_MAX_CHANNELS*VM_MAX_SENSORS);
+	if (cpu_sensors == NULL)
+		return;
 
 	for (sn = 0; sn < VM_MAX_SENSORS; sn++) {
 		for (ch = 0; ch < VM_MAX_CHANNELS; ch++) {
 			if (cpu_sensors->vm_table_type[ch][sn] != NO_EXIST) {
 				if (cpu_has(CPU_FEAT_ISET_V7))
-					read_vm_data_v7(vm_table_val, sn, &ch, base);
+					read_vm_data_v7(p_vm_table_val, sn, &ch, base);
 				else
-					read_vm_data_v6(vm_table_val, sn, ch, base);
+					read_vm_data_v6(p_vm_table_val, sn, ch, base);
 			}
 		}
 	}
@@ -703,14 +756,11 @@ static ssize_t pvt_show_in_avg(struct device *dev,
 			       char *buf)
 {
 	struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
-	struct pcsm_data *data = dev_get_drvdata(dev);
-	int vm_table_val[VM_MAX_CHANNELS][VM_MAX_SENSORS];
-
-	pvt_read_vm_data(vm_table_val, data->base[VOLT_BASE]);
+	struct pcsm_data *data = update_device(dev);
 
 	return snprintf(buf, PAGE_SIZE - 1, "%d.%d\n",
-			pvt_in_avg(vm_table_val, attr->index)/ACCURACY,
-			pvt_in_avg(vm_table_val, attr->index)%ACCURACY);
+			pvt_in_avg(data->vm_table_val, attr->index)/ACCURACY,
+			pvt_in_avg(data->vm_table_val, attr->index)%ACCURACY);
 }
 
 static int pvt_in_min(int (*vm_table_val)[VM_MAX_SENSORS], int index)
@@ -739,14 +789,11 @@ static ssize_t pvt_show_in_min(struct device *dev,
 			       char *buf)
 {
 	struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
-	struct pcsm_data *data = dev_get_drvdata(dev);
-	int vm_table_val[VM_MAX_CHANNELS][VM_MAX_SENSORS];
-
-	pvt_read_vm_data(vm_table_val, data->base[VOLT_BASE]);
+	struct pcsm_data *data = update_device(dev);
 
 	return snprintf(buf, PAGE_SIZE - 1, "%d.%d\n",
-			pvt_in_min(vm_table_val, attr->index)/ACCURACY,
-			pvt_in_min(vm_table_val, attr->index)%ACCURACY);
+			pvt_in_min(data->vm_table_val, attr->index)/ACCURACY,
+			pvt_in_min(data->vm_table_val, attr->index)%ACCURACY);
 }
 
 static int pvt_in_max(int (*vm_table_val)[VM_MAX_SENSORS], int index)
@@ -775,30 +822,30 @@ static ssize_t pvt_show_in_max(struct device *dev,
 			       char *buf)
 {
 	struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
-	struct pcsm_data *data = dev_get_drvdata(dev);
-	int vm_table_val[VM_MAX_CHANNELS][VM_MAX_SENSORS];
-
-	pvt_read_vm_data(vm_table_val, data->base[VOLT_BASE]);
+	struct pcsm_data *data = update_device(dev);
 
 	return snprintf(buf, PAGE_SIZE - 1, "%d.%d\n",
-			pvt_in_max(vm_table_val, attr->index)/ACCURACY,
-			pvt_in_max(vm_table_val, attr->index)%ACCURACY);
+			pvt_in_max(data->vm_table_val, attr->index)/ACCURACY,
+			pvt_in_max(data->vm_table_val, attr->index)%ACCURACY);
 }
 
-static void pvt_read_vext_data(int (*vm_table_val)[VM_MAX_SENSORS],
-			     void __iomem *base)
+static void update_pvt_vext_data(struct device *dev)
 {
+	struct pcsm_data *data = dev_get_drvdata(dev);
+	void __iomem *base = data->base[VOLT_BASE];
+	int (*p_vm_table_val)[VM_MAX_SENSORS] = data->vm_table_val;
 	int ch, sn;
 
-	memset(vm_table_val[0], 0, sizeof(int)*VM_MAX_CHANNELS*VM_MAX_SENSORS);
+	if (cpu_sensors == NULL)
+		return;
 
 	for (sn = 0; sn < VM_MAX_SENSORS; sn++) {
 		for (ch = 0; ch < VM_MAX_CHANNELS; ch++) {
 			if (cpu_sensors->vm_table_type[ch][sn] == VEXT) {
 				if (cpu_has(CPU_FEAT_ISET_V7))
-					read_vm_data_v7(vm_table_val, sn, &ch, base);
+					read_vm_data_v7(p_vm_table_val, sn, &ch, base);
 				else
-					read_vm_data_v6(vm_table_val, sn, ch, base);
+					read_vm_data_v6(p_vm_table_val, sn, ch, base);
 
 				return;
 			}
@@ -829,14 +876,11 @@ static ssize_t pvt_show_in_ext(struct device *dev,
 			       char *buf)
 {
 	struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
-	struct pcsm_data *data = dev_get_drvdata(dev);
-	int vm_table_val[VM_MAX_CHANNELS][VM_MAX_SENSORS];
-
-	pvt_read_vext_data(vm_table_val, data->base[VOLT_BASE]);
+	struct pcsm_data *data = update_device(dev);
 
 	return snprintf(buf, PAGE_SIZE - 1, "%d.%d\n",
-			pvt_in_ext(vm_table_val, attr->index)/ACCURACY,
-			pvt_in_ext(vm_table_val, attr->index)%ACCURACY);
+			pvt_in_ext(data->vm_table_val, attr->index)/ACCURACY,
+			pvt_in_ext(data->vm_table_val, attr->index)%ACCURACY);
 }
 
 static int get_vm_info(int (*vm_table_val)[VM_MAX_SENSORS],
@@ -908,29 +952,33 @@ static ssize_t pvt_show_vm_info(struct device *dev,
 				char *buf)
 {
 	struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
-	struct pcsm_data *data = dev_get_drvdata(dev);
-	int vm_table_val[VM_MAX_CHANNELS][VM_MAX_SENSORS];
+	struct pcsm_data *data = update_device(dev);
+	int (*p_vm_table_val)[VM_MAX_SENSORS] = data->vm_table_val;
 	int sn, pos = 0;
-
-	pvt_read_vm_data(vm_table_val, data->base[VOLT_BASE]);
 
 	if (attr->index == INFO_ALL) {
 		for (sn = 0; sn < VM_MAX_SENSORS; sn++) {
 			if (cpu_sensors->vm_table_type[0][sn] != NO_EXIST) {
-				pos = get_vm_info(vm_table_val, sn, buf, pos);
+				pos = get_vm_info(p_vm_table_val, sn, buf, pos);
 			}
 		}
 	}
 
 	pos += snprintf(&buf[pos], PAGE_SIZE - 1, "VCORE avg: %d.%d min: %d.%d max: %d.%d\n",
-	       pvt_in_avg(vm_table_val, VCORE)/ACCURACY, pvt_in_avg(vm_table_val, VCORE)%ACCURACY,
-	       pvt_in_min(vm_table_val, VCORE)/ACCURACY, pvt_in_min(vm_table_val, VCORE)%ACCURACY,
-	       pvt_in_max(vm_table_val, VCORE)/ACCURACY, pvt_in_max(vm_table_val, VCORE)%ACCURACY);
+			pvt_in_avg(p_vm_table_val, VCORE)/ACCURACY,
+			pvt_in_avg(p_vm_table_val, VCORE)%ACCURACY,
+			pvt_in_min(p_vm_table_val, VCORE)/ACCURACY,
+			pvt_in_min(p_vm_table_val, VCORE)%ACCURACY,
+			pvt_in_max(p_vm_table_val, VCORE)/ACCURACY,
+			pvt_in_max(p_vm_table_val, VCORE)%ACCURACY);
 
 	pos += snprintf(&buf[pos], PAGE_SIZE - 1, "VDDR  avg: %d.%d min: %d.%d max: %d.%d\n",
-	       pvt_in_avg(vm_table_val, VDDR)/ACCURACY, pvt_in_avg(vm_table_val, VDDR)%ACCURACY,
-	       pvt_in_min(vm_table_val, VDDR)/ACCURACY, pvt_in_min(vm_table_val, VDDR)%ACCURACY,
-	       pvt_in_max(vm_table_val, VDDR)/ACCURACY, pvt_in_max(vm_table_val, VDDR)%ACCURACY);
+			pvt_in_avg(p_vm_table_val, VDDR)/ACCURACY,
+			pvt_in_avg(p_vm_table_val, VDDR)%ACCURACY,
+			pvt_in_min(p_vm_table_val, VDDR)/ACCURACY,
+			pvt_in_min(p_vm_table_val, VDDR)%ACCURACY,
+			pvt_in_max(p_vm_table_val, VDDR)/ACCURACY,
+			pvt_in_max(p_vm_table_val, VDDR)%ACCURACY);
 
 	return pos;
 }
@@ -992,9 +1040,13 @@ static ssize_t set_pcs_adjust_period(struct device *dev,
 		return err;
 	}
 
-	PCS_ADJUST_PERIOD = value;
+	mutex_lock(&data->update_lock);
+
+	PCS_ADJUST_PERIOD = clamp_val(value, PCS_ADJUST_MIN_PERIOD, PCS_ADJUST_MAX_PERIOD);
 
 	flush_delayed_work(&data->pcsm_int_cleanup_work);
+
+	mutex_unlock(&data->update_lock);
 
 	return count;
 }
@@ -1007,28 +1059,55 @@ static ssize_t show_pcs_events(struct device *dev,
 	int pos = 0;
 	int i = 0;
 
+	mutex_lock(&data->update_lock);
+
 	pos += snprintf(&buf[pos], PAGE_SIZE - 1, "%-20s %-5s %-19s\n",
 			"name", "count", "date");
 
-	for (i = 0; i < PCS_EVENTS_MAX && i < data->pcs_events_count; i++) {
+	for (i = 0; i < data->pcs_events_count; i++) {
+		if (!data->pmc_sys_events[i])
+			continue;
+
 		struct tm tm_event;
 
 		if (data->pcs_events[i].count != 0) {
 			time64_to_tm(data->pcs_events[i].time, 0, &tm_event);
 
 			pos += snprintf(&buf[pos], PAGE_SIZE - 1,
-					"%-20s %5d %04ld-%02d-%02d %02d:%02d:%02d\n",
-					pmc_sys_events[i], data->pcs_events[i].count,
+					"%-20s %5lu %04ld-%02d-%02d %02d:%02d:%02d\n",
+					data->pmc_sys_events[i], data->pcs_events[i].count,
 					tm_event.tm_year + 1900, tm_event.tm_mon + 1,
 					tm_event.tm_mday, tm_event.tm_hour,
 					tm_event.tm_min, tm_event.tm_sec);
 		} else {
 			pos += snprintf(&buf[pos], PAGE_SIZE - 1, "%-20s %25s\n",
-					pmc_sys_events[i], "no");
+					data->pmc_sys_events[i], "no");
 		}
 	}
 
+	mutex_unlock(&data->update_lock);
+
 	return pos;
+}
+
+static struct pcsm_data *update_device(struct device *dev)
+{
+	struct pcsm_data *data = dev_get_drvdata(dev);
+	unsigned long next_update = msecs_to_jiffies(PCS_UPDATE_PERIOD);
+
+	mutex_lock(&data->update_lock);
+
+	if (time_after(jiffies, data->last_updated + next_update) || !data->valid) {
+		update_temp(dev);
+		update_pwm_regs(dev);
+		update_pvt_vm_data(dev);
+		update_pvt_vext_data(dev);
+		data->last_updated = jiffies;
+		data->valid = true;
+	}
+
+	mutex_unlock(&data->update_lock);
+	return data;
 }
 
 #ifdef CONFIG_EPIC
@@ -1039,14 +1118,14 @@ static void pcs_events_enable(struct pcsm_data *data)
 	if (cpu_has(CPU_FEAT_ISET_V7)) {
 		data->pcs_events_count = PCS_EVENTS_MAX;
 		if (IS_MACHINE_E8V7) {
-			pcs_sys_events.reg = ALL_EVENTS_MASK_E8V7;
+			pcs_sys_events.reg = EVENTS_MASK_E8V7;
 		} else {
 			BUG();
 		}
 		writel(pcs_sys_events.reg, data->base[SYS_BASE] + PMC_SYS_EVENTS_MASK_0_V7);
 	} else {
 		data->pcs_events_count = PCS_EVENTS_COUNT_V6;
-		pcs_sys_events.reg = ALL_EVENTS_MASK_V6;
+		pcs_sys_events.reg = EVENTS_MASK_V6;
 		writel(pcs_sys_events.reg, data->base[SYS_BASE] + PMC_SYS_EVENTS_MASK_V6);
 	}
 }
@@ -1058,12 +1137,12 @@ static irqreturn_t pcsm_interrupt(int irq, void *data)
 	int i;
 
 	if (cpu_has(CPU_FEAT_ISET_V7)) {
-		pcs_sys_events.reg = readl(pdata->base[SYS_BASE] + PMC_SYS_EVENTS_POLLING_0_V7);
+		pcs_sys_events.reg = readl(pdata->base[SYS_BASE] + PMC_SYS_EVENTS_INT_0_V7);
 	} else {
-		pcs_sys_events.reg = readl(pdata->base[SYS_BASE] + PMC_SYS_EVENTS_POLLING_V6);
+		pcs_sys_events.reg = readl(pdata->base[SYS_BASE] + PMC_SYS_EVENTS_INT_V6);
 	}
 
-	for (i = 0; i < PCS_EVENTS_MAX && i < pdata->pcs_events_count; i++) {
+	for (i = 0; i < pdata->pcs_events_count; i++) {
 		if (pcs_sys_events.reg & (1 << i)) {
 			pdata->pcs_events[i].count++;
 			pdata->pcs_events[i].time = ktime_get_real_seconds();
@@ -1081,10 +1160,10 @@ static void pcsm_int_cleanup_irq(struct work_struct *work)
 	data = container_of(work, struct pcsm_data, pcsm_int_cleanup_work.work);
 
 	if (cpu_has(CPU_FEAT_ISET_V7)) {
-		pcs_sys_events.reg = ALL_EVENTS_MASK_E8V7;
+		pcs_sys_events.reg = EVENTS_MASK_E8V7;
 		writel(pcs_sys_events.reg, data->base[SYS_BASE] + PMC_SYS_EVENTS_INT_0_V7);
 	} else {
-		pcs_sys_events.reg = ALL_EVENTS_MASK_V6;
+		pcs_sys_events.reg = EVENTS_MASK_V6;
 		writel(pcs_sys_events.reg, data->base[SYS_BASE] + PMC_SYS_EVENTS_INT_V6);
 	}
 
@@ -1533,6 +1612,8 @@ static int pcsm_drv_probe(struct platform_device *pdev)
 		pcsm_drv->base[i] = base;
 	}
 
+	pcsm_drv->pmc_sys_events = pmc_sys_events_v6;
+
 	if (IS_MACHINE_E16C) {
 		if (cpu_has(CPU_FEAT_IMPROVED_VM))
 			cpu_sensors = &cpu_sensors_e16c_improved_vm;
@@ -1568,6 +1649,8 @@ static int pcsm_drv_probe(struct platform_device *pdev)
 
 	pcsm_drv->pdev = pdev;
 
+	mutex_init(&pcsm_drv->update_lock);
+
 	hwmon_dev = hwmon_device_register_with_groups(&pdev->dev,
 					KBUILD_MODNAME, pcsm_drv, pcsm_attr_groups);
 
@@ -1578,9 +1661,10 @@ static int pcsm_drv_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, pcsm_drv);
 
 #ifdef CONFIG_EPIC
-	pcs_events_enable(pcsm_drv);
 	INIT_DEFERRABLE_WORK(&pcsm_drv->pcsm_int_cleanup_work, pcsm_int_cleanup_irq);
-	queue_delayed_work(system_power_efficient_wq, &pcsm_drv->pcsm_int_cleanup_work, 0);
+	pcs_events_enable(pcsm_drv);
+	queue_delayed_work(system_power_efficient_wq,
+			   &pcsm_drv->pcsm_int_cleanup_work, msecs_to_jiffies(PCS_ADJUST_PERIOD));
 #endif
 
 	return error;

@@ -16,6 +16,7 @@
 #include <linux/entry-kvm.h>
 #include <asm/cpu_regs.h>
 #include <asm/trace.h>
+#include <asm/trap_cellar.h>
 #include <asm/trap_table.h>
 #include <asm/traps.h>
 #include <asm/mmu_regs_types.h>
@@ -39,6 +40,8 @@
 #include "paravirt_sw/cpu_defs.h"
 #include "paravirt_sw/mmu_defs.h"
 #endif /* CONFIG_KVM_PARAVIRTUALIZATION */
+
+#include <asm/kvm/trace_kvm_hv.h>
 
 #undef	DEBUG_KVM_STARTUP_MODE
 #undef	DebugKVMSTUP
@@ -740,6 +743,56 @@ static bool kvm_vcpu_exit_request(struct kvm_vcpu *vcpu)
 		xfer_to_guest_mode_work_pending();
 }
 
+static void copy_entry_completion(intc_info_mu_t *dst, const intc_info_mu_t *src)
+{
+	bool updated = false;
+
+	if (src->no_restore && !dst->no_restore) {
+		dst->no_restore = true;
+		updated = true;
+	}
+
+	if (src->hdr.event_code == IME_READ_MU && dst->hdr.event_code != IME_READ_MU) {
+		dst->hdr.event_code = IME_READ_MU;
+		updated = true;
+	}
+
+	if (updated) {
+		if (dst->condition.store)
+			trace_complete_intc_info_io_write(dst->gpa, dst->data, dst->data_ext);
+		else
+			trace_complete_intc_info_io_read(dst->gpa, dst->data, dst->data_ext);
+	}
+}
+
+static void modify_intc_info_mu_data(intc_info_mu_t *info, int num)
+{
+	for (int i = 0; i < num; i++) {
+		if (unlikely(info[i].modify_data)) {
+			info[i].data = info[i].mod_data;
+			info[i].data_ext = info[i].mod_data_ext;
+		}
+
+		/*
+		 * See complete_intc_info_io_{read/write}()
+		 */
+		if (unlikely(tc_cond_is_quadro_lo(info[i].condition) && i < num - 1))
+			copy_entry_completion(&info[i + 1], &info[i]);
+		else if (unlikely(tc_cond_is_quadro_hi(info[i].condition) && i > 0))
+			copy_entry_completion(&info[i - 1], &info[i]);
+	}
+}
+
+static void check_intc_info_mu_data(intc_info_mu_t *info, int num)
+{
+	if (num == -1)
+		return;
+	if (unlikely(tc_cond_is_quadro_lo(info[num - 1].condition)))
+		WARN_ON_ONCE(true);
+	if (unlikely(tc_cond_is_quadro_hi(info[0].condition)))
+		WARN_ON_ONCE(true);
+}
+
 /**
  * vcpu_enter_guest - handle single VCPU guest entry
  *
@@ -824,6 +877,10 @@ int vcpu_enter_guest(struct kvm_vcpu *vcpu) __must_hold(vcpu)
 #endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	kvm_set_g_tmr();
+
+	/* Interrupts are not allowed after TIRs restored */
+	if (kvm_get_intc_info_mu_is_updated(vcpu))
+		check_intc_info_mu_data(intc_ctxt->mu, intc_ctxt->mu_num);
 
 	intc_ctxt->nr_TIRs = restore_SBBP_TIRs_usincr(intc_ctxt->sbbp, intc_ctxt->TIRs,
 			intc_ctxt->nr_TIRs, intc_ctxt->usincr, cu->header.tir_fz, g_th, dump);

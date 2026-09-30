@@ -1704,6 +1704,7 @@ static long ksys_semctl(int semid, int semnum, int cmd, unsigned long arg, int v
 
 SYSCALL_DEFINE4(semctl, int, semid, int, semnum, int, cmd, unsigned long, arg)
 {
+	cmd &= ~IPC_64; /* Bug #170975 */
 	return ksys_semctl(semid, semnum, cmd, arg, IPC_64);
 }
 

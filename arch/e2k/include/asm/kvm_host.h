@@ -193,7 +193,7 @@ gfn_to_index(gfn_t gfn, gfn_t base_gfn, const pt_level_t *pt_level)
 
 #define KVM_IRQCHIP_NUM_PINS  KVM_IOEPIC_NUM_PINS
 
-#define	KVM_MAX_EIOHUB_NUM	MAX_NUMNODES
+#define	KVM_MAX_EIOHUB_NUM	4
 
 #define ASYNC_PF_PER_VCPU 64
 
@@ -788,6 +788,7 @@ typedef struct kvm_mem_guest {
  */
 #define	DIRECT_INJ_VIRQ_FLAG	0x0010UL	/* direct injection of VIRQ */
 						/* to VCPU process */
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 typedef struct kvm_guest_virq {
 	int virq_id;			/* VIRQ number */
 	atomic_t *count;		/* pointer to atomic counter */
@@ -798,6 +799,7 @@ typedef struct kvm_guest_virq {
 	struct task_struct *host_task;	/* host task structure of VIRQ */
 	int stop_handler;		/* VIRQ handler should be stopped */
 } kvm_guest_virq_t;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 /*
  * Context that is saved and restored by software when
@@ -1194,12 +1196,12 @@ struct kvm_vcpu_arch {
 	ktime_t cepic_idle_start_time;
 
 	int mp_state;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	struct task_struct *host_task;	/* host task: main VCPU host */
 					/* or VIRQ VCPU host for VIRQ VCPUs */
 	struct mutex lock;		/* host and guest part of VCPU */
 					/* including VIRQ VCPUs */
 					/* synchronization */
-#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	struct list_head vcpus_to_spin;	/* list of VCPUs to support boot-time */
 					/* spin lock/unlock */
 #endif /* CONFIG_KVM_PARAVIRTUALIZATION */
@@ -1669,6 +1671,8 @@ static inline void kvm_arch_async_page_present_queued(struct kvm_vcpu *vcpu)
 {
 	/* nothing to do */
 }
+
+DECLARE_PER_CPU(struct kvm_vcpu *, kvm_running_vcpu);
 
 typedef enum kvm_e2k_from {
 	FROM_GENERIC_HYPERCALL,

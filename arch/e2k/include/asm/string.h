@@ -316,9 +316,9 @@ extern void __tagged_memcpy_8(volatile void *dst, const volatile void *src, size
  * For the best performance it is recommended to copy memory with 8192
  * bytes blocks.
  *
- * 'strd_opcode' can be used to specify cache policy: usually L1 cache
- * is disabled to avoid its pollution (disabling L2 cache slows copying
- * of blocks larger than the size of the memory buffers).
+ * 'st_opc' and 'ld_opc' can be used to specify cache policy: usually L1
+ * cache is disabled to avoid its pollution.  Disabling L2 cache slows
+ * copying of blocks larger than the size of the memory buffers.
  *
  * When copying from/to physical/IO memory, disable prefetch through the
  * last argument.
@@ -329,10 +329,10 @@ extern void __tagged_memcpy_8(volatile void *dst, const volatile void *src, size
  * with SET_USR_PFAULT("recovery_memcpy_fault")).
  */
 extern unsigned long __recovery_memcpy_8(void *dst, const void *src, size_t len,
-		ldst_rec_op_t strd_opcode, ldst_rec_op_t ldrd_opcode, int prefetch);
+		ldst_rec_op_t st_opc, ldst_rec_op_t ld_opc, int prefetch);
 /* Since iset v5 we can use this with 16-bytes aligned src, dst and len */
 extern unsigned long __recovery_memcpy_16(void *dst, const void *src, size_t len,
-		ldst_rec_op_t strqp_opcode, ldst_rec_op_t ldrqp_opcode, int prefetch);
+		ldst_rec_op_t st_opc, ldst_rec_op_t ld_opc, int prefetch);
 
 
 #ifdef E2K_P2V
@@ -359,22 +359,20 @@ extern unsigned long __recovery_memcpy_16(void *dst, const void *src, size_t len
  */
 static __can_be_priv_hypercall __always_inline unsigned long
 native_fast_tagged_memory_copy(volatile void *dst, const volatile void __force *src, size_t len,
-			       ldst_rec_op_t st_op, ldst_rec_op_t ld_op, int prefetch)
+			       ldst_rec_op_t st_opc, ldst_rec_op_t ld_opc, int prefetch)
 {
 	unsigned long ret;
 
-	if (CONFIG_CPU_ISET_MIN >= 5 && !st_op.fmt_h && !ld_op.fmt_h &&
-	    st_op.fmt == LDST_QWORD_FMT && ld_op.fmt == LDST_QWORD_FMT &&
+	if (CONFIG_CPU_ISET_MIN >= 5 && !st_opc.fmt_h && !ld_opc.fmt_h &&
+	    st_opc.fmt == LDST_QWORD_FMT && ld_opc.fmt == LDST_QWORD_FMT &&
 	    !((u64) dst & 0xf) && !((u64) src & 0xf) && !(len & 0xf)) {
-		ret = __recovery_memcpy_16((void *)dst, (void *)src, len,
-					   st_op, ld_op, prefetch);
+		ret = __recovery_memcpy_16((void *)dst, (void *)src, len, st_opc, ld_opc, prefetch);
 	} else {
-		ret = __recovery_memcpy_8((void *)dst, (void *)src, len,
-					  st_op, ld_op, prefetch);
+		ret = __recovery_memcpy_8((void *)dst, (void *)src, len, st_opc, ld_opc, prefetch);
 	}
 
 	/* Can give false positives but that's OK */
-	if (HAS_HWBUG_WC_DAM && ldst_rec_get_mas(st_op).masf2.dc_ch == CACHE_BYPASS_ALL)
+	if (HAS_HWBUG_WC_DAM && ldst_rec_get_mas(st_opc).masf2.dc_ch == CACHE_BYPASS_ALL)
 		__E2K_WAIT(_st_c);
 
 	return ret;
@@ -477,15 +475,14 @@ extern notrace void boot_fast_memset(void *s_va, long c, size_t count);
 static inline void
 fast_tagged_memory_copy(volatile void *dst, const volatile void *src, size_t len, int prefetch)
 {
-	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT };
-	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) {
+	ldst_rec_op_t st_opc = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT };
+	ldst_rec_op_t ld_opc = (ldst_rec_op_t) {
 		.fmt = LDST_QWORD_FMT,
 		.mas = MAS_FILL_OPERATION(CACHE_BYPASS_L1, 0),
 	};
 	size_t copied;
 
-	copied = native_fast_tagged_memory_copy(dst, src, len,
-					strd_opcode, ldrd_opcode, prefetch);
+	copied = native_fast_tagged_memory_copy(dst, src, len, st_opc, ld_opc, prefetch);
 	BUG_ON(copied != len);
 }
 
@@ -505,60 +502,11 @@ static inline void fast_memset_io(void *addr, u64 val, u64 tag, size_t len)
 	(void) __recovery_memset_8(addr, val, tag, len, ldst_rec_dword());
 }
 
-static __always_inline __must_check size_t
-fast_tagged_memory_copy_to_user(volatile void __user *dst, const volatile void *src, size_t len,
-				size_t *copied, int prefetch)
-{
-	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT, .prot = 1 };
-	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) {
-		.fmt = LDST_QWORD_FMT,
-		.mas = MAS_FILL_OPERATION(CACHE_BYPASS_L1, 0),
-	};
-	return native_fast_tagged_memory_copy((volatile void __force *) dst, src, len,
-			strd_opcode, ldrd_opcode, prefetch);
-}
-
-static __always_inline __must_check size_t
-fast_tagged_memory_copy_from_user(volatile void *dst, const volatile void __user *src, size_t len,
-				  size_t *copied, int prefetch)
-{
-	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT };
-	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) {
-		.fmt = LDST_QWORD_FMT,
-		.mas = MAS_FILL_OPERATION(CACHE_BYPASS_L1, 0),
-		.prot = 1,
-	};
-	return native_fast_tagged_memory_copy(dst, (void __force *) src, len,
-			strd_opcode, ldrd_opcode, prefetch);
-}
-
-static __always_inline __must_check size_t
-fast_tagged_memory_copy_in_user(volatile void __user *dst, const volatile void __user *src,
-				size_t len, size_t *copied, int prefetch)
-{
-	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT, .prot = 1 };
-	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) {
-		.fmt = LDST_QWORD_FMT,
-		.mas = MAS_FILL_OPERATION(CACHE_BYPASS_L1, 0),
-		.prot = 1,
-	};
-	return native_fast_tagged_memory_copy((volatile void __force *)  dst,
-					      (const volatile void __force *) src,
-					      len, strd_opcode, ldrd_opcode, prefetch);
-}
 static inline unsigned long
 fast_tagged_memory_set(volatile void *addr, u64 val, u64 tag,
 		       size_t len, ldst_rec_op_t strd_opcode)
 {
 	return native_fast_tagged_memory_set(addr, val, tag, len, strd_opcode);
-}
-
-static __always_inline __must_check unsigned long
-fast_tagged_memory_set_user(void __user *addr, u64 val, u64 tag,
-		size_t len, size_t *cleared, ldst_rec_op_t strd_opcode)
-{
-	return native_fast_tagged_memory_set((void __force *) addr, val,
-			tag, len, strd_opcode);
 }
 
 static inline unsigned long

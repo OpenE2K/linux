@@ -26,9 +26,12 @@ static __always_inline int preempt_count(void)
 #define init_task_preempt_count(p) do { } while (0)
 
 #define init_idle_preempt_count(p, cpu) do { \
-	__cpu_preempt_reg = (u64) (u32) __cpu_preempt_reg; \
-	if (cpu == smp_processor_id()) \
-		__cpu_preempt_reg  += (u64) PREEMPT_DISABLED << PREEMPT_COUNTER_SHIFT; \
+	if (cpu == raw_smp_processor_id()) { \
+		/* The preemption counter on secondary CPUs is initialized */ \
+		/* in e2k_start_secondary_switched_stacks() */ \
+		preempt_count_set(PREEMPT_DISABLED); \
+		clear_preempt_need_resched(); \
+	} \
 } while (0)
 
 #define set_cpu_preempt_reg(__cpu_reg, __val) \

@@ -10,7 +10,7 @@
 #include "apic.h"
 #include "../pic.h"
 
-static void unknown_nmi_error(unsigned int reason, struct pt_regs *regs)
+static void unknown_nmi_error(u32 reason)
 {
 	pr_emerg("Uhhuh. NMI received for unknown reason %x on CPU %d.\n",
 			reason, smp_processor_id());
@@ -37,11 +37,9 @@ static void unknown_nmi_error(unsigned int reason, struct pt_regs *regs)
  *
  *      APIC_NM &= ~written_value
  */
-noinline notrace void apic_do_nmi(struct pt_regs *regs)
+notrace u32 lapic_save_and_clear_nmi(void)
 {
-	unsigned int reason;
-
-	reason = apic_read(APIC_NM);
+	u32 reason = apic_read(APIC_NM);
 
 	/*
 	 * Immediately allow receiving of next NM interrupts.
@@ -60,8 +58,13 @@ noinline notrace void apic_do_nmi(struct pt_regs *regs)
 	 *
 	 * In this example cpu0 will never receive the second NMI.
 	 */
-	apic_write(APIC_NM, APIC_NM_BIT_MASK);
+	apic_write(APIC_NM, reason);
 
+	return reason;
+}
+
+noinline notrace void apic_do_nmi(u32 reason)
+{
 	if (reason & APIC_NM_NMI) {
 #ifdef CONFIG_E2K
 		/* NMI IPIs are used only by nmi_call_function() */
@@ -70,6 +73,6 @@ noinline notrace void apic_do_nmi(struct pt_regs *regs)
 		reason &= ~APIC_NM_NMI;
 	}
 
-	if (APIC_NM_MASK(reason) != 0)
-		unknown_nmi_error(reason, regs);
+	if (APIC_NM_MASK(reason))
+		unknown_nmi_error(reason);
 }

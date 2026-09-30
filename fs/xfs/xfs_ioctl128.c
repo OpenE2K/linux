@@ -182,7 +182,7 @@ typedef struct ptr128_xfs_fsop_handlereq {
 
 
 STATIC int
-xfs_ptr128_handlereq_copyin(int cmd,
+xfs_ptr128_handlereq_copyin(u32 cmd,
 			    xfs_fsop_handlereq_t		*hreq,
 			    ptr128_xfs_fsop_handlereq_t	__user *arg128)
 {
@@ -411,8 +411,6 @@ xfs_file_ptr128_ioctl(
 	unsigned		cmd,
 	unsigned long		p)
 {
-	struct inode		*inode = file_inode(filp);
-	struct xfs_inode	*ip = XFS_I(inode);
 	void			__user *arg = (void __user *)p;
 	struct xfs_fsop_handlereq	hreq;
 

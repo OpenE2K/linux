@@ -82,12 +82,31 @@ static int cepic_next_event(unsigned long delta,
 /* Stop generating timer interrupts and mask them */
 static int cepic_timer_shutdown(struct clock_event_device *evt)
 {
-	union cepic_timer_lvtt reg;
+	union cepic_timer_lvtt lvtt;
+	unsigned long flags;
 
-	reg.raw = epic_read_w(CEPIC_TIMER_LVTT);
-	reg.mask = 1;
-	epic_write_w(CEPIC_TIMER_LVTT, reg.raw);
+	local_irq_save(flags);
+
+	lvtt.raw = epic_read_w(CEPIC_TIMER_LVTT);
+	bool was_enabled = !lvtt.mask;
+	lvtt.mask = 1;
+	epic_write_w(CEPIC_TIMER_LVTT, lvtt.raw);
 	epic_write_w(CEPIC_TIMER_INIT, 0);
+
+	/*
+	 * After stopping check if previous timer interrupt is caught
+	 * in CEPIC_CIR.  It might also be caught in CEPIC_PMIRR but
+	 * there is not much we can do with it so there will be
+	 * harmless message about missing handler for timer vector.
+	 */
+	if (was_enabled) {
+		union cepic_cir cir;
+		cir.raw = epic_read_w(CEPIC_CIR);
+		if (cir.vect == lvtt.vect)
+			WARN_ON_ONCE(epic_get_vector() != lvtt.vect);
+	}
+
+	local_irq_restore(flags);
 
 	return 0;
 }

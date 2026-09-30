@@ -718,8 +718,9 @@ CPUHAS(CPU_HWBUG_MCNA_PLLMC_ACCESS,
 		cpu == IDR_E8V7_MDL && revision == 0);
 
 /* #170626 - async CLW mode can lose unaligned stores crodding page boundary.
+ * #170639 - async CLW mode can deadlock on some return + store combinations.
  * Workaround - switch to synchronous CLW mode. */
-CPUHAS(CPU_HWBUG_CLW_ASYNC_UNALIGNED_STORE,
+CPUHAS(CPU_HWBUG_CLW_ASYNC,
 		!IS_ENABLED(CONFIG_CPU_E8V7),
 		false,
 		cpu == IDR_E8V7_MDL && revision == 0);
@@ -746,6 +747,14 @@ CPUHAS(CPU_HWBUG_GENERATIONS_L2_PREF,
 		!IS_ENABLED(CONFIG_CPU_E16C) && !IS_ENABLED(CONFIG_CPU_E8V7),
 		false,
 		cpu == IDR_E16C_MDL && revision == 2 || cpu == IDR_E8V7_MDL && revision == 0);
+
+/* rm 39054 - ldr{d/qp} with .prot=1 in unprotected mode does read tags.
+ * Workaround - use CPU_FEAT_SAFE_UACCESS if supported or clear tags
+ * with `puttag` instruction. */
+CPUHAS(CPU_HWBUG_LDRD_UNPROT_MODE1_TAGGED,
+		!IS_ENABLED(CONFIG_CPU_E8V7),
+		false,
+		cpu == IDR_E8V7_MDL && revision == 0);
 
 /*
  * Not bugs but features go here
@@ -933,6 +942,13 @@ CPUHAS(CPU_FEAT_SVSC,
 		(IS_ENABLED(CONFIG_E2K_MACHINE) || CONFIG_CPU_ISET_MIN >= 7),
 		CONFIG_CPU_ISET_MIN >= 7,
 		iset_ver >= E2K_ISET_V7);
+
+/* Special instructions for accessing user space from kernel. */
+CPUHAS(CPU_FEAT_SAFE_UACCESS,
+		true,
+		CONFIG_CPU_ISET_MIN >= 8,
+		iset_ver >= E2K_ISET_V8);
+
 /* Are we hardware guest? */
 CPUHAS(CPU_FEAT_GUEST, false, false, is_hardware_guest);
 

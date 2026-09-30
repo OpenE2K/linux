@@ -219,7 +219,7 @@ static ssize_t map_attr_show(struct kobject *kobj, struct attribute *attr, char 
   #ifdef IMGPCI_EXTRA_DEBUG
 	if (strncmp(attr->name,"intaddr",4) == 0)
 	{
-		return sprintf(buf, "0x%lx\n", mem->internal_addr);
+		return sprintf(buf, "0x%lx\n", (unsigned long) mem->internal_addr); /* CONFIG_MCST */
 	}
   #endif
 
@@ -1612,7 +1612,7 @@ static int imgpci_pci_probe(struct pci_dev *dev, const struct pci_device_id *id)
 	       MAX_IMGPCI_MAPS-1,
 	       info->mem[MAX_IMGPCI_MAPS-1].addr,
 	       info->mem[MAX_IMGPCI_MAPS-1].size,
-	       info->mem[MAX_IMGPCI_MAPS-1].internal_addr);
+	       (unsigned long) info->mem[MAX_IMGPCI_MAPS-1].internal_addr); /* CONFIG_MCST */
 
 	info->pdev = dev;
 	info->name = "imgpcidev";

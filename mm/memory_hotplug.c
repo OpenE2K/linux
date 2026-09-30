@@ -304,7 +304,11 @@ int __ref __add_pages(int nid, unsigned long pfn, unsigned long nr_pages,
 {
 	const unsigned long end_pfn = pfn + nr_pages;
 	unsigned long cur_nr_pages;
+#ifdef CONFIG_MCST
+	int err = 0;
+#else
 	int err;
+#endif
 	struct vmem_altmap *altmap = params->altmap;
 
 	if (WARN_ON_ONCE(!pgprot_val(params->pgprot)))

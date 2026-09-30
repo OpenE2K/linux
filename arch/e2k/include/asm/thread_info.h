@@ -133,10 +133,12 @@ typedef struct thread_info {
 	void	*virt_machine;		/* pointer to main structure of */
 					/* virtual machine for */
 					/* paravirtualized guest */
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	struct kvm_vcpu *vcpu;		/* KVM VCPU state for host */
 	struct kvm_vcpu *is_vcpu;	/* process is kvm VCPU thread */
 					/* but now it is not active (scheduled) */
 					/* or is at vcpu-qemu mode */
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	unsigned long vcpu_state_base;	/* base of VCPU state fo guest */
 	int (*paravirt_page_prefault)	/* paravirtualized guest page */
 					/* prefault handler */

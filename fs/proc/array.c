@@ -468,8 +468,8 @@ static int do_task_stat(struct seq_file *m, struct pid_namespace *ns,
 	struct mm_struct *mm;
 	unsigned long long start_time;
 #ifdef CONFIG_MCST
-	unsigned long cmin_flt, cmaj_flt, min_flt = 0, maj_flt = 0;
-	u64 cutime, cstime, cgtime, utime, stime, gtime = 0;
+	unsigned long cmin_flt = 0, cmaj_flt = 0, min_flt = 0, maj_flt = 0;
+	u64 cutime = 0, cstime = 0, cgtime = 0, utime, stime, gtime = 0;
 #else
 	unsigned long cmin_flt, cmaj_flt, min_flt, maj_flt;
 	u64 cutime, cstime, cgtime, utime, stime, gtime;

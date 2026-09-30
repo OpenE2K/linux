@@ -722,9 +722,9 @@ typedef union ldst_rec_op {
 	struct {
 		u64 index	: 32;	/* [31- 0] */
 		u64 mas		: 7;	/* [38-32] */
-		u64 prot	: 1;	/*    [39] */
+		u64 prot	: 1;	/*    [39] later renamed to `mode0` */
 		u64 fmt		: 3;	/* [42-40] */
-		u64 root	: 1;	/*    [43] */
+		u64 root	: 1;	/*    [43] later renamed to `mode1` */
 #ifdef CONFIG_KVM_PARAVIRTUALIZATION
 		u64		: 7;	/* [50-44]; should be [51-44] */
 		/* software bit to mark privileged user space access */

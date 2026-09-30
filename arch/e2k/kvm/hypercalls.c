@@ -366,6 +366,13 @@ static int __init init_unpriv_hcalls(void)
 }
 pure_initcall(init_unpriv_hcalls);
 
+/* This can be called in __interrupt hypercall contexts */
+static __always_inline struct kvm_vcpu *kvm_get_running_vcpu_raw(struct thread_info *ti)
+{
+	long cpu = task_cpu(thread_info_task(ti));
+	return per_cpu(kvm_running_vcpu, cpu);
+}
+
 /*
  * This is the light hypercalls execution.
  * Lighte hypercalls do not:
@@ -395,7 +402,7 @@ __visible unsigned long kvm_light_hcalls(unsigned long hcall_num,
 
 	/* Save guest values of global regs and set current pointers instead */
 	thread_info = native_read_CURRENT_reg_value();
-	vcpu = thread_info->vcpu;
+	vcpu = kvm_get_running_vcpu_raw(thread_info);
 
 	__guest_exit_light(thread_info, &vcpu->arch);
 
@@ -809,7 +816,7 @@ __visible unsigned long kvm_generic_hcalls(unsigned long hcall_num,
 		unsigned long arg4, unsigned long arg5, unsigned long arg6)
 {
 	struct thread_info *ti = native_read_CURRENT_reg_value();
-	struct kvm_vcpu *vcpu = ti->vcpu;
+	struct kvm_vcpu *vcpu = kvm_get_running_vcpu_raw(ti);
 #ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	gmm_struct_t *gmm = NULL;
 	hpa_t root, gk_root;
@@ -884,7 +891,7 @@ static unsigned long kvm_generic_hcalls_continue(unsigned long hcall_num,
 		unsigned long arg4, unsigned long arg5, unsigned long arg6)
 {
 	struct thread_info *ti = native_read_CURRENT_reg_value();
-	struct kvm_vcpu *vcpu = ti->vcpu;
+	struct kvm_vcpu *vcpu = kvm_get_running_vcpu();
 	struct kvm *kvm = vcpu->kvm;
 	e2k_cr1_t cr1;
 #ifdef CONFIG_KVM_PARAVIRTUALIZATION

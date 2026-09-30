@@ -89,7 +89,7 @@ static int ioepic_service(struct kvm_ioepic *ioepic, unsigned int idx)
 	entry = &ioepic->redirtbl[idx];
 
 	if (!entry->int_ctrl.mask) {
-		injected = ioepic_deliver_to_cepic(ioepic, idx);
+		injected = !ioepic_deliver_to_cepic(ioepic, idx);
 		/* Set delivery_status bit for level interrupts */
 		if (injected && entry->int_ctrl.trigger)
 			entry->int_ctrl.delivery_status = 1;

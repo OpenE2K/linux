@@ -252,8 +252,10 @@ int kvm_init_vcpu_thread(struct kvm_vcpu *vcpu)
 
 	sprintf(name, "kvm/%d-vcpu/%d", vcpu->kvm->arch.vm_id, vcpu->vcpu_id);
 	set_task_comm(current, name);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	vcpu->arch.host_task = current;
 	task_thread_info(current)->is_vcpu = vcpu;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	kvm_reset_vcpu_thread(vcpu);
 
@@ -630,7 +632,7 @@ void kvm_print_all_vm_stacks(void)
 #ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	deferred_print_all_guest_stacks();
 #else
-	struct kvm_vcpu *vcpu = current_thread_info()->vcpu;
+	struct kvm_vcpu *vcpu = kvm_get_running_vcpu();
 	if (vcpu) {
 		/* If called from guest then dump current VM only */
 		vcpu_inject_empty_tirs(vcpu);

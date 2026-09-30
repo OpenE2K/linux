@@ -328,8 +328,8 @@ static __always_inline enum fast_gettime_return fast_gettimeofday_user(
 
 	fast_ret = fast_get_time_precise(&ts_tv_sec, &ts_tv_nsec, false);
 	if (likely(!fast_ret)) {
-		__put_user_switched_pt(ts_tv_sec, &tv->tv_sec);
-		__put_user_switched_pt(ts_tv_nsec / 1000, &tv->tv_usec);
+		put_user_switched_pt(ts_tv_sec, &tv->tv_sec);
+		put_user_switched_pt(ts_tv_nsec / 1000, &tv->tv_usec);
 	}
 
 	return fast_ret;
@@ -399,17 +399,17 @@ static __always_inline int fast_sys_getcontext(struct ucontext __user *ucp,
 	pcsp = decr_pcsp_ind(pcsp, SZ_OF_CR);
 	psp = decr_psp_ind(psp, ((e2k_cr1_t) { .lo = cr1_lo, .hi = 0 }).wbs * EXT_4_NR_SZ);
 
-	/* Can use `|=` because __put_user_switched_pt can return only -EFAULT error */
-	ret = __put_user_switched_pt(set, (u64 __user *) &ucp->uc_sigmask);
-	ret |= __put_user_switched_pt(key, uc_coroutine_key_64(ucp));
-	ret |= __put_user_switched_pt(LO(pcsp), &ucp->uc_mcontext.pcsp_lo);
-	ret |= __put_user_switched_pt(HI(pcsp), &ucp->uc_mcontext.pcsp_hi);
-	ret |= __put_user_switched_pt(LO(psp), &ucp->uc_mcontext.psp_lo);
-	ret |= __put_user_switched_pt(HI(psp), &ucp->uc_mcontext.psp_hi);
-	ret |= __put_user_switched_pt(sbr, &ucp->uc_mcontext.sbr);
-	ret |= __put_user_switched_pt(fpcr, &ucp->uc_extra.fpcr);
-	ret |= __put_user_switched_pt(fpsr, &ucp->uc_extra.fpsr);
-	return ret | __put_user_switched_pt(pfpfr, &ucp->uc_extra.pfpfr);
+	/* Can use `|=` because put_user_switched_pt can return only -EFAULT error */
+	ret = put_user_switched_pt(set, (u64 __user *) &ucp->uc_sigmask);
+	ret |= put_user_switched_pt(key, uc_coroutine_key_64(ucp));
+	ret |= put_user_switched_pt(LO(pcsp), &ucp->uc_mcontext.pcsp_lo);
+	ret |= put_user_switched_pt(HI(pcsp), &ucp->uc_mcontext.pcsp_hi);
+	ret |= put_user_switched_pt(LO(psp), &ucp->uc_mcontext.psp_lo);
+	ret |= put_user_switched_pt(HI(psp), &ucp->uc_mcontext.psp_hi);
+	ret |= put_user_switched_pt(sbr, &ucp->uc_mcontext.sbr);
+	ret |= put_user_switched_pt(fpcr, &ucp->uc_extra.fpcr);
+	ret |= put_user_switched_pt(fpsr, &ucp->uc_extra.fpsr);
+	return ret | put_user_switched_pt(pfpfr, &ucp->uc_extra.pfpfr);
 }
 
 static __always_inline int native_fast_sys_set_return(u64 ip, int flags)
@@ -505,18 +505,18 @@ static __always_inline int compat_fast_sys_getcontext(struct ucontext_32 __user 
 	pcsp = decr_pcsp_ind(pcsp, SZ_OF_CR);
 	psp = decr_psp_ind(psp, ((e2k_cr1_t) { .lo = cr1_lo, .hi = 0 }).wbs * EXT_4_NR_SZ);
 
-	/* Can use `|=` because __put_user_switched_pt can return only -EFAULT error */
-	ret = __put_user_switched_pt(set.word[0], &((u32 __user *) &ucp->uc_sigmask)[0]);
-	ret |= __put_user_switched_pt(set.word[1], &((u32 __user *) &ucp->uc_sigmask)[1]);
-	ret |= __put_user_switched_pt(key, uc_coroutine_key_32(ucp));
-	ret |= __put_user_switched_pt(LO(pcsp), &ucp->uc_mcontext.pcsp_lo);
-	ret |= __put_user_switched_pt(HI(pcsp), &ucp->uc_mcontext.pcsp_hi);
-	ret |= __put_user_switched_pt(LO(psp), &ucp->uc_mcontext.psp_lo);
-	ret |= __put_user_switched_pt(HI(psp), &ucp->uc_mcontext.psp_hi);
-	ret |= __put_user_switched_pt(sbr, &ucp->uc_mcontext.sbr);
-	ret |= __put_user_switched_pt(fpcr, &ucp->uc_extra.fpcr);
-	ret |= __put_user_switched_pt(fpsr, &ucp->uc_extra.fpsr);
-	return ret | __put_user_switched_pt(pfpfr, &ucp->uc_extra.pfpfr);
+	/* Can use `|=` because put_user_switched_pt can return only -EFAULT error */
+	ret = put_user_switched_pt(set.word[0], &((u32 __user *) &ucp->uc_sigmask)[0]);
+	ret |= put_user_switched_pt(set.word[1], &((u32 __user *) &ucp->uc_sigmask)[1]);
+	ret |= put_user_switched_pt(key, uc_coroutine_key_32(ucp));
+	ret |= put_user_switched_pt(LO(pcsp), &ucp->uc_mcontext.pcsp_lo);
+	ret |= put_user_switched_pt(HI(pcsp), &ucp->uc_mcontext.pcsp_hi);
+	ret |= put_user_switched_pt(LO(psp), &ucp->uc_mcontext.psp_lo);
+	ret |= put_user_switched_pt(HI(psp), &ucp->uc_mcontext.psp_hi);
+	ret |= put_user_switched_pt(sbr, &ucp->uc_mcontext.sbr);
+	ret |= put_user_switched_pt(fpcr, &ucp->uc_extra.fpcr);
+	ret |= put_user_switched_pt(fpsr, &ucp->uc_extra.fpsr);
+	return ret | put_user_switched_pt(pfpfr, &ucp->uc_extra.pfpfr);
 }
 
 #endif /* _ASM_E2K_FAST_SYSCALLS_H */

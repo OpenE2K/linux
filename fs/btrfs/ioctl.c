@@ -5701,17 +5701,25 @@ static long btrfs_protected_ioctl_v2(struct file *file,
 		return -ENOMEM;
 	}
 	set_u_border(MAX_U_BORDER);
-	if (copy_in_user(arg64p, arg128, 3 * sizeof(__u64))) {
+
+	char buf1[3 * sizeof(__u64)];
+	if (copy_from_user(buf1, arg128, sizeof(buf1)) ||
+	    copy_to_user(arg64p, buf1, sizeof(buf1))) {
 		/* fd, transid, flags */
 		return -EFAULT;
 	}
-	if (copy_in_user(arg64p + offsetof(struct btrfs_ioctl_vol_args_v2, devid),
+
+	char buf2[sizeof(struct btrfs_ioctl_vol_args_v2) -
+		  offsetof(struct btrfs_ioctl_vol_args_v2, devid)];
+	if (copy_from_user(buf2,
 		     arg128 + offsetof(struct btrfs_protected_ioctl_vol_args_v2, devid),
-		     sizeof(struct btrfs_ioctl_vol_args_v2) -
-			    offsetof(struct btrfs_ioctl_vol_args_v2, devid))) {
+		     sizeof(buf2)) ||
+	    copy_to_user(arg64p + offsetof(struct btrfs_ioctl_vol_args_v2, devid),
+		     buf2, sizeof(buf2))) {
 		/* union {name, devid, subvolid */
 		return -EFAULT;
 	}
+
 	if (get_user(flags, (__u64 __user *)&arg128->flags))
 		return -EFAULT;
 	if (!(flags & BTRFS_SUBVOL_QGROUP_INHERIT)) {

@@ -24,8 +24,10 @@
 /*
  * V6, V7 PWMs registers
  * */
-#define FRST_INST                       0x1
-#define SCND_INST                       0x2
+#define FRST_INST                       0x0 /* inst in pwmc - 0x1 */
+#define SCND_INST                       0x1 /* inst in pwmc - 0x2 */
+
+#define INST_COUNT                      0x2
 
 /* common control and pwm */
 #define PCSM_RO_ID_LO			0x00
@@ -80,6 +82,7 @@
 #define PCSM_RW_TACH_MAX_HI		0x2d
 #define PCSM_RW_ALERT_STATUS		0x2e
 
+#define PCSM_PWM_REGS_COUNT		0x2f
 /* max value for pwm and temp registers */
 #define PCSM_THERM_MAX			0xFF
 #define PCSM_PWM_MAX			0x80
@@ -124,8 +127,8 @@ typedef union {
 		u32 rsv			: 7;
 	} v6;
 	struct {
-		u32 mc0_dimm_event : 1;
-		u32 mc1_dimm_event : 1;
+		u32 mc0_dimm_event	  : 1;
+		u32 mc1_dimm_event	  : 1;
 		u32 machine_gen_alert	  : 1;
 		u32 nmi_cpu_sw		  : 1;
 		u32 smbus_alert_0	  : 1;
@@ -160,20 +163,23 @@ typedef union {
 	u32 reg;
 } pcs_sys_events_t;
 
-#define ALL_EVENTS_MASK_V6		0x01ffffff
-#define ALL_EVENTS_MASK_E8V7		0x29ffffff
+#define EVENTS_MASK_V6		0x01c6dfff
+#define EVENTS_MASK_E8V7	0x28ffffff
 
 #define PCS_EVENTS_MAX			31
 #define PCS_EVENTS_COUNT_V6		25
 
 typedef struct event_info {
-	unsigned int count;
+	unsigned long count;
 	time64_t time;
 } event_info_t;
 
-
+#define PCS_ADJUST_MIN_PERIOD 1000 /* ms */
+#define PCS_ADJUST_MAX_PERIOD 3600000 /* ms */
 static int PCS_ADJUST_PERIOD = 300000; /* ms */
+static int PCS_UPDATE_PERIOD = 200; /* ms */
 
+#define PMC_TEPM_MIN	(-256000)
 #define PMC_TERM_TS_MAX	8
 #undef PMC_FAN_CFG
 #define PMC_FAN_CFG 0x0
@@ -248,7 +254,7 @@ struct cpu_sensors {
 	s8 vm_table_type[VM_MAX_CHANNELS][VM_MAX_SENSORS];
 };
 
-static const char * const pmc_sys_events[] = {
+static const char * const pmc_sys_events_v6[] = {
 	"mc03_dimm_event",
 	"mc47_dimm_event",
 	"mc03_pwr_alert",
@@ -274,6 +280,40 @@ static const char * const pmc_sys_events[] = {
 	"mc03_throttle",
 	"mc47_throttle",
 	"cpu_forcepr"
+};
+
+static const char * const pmc_sys_events_e8v7[] = {
+	"mc0_dimm_event",
+	"mc1_dimm_event",
+	"machine_gen_alert",
+	"nmi_cpu_sw",
+	"smbus_alert_0",
+	"smbus_alert_1",
+	"board_event",
+	"cpu_hot",
+	"mc0_throttle",
+	"mc1_throttle",
+	"cpu_forcepr",
+	"term_nomax",
+	"term_fault",
+	"term_diag",
+	"volt_no_minmax",
+	"volt_fault",
+	"volt_diag",
+	"uC_int",
+	"ts_alarma",
+	"ts_alarmb",
+	"vm_alarma",
+	"vm_alarmb",
+	"pd_alarma",
+	"pd_alarmb",
+	"pvt_all_int",
+	NULL,
+	NULL,
+	"core_cc_lo", /* CORE0-CORE7 */
+	NULL,
+	"core_cu_lo", /* CORE0-CORE7 */
+	NULL
 };
 
 struct cpufreq_policy;

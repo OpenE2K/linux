@@ -2,6 +2,7 @@
 # Copyright (c) 2023 MCST
 
 obj-y := libkeprof.o
+CFLAGS_libkeprof.o := $(call lcc-option,-fno-global-regs)
 CFLAGS_REMOVE_libkeprof.o := $(CC_FLAGS_FTRACE)
 
 empty:=

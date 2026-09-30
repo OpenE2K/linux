@@ -4257,8 +4257,9 @@ static enum exec_mmu_ret do_recovery_store(struct pt_regs *regs,
 	st_rec_opc.mas = (big_endian) ? (mas & ~MAS_ENDIAN_MASK) : mas;
 	st_rec_opc.prot = !tcellar->condition.npsp;
 	st_rec_opc.root = tcellar->condition.root;
-	if (cpu_has(CPU_FEAT_ISET_V7) && !st_rec_opc.prot &&
-			__range_ok(address, length, TASK_SIZE)) {
+	if (cpu_has(CPU_FEAT_SVSC) && !cpu_has(CPU_FEAT_SAFE_UACCESS) &&
+			!st_rec_opc.prot &&
+			__range_ok(address, length, user_addr_max())) {
 		/* MMU_CR.svsc check should not trigger here so use unprivileged
 		 * access (mode=4) instead of the privileged one (mode=0) */
 		st_rec_opc.mode_h = 1;
@@ -4855,8 +4856,9 @@ static enum exec_mmu_ret do_recovery_load(struct pt_regs *regs,
 	}
 	ld_rec_opc.prot = !cond.npsp;
 	ld_rec_opc.root = cond.root;
-	if (cpu_has(CPU_FEAT_ISET_V7) && !ld_rec_opc.prot &&
-			__range_ok(address, length, TASK_SIZE)) {
+	if (cpu_has(CPU_FEAT_SVSC) && !cpu_has(CPU_FEAT_SAFE_UACCESS) &&
+			!ld_rec_opc.prot &&
+			__range_ok(address, length, user_addr_max())) {
 		/* MMU_CR.svsc check should not trigger here so use unprivileged
 		 * access (mode=4) instead of the privileged one (mode=0) */
 		ld_rec_opc.mode_h = 1;
@@ -5242,6 +5244,9 @@ enum exec_mmu_ret execute_mmu_operations(trap_cellar_t *tcellar,
 
 
 out:
+	if (unlikely(ret == EXEC_MMU_STOP && !user_mode(regs) && controlled_user_access(regs)))
+		handle_uaccess_trap(regs, false);
+
 	regs->flags.exec_mmu_op = 0;
 	regs->flags.exec_mmu_op_nested = 0;
 

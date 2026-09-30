@@ -23,14 +23,14 @@ int fast_sys_getcpu(unsigned __user *cpup, unsigned __user *nodep,
 		     (unsigned long) nodep + sizeof(unsigned) > user_addr_max()))
 		return -EFAULT;
 
-	/* Can use `|=` because __put_user_switched_pt can return only -EFAULT error */
+	/* Can use `|=` because put_user_switched_pt can return only -EFAULT error */
 	if (nodep) {
 		int node = cpu_to_node(cpu);
 
-		ret = __put_user_switched_pt(node, nodep);
+		ret = put_user_switched_pt(node, nodep);
 	}
 	if (cpup)
-		ret |= __put_user_switched_pt(cpu, cpup);
+		ret |= put_user_switched_pt(cpu, cpup);
 
 	return ret;
 }

@@ -116,6 +116,16 @@ static inline struct kvm_spmc *timer_to_spmc(struct kvm_timer *timer)
 	return container_of(timer, struct kvm_spmc, sci_timer);
 }
 
+static inline struct kvm_spmc *kvm_get_spmc(struct kvm *kvm, int node_id)
+{
+	return kvm->arch.spmc[node_id];
+}
+
+static inline void kvm_set_spmc(struct kvm *kvm, int node_id, struct kvm_spmc *spmc)
+{
+	kvm->arch.spmc[node_id] = spmc;
+}
+
 #if	DEBUG_SPMC_REGS_MODE
 static inline void dump_spmc_pm_timer(u32 reg)
 {
@@ -310,8 +320,7 @@ static u64 kvm_get_up_to_date_sci_timer(struct kvm_vcpu *vcpu,
 static inline bool spmc_in_range(struct kvm_spmc *spmc, gpa_t addr)
 {
 	return addr >= spmc->base_address + SPMC_REGS_CFG_OFFSET &&
-			addr < spmc->base_address + SPMC_REGS_CFG_OFFSET +
-							SPMC_REGS_CFG_LENGTH;
+	       addr < spmc->base_address + SPMC_REGS_CFG_OFFSET + SPMC_REGS_CFG_LENGTH;
 }
 static inline u32 spmc_get_reg(struct kvm_spmc *spmc, int reg_off)
 {
@@ -921,7 +930,7 @@ static void kvm_spmc_reset(struct kvm_spmc *spmc)
 	hrtimer_cancel(&spmc->sci_timer.timer);
 	kthread_flush_work(&spmc->sci_timer.expired);
 
-	spmc->base_address = 0;
+	spmc->base_address = INVALID_GPA;
 	spmc->sci_timer_irq_id = SPMC_SCI_IRQ_ID;
 
 	/* registers state on reset */
@@ -949,9 +958,10 @@ static const struct kvm_timer_ops spmc_sci_timer_ops = {
 	.timer_fn	= do_sci_timer,
 };
 
-struct kvm_spmc *kvm_create_spmc(struct kvm *kvm, int node_id,
-			u32 ticks_per_sec,	/* CPU frequency at herz */
-			u32 spmc_timer_freq)	/* PM timer frequency at herz */
+static struct kvm_spmc *kvm_create_spmc(struct kvm *kvm, int node_id,
+		u32 ticks_per_sec /* CPU frequency at herz */,
+		u32 spmc_timer_freq /* PM timer frequency at herz */,
+		gpa_t conf_base)
 {
 	struct kvm_spmc *spmc;
 	pid_t pid_nr;
@@ -967,6 +977,7 @@ struct kvm_spmc *kvm_create_spmc(struct kvm *kvm, int node_id,
 	spmc->kvm = kvm;
 	spmc->ticks_per_sec = ticks_per_sec;
 	spmc->frequency = spmc_timer_freq;
+	spmc->base_address = conf_base;
 
 	pid_nr = task_pid_nr(current);
 
@@ -985,8 +996,6 @@ struct kvm_spmc *kvm_create_spmc(struct kvm *kvm, int node_id,
 
 	kvm_spmc_reset(spmc);
 
-	kvm_set_spmc(kvm, node_id, spmc);
-
 	return spmc;
 
 fail_sci_timer:
@@ -996,62 +1005,64 @@ fail_sci_timer:
 
 int kvm_spmc_set_base(struct kvm *kvm, int node_id, unsigned long conf_base)
 {
-	struct kvm_spmc *spmc = kvm_get_spmc(kvm, node_id);
 	int ret;
 
-	if (spmc == NULL) {
-		kvm_create_spmc(kvm, node_id, cpu_freq_hz,
-			EIOH_SPMC_PM_TIMER_FREQ	/* only SPMC of EIOHub */
-						/* is now supported */);
-		spmc = kvm_get_spmc(kvm, node_id);
-		if (spmc == NULL) {
-			pr_err("%s(): SPMC node #%d could not be created, "
-				"ignore setup\n",
-				__func__, node_id);
-			return -ENODEV;
-		}
-	}
-	if (spmc->base_address == conf_base) {
-		pr_info("%s(): SPMC node #%d base 0x%lx is the same, "
-			"so ignore update\n",
-			__func__, node_id, conf_base);
+	if (conf_base == INVALID_GPA || node_id >= KVM_MAX_EIOHUB_NUM)
+		return -EINVAL;
+
+	/* Ignore -1 (trying to get PCI BAR size) */
+	if ((conf_base & 0xffffffff) != 0xffffffff)
 		return 0;
-	}
 
 	mutex_lock(&kvm->slots_lock);
-	if (spmc->base_address != 0) {
-		/* base address was already set, so update */
+
+	struct kvm_spmc *spmc = kvm_get_spmc(kvm, node_id);
+	if (spmc) {
+		if (spmc->base_address == conf_base) {
+			ret = 0;
+			goto out_unlock;
+		}
+
 		kvm_io_bus_unregister_dev(kvm, KVM_MMIO_BUS, &spmc->dev);
-	}
-	spmc->base_address = conf_base;
-	kvm_iodevice_init(&spmc->dev, &spmc_conf_io_ops);
-	ret = kvm_io_bus_register_dev(kvm, KVM_MMIO_BUS,
-			conf_base + SPMC_REGS_CFG_OFFSET, SPMC_REGS_CFG_LENGTH,
-			&spmc->dev);
-	mutex_unlock(&kvm->slots_lock);
-	if (ret < 0) {
-		kvm_set_spmc(kvm, node_id, NULL);
-		kfree(spmc);
-		pr_err("%s(): could not register SPMC node #%d as PIO "
-			"bus device, error %d\n",
-			__func__, node_id, ret);
+		spmc->base_address = conf_base;
+	} else {
+		/* only SPMC of EIOHub is supported */
+		spmc = kvm_create_spmc(kvm, node_id, cpu_freq_hz,
+				EIOH_SPMC_PM_TIMER_FREQ, conf_base);
+		if (!spmc) {
+			ret = -ENODEV;
+			goto out_unlock;
+		}
+
+		kvm_iodevice_init(&spmc->dev, &spmc_conf_io_ops);
 	}
 
+	ret = kvm_io_bus_register_dev(kvm, KVM_MMIO_BUS,
+			conf_base + SPMC_REGS_CFG_OFFSET,
+			SPMC_REGS_CFG_LENGTH, &spmc->dev);
+	if (ret) {
+		kfree(spmc);
+	} else {
+		kvm_set_spmc(kvm, node_id, spmc);
+	}
+
+out_unlock:
+	mutex_unlock(&kvm->slots_lock);
 	return ret;
 }
 
-void kvm_free_spmc(struct kvm *kvm, int node_id)
+static void kvm_free_spmc(struct kvm *kvm, int node_id)
 {
 	struct kvm_spmc *spmc = kvm_get_spmc(kvm, node_id);
 
 	if (spmc) {
-		if (spmc->base_address != 0) {
-			mutex_lock(&kvm->slots_lock);
-			kvm_io_bus_unregister_dev(kvm, KVM_MMIO_BUS,
-							&spmc->dev);
-			spmc->base_address = 0;
-			mutex_unlock(&kvm->slots_lock);
+		mutex_lock(&kvm->slots_lock);
+		if (spmc->base_address != INVALID_GPA) {
+			kvm_io_bus_unregister_dev(kvm, KVM_MMIO_BUS, &spmc->dev);
+			spmc->base_address = INVALID_GPA;
 		}
+		mutex_unlock(&kvm->slots_lock);
+
 		hrtimer_cancel(&spmc->sci_timer.timer);
 		kthread_flush_work(&spmc->sci_timer.expired);
 		kthread_destroy_worker(spmc->sci_timer.worker);

@@ -56,7 +56,7 @@
 
 #define PM_MM_FREE_PTR_MODE_MASK	0x007000
 /* Default mmu control mode: */
-#define PM_MM_DEFAULT_FREE_PTR_MODE	PM_MM_EMPTYING_FREED_POINTERS
+#define PM_MM_DEFAULT_FREE_PTR_MODE	PM_MM_ZEROING_FREED_POINTERS
 
 /* Malloc ops mode in PM: no initialization of memory allocated (64-bit compatible) */
 #define PM_MM_MALLOC_MODE_MASK		0x030000UL

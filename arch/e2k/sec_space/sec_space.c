@@ -549,11 +549,10 @@ static int set_bin_comp_info_search_path(const char __user *user_path)
 		ret = len < 0 ? len : -ENOENT;
 		goto out_free;
 	}
-	if (path[len-1] == '/')
-		path[len--] = '0';
 
 	/* currently both RTC32/64 have the same lengths */
-	if (len + strlen(RTC32_NAME) >= PATH_MAX) {
+	if (len + strlen(RTC32_NAME) >= PATH_MAX ||
+	    len + strlen(RTC64_NAME) >= PATH_MAX) {
 		ret = -ENAMETOOLONG;
 		goto out_free;
 	}

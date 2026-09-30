@@ -123,9 +123,7 @@ static inline bool is_spt_paging(struct kvm_vcpu *vcpu)
 #endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 static inline bool is_hv_paging(struct kvm_vcpu *vcpu)
 {
-	if (current_thread_info()->vcpu != vcpu)
-		return is_paging_flag(vcpu);
-	if (vcpu->arch.mmu.is_paging == NULL)
+	if (!vcpu->arch.mmu.is_paging || kvm_get_running_vcpu() != vcpu)
 		return is_paging_flag(vcpu);
 
 	return vcpu->arch.mmu.is_paging(vcpu);

@@ -19,6 +19,7 @@ typedef enum e2k_iset_ver {
 	E2K_ISET_V5 = 5,
 	E2K_ISET_V6 = 6,
 	E2K_ISET_V7 = 7,
+	E2K_ISET_V8 = 8,
 } e2k_iset_ver_t;
 
 #define E2K_ISET_V3_MASK	(1 << E2K_ISET_V3)

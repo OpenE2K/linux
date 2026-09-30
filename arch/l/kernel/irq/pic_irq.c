@@ -133,12 +133,12 @@ u64 arch_irq_stat(void)
 	return atomic_read(&irq_mis_count);
 }
 
-noinline notrace void do_nmi(struct pt_regs *regs)
+noinline notrace void do_nmi(u32 nmi_reason)
 {
 	if (cpu_has_epic())
-		epic_do_nmi(regs);
+		epic_do_nmi(nmi_reason);
 	else
-		apic_do_nmi(regs);
+		apic_do_nmi(nmi_reason);
 }
 
 void __ref do_postpone_tick(int to_next_rt_ns)

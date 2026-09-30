@@ -1780,13 +1780,6 @@ static struct ctl_table kern_table[] = {
 		.mode		= 0644,
 		.proc_handler	= stack_trace_sysctl,
 	},
-	{
-		.procname	= "stack_tracer_kernel_only",
-		.data		= &stack_tracer_kernel_only,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
-	},
 #endif
 	{
 		.procname	= "ftrace_dump_on_oops",

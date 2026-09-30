@@ -431,7 +431,7 @@
 				reg = <0x00004900 0 0 0 0>;
 				interrupts =	<17 IRQ_TYPE_LEVEL_HIGH>; /*Serial Port*/
 			};
-			pci@a,0 { /*SMPC controller*/
+			pci@a,0 { /*SPMC controller*/
 				reg = <0x000005000 0 0 0 0>;
 				interrupts =	< 1 IRQ_TYPE_LEVEL_HIGH>; /*SCI*/
 			};

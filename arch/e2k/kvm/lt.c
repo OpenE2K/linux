@@ -106,6 +106,16 @@ static bool wd_debug = false;
  */
 #define	ENABLE_WATCHDOG_RESET	0
 
+static inline struct kvm_lt *kvm_get_lt(struct kvm *kvm, int node_id)
+{
+	return kvm->arch.lt[node_id];
+}
+
+static inline void kvm_set_lt(struct kvm *kvm, int node_id, struct kvm_lt *lt)
+{
+	kvm->arch.lt[node_id] = lt;
+}
+
 static inline struct kvm_lt *to_lt(struct kvm_io_device *dev)
 {
 	return container_of(dev, struct kvm_lt, dev);
@@ -305,9 +315,9 @@ static u64 kvm_get_up_to_date_count(struct kvm_vcpu *vcpu, struct kvm_lt *lt,
 
 static inline bool lt_in_range(struct kvm_lt *lt, gpa_t addr)
 {
-	return ((addr >= lt->base_address &&
-		 (addr < lt->base_address + LT_MMIO_LENGTH)));
+	return addr >= lt->base_address && addr < (lt->base_address + LT_MMIO_LENGTH);
 }
+
 static inline u32 lt_get_reg(struct kvm_lt *lt, int reg_off)
 {
 	lt_reg_debug("%02x : %08x from %px\n",
@@ -991,7 +1001,7 @@ static void kvm_lt_reset(struct kvm_lt *lt)
 	hrtimer_cancel(&lt->wd_timer.timer);
 	kthread_flush_work(&lt->wd_timer.expired);
 
-	lt->base_address = 0;
+	lt->base_address = INVALID_GPA;
 	lt->sys_timer_irq_id = SYS_TIMER_IRQ_ID;
 	lt->wd_timer_irq_id = WD_TIMER_IRQ_ID;
 
@@ -1022,7 +1032,7 @@ static const struct kvm_timer_ops lt_wd_timer_ops = {
 	.timer_fn	= do_lt_wd_timer,
 };
 
-struct kvm_lt *kvm_create_lt(struct kvm *kvm, int node_id, u32 sys_timer_freq)
+static struct kvm_lt *kvm_create_lt(struct kvm *kvm, int node_id, u32 sys_timer_freq, gpa_t base)
 {
 	struct kvm_lt *lt;
 	pid_t pid_nr;
@@ -1037,6 +1047,7 @@ struct kvm_lt *kvm_create_lt(struct kvm *kvm, int node_id, u32 sys_timer_freq)
 
 	lt->kvm = kvm;
 	lt->frequency = sys_timer_freq;
+	lt->base_address = base;
 
 	pid_nr = task_pid_nr(current);
 
@@ -1074,8 +1085,6 @@ struct kvm_lt *kvm_create_lt(struct kvm *kvm, int node_id, u32 sys_timer_freq)
 
 	kvm_lt_reset(lt);
 
-	kvm_set_lt(kvm, node_id, lt);
-
 	return lt;
 
 fail_wd_timer:
@@ -1085,64 +1094,64 @@ fail_sys_timer:
 	return NULL;
 }
 
-int kvm_lt_set_base(struct kvm *kvm, int node_id, unsigned long new_base)
+int kvm_lt_set_base(struct kvm *kvm, int node_id, gpa_t new_base)
 {
-	struct kvm_lt *lt = kvm_get_lt(kvm, node_id);
-	bool created = false;
 	int ret = 0;
-	u32 lt_freq = 10000000;
+	u32 lt_freq = is_prototype() ? 500000 : 10000000;
 
-	if (is_prototype())
-		lt_freq = 500000;
+	if (new_base == INVALID_GPA || node_id >= KVM_MAX_EIOHUB_NUM)
+		return -EINVAL;
 
-	if (lt == NULL) {
-		kvm_create_lt(kvm, node_id, lt_freq);
-		lt = kvm_get_lt(kvm, node_id);
-		if (lt == NULL) {
-			pr_err("%s(): sys timer node #%d is not yet created, ignore setup\n",
-				__func__, node_id);
-			return -ENODEV;
-		}
-		created = true;
-	}
+	/* Ignore -1 (trying to get PCI BAR size) */
+	if ((new_base & 0xffffffff) != 0xffffffff)
+		return 0;
 
 	mutex_lock(&kvm->slots_lock);
 
-	/* Ignore if base did not change or we see -1 (trying to get PCI BAR size) */
-	if (lt->base_address == new_base || (new_base & 0xffffffff) == 0xffffffff) {
-		ret = 0;
-		goto out_unlock;
+	struct kvm_lt *lt = kvm_get_lt(kvm, node_id);
+	if (lt) {
+		if (lt->base_address == new_base) {
+			ret = 0;
+			goto out_unlock;
+		}
+
+		kvm_io_bus_unregister_dev(kvm, KVM_MMIO_BUS, &lt->dev);
+		lt->base_address = new_base;
+	} else {
+		lt = kvm_create_lt(kvm, node_id, lt_freq, new_base);
+		if (!lt) {
+			ret = -ENODEV;
+			goto out_unlock;
+		}
+
+		kvm_iodevice_init(&lt->dev, &lt_mmio_ops);
 	}
 
-	lt->base_address = new_base;
-	kvm_iodevice_init(&lt->dev, &lt_mmio_ops);
-	if (likely(created)) {
-		ret = kvm_io_bus_register_dev(kvm, KVM_MMIO_BUS, new_base,
-					      LT_MMIO_LENGTH, &lt->dev);
+	ret = kvm_io_bus_register_dev(kvm, KVM_MMIO_BUS, new_base,
+				      LT_MMIO_LENGTH, &lt->dev);
+	if (ret) {
+		kfree(lt);
+	} else {
+		kvm_set_lt(kvm, node_id, lt);
 	}
+
 out_unlock:
 	mutex_unlock(&kvm->slots_lock);
-	if (ret < 0) {
-		kvm_set_lt(kvm, node_id, NULL);
-		kfree(lt);
-		pr_err("%s(): could not register sys timer node #%d as MMIO bus device, error %d\n",
-			__func__, node_id, ret);
-	}
-
 	return ret;
 }
 
-void kvm_free_lt(struct kvm *kvm, int node_id)
+static void kvm_free_lt(struct kvm *kvm, int node_id)
 {
 	struct kvm_lt *lt = kvm_get_lt(kvm, node_id);
 
 	if (lt) {
-		if (lt->base_address != 0) {
-			/* mutex_lock(&kvm->slots_lock); */
+		mutex_lock(&kvm->slots_lock);
+		if (lt->base_address != INVALID_GPA) {
 			kvm_io_bus_unregister_dev(kvm, KVM_MMIO_BUS, &lt->dev);
-			lt->base_address = 0;
-			/* mutex_unlock(&kvm->slots_lock); */
+			lt->base_address = INVALID_GPA;
 		}
+		mutex_unlock(&kvm->slots_lock);
+
 		hrtimer_cancel(&lt->sys_timer.timer);
 		kthread_flush_work(&lt->sys_timer.expired);
 		kthread_destroy_worker(lt->sys_timer.worker);

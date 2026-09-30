@@ -1353,8 +1353,11 @@ do { \
 	e2k_cr0_t __ehs_cr0 = (_cr0); \
 	e2k_cr1_t __ehs_cr1 = (_cr1); \
 	u64 __ehs_wd; \
-	__asm_length(11) \
-	asm volatile ("{rwd %[sbr], %%sbr}" \
+	/* Use branches under false predicate to flush %sbbp */ \
+	__asm_length(14) \
+	asm volatile ("0:" \
+		      "{rwd %[sbr], %%sbr;" \
+		      " cmpedb 0, 0, %%pred0}" \
 		      /* Must read %wd in asm (i.e. after `setwd`). \
 		       * Also serves as workaround for CPU_HWBUG_USD_ALIGNMENT */ \
 		      "{rrd %%wd, %[wd]}" \
@@ -1370,33 +1373,72 @@ do { \
 		      %[cpu_hwbug_cr_before_writes]) \
 		      ALTERNATIVE_2( \
 		      /* Default version */ \
-			"{rwd %[cr0_lo], %%cr0.lo}" \
-			"{rwd %[cr0_hi], %%cr0.hi}" \
-			"{rwd %[cr1_lo], %%cr1.lo}" \
-			"{rwd %[cr1_hi], %%cr1.hi}", \
+			"{rwd %[cr0_lo], %%cr0.lo;" \
+			" ibranch 0b ? ~ %%pred0}" \
+			"{rwd %[cr0_hi], %%cr0.hi;" \
+			" ibranch 0b ? ~ %%pred0}" \
+			"{rwd %[cr1_lo], %%cr1.lo;" \
+			" ibranch 0b ? ~ %%pred0}" \
+			"{rwd %[cr1_hi], %%cr1.hi;" \
+			" ibranch 0b ? ~ %%pred0}", \
 		      /* CPU_HWBUG_CR_EVERY_WRITE version */ \
 			"{wait ma_c=1;" \
-			" rwd %[cr0_lo], %%cr0.lo}" \
+			" rwd %[cr0_lo], %%cr0.lo;" \
+			" ibranch 0b ? ~ %%pred0}" \
 			"{wait ma_c=1;" \
-			" rwd %[cr0_hi], %%cr0.hi}" \
+			" rwd %[cr0_hi], %%cr0.hi;" \
+			" ibranch 0b ? ~ %%pred0}" \
 			"{wait ma_c=1;" \
-			" rwd %[cr1_lo], %%cr1.lo}" \
+			" rwd %[cr1_lo], %%cr1.lo;" \
+			" ibranch 0b ? ~ %%pred0}" \
 			"{wait ma_c=1;" \
-			" rwd %[cr1_hi], %%cr1.hi}", \
+			" rwd %[cr1_hi], %%cr1.hi;" \
+			" ibranch 0b ? ~ %%pred0}", \
 		      %[cpu_hwbug_cr_every_write], \
 		      /* CPU_HWBUG_CR_FIRST_WRITE version */ \
 			"{wait ma_c=1;" \
-			" rwd %[cr0_lo], %%cr0.lo}" \
-			"{rwd %[cr0_hi], %%cr0.hi}" \
-			"{rwd %[cr1_lo], %%cr1.lo}" \
-			"{rwd %[cr1_hi], %%cr1.hi}", \
+			" rwd %[cr0_lo], %%cr0.lo;" \
+			" ibranch 0b ? ~ %%pred0}" \
+			"{rwd %[cr0_hi], %%cr0.hi;" \
+			" ibranch 0b ? ~ %%pred0}" \
+			"{rwd %[cr1_lo], %%cr1.lo;" \
+			" ibranch 0b ? ~ %%pred0}" \
+			"{rwd %[cr1_hi], %%cr1.hi;" \
+			" ibranch 0b ? ~ %%pred0}", \
 		      %[cpu_hwbug_cr_first_write]) \
 		      "{rws %[upsr], %%upsr;" \
-		      " scld %[wd], 32, %[wd]}" \
+		      " scld %[wd], 32, %[wd];" \
+		      " ibranch 0b ? ~ %%pred0}" \
 		      /* %wd write must be last since RF is not \
 		       * available while %wd is being modified */ \
-		      "{rwd %[wd], %%wd}\n" \
-		      "{wait all_e=1}" \
+		      "{rwd %[wd], %%wd;" \
+		      " ibranch 0b ? ~ %%pred0}" \
+		      "{ibranch 0b ? ~ %%pred0}" \
+		      "{ibranch 0b ? ~ %%pred0}" \
+		      "{ibranch 0b ? ~ %%pred0}" \
+		      "{ibranch 0b ? ~ %%pred0}" \
+		      "{ibranch 0b ? ~ %%pred0}" \
+		      "{ibranch 0b ? ~ %%pred0}" \
+		      "{ibranch 0b ? ~ %%pred0}" \
+		      "{ibranch 0b ? ~ %%pred0}" \
+		      "{ibranch 0b ? ~ %%pred0}" \
+		      "{ibranch 0b ? ~ %%pred0}" \
+		      "{ibranch 0b ? ~ %%pred0}" \
+		      "{ibranch 0b ? ~ %%pred0}" \
+		      "{ibranch 0b ? ~ %%pred0}" \
+		      "{ibranch 0b ? ~ %%pred0}" \
+		      "{ibranch 0b ? ~ %%pred0}" \
+		      "{ibranch 0b ? ~ %%pred0}" \
+		      "{ibranch 0b ? ~ %%pred0}" \
+		      "{ibranch 0b ? ~ %%pred0}" \
+		      "{ibranch 0b ? ~ %%pred0}" \
+		      "{ibranch 0b ? ~ %%pred0}" \
+		      "{ibranch 0b ? ~ %%pred0}" \
+		      "{ibranch 0b ? ~ %%pred0}" \
+		      "{ibranch 0b ? ~ %%pred0}" \
+		      "{ibranch 0b ? ~ %%pred0}" \
+		      "{wait all_e=1;" \
+		      " ibranch 0b ? ~ %%pred0}" \
 		      : [wd] "=&r" (__ehs_wd) \
 		      : [sbr] "ri" ((u64) ((_sbr).word)), \
 			[usd_hi] "ri" ((u64) (__ehs_usd.hi)), \
@@ -1411,7 +1453,8 @@ do { \
 					   (1 /*me3hi*/ << 15)), \
 			[cpu_hwbug_cr_before_writes] "i" (CPU_HWBUG_CR_BEFORE_WRITES), \
 			[cpu_hwbug_cr_every_write] "i" (CPU_HWBUG_CR_EVERY_WRITE), \
-			[cpu_hwbug_cr_first_write] "i" (CPU_HWBUG_CR_FIRST_WRITE)); \
+			[cpu_hwbug_cr_first_write] "i" (CPU_HWBUG_CR_FIRST_WRITE) \
+		      : "pred0"); \
 } while (0)
 
 static __always_inline void native_set_binco_regs(e2k_qreg_t cs, e2k_qreg_t ds,
@@ -5406,62 +5449,6 @@ do { \
 # define ASM_NO_SANITIZE_OR_NO_INLINE
 #endif
 
-static __always_inline u8 __user_ldrd_b(const u8 __user *addr)
-{
-	ldst_rec_op_t opc = { .prot = 1, .fmt = LDST_BYTE_FMT };
-	u8 ret;
-
-	ASM_NO_SANITIZE_OR_NO_INLINE
-	asm ("ldrd %[addr], %[opc], %[ret]"
-		: [ret] "=r" (ret)
-		: [addr] "r" (addr), "m" (*addr),
-		  [opc] "ir" (opc.word));
-
-	return ret;
-}
-
-static __always_inline u16 __user_ldrd_h(const u16 __user *addr)
-{
-	ldst_rec_op_t opc = { .prot = 1, .fmt = LDST_HALF_FMT };
-	u16 ret;
-
-	ASM_NO_SANITIZE_OR_NO_INLINE
-	asm ("ldrd %[addr], %[opc], %[ret]"
-		: [ret] "=r" (ret)
-		: [addr] "r" (addr), "m" (*addr),
-		  [opc] "ir" (opc.word));
-
-	return ret;
-}
-
-static __always_inline u32 __user_ldrd_w(const u32 __user *addr)
-{
-	ldst_rec_op_t opc = { .prot = 1, .fmt = LDST_WORD_FMT };
-	u32 ret;
-
-	ASM_NO_SANITIZE_OR_NO_INLINE
-	asm ("ldrd %[addr], %[opc], %[ret]"
-		: [ret] "=r" (ret)
-		: [addr] "r" (addr), "m" (*addr),
-		  [opc] "ir" (opc.word));
-
-	return ret;
-}
-
-static __always_inline u64 __user_ldrd_d(const u64 __user *addr)
-{
-	ldst_rec_op_t opc = { .prot = 1, .fmt = LDST_DWORD_FMT };
-	u64 ret;
-
-	ASM_NO_SANITIZE_OR_NO_INLINE
-	asm ("ldrd %[addr], %[opc], %[ret]"
-		: [ret] "=r" (ret)
-		: [addr] "r" (addr), "m" (*addr),
-		  [opc] "ir" (opc.word));
-
-	return ret;
-}
-
 
 static __always_inline u64 __kernel_ldrd_d_opc(const u64 *addr, ldst_rec_op_t opc)
 {
@@ -5476,54 +5463,6 @@ static __always_inline u64 __kernel_ldrd_d_opc(const u64 *addr, ldst_rec_op_t op
 		  [opc] "ir" (opc.word));
 
 	return ret;
-}
-
-static __always_inline void __user_strd_b(u8 value, u8 __user *addr)
-{
-	ldst_rec_op_t opc = { .prot = 1, .fmt = LDST_BYTE_FMT };
-
-	ASM_NO_SANITIZE_OR_NO_INLINE
-	asm ("strd %[addr], %[opc], %[value]"
-		: "=m" (*addr)
-		: [addr] "r" (addr),
-		  [value] "r" (value),
-		  [opc] "ir" (opc.word));
-}
-
-static __always_inline void __user_strd_h(u16 value, u16 __user *addr)
-{
-	ldst_rec_op_t opc = { .prot = 1, .fmt = LDST_HALF_FMT };
-
-	ASM_NO_SANITIZE_OR_NO_INLINE
-	asm ("strd %[addr], %[opc], %[value]"
-		: "=m" (*addr)
-		: [addr] "r" (addr),
-		  [value] "r" (value),
-		  [opc] "ir" (opc.word));
-}
-
-static __always_inline void __user_strd_w(u32 value, u32 __user *addr)
-{
-	ldst_rec_op_t opc = { .prot = 1, .fmt = LDST_WORD_FMT };
-
-	ASM_NO_SANITIZE_OR_NO_INLINE
-	asm ("strd %[addr], %[opc], %[value]"
-		: "=m" (*addr)
-		: [addr] "r" (addr),
-		  [value] "r" (value),
-		  [opc] "ir" (opc.word));
-}
-
-static __always_inline void __user_strd_d(u64 value, u64 __user *addr)
-{
-	ldst_rec_op_t opc = { .prot = 1, .fmt = LDST_DWORD_FMT };
-
-	ASM_NO_SANITIZE_OR_NO_INLINE
-	asm ("strd %[addr], %[opc], %[value]"
-		: "=m" (*addr)
-		: [addr] "r" (addr),
-		  [value] "r" (value),
-		  [opc] "ir" (opc.word));
 }
 
 static __always_inline void __kernel_strd_d_opc(u64 value, u64 *addr, ldst_rec_op_t opc)
@@ -5550,14 +5489,15 @@ do { \
 			" nop 4}", \
 		%[cpu_feat_iset_v6]) \
 		/* Careful, all alternatives must have the same offset */ \
-		"1:\n" \
+		NONTARGET_LABEL("1") "\n" \
+		"2:\n" \
 		".section .fixup,\"ax\"\n" \
-		"2:{adds 0, %[efault], %[ret];" \
+		"3:{adds 0, %[efault], %[ret];" \
 		"   addd 0, 0, %[x];" \
-		"   ibranch 1b}\n" \
+		"   ibranch 2b}\n" \
 		".previous\n" \
 		".section __ex_table,\"a\"\n" \
-		".dword 1b, 2b\n" \
+		".dword 1b, 3b\n" \
 		".previous\n" \
 		: [ret] "=r" (_ret), \
 		  [x] "=r" (_x) \
@@ -5572,13 +5512,14 @@ do { \
 	__no_asm_inline(1) \
 	asm (	"{st" #_fmt_st " %[addr], %[x];" \
 		" adds 0, 0, %[ret]}\n" \
-		"1:\n" \
+		NONTARGET_LABEL("1") "\n" \
+		"2:\n" \
 		".section .fixup,\"ax\"\n" \
-		"2:{adds 0, %[efault], %[ret];" \
-		"   ibranch 1b}\n" \
+		"3:{adds 0, %[efault], %[ret];" \
+		"   ibranch 2b}\n" \
 		".previous\n" \
 		".section __ex_table,\"a\"\n" \
-		".dword 1b, 2b\n" \
+		".dword 1b, 3b\n" \
 		".previous\n" \
 		: [ret] "=r" (_ret), \
 		  [addr] "=m" (*(_addr)) \
@@ -5600,111 +5541,127 @@ extern void __user_ldst_bad(void) __attribute__((noreturn));
  * performance hit from it.
  */
 #ifdef CONFIG_KVM_GUEST_KERNEL
-# define USER_LD(x, ptr) do { (x) = *(ptr); } while (0)
-# define USER_ST(x, ptr) do { *(ptr) = (x); } while (0)
-# define GET_USER_ASM_LD(addr, opc, x, fmt) __stringify(ld##fmt[addr + 0], x)
-# define PUT_USER_ASM_ST(addr, opc, x, fmt) __stringify(st##fmt[addr + 0], x)
+#define GET_USER_ASM(_x, _addr, __ret_gu, _fmt_ld, _fmt_value, _priv) \
+do { \
+	ASM_LENGTH_V5_V6(3, 5) \
+	asm (	"{ld" #_fmt_ld " %[addr], 0, %[x]\n" \
+		" adds,2 0, 0, %[ret]}\n" \
+		"1:\n" \
+		".section .fixup,\"ax\"\n" \
+		"2:{adds 0, %[efault], %[ret]\n" \
+		"   addd 0, 0, %[x]\n" \
+		"   ibranch 1b}\n" \
+		".previous\n" \
+		".section __ex_table,\"a\"\n" \
+		".dword 1b, 2b\n" \
+		".previous\n" \
+		: [ret] "=r" (__ret_gu), [x] "=r" (_x) \
+		: [addr] "r" (_addr), "m" (*(_addr)), [efault] "i" (-EFAULT)); \
+} while (0)
+
+#define PUT_USER_ASM(_x, ptr, _retval, _fmt_st, _fmt_value, _priv) \
+do { \
+	__no_asm_inline(1) \
+	asm (	"{st" #_fmt_st "%[addr], %[opc_legacy], %[x], _fmt_st\n" \
+		" adds 0, 0, %[ret]}\n" \
+		"1:\n" \
+		".section .fixup,\"ax\"\n" \
+		"2:{adds 0, %[efault], %[ret]\n" \
+		"   ibranch 1b}\n" \
+		".previous\n" \
+		".section __ex_table,\"a\"\n" \
+		".dword 1b, 2b\n" \
+		".previous\n" \
+		: [ret] "=r" (_retval), \
+		  "=m" (*ptr) \
+		: [addr] "r" (ptr), \
+		  [x] "r" (_x), [efault] "i" (-EFAULT)); \
+} while (0)
 #else
-# define GET_USER_ASM_LD(addr, opc, x, fmt) __stringify(ldrd,0 addr, opc, x)
-# define PUT_USER_ASM_ST(addr, opc, x, fmt) __stringify(strd addr, opc, x)
-
-# define USER_LD(x, ptr) \
-do { \
-	const __typeof__(*(ptr)) __user *__u_ld_addr = (ptr); \
-	__chk_user_ptr(ptr); \
-	switch (sizeof(*__u_ld_addr)) { \
-	case 1: \
-		(x) = __user_ldrd_b((const u8 __user *) (__u_ld_addr)); \
-		break; \
-	case 2: \
-		(x) = __user_ldrd_h((const u16 __user *) (__u_ld_addr)); \
-		break; \
-	case 4: \
-		(x) = __user_ldrd_w((const u32 __user *) (__u_ld_addr)); \
-		break; \
-	case 8: \
-		(x) = __user_ldrd_d((const u64 __user *) (__u_ld_addr)); \
-		break; \
-	default: \
-		__user_ldst_bad(); \
-		break; \
-	} \
-} while (0)
-
-/* See USER_LD() */
-# define USER_ST(x, ptr) \
-do { \
-	__typeof__(*(ptr)) __user *__u_st_addr = (ptr); \
-	__chk_user_ptr(ptr); \
-	switch (sizeof(*__u_st_addr)) { \
-	case 1: \
-		__user_strd_b((x),  (u8 __user *) (__u_st_addr)); \
-		break; \
-	case 2: \
-		__user_strd_h((x),  (u16 __user *) (__u_st_addr)); \
-		break; \
-	case 4: \
-		__user_strd_w((x),  (u32 __user *) (__u_st_addr)); \
-		break; \
-	case 8: \
-		__user_strd_d((x),  (u64 __user *) (__u_st_addr)); \
-		break; \
-	default: \
-		__user_ldst_bad(); \
-		break; \
-	} \
-} while (0)
-#endif
-
-/* See also: USER_LD() */
-#define GET_USER_ASM(_x, _addr, _opc, __ret_gu, _fmt) \
+/*
+ * @_priv must be 0 or 1 for assembler macros to work
+ */
+#define GET_USER_ASM(_x, _addr, __ret_gu, _fmt_ld, _fmt_value, _priv) \
 do { \
 	e2k_madmr_t madmr = cpu_has(CPU_FEAT_MADM) ? read_MADMR_reg() : \
 						     (e2k_madmr_t) { .word = 0 }; \
 	ASM_LENGTH_V5_V6(3, 5) \
-	asm (ALTERNATIVE_1_ALTINSTR \
-	     /* CPU_FEAT_ISET_V6 version */ \
-		     "{" GET_USER_ASM_LD(%[addr], %[opc], %[x], _fmt) "\n" \
-		     " cmpandesb,1 %[madmr], 0x3, %%pred0\n" \
-		     " adds,2 0, 0, %[ret]\n" \
-		     " nop 3}\n" \
-		     "{adds,sm 0, %[x], %%empty ? ~ %%pred0}\n" \
-	     ALTERNATIVE_2_OLDINSTR \
-	     /* Default version */ \
-		     "{" GET_USER_ASM_LD(%[addr], %[opc], %[x], _fmt) "\n" \
-		     " cmpandesb,1 %[madmr], 0x3, %%pred0\n" \
-		     " adds,2 0, 0, %[ret]\n" \
-		     " nop 1}\n" \
-		     /* Careful, both alternatives must have the same offset */ \
-		     NONTARGET_LABEL("1") "\n" \
-		     /* Keep this instruction inside alternatives to make sure \
-		      * there are no NOPs between it and the load above */ \
-		     "{adds,sm 0, %[x], %%empty ? ~ %%pred0}\n" \
-	     ALTERNATIVE_3_FEATURE(%[facility]) \
-	     "2:\n" \
-	     ".section .fixup,\"ax\"\n" \
-	     "3:{adds 0, %[efault], %[ret]\n" \
-	     "   addd 0, 0, %[x]\n" \
-	     "   ibranch 2b}\n" \
-	     ".previous\n" \
-	     ".section __ex_table,\"a\"\n" \
-	     ".dword 1b, 3b\n" \
-	     ".previous\n" \
-	     : [ret] "=r" (__ret_gu), [x] "=r" (_x) \
-	     : [addr] "r" (_addr), "m" (*(_addr)), [efault] "i" (-EFAULT), \
-	       [opc] "ir" (_opc), [madmr] "ir" (AW(madmr)), \
-	       [facility] "i" (CPU_FEAT_ISET_V6) \
-	     : "pred0"); \
+	asm (	ALTERNATIVE_2( \
+		/* Default version */ \
+			"{ldrd,0 %[addr], _f64,_lts0 %[opc_legacy], %[x]\n" \
+			" cmpandesb,1 %[madmr], 0x3, %%pred0\n" \
+			" adds,2 0, 0, %[ret]\n" \
+			" nop 1}\n", \
+		/* CPU_FEAT_ISET_V6 version */ \
+			"{ldrd,0 %[addr], _f64,_lts0 %[opc_legacy], %[x]\n" \
+			" cmpandesb,1 %[madmr], 0x3, %%pred0\n" \
+			" adds,2 0, 0, %[ret]\n" \
+			" nop 3}\n", \
+		%[cpu_feat_iset_v6], \
+		/* CPU_FEAT_SAFE_UACCESS version */ \
+			".ifne " #_priv "\n" \
+			"{ldrd,0 %[addr], _f64,_lts0 %[opc_priv], %[x]\n" \
+			" cmpandesb,1 %[madmr], 0x3, %%pred0\n" \
+			" adds,2 0, 0, %[ret]\n" \
+			" nop 3}\n" \
+			".else\n" \
+			"{ldrd,0 %[addr], _f64,_lts0 %[opc_unpriv], %[x]\n" \
+			" cmpandesb,1 %[madmr], 0x3, %%pred0\n" \
+			" adds,2 0, 0, %[ret]\n" \
+			" nop 3}\n" \
+			".endif\n", \
+		%[cpu_feat_safe_uaccess]) \
+ \
+		/* Careful, all alternatives must have the same offset */ \
+		NONTARGET_LABEL("1") "\n" \
+ \
+		/* Make all alternatives above have the same length \
+		 * so that there are no NOPs between them and this use. */ \
+		ALTERNATIVE( \
+		/* Default version */ \
+			"{adds,sm 0, %[x], %%empty ? ~ %%pred0}\n", \
+		/* CPU_HWBUG_LDRD_UNPROT_MODE1_TAGGED version */ \
+			"{puttagd %[x], 0, %[x]}\n", \
+		%[cpu_hwbug_ldrd_unprot_mode1_tagged]) \
+ \
+		"2:\n" \
+		".section .fixup,\"ax\"\n" \
+		"3:{adds 0, %[efault], %[ret]\n" \
+		"   addd 0, 0, %[x]\n" \
+		"   ibranch 2b}\n" \
+		".previous\n" \
+		".section __ex_table,\"a\"\n" \
+		".dword 1b, 3b\n" \
+		".previous\n" \
+		: [ret] "=r" (__ret_gu), [x] "=r" (_x) \
+		: [addr] "r" (_addr), "m" (*(_addr)), [efault] "i" (-EFAULT), \
+		  [madmr] "ir" (AW(madmr)), \
+		  [opc_legacy] "i" (((ldst_rec_op_t) { .fmt = (_fmt_value), .prot = 1 }).word), \
+		  [opc_unpriv] "i" (((ldst_rec_op_t) { .fmt = (_fmt_value), .mode_h = 1 }).word), \
+		  [opc_priv] "i" (((ldst_rec_op_t) { .fmt = (_fmt_value) }).word), \
+		  [cpu_feat_safe_uaccess] "i" (CPU_FEAT_SAFE_UACCESS), \
+		  [cpu_feat_iset_v6] "i" (CPU_FEAT_ISET_V6), \
+		  [cpu_hwbug_ldrd_unprot_mode1_tagged] "i" (CPU_HWBUG_LDRD_UNPROT_MODE1_TAGGED) \
+		: "pred0"); \
 } while (0)
 
-#define ASM_USER_STRD_16(_addr, _val, _tag, _opc) \
-({ \
-	volatile __uint128_t *__us_addr = (_addr); \
-	int _ret = 0; \
-	__no_asm_inline(2) \
-	asm (	"{puttagd %[val], %[tag], %[val]}\n" \
-		"{strd %[addr], %[opc_lo], %[val]\n" \
-		" strd %[addr], %[opc_hi], %[val]\n}" \
+/* @_priv must be 0 or 1 for assembler macros to work */
+#define PUT_USER_ASM(_x, ptr, _retval, _fmt_st, _fmt_value, _priv) \
+do { \
+	__no_asm_inline(1) \
+	asm (	ALTERNATIVE( \
+		/* Default version */ \
+			"{strd %[addr], _f64,_lts0 %[opc_legacy], %[x]\n" \
+			" adds 0, 0, %[ret]}\n", \
+		/* CPU_FEAT_SAFE_UACCESS version */ \
+			".ifne " #_priv "\n" \
+			"{strd %[addr], _f64,_lts0 %[opc_priv], %[x]\n" \
+			" adds 0, 0, %[ret]}\n" \
+			".else\n" \
+			"{strd %[addr], _f64,_lts0 %[opc_unpriv], %[x]\n" \
+			" adds 0, 0, %[ret]}\n" \
+			".endif\n", \
+		%[cpu_feat_safe_uaccess]) \
 		NONTARGET_LABEL("1") "\n" \
 		"2:\n" \
 		".section .fixup,\"ax\"\n" \
@@ -5714,183 +5671,233 @@ do { \
 		".section __ex_table,\"a\"\n" \
 		".dword 1b, 3b\n" \
 		".previous\n" \
-		: [ret] "+r" (_ret), \
-		  "=m" (*__us_addr) \
-		: [addr] "r" (__us_addr), \
-		  [val] "r" (_val), \
-		  [tag] "ir" (_tag), \
-		  [opc_lo] "i" (_opc), \
-		  [opc_hi] "i" (_opc | 8), \
-		  [efault] "i" (-EFAULT)); \
-	_ret; \
-})
-
-/* See also: USER_LD() */
-#define PUT_USER_ASM(_x, ptr, _opc, _retval, _fmt) \
-do { \
-	__no_asm_inline(1) \
-	asm ("{" PUT_USER_ASM_ST(%[addr], %[opc], %[x], _fmt) "\n" \
-	     "   adds 0, 0, %[ret]}\n" \
-	     NONTARGET_LABEL("1") "\n" \
-	     "2:\n" \
-	     ".section .fixup,\"ax\"\n" \
-	     "3:{adds 0, %[efault], %[ret]\n" \
-	     "   ibranch 2b}\n" \
-	     ".previous\n" \
-	     ".section __ex_table,\"a\"\n" \
-	     ".dword 1b, 3b\n" \
-	     ".previous\n" \
-	     : [ret] "=r" (_retval), \
-	       "=m" (*ptr) \
-	     : [addr] "r" (ptr), \
-	       [x] "r" (_x), [efault] "i" (-EFAULT), \
-	       [opc] "ir" (_opc)); \
+		: [ret] "=r" (_retval), \
+		  "=m" (*ptr) \
+		: [addr] "r" (ptr), \
+		  [x] "r" (_x), [efault] "i" (-EFAULT), \
+		  [opc_legacy] "i" (((ldst_rec_op_t) { .fmt = (_fmt_value), .prot = 1 }).word), \
+		  [opc_unpriv] "i" (((ldst_rec_op_t) { .fmt = (_fmt_value), .mode_h = 1 }).word), \
+		  [opc_priv] "i" (((ldst_rec_op_t) { .fmt = (_fmt_value) }).word), \
+		  [cpu_feat_safe_uaccess] "i" (CPU_FEAT_SAFE_UACCESS)); \
 } while (0)
+#endif /* CONFIG_KVM_GUEST_KERNEL */
 
-#define NATIVE_GET_USER_VAL_AND_TAGW(_val, _tag, _addr, __ret_gu) \
+/* @_priv must be 0 or 1 for assembler macros to work */
+#define NATIVE_GET_USER_VAL_AND_TAGW(_val, _tag, _addr, __ret_gu, _priv) \
 do { \
 	const volatile u32 __user *__gu_addr = (_addr); \
-	ldst_rec_op_t __u_ld_opc = { \
-		.fmt = LDST_WORD_FMT, \
-		.mas = MAS_FILL_OPERATION(CACHE_BYPASS_NONE, 0), \
-		.prot = 1 \
-	}; \
 	BUILD_BUG_ON(sizeof(_tag) > 4); \
 	ASM_LENGTH_V5_V6(5, 6) \
-	asm ( \
-	     ALTERNATIVE("" /* Default version */, \
-			 "{nop 3}\n" /* CPU_HWBUG_TAGGED_LDW version */, \
-			 %[hwbug_tagged_ldw]) \
-	     ALTERNATIVE( \
-	     /* Default version */ \
-		     "{ldrd %[addr], %[opc], %[val]\n" \
-		     " adds 0, 0, %[ret]\n" \
-		     " nop 2}\n" \
-		     /* Careful, both alternatives must have the same offset */ \
-		     NONTARGET_LABEL("1") "\n" \
-		     "{gettagd %[val], %[tag]}\n" \
-		     "{puttagd %[val], 0, %[val]}\n", \
-	     /* CPU_FEAT_ISET_V6 version */ \
-		     "{ldrd %[addr], %[opc], %[val]\n" \
-		     " adds 0, 0, %[ret]\n" \
-		     " nop 4}\n" \
-		     "{gettagd %[val], %[tag]\n" \
-		     " puttagd %[val], 0, %[val]}\n", \
-	     %[iset_v6]) \
-	     "2:\n" \
-	     ".section .fixup,\"ax\"\n" \
-	     "3:{adds 0, %[efault], %[ret]\n" \
-	     "   addd 0, 0, %[val]\n" \
-	     "   adds 0, 0, %[tag]\n" \
-	     "   ibranch 2b}\n" \
-	     ".previous\n" \
-	     ".section __ex_table,\"a\"\n" \
-	     ".dword 1b, 3b\n" \
-	     ".previous\n" \
-	     : [ret] "=&r" (__ret_gu), [val] "=&r" (_val), [tag] "=&r" (_tag) \
-	     : [addr] "r" (__gu_addr), "m" (*__gu_addr), \
-	       [efault] "i" (-EFAULT), \
-	       [iset_v6] "i" (CPU_FEAT_ISET_V6), \
-	       [hwbug_tagged_ldw] "i" (CPU_HWBUG_TAGGED_LDW), \
-	       [opc] "i" (AW(__u_ld_opc))); \
+	asm (	ALTERNATIVE("", "{nop 3}", %[cpu_hwbug_tagged_ldw]) \
+		ALTERNATIVE_2( \
+		/* Default version */ \
+			"{ldrd %[addr], _f64,_lts0 %[opc_legacy], %[val]\n" \
+			" adds 0, 0, %[ret]\n" \
+			" nop 2}\n" \
+			/* Careful, all alternatives must have the same offset */ \
+			NONTARGET_LABEL("1") "\n", \
+		/* CPU_FEAT_ISET_V6 version */ \
+			"{ldrd %[addr], _f64,_lts0 %[opc_legacy], %[val]\n" \
+			" adds 0, 0, %[ret]\n" \
+			" nop 4}\n", \
+		%[cpu_feat_iset_v6], \
+		/* CPU_FEAT_SAFE_UACCESS version */ \
+			".ifne " #_priv "\n" \
+			"{ldrd %[addr], _f64,_lts0 %[opc_priv], %[val]\n" \
+			" adds 0, 0, %[ret]\n" \
+			" nop 4}\n" \
+			".else\n" \
+			"{ldrd %[addr], _f64,_lts0 %[opc_unpriv], %[val]\n" \
+			" adds 0, 0, %[ret]\n" \
+			" nop 4}\n" \
+			".endif\n", \
+		%[cpu_feat_safe_uaccess]) \
+		"{gettagd %[val], %[tag]}\n" \
+		"{puttagd %[val], 0, %[val]}\n" \
+		"2:\n" \
+		".section .fixup,\"ax\"\n" \
+		"3:{adds 0, %[efault], %[ret]\n" \
+		"   addd 0, 0, %[val]\n" \
+		"   adds 0, 0, %[tag]\n" \
+		"   ibranch 2b}\n" \
+		".previous\n" \
+		".section __ex_table,\"a\"\n" \
+		".dword 1b, 3b\n" \
+		".previous\n" \
+		: [ret] "=&r" (__ret_gu), [val] "=&r" (_val), [tag] "=&r" (_tag) \
+		: [addr] "r" (__gu_addr), "m" (*__gu_addr), \
+		  [efault] "i" (-EFAULT), \
+		  [opc_legacy] "i" (((ldst_rec_op_t) { \
+			.fmt = LDST_WORD_FMT, \
+			.mas = MAS_FILL_OPERATION(CACHE_BYPASS_NONE, 0), \
+			.prot = 1, \
+		  }).word), \
+		  [opc_unpriv] "i" (((ldst_rec_op_t) { \
+			.fmt = LDST_WORD_FMT, \
+			.prot = 1, \
+			.mode_h = 1, \
+		  }).word), \
+		  [opc_priv] "i" (((ldst_rec_op_t) { \
+			.fmt = LDST_WORD_FMT, \
+			.prot = 1, \
+		  }).word), \
+		  [cpu_feat_safe_uaccess] "i" (CPU_FEAT_SAFE_UACCESS), \
+		  [cpu_feat_iset_v6] "i" (CPU_FEAT_ISET_V6), \
+		  [cpu_hwbug_tagged_ldw] "i" (CPU_HWBUG_TAGGED_LDW)); \
 } while (0)
 
-#define NATIVE_GET_USER_VAL_AND_TAGD(_val, _tag, _addr, __ret_gu) \
+#define NATIVE_GET_USER_VAL_AND_TAGD(_val, _tag, _addr, __ret_gu, _priv) \
 do { \
 	const volatile u64 __user *__gu_addr = (const volatile u64 __user *) (_addr); \
-	ldst_rec_op_t __u_ld_opc = { \
-		.fmt = LDST_DWORD_FMT, \
-		.mas = MAS_FILL_OPERATION(CACHE_BYPASS_NONE, 0), \
-		.prot = 1 \
-	}; \
 	BUILD_BUG_ON(sizeof(_tag) > 4); \
 	ASM_LENGTH_V5_V6(5, 6) \
-	asm ( \
-	     ALTERNATIVE( \
-	     /* Default version */ \
-		     "{ldrd %[addr], %[opc], %[val]\n" \
-		     " adds 0, 0, %[ret]\n" \
-		     " nop 2}\n" \
-		     /* Careful, both alternatives must have the same offset */ \
-		     NONTARGET_LABEL("1") "\n" \
-		     "{gettagd %[val], %[tag]}\n" \
-		     "{puttagd %[val], 0, %[val]}\n", \
-	     /* CPU_FEAT_ISET_V6 version */ \
-		     "{ldrd %[addr], %[opc], %[val]\n" \
-		     " adds 0, 0, %[ret]\n" \
-		     " nop 4}\n" \
-		     "{gettagd %[val], %[tag]\n" \
-		     " puttagd %[val], 0, %[val]}\n", \
-	     %[facility]) \
-	     "2:\n" \
-	     ".section .fixup,\"ax\"\n" \
-	     "3:{adds 0, %[efault], %[ret]\n" \
-	     "   addd 0, 0, %[val]\n" \
-	     "   adds 0, 0, %[tag]\n" \
-	     "   ibranch 2b}\n" \
-	     ".previous\n" \
-	     ".section __ex_table,\"a\"\n" \
-	     ".dword 1b, 3b\n" \
-	     ".previous\n" \
-	     : [ret] "=&r" (__ret_gu), [val] "=&r" (_val), [tag] "=&r" (_tag) \
-	     : [addr] "r" (__gu_addr), "m" (*__gu_addr), \
-	       [efault] "i" (-EFAULT), \
-	       [facility] "i" (CPU_FEAT_ISET_V6), \
-	       [opc] "i" (AW(__u_ld_opc))); \
+	asm (	ALTERNATIVE_2( \
+		/* Default version */ \
+			"{ldrd %[addr], _f64,_lts0 %[opc_legacy], %[val]\n" \
+			" adds 0, 0, %[ret]\n" \
+			" nop 2}\n" \
+			/* Careful, all alternatives must have the same offset */ \
+			NONTARGET_LABEL("1") "\n", \
+		/* CPU_FEAT_ISET_V6 version */ \
+			"{ldrd %[addr], _f64,_lts0 %[opc_legacy], %[val]\n" \
+			" adds 0, 0, %[ret]\n" \
+			" nop 4}\n", \
+		%[cpu_feat_iset_v6], \
+		/* CPU_FEAT_SAFE_UACCESS version */ \
+			".ifne " #_priv "\n" \
+			"{ldrd %[addr], _f64,_lts0 %[opc_priv], %[val]\n" \
+			" adds 0, 0, %[ret]\n" \
+			" nop 4}\n" \
+			".else\n" \
+			"{ldrd %[addr], _f64,_lts0 %[opc_unpriv], %[val]\n" \
+			" adds 0, 0, %[ret]\n" \
+			" nop 4}\n" \
+			".endif\n", \
+		%[cpu_feat_safe_uaccess]) \
+		"{gettagd %[val], %[tag]\n" \
+		" puttagd %[val], 0, %[val]}\n" \
+		"2:\n" \
+		".section .fixup,\"ax\"\n" \
+		"3:{adds 0, %[efault], %[ret]\n" \
+		"   addd 0, 0, %[val]\n" \
+		"   adds 0, 0, %[tag]\n" \
+		"   ibranch 2b}\n" \
+		".previous\n" \
+		".section __ex_table,\"a\"\n" \
+		".dword 1b, 3b\n" \
+		".previous\n" \
+		: [ret] "=&r" (__ret_gu), [val] "=&r" (_val), [tag] "=&r" (_tag) \
+		: [addr] "r" (__gu_addr), "m" (*__gu_addr), \
+		  [efault] "i" (-EFAULT), \
+		  [opc_legacy] "i" (((ldst_rec_op_t) { \
+			.fmt = LDST_DWORD_FMT, \
+			.mas = MAS_FILL_OPERATION(CACHE_BYPASS_NONE, 0), \
+			.prot = 1, \
+		  }).word), \
+		  [opc_unpriv] "i" (((ldst_rec_op_t) { \
+			.fmt = LDST_DWORD_FMT, \
+			.prot = 1, \
+			.mode_h = 1, \
+		  }).word), \
+		  [opc_priv] "i" (((ldst_rec_op_t) { \
+			.fmt = LDST_DWORD_FMT, \
+			.prot = 1, \
+		  }).word), \
+		  [cpu_feat_safe_uaccess] "i" (CPU_FEAT_SAFE_UACCESS), \
+		  [cpu_feat_iset_v6] "i" (CPU_FEAT_ISET_V6)); \
 } while (0)
 
-#define NATIVE_GET_USER_VAL_AND_TAGQ(_val_lo, _val_hi, _tag, _addr, __ret_gu, _offset) \
+#define NATIVE_GET_USER_VAL_AND_TAGQ(_val_lo, _val_hi, _tag, _addr, __ret_gu, _offset, _priv) \
 do { \
 	const volatile u64 __user *__guvt_addr = (const u64 __user *) (_addr); \
 	u64 __gu_offset = (_offset); \
-	ldst_rec_op_t __u_ld_opc = { \
-		.fmt = LDST_QWORD_FMT, \
-		.mas = MAS_FILL_OPERATION(CACHE_BYPASS_NONE, 0), \
-		.prot = 1 \
-	}; \
 	if (!WARN_ON_ONCE(!IS_ALIGNED((unsigned long) __guvt_addr, 16))) { \
 		u32 __tmp_tag_lo, __tmp_tag_hi; \
 		e2k_qreg_t __qvalue; \
 \
 		ASM_LENGTH_V5_V6(5, 7) \
-		asm (ALTERNATIVE( \
-		     /* Default version */ \
-			"{ldrd,0 %[addr], %[opc_lo], %L[qvalue]\n" \
-			" ldrd,3 %[addr], %[opc_hi], %H[qvalue]\n" \
-			" adds,1 0, 0, %[ret]\n" \
-			" nop 2}\n" \
-			/* Careful, both alternatives must have the same offset */ \
-			NONTARGET_LABEL("1") "\n", \
-		     /* CPU_FEAT_ISET_V6 version */ \
-			"{ldrd,0 %[addr], %[opc_lo], %L[qvalue]\n" \
-			" ldrd,3 %[addr], %[opc_hi], %H[qvalue]\n" \
-			" adds,1 0, 0, %[ret]\n" \
-			" nop 4}\n", \
-		     %[facility]) \
-		     "{gettagd,2 %L[qvalue], %[tag_lo]\n" \
-		     " gettagd,5 %H[qvalue], %[tag_hi]}\n" \
-		     "{puttagd,2 %L[qvalue], 0, %L[qvalue]\n" \
-		     " puttagd,5 %H[qvalue], 0, %H[qvalue]}\n" \
-		     "2:\n" \
-		     ".section .fixup,\"ax\"\n" \
-		     "3:{adds 0, %[efault], %[ret]\n" \
-		     "   adds 0, 0, %[tag_lo]\n" \
-		     "   adds 0, 0, %[tag_hi]\n" \
-		     "   addd 0, 0, %L[qvalue]\n" \
-		     "   addd 0, 0, %H[qvalue]\n" \
-		     "   ibranch 2b}\n" \
-		     ".previous\n" \
-		     ".section __ex_table,\"a\"\n" \
-		     ".dword 1b, 3b\n" \
-		     ".previous\n" \
-		     : [ret] "=&r" (__ret_gu), \
-		       [qvalue] "=&r" (__qvalue), \
-		       [tag_lo] "=&r" (__tmp_tag_lo), [tag_hi] "=&r" (__tmp_tag_hi) \
-		     : [addr] "r" (__guvt_addr), \
-		       "m" (__guvt_addr[0]), "m" (__guvt_addr[__gu_offset / 8]), \
-		       [efault] "i" (-EFAULT), [facility] "i" (CPU_FEAT_ISET_V6), \
-		       [opc_lo] "i" (AW(__u_ld_opc)), \
-		       [opc_hi] "ir" (AW(__u_ld_opc) | __gu_offset)); \
+		asm (	ALTERNATIVE_2( \
+			/* Default version */ \
+				"{ldrd,0 %[addr], _f64,_lts0 %[opc_legacy_lo], %L[qvalue]\n" \
+				" ldrd,3 %[addr], %[opc_legacy_hi], %H[qvalue]\n" \
+				" adds,1 0, 0, %[ret]\n" \
+				" nop 2}\n" \
+				/* Careful, all alternatives must have the same offset */ \
+				NONTARGET_LABEL("1") "\n", \
+			/* CPU_FEAT_ISET_V6 version */ \
+				"{ldrd,0 %[addr], _f64,_lts0 %[opc_legacy_lo], %L[qvalue]\n" \
+				" ldrd,3 %[addr], %[opc_legacy_hi], %H[qvalue]\n" \
+				" adds,1 0, 0, %[ret]\n" \
+				" nop 4}\n", \
+			%[cpu_feat_iset_v6], \
+			/* CPU_FEAT_SAFE_UACCESS version */ \
+				".ifne " #_priv "\n" \
+				"{ldrd,0 %[addr], _f64,_lts0 %[opc_priv_lo], %L[qvalue]\n" \
+				" ldrd,3 %[addr], %[opc_priv_hi], %H[qvalue]\n" \
+				" adds,1 0, 0, %[ret]\n" \
+				" nop 4}\n" \
+				".else\n" \
+				"{ldrd,0 %[addr], _f64,_lts0 %[opc_unpriv_lo], %L[qvalue]\n" \
+				" ldrd,3 %[addr], %[opc_unpriv_hi], %H[qvalue]\n" \
+				" adds,1 0, 0, %[ret]\n" \
+				" nop 4}\n" \
+				".endif\n", \
+			%[cpu_feat_safe_uaccess]) \
+			"{gettagd,2 %L[qvalue], %[tag_lo]\n" \
+			" gettagd,5 %H[qvalue], %[tag_hi]}\n" \
+			"{puttagd,2 %L[qvalue], 0, %L[qvalue]\n" \
+			" puttagd,5 %H[qvalue], 0, %H[qvalue]}\n" \
+			"2:\n" \
+			".section .fixup,\"ax\"\n" \
+			"3:{adds 0, %[efault], %[ret]\n" \
+			"   adds 0, 0, %[tag_lo]\n" \
+			"   adds 0, 0, %[tag_hi]\n" \
+			"   addd 0, 0, %L[qvalue]\n" \
+			"   addd 0, 0, %H[qvalue]\n" \
+			"   ibranch 2b}\n" \
+			".previous\n" \
+			".section __ex_table,\"a\"\n" \
+			".dword 1b, 3b\n" \
+			".previous\n" \
+			: [ret] "=&r" (__ret_gu), \
+			  [qvalue] "=&r" (__qvalue), \
+			  [tag_lo] "=&r" (__tmp_tag_lo), [tag_hi] "=&r" (__tmp_tag_hi) \
+			: [addr] "r" (__guvt_addr), \
+			  "m" (__guvt_addr[0]), "m" (__guvt_addr[__gu_offset / 8]), \
+			  [efault] "i" (-EFAULT), [facility] "i" (CPU_FEAT_ISET_V6), \
+			  [opc_legacy_lo] "i" (((ldst_rec_op_t) { \
+				.fmt = LDST_QWORD_FMT, \
+				.mas = MAS_FILL_OPERATION(CACHE_BYPASS_NONE, 0), \
+				.prot = 1, \
+			  }).word), \
+			  [opc_legacy_hi] "r" (((ldst_rec_op_t) { \
+				.fmt = LDST_QWORD_FMT, \
+				.mas = MAS_FILL_OPERATION(CACHE_BYPASS_NONE, 0), \
+				.prot = 1, \
+				.index = __gu_offset, \
+			  }).word), \
+			  [opc_unpriv_lo] "i" (((ldst_rec_op_t) { \
+				.fmt = LDST_QWORD_FMT, \
+				.prot = 1, \
+				.mode_h = 1, \
+			  }).word), \
+			  [opc_unpriv_hi] "r" (((ldst_rec_op_t) { \
+				.fmt = LDST_QWORD_FMT, \
+				.prot = 1, \
+				.mode_h = 1, \
+				.index = __gu_offset, \
+			  }).word), \
+			  [opc_priv_lo] "i" (((ldst_rec_op_t) { \
+				.fmt = LDST_QWORD_FMT, \
+				.prot = 1, \
+			  }).word), \
+			  [opc_priv_hi] "r" (((ldst_rec_op_t) { \
+				.fmt = LDST_QWORD_FMT, \
+				.prot = 1, \
+				.index = __gu_offset, \
+			  }).word), \
+			  [cpu_feat_safe_uaccess] "i" (CPU_FEAT_SAFE_UACCESS), \
+			  [cpu_feat_iset_v6] "i" (CPU_FEAT_ISET_V6)); \
  \
 		(_tag) = __tmp_tag_lo | (__tmp_tag_hi << 4); \
 		(_val_lo) = __qvalue.lo; \
@@ -5903,65 +5910,126 @@ do { \
 	} \
 } while (0)
 
-#define NATIVE_PUT_USER_VAL_AND_TAGD(_val, _tag, _addr, _ret) \
+/* @priv must be 0 or 1 for assembler macros to work */
+#define NATIVE_PUT_USER_VAL_AND_TAGD(_val, _tag, _addr, _ret, _priv) \
 do { \
 	volatile u64 __user *__pu_addr = (_addr); \
-	ldst_rec_op_t __u_st_opc = { .fmt = LDST_DWORD_FMT, .prot = 1 }; \
 	u64 __npu_tmp; \
 	__no_asm_inline(2) \
-	asm ("{puttagd %[val], %[tag], %[tmp]\n" \
-	     " adds 0, 0, %[ret]}\n" \
-	     "{strd %[addr], %[opc], %[tmp]}\n" \
-	     NONTARGET_LABEL("1") "\n" \
-	     "2:\n" \
-	     ".section .fixup,\"ax\"\n" \
-	     "3:{adds 0, %[efault], %[ret]\n" \
-	     "   ibranch 2b}\n" \
-	     ".previous\n" \
-	     ".section __ex_table,\"a\"\n" \
-	     ".dword 1b, 3b\n" \
-	     ".previous\n" \
-	     : [ret] "=&r" (_ret), \
-	       [tmp] "=&r" (__npu_tmp), \
-	       "=m" (*__pu_addr) \
-	     : [addr] "r" (__pu_addr), \
-	       [val] "ir" (_val), [tag] "ir" (_tag), \
-	       [efault] "i" (-EFAULT), \
-	       [opc] "i" (AW(__u_st_opc))); \
+	asm (	"{puttagd %[val], %[tag], %[tmp]\n" \
+		" adds 0, 0, %[ret]}\n" \
+		ALTERNATIVE( \
+		/* Default version */ \
+			"{strd %[addr], _f64,_lts0 %[opc_legacy], %[tmp]}\n", \
+		/* CPU_FEAT_SAFE_UACCESS version */ \
+			".ifne " #_priv "\n" \
+			"{strd %[addr], _f64,_lts0 %[opc_priv], %[tmp]}\n" \
+			".else\n" \
+			"{strd %[addr], _f64,_lts0 %[opc_unpriv], %[tmp]}\n" \
+			".endif\n", \
+		%[cpu_feat_safe_uaccess]) \
+		NONTARGET_LABEL("1") "\n" \
+		"2:\n" \
+		".section .fixup,\"ax\"\n" \
+		"3:{adds 0, %[efault], %[ret]\n" \
+		"   ibranch 2b}\n" \
+		".previous\n" \
+		".section __ex_table,\"a\"\n" \
+		".dword 1b, 3b\n" \
+		".previous\n" \
+		: [ret] "=&r" (_ret), \
+		  [tmp] "=&r" (__npu_tmp), \
+		  "=m" (*__pu_addr) \
+		: [addr] "r" (__pu_addr), \
+		  [val] "ir" (_val), [tag] "ir" (_tag), \
+		  [efault] "i" (-EFAULT), \
+		  [opc_legacy] "i" (((ldst_rec_op_t) { \
+			.fmt = LDST_DWORD_FMT, \
+			.prot = 1, \
+		  }).word), \
+		  [opc_unpriv] "i" (((ldst_rec_op_t) { \
+			.fmt = LDST_DWORD_FMT, \
+			.prot = 1, \
+			.mode_h = 1, \
+		  }).word), \
+		  [opc_priv] "i" (((ldst_rec_op_t) { \
+			.fmt = LDST_DWORD_FMT, \
+			.prot = 1, \
+		  }).word), \
+		  [cpu_feat_safe_uaccess] "i" (CPU_FEAT_SAFE_UACCESS)); \
 } while (0)
 
-#define NATIVE_PUT_USER_VAL_AND_TAGQ(_val_lo, _val_hi, _tag, _addr, _ret, _offset) \
+/* @priv must be 0 or 1 for assembler macros to work */
+#define NATIVE_PUT_USER_VAL_AND_TAGQ(_val_lo, _val_hi, _tag, _addr, _ret, _offset, _priv) \
 do { \
 	volatile u64 __user *__puvt_addr = (volatile u64 __user *) (_addr); \
 	u64 __pu_offset = (_offset); \
-	ldst_rec_op_t __u_st_opc = { .fmt = LDST_QWORD_FMT, .prot = 1 }; \
 	u32 __npu_tmp_tag = (_tag); \
 	if (!WARN_ON_ONCE(!IS_ALIGNED((unsigned long) __puvt_addr, 16))) { \
 		e2k_qreg_t __qvalue; \
 		__no_asm_inline(2) \
-		asm ("{puttagd,2 %[val_lo], %[tag_lo], %L[qvalue]\n" \
-		     " puttagd,5 %[val_hi], %[tag_hi], %H[qvalue]\n" \
-		     " adds,1 0, 0, %[ret]}\n" \
-		     "{strd,2 %[addr], %[opc_lo], %L[qvalue]\n" \
-		     " strd,5 %[addr], %[opc_hi], %H[qvalue]}\n" \
-		     NONTARGET_LABEL("1") "\n" \
-		     "2:\n" \
-		     ".section .fixup,\"ax\"\n" \
-		     "3:{adds 0, %[efault], %[ret]\n" \
-		     "   ibranch 2b}\n" \
-		     ".previous\n" \
-		     ".section __ex_table,\"a\"\n" \
-		     ".dword 1b, 3b\n" \
-		     ".previous\n" \
-		     : [ret] "=&r" (_ret), \
-		       [qvalue] "=&r" (__qvalue), \
-		       "=m" (__puvt_addr[0]), "=m" (__puvt_addr[__pu_offset / 8]) \
-		     : [addr] "r" (__puvt_addr), \
-		       [val_lo] "ir" (_val_lo), [val_hi] "ir" (_val_hi), \
-		       [tag_lo] "ir" (__npu_tmp_tag), [tag_hi] "ir" (__npu_tmp_tag >> 4), \
-		       [efault] "i" (-EFAULT), \
-		       [opc_lo] "i" (AW(__u_st_opc)), \
-		       [opc_hi] "ir" (AW(__u_st_opc) | __pu_offset)); \
+		asm (	"{puttagd,2 %[val_lo], %[tag_lo], %L[qvalue]\n" \
+			" puttagd,5 %[val_hi], %[tag_hi], %H[qvalue]\n" \
+			" adds,1 0, 0, %[ret]}\n" \
+			ALTERNATIVE( \
+			/* Default version */ \
+				"{strd,2 %[addr], _f64,_lts0 %[opc_legacy_lo], %L[qvalue]\n" \
+				" strd,5 %[addr], %[opc_legacy_hi], %H[qvalue]}\n", \
+			/* CPU_FEAT_SAFE_UACCESS version */ \
+				".ifne " #_priv "\n" \
+				"{strd,2 %[addr], _f64,_lts0 %[opc_priv_lo], %L[qvalue]\n" \
+				" strd,5 %[addr], %[opc_priv_hi], %H[qvalue]}\n" \
+				".else\n" \
+				"{strd,2 %[addr],_f64,_lts0  %[opc_unpriv_lo], %L[qvalue]\n" \
+				" strd,5 %[addr], %[opc_unpriv_hi], %H[qvalue]}\n" \
+				".endif\n", \
+			%[cpu_feat_safe_uaccess]) \
+			NONTARGET_LABEL("1") "\n" \
+			"2:\n" \
+			".section .fixup,\"ax\"\n" \
+			"3:{adds 0, %[efault], %[ret]\n" \
+			"   ibranch 2b}\n" \
+			".previous\n" \
+			".section __ex_table,\"a\"\n" \
+			".dword 1b, 3b\n" \
+			".previous\n" \
+			: [ret] "=&r" (_ret), \
+			  [qvalue] "=&r" (__qvalue), \
+			  "=m" (__puvt_addr[0]), "=m" (__puvt_addr[__pu_offset / 8]) \
+			: [addr] "r" (__puvt_addr), \
+			  [val_lo] "ir" (_val_lo), [val_hi] "ir" (_val_hi), \
+			  [tag_lo] "ir" (__npu_tmp_tag), [tag_hi] "ir" (__npu_tmp_tag >> 4), \
+			  [efault] "i" (-EFAULT), \
+			  [opc_legacy_lo] "i" (((ldst_rec_op_t) { \
+				.fmt = LDST_QWORD_FMT, \
+				.prot = 1, \
+			  }).word), \
+			  [opc_legacy_hi] "r" (((ldst_rec_op_t) { \
+				.fmt = LDST_QWORD_FMT, \
+				.prot = 1, \
+				.index = __pu_offset, \
+			  }).word), \
+			  [opc_unpriv_lo] "i" (((ldst_rec_op_t) { \
+				.fmt = LDST_QWORD_FMT, \
+				.prot = 1, \
+				.mode_h = 1, \
+			  }).word), \
+			  [opc_unpriv_hi] "r" (((ldst_rec_op_t) { \
+				.fmt = LDST_QWORD_FMT, \
+				.prot = 1, \
+				.mode_h = 1, \
+				.index = __pu_offset, \
+			  }).word), \
+			  [opc_priv_lo] "i" (((ldst_rec_op_t) { \
+				.fmt = LDST_QWORD_FMT, \
+				.prot = 1, \
+			  }).word), \
+			  [opc_priv_hi] "r" (((ldst_rec_op_t) { \
+				.fmt = LDST_QWORD_FMT, \
+				.prot = 1, \
+				.index = __pu_offset, \
+			  }).word), \
+			  [cpu_feat_safe_uaccess] "i" (CPU_FEAT_SAFE_UACCESS)); \
 	} else { \
 		(_ret) = -EFAULT; \
 	} \

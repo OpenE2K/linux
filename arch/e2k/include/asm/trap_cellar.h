@@ -222,7 +222,7 @@ static inline bool tc_cond_check_reserved_fmt(tc_cond_t condition)
 }
 
 /*
- * Returns if this is a store instruction or a load instruction that
+ * Returns whether this is a store instruction or a load instruction that
  * requires write permission (e.g. as part of atomic operation).
  */
 static inline bool tc_cond_is_store(tc_cond_t condition)
@@ -233,4 +233,33 @@ static inline bool tc_cond_is_store(tc_cond_t condition)
 	return tc_cond_is_lock_wait(condition) ||
 	       tc_cond_is_secondary_lock_wait(condition) ||
 	       tc_cond_is_secondary_lock_trap_on_load_store(condition);
+}
+
+/*
+ * Returns whether this memory access takes two neighboring cellar entries
+ */
+static inline bool tc_cond_is_quadro(tc_cond_t c)
+{
+	int fmt_full = tc_cond_fmt_full(c);
+	return fmt_full == LDST_QWORD_FMT || fmt_full == TC_FMT_QWORD_QP;
+}
+
+/*
+ * Returns whether this memory access takes two neighboring cellar entries
+ * and this is the first of them
+ */
+static inline bool tc_cond_is_quadro_lo(tc_cond_t c)
+{
+	return tc_cond_is_quadro(c) &&
+		(c.store && c.chan == 1 || !c.store && (c.chan == 0 || c.chan == 2));
+}
+
+/*
+ * Returns whether this memory access takes two neighboring cellar entries
+ * and this is the second of them
+ */
+static inline bool tc_cond_is_quadro_hi(tc_cond_t c)
+{
+	return tc_cond_is_quadro(c) &&
+		(c.store && c.chan == 3 || !c.store && (c.chan == 1 || c.chan == 3));
 }

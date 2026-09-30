@@ -183,6 +183,12 @@ typedef struct {
 	volatile u64 data_ext;
 	tc_mask_t mask;
 	bool no_restore;
+
+	/*
+	 * handle_mu_intercepts() can retry handling these
+	 * entries, so any modifications to data should be
+	 * delayed until the actual restoring of %intc_info_mu
+	 */
 	bool modify_data;
 	unsigned long mod_data;
 	unsigned long mod_data_ext;

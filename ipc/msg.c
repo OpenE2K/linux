@@ -639,6 +639,7 @@ static long ksys_msgctl(int msqid, int cmd, struct msqid_ds __user *buf, int ver
 
 SYSCALL_DEFINE3(msgctl, int, msqid, int, cmd, struct msqid_ds __user *, buf)
 {
+	cmd &= ~IPC_64; /* Bug #170975 */
 	return ksys_msgctl(msqid, cmd, buf, IPC_64);
 }
 

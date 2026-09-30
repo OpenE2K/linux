@@ -25,6 +25,7 @@ SECTIONS {
 		*(EXCLUDE_FILE (arch/e2k/boot/cpiggy.o) .rodata .rodata.*)
 		*(.data)
 
+		. = ALIGN(8);
 		__cpuhas_initcalls = .;
 		*(.cpuhas_initcall)
 		__cpuhas_initcalls_end = .;

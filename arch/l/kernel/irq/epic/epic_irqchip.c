@@ -87,6 +87,11 @@ static int epic_starting_cpu(unsigned int cpu)
 	epic_read_w(CEPIC_PNMIRR);
 	epic_write_w(CEPIC_PNMIRR, CEPIC_PNMIRR_BIT_MASK);
 
+	/* Enable CEPIC */
+	reg_ctrl.raw = epic_read_w(CEPIC_CTRL);
+	reg_ctrl.soft_en = 1;
+	epic_write_w(CEPIC_CTRL, reg_ctrl.raw);
+
 	 /* handle PMIRR */
 	reg_svr.raw = epic_read_w(CEPIC_SVR);
 	while ((value = epic_get_vector()) != reg_svr.vect)
@@ -102,31 +107,6 @@ static int epic_starting_cpu(unsigned int cpu)
 	if (error_interrupts_vector >= 0) {
 		reg_esr2.vect = error_interrupts_vector;
 		epic_write_w(CEPIC_ESR2, reg_esr2.raw);
-	}
-
-	/* Enable CEPIC */
-	reg_ctrl.raw = epic_read_w(CEPIC_CTRL);
-	reg_ctrl.soft_en = 1;
-	epic_write_w(CEPIC_CTRL, reg_ctrl.raw);
-
-	/*
-	 * CIR/PMIRR might have some old interrupts from kexec or suspend
-	 */
-	int acked = 0;
-	while (((union cepic_cir) { .raw = epic_read_w(CEPIC_CIR) }).stat) {
-		union cepic_vect_inta vect_inta = {
-			.raw = epic_read_w(CEPIC_VECT_INTA),
-		};
-		union cepic_eoi eoi = {
-			.rcpr = vect_inta.cpr,
-		};
-		epic_write_w(CEPIC_EOI, eoi.raw);
-
-		acked++;
-		if (acked > 1024) {
-			pr_err("CEPIC pending interrupts after %d EOI\n", acked);
-			break;
-		}
 	}
 
 	local_irq_restore(flags);

@@ -16,13 +16,16 @@
 #undef	DEBUG_1SYSCALL
 #define	DEBUG_1SYSCALL	0	/* Tracing particular System Call */
 #if DEBUG_1SYSCALL
-#define Dbg1SC(sys_num, fmt, ...) \
+#define Dbg1SCsnum(sys_num, fmt, ...) \
 do {	\
 	if (sys_num == DEBUG_1SYSCALL)	\
 		pr_info("%s: " fmt, __func__,  ##__VA_ARGS__); \
 } while (0)
+#define Dbg1SC(fmt, ...) \
+	Dbg1SCsnum(sys_num, fmt, ##__VA_ARGS__)
 #else
 #define Dbg1SC(...)
+#define Dbg1SCsnum(...)
 #endif
 
 /**************************** END of DEBUG DEFINES ***********************/
@@ -895,6 +898,7 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 	 * make sure such a spill does not mess emergency stack dump.
 	 */
 	if (unlikely(hw_overflow || kstack_pf_addr)) {
+		native_unfreeze_TIRS();
 		switch_to_reserve_stacks();
 		kernel_hw_stack_fatal_error(regs, exceptions, kstack_pf_addr);
 	}
@@ -1884,8 +1888,8 @@ end_of_args:
 wrong_res:
 
 #if DEBUG_1SYSCALL
-	Dbg1SC(sys_num, "system call %lld (0x%lx, 0x%lx, 0x%lx, 0x%lx, 0x%lx, 0x%lx) expected res = %ld\n",
-			sys_num, a1, a2, a3, a4, a5, a6, wrong_res);
+	Dbg1SC("system call %lld (0x%lx, 0x%lx, 0x%lx, 0x%lx, 0x%lx, 0x%lx) expected res = %ld\n",
+		sys_num, a1, a2, a3, a4, a5, a6, wrong_res);
 #else
 	if (check_pm_sc_debug_mode(PM_SC_DBG_MODE_COMPLEX_WRAPPERS) &&
 		current->mm->context.pm_sc_debug_mode & PM_SC_DBG_STRING_ARGS) {
@@ -1917,6 +1921,8 @@ wrong_res:
 		/* syscall_trace_entry was called above if _TIF_WORK_SYSCALL_TRACE */
 		rval = sys_call(a1, a2, a3, a4, a5, a6, regs);
 		regs->sys_rval = rval;
+		Dbg1SC("system call %lld %s :: rval=0x%lx wrong_res=0x%lx\n",
+			sys_num, SYSCALL_NAME_ON_ID(sys_num), rval, wrong_res);
 		if (unlikely(ti_flags & _TIF_WORK_SYSCALL_TRACE)) {
 			/* Trace syscall exit */
 			syscall_trace_leave(regs);
@@ -1924,12 +1930,13 @@ wrong_res:
 			rval = regs->sys_rval;
 		}
 	} else { /* (unlikely(wrong_res)) */
-
+		Dbg1SC("system call %lld %s :: rval=wrong_res=0x%lx\n",
+			sys_num, SYSCALL_NAME_ON_ID(sys_num), wrong_res);
 		rval = wrong_res;
 		regs->sys_rval = rval;
 	}
 #if DEBUG_1SYSCALL
-	Dbg1SC(sys_num, "syscall %lld : rval = 0x%lx / %ld\n", sys_num, rval,
+	Dbg1SC("syscall %lld : rval = 0x%lx / %ld\n", sys_num, rval,
 	       rval);
 #else
 	if (check_pm_sc_debug_mode(PM_SC_DBG_MODE_DEBUG))
@@ -2035,7 +2042,7 @@ SYS_RET_TYPE notrace handle_sys_call(system_call_func sys_call,
 	}
 #endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
-	Dbg1SC(regs->sys_num, "_NR_ %d current %px pid %d name %s\n"
+	Dbg1SCsnum(regs->sys_num, "_NR_ %d current %px pid %d name %s\n"
 	       "handle_sys_call: k_usd: base 0x%llx, size 0x%llx, sbr 0x%llx\n"
 	       "arg1 %lld arg2 0x%llx arg3 0x%llx arg4 0x%llx arg5 0x%llx arg6 0x%llx\n",
 	       regs->sys_num, current, current->pid, current->comm,
@@ -2050,7 +2057,7 @@ SYS_RET_TYPE notrace handle_sys_call(system_call_func sys_call,
 				(unsigned long)arg3, (unsigned long)arg4,
 				(unsigned long)arg5, (unsigned long)arg6);
 		regs->sys_rval = rval;
-		Dbg1SC(regs->sys_num, "\t\t_NR_ %d rval = %ld / 0x%lx\n",
+		Dbg1SCsnum(regs->sys_num, "\t\t_NR_ %d rval = %ld / 0x%lx\n",
 		       regs->sys_num, rval, rval);
 	} else {
 		/*
@@ -2102,7 +2109,7 @@ call_sys_call:
 		/* Trace syscall exit */
 		syscall_trace_leave(regs);
 		rval = regs->sys_rval;
-		Dbg1SC(regs->sys_num, "\t\t_NR_ %d rval = %ld / 0x%lx\n",
+		Dbg1SCsnum(regs->sys_num, "\t\t_NR_ %d rval = %ld / 0x%lx\n",
 		       regs->sys_num, rval, rval);
 	}
 

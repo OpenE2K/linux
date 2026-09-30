@@ -34,9 +34,9 @@ int compat_fast_sys_clock_gettime(const clockid_t which_clock,
 	if (unlikely(fast_ret))
 		return ttable_entry1_clock_gettime((unsigned long) which_clock, (unsigned long) tp);
 
-	/* Can use `|=` because __put_user_switched_pt can return only -EFAULT error */
-	ret = __put_user_switched_pt(kts_tv_sec, &tp->tv_sec);
-	return ret | __put_user_switched_pt(kts_tv_nsec, &tp->tv_nsec);
+	/* Can use `|=` because put_user_switched_pt can return only -EFAULT error */
+	ret = put_user_switched_pt(kts_tv_sec, &tp->tv_sec);
+	return ret | put_user_switched_pt(kts_tv_nsec, &tp->tv_nsec);
 }
 
 
@@ -61,14 +61,14 @@ int compat_fast_sys_gettimeofday(struct old_timeval32 __user *__restrict tv,
 			return ttable_entry1_gettimeofday((unsigned long) tv, (unsigned long) tz);
 	}
 
-	/* Can use `|=` because __put_user_switched_pt can return only -EFAULT error */
+	/* Can use `|=` because put_user_switched_pt can return only -EFAULT error */
 	if (tv) {
-		ret = __put_user_switched_pt(ktv_tv_sec, &tv->tv_sec);
-		ret |= __put_user_switched_pt(ktv_tv_nsec / 1000, &tv->tv_usec);
+		ret = put_user_switched_pt(ktv_tv_sec, &tv->tv_sec);
+		ret |= put_user_switched_pt(ktv_tv_nsec / 1000, &tv->tv_usec);
 	}
 	if (tz) {
-		ret |= __put_user_switched_pt(sys_tz.tz_minuteswest, &tz->tz_minuteswest);
-		ret |= __put_user_switched_pt(sys_tz.tz_dsttime, &tz->tz_dsttime);
+		ret |= put_user_switched_pt(sys_tz.tz_minuteswest, &tz->tz_minuteswest);
+		ret |= put_user_switched_pt(sys_tz.tz_dsttime, &tz->tz_dsttime);
 	}
 
 	return ret;
@@ -94,6 +94,6 @@ int compat_fast_sys_siggetmask(u32 __user *oset, size_t sigsetsize)
 	if (unlikely((unsigned long) oset + sizeof(sigset_t) > user_addr_max()))
 		return -EFAULT;
 
-	int ret = __put_user_switched_pt(set.word[0], &oset[0]);
-	return unlikely(ret) ? ret : __put_user_switched_pt(set.word[1], &oset[1]);
+	int ret = put_user_switched_pt(set.word[0], &oset[0]);
+	return unlikely(ret) ? ret : put_user_switched_pt(set.word[1], &oset[1]);
 }

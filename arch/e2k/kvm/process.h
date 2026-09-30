@@ -541,8 +541,8 @@ extern void prepare_stacks_to_startup_vcpu(struct kvm_vcpu *vcpu,
 		int cui, bool kernel);
 
 extern int kvm_init_vcpu_thread(struct kvm_vcpu *vcpu);
-extern void kvm_halt_host_vcpu_thread(struct kvm_vcpu *vcpu);
 #ifdef CONFIG_KVM_PARAVIRTUALIZATION
+extern void kvm_halt_host_vcpu_thread(struct kvm_vcpu *vcpu);
 extern void kvm_spare_host_vcpu_release(struct kvm_vcpu *vcpu);
 extern int kvm_copy_guest_kernel_stacks(struct kvm_vcpu *vcpu,
 					kvm_task_info_t *task_info,

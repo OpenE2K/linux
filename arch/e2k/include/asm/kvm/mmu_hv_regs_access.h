@@ -140,18 +140,6 @@ static inline void restore_intc_info_mu(const intc_info_mu_t *info, int num)
 	}
 }
 
-static inline void modify_intc_info_mu_data(intc_info_mu_t *info, int num)
-{
-	int i;
-
-	for (i = 0; i < num; i++) {
-		if (unlikely(info[i].modify_data)) {
-			info[i].data = info[i].mod_data;
-			info[i].data_ext = info[i].mod_data_ext;
-		}
-	}
-}
-
 static inline void
 kvm_set_intc_info_mu_modified_data(intc_info_mu_t *info, unsigned long data,
 				   unsigned long data_ext)

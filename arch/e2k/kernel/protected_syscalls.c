@@ -2823,37 +2823,24 @@ long protected_sys_recvmsg(const unsigned int		socket,
 				socket, (unsigned long)converted_msghdr, flags, rval);
 
 	if (rval >= 0) {
-		long ret;
+		unsigned int msg_flags;
+		__kernel_size_t msg_controllen;
+
+		if (get_user(msg_flags, &converted_msghdr->msg_flags) ||
+		    get_user(msg_controllen, &converted_msghdr->msg_controllen)) {
+			return -EFAULT;
+		}
 
 		if (current->mm->context.pm_sc_debug_mode & PM_SC_DBG_MODE_COMPLEX_WRAPPERS) {
-			unsigned int ival;
-			unsigned long lval;
-
-			if (!get_user(ival, &converted_msghdr->msg_flags))
-				DbgSCP("Syscall recvmsg() returned msg_flags: 0x%x\n", ival);
-			if (!get_user(lval, &converted_msghdr->msg_controllen))
-				DbgSCP("Syscall recvmsg() returned 'controllen': %ld\n", lval);
-
+			DbgSCP("Syscall recvmsg() returned msg_flags: 0x%x\n"
+				"Syscall recvmsg() returned 'controllen': %ld\n",
+				msg_flags, msg_controllen);
 		}
+
 		/* Updating the 'msg_flags' field @ user space: */
-		ret = copy_in_user(&prot_msghdr->msg_flags, &converted_msghdr->msg_flags,
-							sizeof(prot_msghdr->msg_flags));
-		if (ret) {
-			PROTECTED_MODE_WARNING(PMSCERRMSG_FATAL_WRITE_AT_FIELD,
-					       sys_call_ID_to_name[regs->sys_num],
-					       &prot_msghdr->msg_flags, "user_msghdr->msg_flags");
-			PM_EXCEPTION_ON_WARNING(SIGABRT, SI_KERNEL, EINVAL);
-			rval = ret;
-		}
-		/* Updating the 'controllen' field @ user space: */
-		ret = copy_in_user(&prot_msghdr->msg_controllen, &converted_msghdr->msg_controllen,
-							sizeof(converted_msghdr->msg_controllen));
-		if (ret) {
-			PROTECTED_MODE_WARNING(PMSCERRMSG_FATAL_WRITE_AT_FIELD,
-				sys_call_ID_to_name[regs->sys_num],
-				&prot_msghdr->msg_controllen, "user_msghdr->msg_controllen");
-			PM_EXCEPTION_ON_WARNING(SIGABRT, SI_KERNEL, EINVAL);
-			rval = ret;
+		if (put_user(msg_flags, &prot_msghdr->msg_flags) ||
+		    put_user(msg_controllen, &prot_msghdr->msg_controllen)) {
+			return -EFAULT;
 		}
 	}
 
@@ -4514,11 +4501,9 @@ long protected_sys_process_madvise(const long		pidfd,		/* a1 */
  * 'update_all' - update whole structure (all fields); top only otherwise.
  * Returns error code from put_user() or 0 if OK.
  */
-static
-int update_protected_siginfo_t(void __user *siginfo64,
-			       void __user *siginfo128)
+static int update_protected_siginfo_t(const struct siginfo __user *siginfo64,
+				      struct prot_siginfo __user *siginfo128)
 {
-	int rval = 0;
 	/*
 	  Structure siginfo_t consists of 5 'int's + ptr/int + ...
 
@@ -4540,36 +4525,33 @@ int update_protected_siginfo_t(void __user *siginfo64,
 	|              ...              |  6
 	*/
 
+	char buf[32];
+
 	if (!siginfo64 || !siginfo128) {
 		DbgSCP("Empty input: siginfo64=0x%px siginfo128=0x%px\n",
 		       siginfo64, siginfo128);
-		return rval;
+		return 0;
 	}
 
-	if (copy_in_user(siginfo128, siginfo64, 32)) {
-		PROTECTED_MODE_WARNING(PMSCERRMSG_FATAL_WRITE_AT, __func__,
-				(unsigned long) siginfo128);
-		PM_EXCEPTION_ON_WARNING(SIGABRT, SI_KERNEL, EFAULT);
+	if (copy_from_user(buf, siginfo64, sizeof(buf)) ||
+	    copy_to_user(siginfo128, buf, sizeof(buf))) {
 		return -EFAULT;
 	}
+
 	return 0;
 }
 
 
 notrace __section(".entry.text")
-long protected_sys_waitid(const long		which,		/* a1 */
-			  const long		pid,		/* a2 */
-			  void		__user *infop,		/* a3 */
-			  const long		options,	/* a4 */
-			  void		__user *ru,		/* a5 */
-			  const unsigned long unused6,
-			  const struct pt_regs *regs)
+long protected_sys_waitid(int which, pid_t pid, struct prot_siginfo __user *infop,
+			  int options, struct rusage __user *ru,
+			  unsigned long unused, const struct pt_regs *regs)
 {
-	void __user *siginfo64 = NULL;
+	struct siginfo __user *siginfo64 = NULL;
 	long rval;
 
-	DbgSCP("which=%ld, pid=%ld, infop=0x%lx, options=0x%x, ru=0x%px\n",
-	       which, pid, (unsigned long) infop, (int) options, ru);
+	DbgSCP("which=%d, pid=%d, infop=%px, options=0x%x, ru=0x%px\n",
+	       which, pid, infop, options, ru);
 
 	if (infop) {
 		long size;
@@ -4590,9 +4572,7 @@ long protected_sys_waitid(const long		which,		/* a1 */
 			return -ENOMEM;
 	}
 
-	rval = sys_waitid((int) which, (pid_t) pid,
-			  (struct siginfo __user *) siginfo64,
-			  (int) options, (struct rusage __user *) ru);
+	rval = sys_waitid(which, pid, siginfo64, options, ru);
 	if (!rval)
 		(void) update_protected_siginfo_t(siginfo64, infop);
 
@@ -4751,7 +4731,7 @@ struct prot_io_uring_getevents_arg {
 /**
  * get_ptr64_struct_io_uring_getevents_arg() - Converts 128-bit structure to the 64-bit format one
  *								allocated in user stack area.
- * @uargp128: pointer to protected structure 'io_uring_getevents_arg'.
+ * @argp128: pointer to protected structure 'io_uring_getevents_arg'.
  * @uargp64: pointer to allocated 64-bit structure 'io_uring_getevents_arg'.
  * @arg_num: argument number in the syscall (for error reporting).
  * @argsz64: pointer to the total memory size allocated in user stack area.
@@ -4760,19 +4740,14 @@ struct prot_io_uring_getevents_arg {
  * Return: Error number or 0 if conversion succeeded.
  */
 static inline
-long get_ptr64_struct_io_uring_getevents_arg(const void __user		*uargp128,
-					  void __user			**uargp64,
-					  const int			arg_num,
-					  size_t			*argsz64,
-					  const struct pt_regs		*regs)
+long get_ptr64_struct_io_uring_getevents_arg(struct prot_io_uring_getevents_arg __user *argp128,
+		void __user **uargp64, int arg_num, size_t *argsz64, const struct pt_regs *regs)
 {
-	struct prot_io_uring_getevents_arg __user *argp128 =
-				(struct prot_io_uring_getevents_arg __user *)uargp128;
+	struct io_uring_getevents_arg arg64;
 	struct io_uring_getevents_arg __user *argp64 = NULL;
 	e2k_ap_t dscr;
 	int tags;
-	size_t size, uargp64_size;
-	long err;
+	size_t uargp64_size;
 
 	/* NB> Structure 'sigmask' is optional size one.
 	 *	Size may differ from kernel one and be user-defined.
@@ -4780,15 +4755,13 @@ long get_ptr64_struct_io_uring_getevents_arg(const void __user		*uargp128,
 	 *	and then add 'ts' pointer and other stuff extracted from the 'ts' structure.
 	 */
 
-	err = get_user_tagged_16(dscr.qword, tags, &argp128->ts);
-	if (err)
-		return err;
+	if (get_user_tagged_16(dscr.qword, tags, &argp128->ts))
+		return -EFAULT;
 	if ((!tags && dscr.qword.lo) || (tags && tags != ETAGAPQ)) {
 		PROTECTED_MODE_ERROR(PMSCERRMSG_NOT_DESCR_IN_SC_ARG_NAME_TAG,
 				     sys_call_ID_to_name[regs->sys_num], "argp", tags);
 		PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EINVAL);
-		err = -EINVAL;
-		return err;
+		return -EINVAL;
 	} else if (IS_AP(regs->qargs[1], tags)) {
 		if (AP_OBJ_SIZE(regs->qargs[arg_num - 1]) <
 					(sizeof(struct prot_io_uring_getevents_arg))) {
@@ -4804,29 +4777,26 @@ long get_ptr64_struct_io_uring_getevents_arg(const void __user		*uargp128,
 	/* 'ts' is a valid pointer to struct prot_io_uring_getevents_arg. */
 
 	uargp64_size = sizeof(struct io_uring_getevents_arg);
-	argp64 = (struct io_uring_getevents_arg __user *) get_user_space(uargp64_size);
+	argp64 = get_user_space(uargp64_size);
 	if (!argp64)
 		return -ENOMEM;
 
 	/* Copying structure up to 'ts' field as is: */
+	if (copy_from_user(&arg64, argp128, offsetof(struct io_uring_getevents_arg, ts)))
+		return -EFAULT;
 
-	size = offsetof(struct io_uring_getevents_arg, ts);
-	err = copy_in_user((void __user *)argp64, (void __user *)argp128, size);
-	if (err)
-		return err;
+	/* Adding 'ts' pointer to 'arg64': */
+	arg64.ts = AP_PTR(dscr);
 
-	/* Adding 'ts' pointer to 'argp64': */
-
-	err = put_user(AP_PTR(dscr), &(argp64->ts));
-	if (err)
-		return err;
+	if (copy_to_user(argp64, &arg64, sizeof(arg64)))
+		return -EFAULT;
 
 	if (uargp64)
 		*uargp64 = argp64;
 	if (argsz64)
 		*argsz64 = uargp64_size;
 
-	return err;
+	return 0;
 }
 
 notrace __section(".entry.text")

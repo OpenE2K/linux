@@ -185,14 +185,8 @@ void e2k_start_secondary_switched_stacks(int cpuid, int cpu)
 	flush_TLB_page((unsigned long) empty_zero_page,
 						E2K_KERNEL_CONTEXT);
 
-	/*
-	 * init_idle_preempt_count() in e2k set preemt count in register of current cpu,
-	 * so we need to stay preempt_disable() here and not perform it in
-	 * init_idle_preempt_count(). See 3c51d82d0b7862d7d246016c74b4390fb1fa1f11 for
-	 * understanding as it should be.
-	 */
-	WARN_ON(preempt_count());
-	preempt_disable();
+	preempt_count_set(PREEMPT_DISABLED);
+	clear_preempt_need_resched();
 
 	DebugSMPB("Stack at about %px\n", &cpuid);
 

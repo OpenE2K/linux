@@ -47,10 +47,8 @@ extern int ftrace_graph_entry_stub(struct ftrace_graph_ent *);
 
 #ifdef CONFIG_E2K_STACKS_TRACER
 extern int stack_tracer_enabled;
-extern int stack_tracer_kernel_only;
-int
-stack_trace_sysctl(struct ctl_table *table, int write,
-		   void __user *buffer, size_t *lenp, loff_t *ppos);
+int stack_trace_sysctl(struct ctl_table *table, int write,
+		       void __user *buffer, size_t *lenp, loff_t *ppos);
 #endif
 
 extern __noreturn void panic_ftrace_graph_cr(void);

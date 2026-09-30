@@ -247,19 +247,19 @@ static int rtcfs_fill_super(struct super_block *sb, void *data, int silent)
 	if (!proc_fs_type)
 		return -ENODEV;
 	proc_fc = fs_context_for_mount(proc_fs_type, SB_KERNMOUNT);
+	put_filesystem(proc_fs_type);
 	if (IS_ERR(proc_fc))
 		return PTR_ERR(proc_fc);
-
 	sbi->proc_fc = proc_fc;
+
 	mnt = fc_mount(proc_fc);
-	module_put(proc_fs_type->owner);
 	if (IS_ERR(mnt))
 		return PTR_ERR(mnt);
+	sbi->proc_mnt = mnt;
+
 	ret = rtcfs_apply_options(sbi, data);
 	if (ret)
 		return ret;
-
-	sbi->proc_mnt = mnt;
 
 	/* getting proc root path */
 	ret = vfs_path_lookup(mnt->mnt_root, mnt, "/", 0, &path);
@@ -272,10 +272,8 @@ static int rtcfs_fill_super(struct super_block *sb, void *data, int silent)
 
 	set_nlink(root, 2);
 	root_dentry = d_make_root(root);
-	if (!root_dentry) {
-		iput(root);
+	if (!root_dentry)
 		return -EINVAL;
-	}
 
 	sb->s_root = root_dentry;
 	return 0;

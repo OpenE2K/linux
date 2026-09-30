@@ -80,8 +80,6 @@ static DEFINE_MUTEX(stack_sysctl_mutex);
 int stack_tracer_enabled = 0;
 static int last_stack_tracer_enabled;
 
-int stack_tracer_kernel_only = 0;
-
 
 struct save_stack_address_args {
 	struct extended_stack_trace *trace;
@@ -117,6 +115,7 @@ static int save_stack_address(e2k_mem_crs_t *frame, unsigned long real_frame_add
 		 * to do the necessary calculation one step later.
 		 */
 		u64 free_stack = get_cr1_ussz(frame->cr1);
+		prev_size = 0;
 		*prev = KERNEL_C_STACK_SIZE - free_stack;
 	} else {
 		u64 free_stack = get_cr1_ussz(frame->cr1);
@@ -199,50 +198,6 @@ static void save_extended_p_stack_trace(struct extended_stack_trace *trace)
 		trace->entries[trace->nr_entries++] = ULONG_MAX;
 }
 
-struct read_kernel_stacks_size_args {
-	unsigned long *cs_size;
-	unsigned long *ps_size;
-	int *skip;
-};
-
-static int read_kernel_stacks_size(e2k_mem_crs_t *frame, unsigned long real_frame_addr,
-		unsigned long corrected_frame_addr, chain_write_fn_t write_frame, void *arg)
-{
-	struct read_kernel_stacks_size_args *args = arg;
-	unsigned long *cs_size = args->cs_size;
-	unsigned long *ps_size = args->ps_size;
-	int *skip = args->skip;
-
-	if (*skip > 0) {
-		(*skip)--;
-		return 0;
-	}
-
-	if (!frame->cr1.pm)
-		return 1;
-
-	*cs_size += SZ_OF_CR;
-	*ps_size += frame->cr1.wbs * EXT_4_NR_SZ;
-
-	return 0;
-}
-
-noinline
-static void get_kernel_stacks_size(unsigned long *cs_size,
-		unsigned long *ps_size)
-{
-	struct read_kernel_stacks_size_args args;
-	int skip = 3;
-
-	*cs_size = 0;
-	*ps_size = 0;
-
-	args.cs_size = cs_size;
-	args.ps_size = ps_size;
-	args.skip = &skip;
-	parse_chain_stack(false, false, NULL, read_kernel_stacks_size, &args);
-}
-
 static inline void check_stack(void)
 {
 	unsigned long this_size, flags, ps_size, cs_size;
@@ -254,29 +209,24 @@ static inline void check_stack(void)
 
 	this_size = read_SBR_reg().base - (unsigned long) &this_size;
 
-	if (stack_tracer_kernel_only &&
-			(current->mm || (current->flags & PF_EXITING))) {
-		get_kernel_stacks_size(&cs_size, &ps_size);
-	} else {
-		raw_all_irq_save(flags);
-		cr1 = read_CR1_reg();
-		psp = read_PSP_reg();
-		pcsp = read_PCSP_reg();
-		pshtp = read_PSHTP_reg();
-		pcshtp = read_PCSHTP_reg();
-		raw_all_irq_restore(flags);
+	raw_all_irq_save(flags);
+	cr1 = read_CR1_reg();
+	psp = read_PSP_reg();
+	pcsp = read_PCSP_reg();
+	pshtp = read_PSHTP_reg();
+	pcshtp = read_PCSHTP_reg();
+	raw_all_irq_restore(flags);
 
-		u64 ps_base = PSP_BASE(psp);
-		u64 cs_base = PCSP_BASE(pcsp);
+	u64 ps_base = PSP_BASE(psp);
+	u64 cs_base = PCSP_BASE(pcsp);
 
-		ps_size = PSP_IND(psp) + GET_PSHTP_MEM_INDEX(pshtp) - cr1.wbs * EXT_4_NR_SZ;
-		if (IS_USER_ADDR(ps_base))
-			ps_size += ps_base - (u64) CURRENT_PS_BASE();
+	ps_size = PSP_IND(psp) + PSHTP_MEM_INDEX(pshtp) - cr1.wbs * EXT_4_NR_SZ;
+	if (IS_USER_ADDR(ps_base))
+		ps_size += ps_base - (u64) CURRENT_PS_BASE();
 
-		cs_size = PCSP_IND(pcsp) + pcshtp.ind - SZ_OF_CR;
-		if (IS_USER_ADDR(cs_base))
-			cs_size += cs_base - (u64) CURRENT_PCS_BASE();
-	}
+	cs_size = PCSP_IND(pcsp) + pcshtp.ind - SZ_OF_CR;
+	if (IS_USER_ADDR(cs_base))
+		cs_size += cs_base - (u64) CURRENT_PCS_BASE();
 
 	if (this_size <= max_stack_size && ps_size <= max_p_stack_size
 			&& cs_size <= max_pc_stack_size)
@@ -317,9 +267,8 @@ static inline void check_stack(void)
 	local_irq_restore(flags);
 }
 
-static void
-stack_trace_call(unsigned long ip, unsigned long parent_ip,
-		 struct ftrace_ops *op, struct pt_regs *pt_regs)
+static void stack_trace_call(unsigned long ip, unsigned long parent_ip,
+		struct ftrace_ops *op, struct ftrace_regs *fregs)
 {
 	int cpu;
 
@@ -481,9 +430,9 @@ static int t_show(struct seq_file *m, void *v)
 	total = max_stack_size;
 	for (i = 0; i < max_stack_trace.nr_entries &&
 			max_stack_trace.entries[i] != ULONG_MAX; i++) {
-		seq_printf(m, "%3ld) %8d   %5d   %pF\n", i, total,
+		seq_printf(m, "%3ld) %8llu   %5lu   %pS\n", i, total,
 				max_stack_trace.sizes[i],
-				max_stack_trace.entries[i]);
+				(void *) max_stack_trace.entries[i]);
 		total -= max_stack_trace.sizes[i];
 	}
 
@@ -495,9 +444,9 @@ static int t_show(struct seq_file *m, void *v)
 	total = max_p_stack_size;
 	for (i = 0; i < max_p_stack_trace.nr_entries &&
 			max_p_stack_trace.entries[i] != ULONG_MAX; i++) {
-		seq_printf(m, "%3ld) %8d   %5d   %pF\n", i, total,
+		seq_printf(m, "%3ld) %8llu   %5lu   %pS\n", i, total,
 				max_p_stack_trace.sizes[i],
-				max_p_stack_trace.entries[i]);
+				(void *) max_p_stack_trace.entries[i]);
 		total -= max_p_stack_trace.sizes[i];
 	}
 
@@ -508,8 +457,7 @@ static int t_show(struct seq_file *m, void *v)
 
 	for (i = 0; i < max_pc_stack_trace.nr_entries &&
 			max_pc_stack_trace.entries[i] != ULONG_MAX; i++)
-		seq_printf(m, "%3ld)    %pF\n", i,
-				max_pc_stack_trace.entries[i]);
+		seq_printf(m, "%3ld)    %pS\n", i, (void *) max_pc_stack_trace.entries[i]);
 
 	return 0;
 }
@@ -585,33 +533,31 @@ static __init int enable_stacktrace(char *str)
 	stack_tracer_enabled = 1;
 	last_stack_tracer_enabled = 1;
 
-	stack_tracer_kernel_only = (strstr(str, "kernel") != NULL);
-
 	return 1;
 }
 __setup("stacktrace", enable_stacktrace);
 
 static __init int stack_trace_init(void)
 {
-	struct dentry *d_tracer;
+	int ret;
 
-	d_tracer = tracing_init_dentry();
-	if (!d_tracer)
+	ret = tracing_init_dentry();
+	if (ret)
 		return 0;
 
-	trace_create_file("stack_max_size", 0644, d_tracer,
+	trace_create_file("stack_max_size", TRACE_MODE_WRITE, NULL,
 			&max_stack_size, &stack_max_size_fops);
 
-	trace_create_file("stack_max_size_p", 0644, d_tracer,
+	trace_create_file("stack_max_size_p", TRACE_MODE_WRITE, NULL,
 			&max_p_stack_size, &stack_max_size_fops);
 
-	trace_create_file("stack_max_size_pc", 0644, d_tracer,
+	trace_create_file("stack_max_size_pc", TRACE_MODE_WRITE, NULL,
 			&max_pc_stack_size, &stack_max_size_fops);
 
-	trace_create_file("stack_trace", 0444, d_tracer,
+	trace_create_file("stack_trace", TRACE_MODE_READ, NULL,
 			NULL, &stack_trace_fops);
 
-	trace_create_file("stack_trace_filter", 0444, d_tracer,
+	trace_create_file("stack_trace_filter", TRACE_MODE_READ, NULL,
 			NULL, &stack_trace_filter_fops);
 
 	if (stack_trace_filter_buf[0])

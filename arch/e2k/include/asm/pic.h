@@ -11,7 +11,7 @@
 #include <linux/delay.h>
 #include <asm/cpu_features.h>
 
-static inline bool cpu_has_epic(void)
+static __always_inline bool cpu_has_epic(void)
 {
 	return cpu_has(CPU_FEAT_EPIC);
 }
@@ -41,6 +41,28 @@ static inline void local_pic_timer_interrupt(void)
 	else
 		local_apic_timer_interrupt(NULL);
 }
+
+
+extern u32 lapic_save_and_clear_nmi(void);
+extern u32 cepic_save_and_clear_nmi(void);
+
+/**
+ * save_pic_nmi - saves NMI bits from interrupt controller to pt_regs
+ *
+ * We must keep NMIs closed between entering trap and getting
+ * NMI interrupts from the NMI regiser.  Otherwise we would
+ * enter handler again immediately after opening interrupts
+ * in %psr (because nm_interrupt signal in controller is not
+ * cleared until explicit NMI register write).
+ */
+static __always_inline __must_check u32 pic_save_and_clear_nmi(void)
+{
+	if (cpu_has_epic())
+		return cepic_save_and_clear_nmi();
+	else
+		return lapic_save_and_clear_nmi();
+}
+
 
 extern void cepic_disable(void);
 extern void disable_local_APIC(void);

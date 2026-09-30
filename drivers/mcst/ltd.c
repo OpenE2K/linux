@@ -479,4 +479,4 @@ module_platform_driver(ltd_tty_platform_driver);
 
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("MCST");
-MODULE_DESCRIPTION("Log Transmission Device Driver for e32c & e8v7 MCST processors");
+MODULE_DESCRIPTION("Log Transmission Device Driver for e8v7 MCST processors");

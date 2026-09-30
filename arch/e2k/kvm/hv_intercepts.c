@@ -2337,7 +2337,8 @@ int parse_INTC_registers(struct kvm_vcpu *vcpu)
 	 * 2) Handle NMIs
 	 */
 	if (unlikely(cu_num != -1 && cu->header.hv_nm_int)) {
-		do_nm_interrupt(&regs);
+		u32 nmi_reason = pic_save_and_clear_nmi();
+		do_nmi(nmi_reason);
 	}
 
 	/*

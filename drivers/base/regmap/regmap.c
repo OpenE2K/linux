@@ -2104,8 +2104,11 @@ int _regmap_raw_write(struct regmap *map, unsigned int reg,
 	size_t val_count = val_len / val_bytes;
 	size_t chunk_count, chunk_bytes;
 	size_t chunk_regs = val_count;
+#ifdef CONFIG_MCST
+	int ret = 0, i;
+#else
 	int ret, i;
-
+#endif
 	if (!val_count)
 		return -EINVAL;
 

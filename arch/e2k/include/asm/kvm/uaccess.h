@@ -18,26 +18,28 @@
 #include <asm/kvm/pv-emul.h>
 #include <asm/kvm/mmu.h>
 
+#ifdef	CONFIG_KVM_PARAVIRTUALIZATION
 static inline unsigned long
 native_copy_in_user_with_tags(void __user *to, const void __user *from,
 				unsigned long n)
 {
-	return raw_copy_in_user_with_tags(to, from, n);
+	return raw_copy_in_userspace_with_tags(to, from, n);
 }
 
 static inline unsigned long
 native_copy_to_user_with_tags(void __user *to, const void *from,
 				unsigned long n)
 {
-	return raw_copy_to_user_with_tags(to, from, n);
+	return raw_copy_to_userspace_with_tags(to, from, n);
 }
 
 static inline unsigned long
 native_copy_from_user_with_tags(void *to, const void __user *from,
 				unsigned long n)
 {
-	return raw_copy_from_user_with_tags(to, from, n);
+	return raw_copy_from_userspace_with_tags(to, from, n);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #define	native_get_user(kval, uptr)	get_user(kval, uptr)
 #define	native_put_user(kval, uptr)	put_user(kval, uptr)
@@ -224,8 +226,7 @@ static inline size_t fast_tagged_memory_copy_to_user_gva(void __user *dst,
 	};
 
 	if (likely(!host_test_intc_emul_mode(regs))) {
-		return native_fast_tagged_memory_copy_to_user(dst, src,
-				len, regs, strd_opcode, ldrd_opcode, prefetch);
+		return native_fast_tagged_memory_copy_to_user(dst, src, len, regs, prefetch);
 	}
 
 	vcpu = native_current_thread_info()->vcpu;
@@ -264,40 +265,13 @@ static inline size_t fast_tagged_memory_copy_from_user_gva(void *dst,
 #define	host_get_user(kval, uptr, hregs)	native_get_user(kval, uptr)
 #define	host_put_user(kval, uptr, hregs)	native_put_user(kval, uptr)
 
-static inline unsigned long
-host_copy_in_user_with_tags(struct kvm_vcpu *vcpu, void __user *to,
-		const void __user *from, unsigned long n, const struct pt_regs *regs)
-{
-	return native_copy_in_user_with_tags(to, from, n);
-}
-
-static inline unsigned long
-host_copy_to_user_with_tags(void __user *to, const void *from,
-				unsigned long n, const struct pt_regs *regs)
-{
-	return native_copy_to_user_with_tags(to, from, n);
-}
-
-static inline unsigned long
-host_copy_from_user_with_tags(void *to, const void __user *from,
-				unsigned long n, const struct pt_regs *regs)
-{
-	return native_copy_from_user_with_tags(to, from, n);
-}
-
 #ifndef CONFIG_KVM_GUEST_KERNEL
+#ifdef	CONFIG_KVM_PARAVIRTUALIZATION
 static inline size_t fast_tagged_memory_copy_to_user_gva(void __user *dst,
 		const void *src, size_t len,
 		const struct pt_regs *regs, int prefetch)
 {
-	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT, .prot = 1 };
-	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) {
-		.fmt = LDST_QWORD_FMT,
-		.mas = MAS_FILL_OPERATION(CACHE_BYPASS_L1, 0),
-	};
-
-	return native_fast_tagged_memory_copy_to_user(dst, src, len,
-			regs, strd_opcode, ldrd_opcode, prefetch);
+	return native_fast_tagged_memory_copy_to_user(dst, src, len, regs, prefetch);
 }
 
 static inline size_t fast_tagged_memory_copy_from_user_gva(void *dst,
@@ -314,14 +288,8 @@ static inline size_t fast_tagged_memory_copy_from_user_gva(void *dst,
 	return native_fast_tagged_memory_copy_from_user(dst, src, len, regs,
 			strd_opcode, ldrd_opcode, prefetch);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 #endif
 #endif	/* CONFIG_KVM_HOST_KERNEL */
-
-static inline unsigned long
-host_copy_to_user(void __priv *to, const void *from,
-				unsigned long n, const struct pt_regs *regs)
-{
-	return host_copy_to_user_with_tags(to, from, n, regs);
-}
 
 #endif /* _E2K_KVM_UACCESS_H_ */

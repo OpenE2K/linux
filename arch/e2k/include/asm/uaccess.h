@@ -24,6 +24,228 @@
 #include <asm/e2k_ptypes.h>
 #endif
 
+
+#define __user_ldrd(_x, _ptr, _opc) \
+do { \
+	ASM_NO_SANITIZE_OR_NO_INLINE \
+	asm ("ldrd %[ptr], %[opc], %[x]" \
+		: [x] "=r" (_x) \
+		: [ptr] "r" (_ptr), "m" (*(_ptr)), \
+		  [opc] "ir" ((_opc).word)); \
+} while (0)
+
+#define __user_strd(_value, _ptr, _opc) \
+do { \
+	ASM_NO_SANITIZE_OR_NO_INLINE \
+	asm ("strd %[addr], %[opc], %[value]" \
+		: "=m" (*(_ptr)) \
+		: [addr] "r" (_ptr), \
+		  [value] "r" (_value), \
+		  [opc] "ir" ((_opc).word)); \
+} while (0)
+
+
+/*
+ * Do not put this into mmu_types.h with others
+ * to avoid header dependency hell.
+ */
+static __always_inline ldst_rec_op_t ldst_rec_userspace_access(int fmt, bool priv)
+{
+	bool safe_uaccess = cpu_has(CPU_FEAT_SAFE_UACCESS);
+	return (ldst_rec_op_t) {
+		.fmt = fmt,
+		.prot = !safe_uaccess,
+		.mode_h = safe_uaccess && !priv,
+	};
+}
+
+static __always_inline ldst_rec_op_t ldst_rec_userspace_tagged_store_8(int bypass, bool priv)
+{
+	bool safe_uaccess = cpu_has(CPU_FEAT_SAFE_UACCESS);
+	return (ldst_rec_op_t) {
+		.fmt = LDST_QWORD_FMT,
+		.mas = MAS_NORMAL(bypass, 0),
+		.prot = 1,
+		.mode_h = safe_uaccess && !priv,
+	};
+}
+
+static __always_inline ldst_rec_op_t ldst_rec_userspace_tagged_load_8(int bypass, bool priv)
+{
+	bool safe_uaccess = cpu_has(CPU_FEAT_SAFE_UACCESS);
+	return (ldst_rec_op_t) {
+		.fmt = LDST_QWORD_FMT,
+		.prot = 1,
+		.mode_h = safe_uaccess && !priv,
+		.mas = (safe_uaccess) ? 0 : MAS_FILL_OPERATION(bypass, 0),
+	};
+}
+
+#define USER_LDST_OPC()	ldst_rec_userspace_access(0, false)
+#define PRIV_LDST_OPC()	ldst_rec_userspace_access(0, true)
+
+#ifdef CONFIG_KVM_GUEST_KERNEL
+# define USER_LD(x, ptr, opc) do { (x) = *(ptr); } while (0)
+# define USER_ST(x, ptr, opc) do { *(ptr) = (x); } while (0)
+# define PRIV_LD USER_LD
+# define PRIV_ST USER_ST
+#else
+# define USER_LD(x, ptr, opc) \
+do { \
+	const __typeof__(*(ptr)) __user *__u_ld_addr = (ptr); \
+	ldst_rec_op_t __ul_opc = (opc); \
+	__chk_user_ptr(ptr); \
+	switch (sizeof(*__u_ld_addr)) { \
+	case 1: \
+		__ul_opc.fmt = LDST_BYTE_FMT; \
+		__user_ldrd((x), (const u8 __user *) (__u_ld_addr), __ul_opc); \
+		break; \
+	case 2: \
+		__ul_opc.fmt = LDST_HALF_FMT; \
+		__user_ldrd((x), (const u16 __user *) (__u_ld_addr), __ul_opc); \
+		break; \
+	case 4: \
+		__ul_opc.fmt = LDST_WORD_FMT; \
+		__user_ldrd((x), (const u32 __user *) (__u_ld_addr), __ul_opc); \
+		break; \
+	case 8: \
+		__ul_opc.fmt = LDST_DWORD_FMT; \
+		__user_ldrd((x), (const u64 __user *) (__u_ld_addr), __ul_opc); \
+		break; \
+	default: \
+		__user_ldst_bad(); \
+		break; \
+	} \
+} while (0)
+
+# define PRIV_LD(x, ptr, opc) \
+do { \
+	const __typeof__(*(ptr)) __priv *__u_ld_addr = (ptr); \
+	ldst_rec_op_t __ul_opc = (opc); \
+	__chk_priv_ptr(ptr); \
+	switch (sizeof(*__u_ld_addr)) { \
+	case 1: \
+		__ul_opc.fmt = LDST_BYTE_FMT; \
+		__user_ldrd((x), (const u8 __priv *) (__u_ld_addr), __ul_opc); \
+		break; \
+	case 2: \
+		__ul_opc.fmt = LDST_HALF_FMT; \
+		__user_ldrd((x), (const u16 __priv *) (__u_ld_addr), __ul_opc); \
+		break; \
+	case 4: \
+		__ul_opc.fmt = LDST_WORD_FMT; \
+		__user_ldrd((x), (const u32 __priv *) (__u_ld_addr), __ul_opc); \
+		break; \
+	case 8: \
+		__ul_opc.fmt = LDST_DWORD_FMT; \
+		__user_ldrd((x), (const u64 __priv *) (__u_ld_addr), __ul_opc); \
+		break; \
+	default: \
+		__user_ldst_bad(); \
+		break; \
+	} \
+} while (0)
+
+# define USER_ST(x, ptr, opc) \
+do { \
+	__typeof__(*(ptr)) __user *__u_st_addr = (ptr); \
+	ldst_rec_op_t __us_opc = (opc); \
+	__chk_user_ptr(ptr); \
+	switch (sizeof(*__u_st_addr)) { \
+	case 1: \
+		__us_opc.fmt = LDST_BYTE_FMT; \
+		__user_strd((x),  (u8 __user *) (__u_st_addr), __us_opc); \
+		break; \
+	case 2: \
+		__us_opc.fmt = LDST_HALF_FMT; \
+		__user_strd((x),  (u16 __user *) (__u_st_addr), __us_opc); \
+		break; \
+	case 4: \
+		__us_opc.fmt = LDST_WORD_FMT; \
+		__user_strd((x),  (u32 __user *) (__u_st_addr), __us_opc); \
+		break; \
+	case 8: \
+		__us_opc.fmt = LDST_DWORD_FMT; \
+		__user_strd((x),  (u64 __user *) (__u_st_addr), __us_opc); \
+		break; \
+	default: \
+		__user_ldst_bad(); \
+		break; \
+	} \
+} while (0)
+
+# define PRIV_ST(x, ptr, opc) \
+do { \
+	__typeof__(*(ptr)) __priv *__u_st_addr = (ptr); \
+	ldst_rec_op_t __us_opc = (opc); \
+	__chk_priv_ptr(ptr); \
+	switch (sizeof(*__u_st_addr)) { \
+	case 1: \
+		__us_opc.fmt = LDST_BYTE_FMT; \
+		__user_strd((x),  (u8 __priv *) (__u_st_addr), __us_opc); \
+		break; \
+	case 2: \
+		__us_opc.fmt = LDST_HALF_FMT; \
+		__user_strd((x),  (u16 __priv *) (__u_st_addr), __us_opc); \
+		break; \
+	case 4: \
+		__us_opc.fmt = LDST_WORD_FMT; \
+		__user_strd((x),  (u32 __priv *) (__u_st_addr), __us_opc); \
+		break; \
+	case 8: \
+		__us_opc.fmt = LDST_DWORD_FMT; \
+		__user_strd((x),  (u64 __priv *) (__u_st_addr), __us_opc); \
+		break; \
+	default: \
+		__user_ldst_bad(); \
+		break; \
+	} \
+} while (0)
+
+static __always_inline __must_check unsigned long
+fast_tagged_memory_set_user(void __user *addr, u64 val, u64 tag, size_t len,
+		size_t *cleared, bool priv)
+{
+	ldst_rec_op_t strd_opcode = ldst_rec_userspace_tagged_store_8(CACHE_BYPASS_L1, priv);
+
+	return native_fast_tagged_memory_set((void __force *) addr, val,
+			tag, len, strd_opcode);
+}
+#endif
+
+
+static __always_inline __must_check size_t
+fast_tagged_memory_copy_to_user(volatile void __user *dst, const volatile void *src, size_t len,
+				size_t *copied, int prefetch, bool priv)
+{
+	ldst_rec_op_t ld_opc = ldst_rec_tagged_load_bypass(CACHE_BYPASS_L1);
+	ldst_rec_op_t st_opc = ldst_rec_userspace_tagged_store_8(CACHE_BYPASS_L1, priv);
+	return native_fast_tagged_memory_copy((volatile void __force *) dst, src, len,
+					      st_opc, ld_opc, prefetch);
+}
+
+static __always_inline __must_check size_t
+fast_tagged_memory_copy_from_user(volatile void *dst, const volatile void __user *src, size_t len,
+				  size_t *copied, int prefetch, bool priv)
+{
+	ldst_rec_op_t ld_opc = ldst_rec_userspace_tagged_load_8(CACHE_BYPASS_L1, priv);
+	ldst_rec_op_t st_opc = ldst_rec_tagged_store_bypass(CACHE_BYPASS_L1);
+	return native_fast_tagged_memory_copy(dst, (void __force *) src, len,
+					      st_opc, ld_opc, prefetch);
+}
+
+static __always_inline __must_check size_t
+fast_tagged_memory_copy_in_user(volatile void __user *dst, const volatile void __user *src,
+		size_t len, size_t *copied, int prefetch, bool priv_to, bool priv_from)
+{
+	ldst_rec_op_t st_opc = ldst_rec_userspace_tagged_store_8(CACHE_BYPASS_L1, priv_to);
+	ldst_rec_op_t ld_opc = ldst_rec_userspace_tagged_load_8(CACHE_BYPASS_L1, priv_from);
+	return native_fast_tagged_memory_copy((volatile void __force *)  dst,
+					      (const volatile void __force *) src,
+					      len, st_opc, ld_opc, prefetch);
+}
+
+
 /* Keep a hole between user memory and privileged so that
  * protected mode descriptors can never ever reach the
  * privileged area. It was true before v7 instruction set */
@@ -51,11 +273,20 @@ register u64 uaccess_max ASM_GREG(UACCESS_MAX_GREG);
 #define set_ap_u_border(ap)	set_u_border(AP_PTR(ap) + AP_OBJ_SIZE(ap))
 #define set_max_u_border()	set_u_border(MAX_U_BORDER)
 
-#define __access_ok(addr, size) \
+#ifdef CONFIG_ALTERNATE_USER_ADDRESS_SPACE
+/* TODO this conflicts with ptr128 support (set_u_border()) */
+# define __access_ok(addr, size) \
+({ \
+	__chk_user_ptr(addr); \
+	true; \
+})
+#else
+# define __access_ok(addr, size) \
 ({ \
 	__chk_user_ptr(addr); \
 	likely(__range_ok((unsigned long) (addr), (size), get_u_border())); \
 })
+#endif
 
 /*
  * WARN_ON_IN_IRQ() and access_ok() are copy/paste from x86
@@ -454,38 +685,33 @@ do { \
 		 * 		get user
 		 */
 
-extern int __get_user_bad(void) __attribute__((noreturn));
+extern int __noreturn __get_user_bad(void);
 
-/* __get_user() but caller must manually switch to user page tables.
- * Useful in protected fast syscalls since we can't access user space
- * directly (PTE.int_pr prohibits that) but page tables are from user. */
-#define __get_user_switched_pt(x, ptr) \
-({									\
-	const __typeof__(*(ptr)) __user *__gusp_ptr = (ptr);		\
-	ldst_rec_op_t __gu_opc = { .prot = 1 }; \
-	int __ret_gusp;							\
-	__chk_user_ptr(ptr);						\
-	switch (sizeof(*__gusp_ptr)) {					\
+/*
+ * @priv must be 0 or 1 for assembler macros to work
+ */
+#define userspace_ldrd(x, ptr, priv) \
+({ \
+	const __typeof__(*(ptr)) __user *__gusp_ptr = (ptr); \
+	int __ret_gusp; \
+	__chk_user_ptr(ptr); \
+	switch (sizeof(*__gusp_ptr)) { \
 	case 1: \
-		__gu_opc.fmt = LDST_BYTE_FMT; \
-		GET_USER_ASM(x, __gusp_ptr, __gu_opc.word, __ret_gusp, b); \
+		GET_USER_ASM(x, __gusp_ptr, __ret_gusp, b, LDST_BYTE_FMT, priv); \
 		break; \
 	case 2: \
-		__gu_opc.fmt = LDST_HALF_FMT; \
-		GET_USER_ASM(x, __gusp_ptr, __gu_opc.word, __ret_gusp, h); \
+		GET_USER_ASM(x, __gusp_ptr, __ret_gusp, h, LDST_HALF_FMT, priv); \
 		break; \
 	case 4: \
-		__gu_opc.fmt = LDST_WORD_FMT; \
-		GET_USER_ASM(x, __gusp_ptr, __gu_opc.word, __ret_gusp, w); \
+		GET_USER_ASM(x, __gusp_ptr, __ret_gusp, w, LDST_WORD_FMT, priv); \
 		break; \
 	case 8: \
-		__gu_opc.fmt = LDST_DWORD_FMT; \
-		GET_USER_ASM(x, __gusp_ptr, __gu_opc.word, __ret_gusp, d); \
+		GET_USER_ASM(x, __gusp_ptr, __ret_gusp, d, LDST_DWORD_FMT, priv); \
 		break; \
-	default:							\
-		__ret_gusp = -EFAULT; __get_user_bad(); break;		\
-	}								\
-	(int) builtin_expect_wrapper(__ret_gusp, 0);			\
+	default: \
+		__ret_gusp = -EFAULT; __get_user_bad(); break; \
+	} \
+	(int) builtin_expect_wrapper(__ret_gusp, 0); \
 })
 
 #define __get_user(x, ptr) \
@@ -493,7 +719,7 @@ extern int __get_user_bad(void) __attribute__((noreturn));
 	const __typeof__(*(ptr)) __user *___gu_ptr = (ptr); \
 	int __ret_gu;	\
 	uaccess_enable(); \
-	__ret_gu = __get_user_switched_pt((x), ___gu_ptr); \
+	__ret_gu = userspace_ldrd((x), ___gu_ptr, 0); \
 	uaccess_disable(); \
 	__ret_gu; \
 })
@@ -517,7 +743,7 @@ extern int __get_user_bad(void) __attribute__((noreturn));
 			"unaligned get_user_tagged_4() parameter")) { \
 		__ret_gu = -EFAULT; \
 	} else { \
-		GET_USER_VAL_AND_TAGW((val), (tag), ____gu_ptr, __ret_gu); \
+		GET_USER_VAL_AND_TAGW((val), (tag), ____gu_ptr, __ret_gu, 0); \
 	} \
 	(int) builtin_expect_wrapper(__ret_gu, 0); \
 })
@@ -541,7 +767,7 @@ extern int __get_user_bad(void) __attribute__((noreturn));
 			"unaligned get_user_tagged_8() parameter")) { \
 		__ret_gu = -EFAULT; \
 	} else { \
-		GET_USER_VAL_AND_TAGD((val), (tag), ____gu_ptr, __ret_gu); \
+		GET_USER_VAL_AND_TAGD((val), (tag), ____gu_ptr, __ret_gu, 0); \
 	} \
 	(int) builtin_expect_wrapper(__ret_gu, 0); \
 })
@@ -561,7 +787,7 @@ extern int __get_user_bad(void) __attribute__((noreturn));
 	int ___ret_gu; \
 	const __typeof__(*(ptr)) __user *___gu_ptr = (ptr); \
 	__chk_user_ptr(ptr); \
-	GET_USER_VAL_AND_TAGQ(___x_gu.lo, ___x_gu.hi, (tag), ___gu_ptr, ___ret_gu, 8ul); \
+	GET_USER_VAL_AND_TAGQ(___x_gu.lo, ___x_gu.hi, (tag), ___gu_ptr, ___ret_gu, 8ul, 0); \
 	(x) = ___x_gu; \
 	(int) builtin_expect_wrapper(___ret_gu, 0); \
 })
@@ -586,7 +812,35 @@ extern int __get_user_bad(void) __attribute__((noreturn));
 		 * 		put user
 		 */
 
-extern int __put_user_bad(void) __attribute__((noreturn));
+extern int __noreturn __put_user_bad(void);
+
+/*
+ * @priv must be 0 or 1 for assembler macros to work
+ */
+#define userspace_strd(x, ptr, priv) \
+({									\
+	__typeof__(*(ptr)) __user *__pusp_ptr = (ptr);			\
+	__typeof__(*(ptr)) __pusp_val  = (x);				\
+	int __ret_pusp;							\
+	__chk_user_ptr(ptr);						\
+	switch (sizeof(*__pusp_ptr)) {					\
+	case 1: \
+		PUT_USER_ASM(__pusp_val, __pusp_ptr, __ret_pusp, b, LDST_BYTE_FMT, priv); \
+		break; \
+	case 2: \
+		PUT_USER_ASM(__pusp_val, __pusp_ptr, __ret_pusp, h, LDST_HALF_FMT, priv); \
+		break; \
+	case 4: \
+		PUT_USER_ASM(__pusp_val, __pusp_ptr, __ret_pusp, w, LDST_WORD_FMT, priv); \
+		break; \
+	case 8: \
+		PUT_USER_ASM(__pusp_val, __pusp_ptr, __ret_pusp, d, LDST_DWORD_FMT, priv); \
+		break; \
+	default:							\
+		__ret_pusp = -EFAULT; __put_user_bad(); break;		\
+	}								\
+	(int) builtin_expect_wrapper(__ret_pusp, 0);			\
+})
 
 /*
  * __put_user() but caller must manually switch to user page tables.
@@ -595,42 +849,14 @@ extern int __put_user_bad(void) __attribute__((noreturn));
  *
  * Returns -EFAULT on unhandled page fault and 0 otherwise.
  */
-#define __put_user_switched_pt(x, ptr) \
-({									\
-	__typeof__(*(ptr)) __user *__pusp_ptr = (ptr);			\
-	__typeof__(*(ptr)) __pusp_val  = (x);				\
-	ldst_rec_op_t __pu_opc = { .prot = 1 }; \
-	int __ret_pusp;							\
-	__chk_user_ptr(ptr);						\
-	switch (sizeof(*__pusp_ptr)) {					\
-	case 1: \
-		__pu_opc.fmt = LDST_BYTE_FMT; \
-		PUT_USER_ASM(__pusp_val, __pusp_ptr, __pu_opc.word, __ret_pusp, b); \
-		break; \
-	case 2: \
-		__pu_opc.fmt = LDST_HALF_FMT; \
-		PUT_USER_ASM(__pusp_val, __pusp_ptr, __pu_opc.word, __ret_pusp, h); \
-		break; \
-	case 4: \
-		__pu_opc.fmt = LDST_WORD_FMT; \
-		PUT_USER_ASM(__pusp_val, __pusp_ptr, __pu_opc.word, __ret_pusp, w); \
-		break; \
-	case 8: \
-		__pu_opc.fmt = LDST_DWORD_FMT; \
-		PUT_USER_ASM(__pusp_val, __pusp_ptr, __pu_opc.word, __ret_pusp, d); \
-		break; \
-	default:							\
-		__ret_pusp = -EFAULT; __put_user_bad(); break;		\
-	}								\
-	(int) builtin_expect_wrapper(__ret_pusp, 0);			\
-})
+#define put_user_switched_pt(x, ptr) userspace_strd((x), (ptr), 0)
 
 #define __put_user(x, ptr) \
 ({ \
 	__typeof__(*(ptr)) __user *___pu_ptr = (ptr); \
 	__typeof__(*(ptr)) ___pu_val = (x); \
 	uaccess_enable(); \
-	int __ret_pu = __put_user_switched_pt(___pu_val, ___pu_ptr); \
+	int __ret_pu = userspace_strd(___pu_val, ___pu_ptr, 0); \
 	uaccess_disable(); \
 	__ret_pu; \
 })
@@ -655,7 +881,7 @@ extern int __put_user_bad(void) __attribute__((noreturn));
 			"unaligned put_user_tagged_8() parameter")) { \
 		__ret_pu = -EFAULT; \
 	} else { \
-		PUT_USER_VAL_AND_TAGD(___pu_val, ___pu_tag, ____pu_ptr, __ret_pu); \
+		PUT_USER_VAL_AND_TAGD(___pu_val, ___pu_tag, ____pu_ptr, __ret_pu, 0); \
 	} \
 	(int) builtin_expect_wrapper(__ret_pu, 0); \
 })
@@ -681,7 +907,7 @@ extern int __put_user_bad(void) __attribute__((noreturn));
 		__ret_pu = -EFAULT; \
 	} else { \
 		PUT_USER_VAL_AND_TAGQ(__x_pu.lo, __x_pu.hi, ___pu_tag, \
-				      ____pu_ptr, __ret_pu, 8ul); \
+				      ____pu_ptr, __ret_pu, 8ul, 0); \
 	} \
 	(int) builtin_expect_wrapper(__ret_pu, 0); \
 })
@@ -697,8 +923,8 @@ extern int __put_user_bad(void) __attribute__((noreturn));
 #define INLINE_COPY_FROM_USER
 #define INLINE_COPY_TO_USER
 
-UACCESS_FN_DECLARE4(copy_from_user_fn, void *, to, const void __user *, from,
-		unsigned long, size, unsigned long *, left);
+UACCESS_FN_DECLARE5(copy_from_userspace_fn, void *, to, const void __user *, from,
+		unsigned long, size, unsigned long *, left, bool, priv);
 static inline __must_check unsigned long raw_copy_from_user(void *to,
 		const void __user *from, unsigned long size)
 {
@@ -714,27 +940,30 @@ static inline __must_check unsigned long raw_copy_from_user(void *to,
 		return 0;
 	}
 
-	if (unlikely(__UACCESS_FN_CALL(copy_from_user_fn, to, from, size, &left)))
+	if (unlikely(__UACCESS_FN_CALL(copy_from_userspace_fn, to, from, size, &left, false)))
 		return left;
 
 	return 0;
 }
 
-UACCESS_FN_DECLARE4(copy_in_user_fn, void __user *, to, const void __user *, from,
-		unsigned long, size, unsigned long *, left);
+UACCESS_FN_DECLARE6(copy_in_userspace_fn, void __user *, to, const void __user *, from,
+		unsigned long, size, unsigned long *, left, bool, priv_from, bool, priv_to);
+
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline __must_check unsigned long raw_copy_in_user(void __user *to,
 		const void __user *from, unsigned long size)
 {
 	unsigned long left = size;
 
-	if (unlikely(__UACCESS_FN_CALL(copy_in_user_fn, to, from, size, &left)))
+	if (unlikely(__UACCESS_FN_CALL(copy_in_userspace_fn, to, from, size, &left, false, false)))
 		return left;
 
 	return 0;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
-UACCESS_FN_DECLARE4(copy_to_user_fn, void __user *, to, const void *, from,
-		unsigned long, size, unsigned long *, left);
+UACCESS_FN_DECLARE5(copy_to_userspace_fn, void __user *, to, const void *, from,
+		unsigned long, size, unsigned long *, left, bool, priv);
 static inline __must_check unsigned long raw_copy_to_user(void __user *to,
 		const void *from, unsigned long size)
 {
@@ -750,12 +979,13 @@ static inline __must_check unsigned long raw_copy_to_user(void __user *to,
 		return 0;
 	}
 
-	if (unlikely(__UACCESS_FN_CALL(copy_to_user_fn, to, from, size, &left)))
+	if (unlikely(__UACCESS_FN_CALL(copy_to_userspace_fn, to, from, size, &left, false)))
 		return left;
 
 	return 0;
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static __always_inline unsigned long __must_check
 copy_in_user(void __user *to, const void __user *from, unsigned long n)
 {
@@ -764,56 +994,52 @@ copy_in_user(void __user *to, const void __user *from, unsigned long n)
 		n = raw_copy_in_user(to, from, n);
 	return n;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 
 
-
-
-extern __must_check unsigned long raw_copy_in_user_with_tags(volatile void __user *to,
-		const volatile void __user *from, unsigned long n);
+extern __must_check unsigned long raw_copy_in_userspace_with_tags(volatile void __user *to,
+		const volatile void __user *from, unsigned long n, bool priv_to, bool priv_from);
 
 static inline __must_check
 unsigned long copy_in_user_tagged(volatile void __user *to, const volatile void __user *from,
 				     unsigned long n)
 {
 	if (likely(access_ok(from, n) && access_ok(to, n)))
-		n = raw_copy_in_user_with_tags(to, from, n);
+		n = raw_copy_in_userspace_with_tags(to, from, n, false, false);
 
 	return n;
 }
 
 
 
-
-extern __must_check unsigned long raw_copy_to_user_with_tags(volatile void __user *to,
-		const volatile void *from, unsigned long n);
+extern __must_check unsigned long raw_copy_to_userspace_with_tags(volatile void __user *to,
+		const volatile void *from, unsigned long n, bool priv);
 
 static inline __must_check
 unsigned long copy_to_user_tagged(volatile void __user *to, const volatile void *from,
 				     unsigned long n)
 {
 	if (access_ok(to, n))
-		n = raw_copy_to_user_with_tags(to, from, n);
+		n = raw_copy_to_userspace_with_tags(to, from, n, false);
 
 	return n;
 }
 
 
 
-
-extern __must_check unsigned long raw_copy_from_user_with_tags(volatile void *to,
-		const volatile void __user *from, unsigned long n);
+extern __must_check unsigned long raw_copy_from_userspace_with_tags(volatile void *to,
+		const volatile void __user *from, unsigned long n, bool priv);
 
 static inline __must_check
 unsigned long copy_from_user_tagged(volatile void *to, const volatile void __user *from,
 				       unsigned long n)
 {
 	if (access_ok(from, n))
-		n = raw_copy_from_user_with_tags(to, from, n);
+		n = raw_copy_from_userspace_with_tags(to, from, n, false);
 
 	return n;
 }
-
 
 
 
@@ -823,8 +1049,8 @@ __must_check long strnlen_user(const char __user *str, long count) __pure;
 __must_check long strncpy_from_user(char *dst, const char __user *src, long count);
 
 
-__must_check unsigned long __fill_user(void __user *mem,
-		unsigned long len, const u8 b);
+__must_check unsigned long __fill_userspace(void __user *mem,
+		unsigned long len, const u8 b, bool priv);
 
 static inline __must_check unsigned long
 fill_user(void __user *to, unsigned long n, const u8 b)
@@ -832,25 +1058,20 @@ fill_user(void __user *to, unsigned long n, const u8 b)
 	if (!access_ok(to, n))
 		return n;
 
-	return __fill_user(to, n, b);
+	return __fill_userspace(to, n, b, false);
 }
 
-#define __clear_user(mem, len) __fill_user(mem, len, 0)
+#define __clear_user(mem, len) __fill_userspace(mem, len, 0, false)
 #define clear_user(to, n) fill_user(to, n, 0)
 
 
 __must_check unsigned long __fill_user_with_tags(void __user *dst,
-		unsigned long n, unsigned long tag, unsigned long dw, ldst_rec_op_t strd_opcode);
+		unsigned long n, unsigned long tag, unsigned long dw);
 
 /* Filling aligned user pointer 'to' with 'n' bytes of 'dw' double words: */
 static inline __must_check unsigned long
 fill_user_with_tags(void __user *to, unsigned long n, unsigned long tag, unsigned long dw)
 {
-	ldst_rec_op_t opc = (ldst_rec_op_t) {
-		.fmt = LDST_QWORD_FMT,
-		.mas = MAS_BYPASS_L1_CACHE,
-		.prot = 1,
-	};
 	int ret = 0;
 
 	if (!access_ok(to, n))
@@ -858,18 +1079,30 @@ fill_user_with_tags(void __user *to, unsigned long n, unsigned long tag, unsigne
 
 	if (__builtin_constant_p(n) && IS_ALIGNED((unsigned long) to, 16) && n <= 64 &&
 			!(n % 16)) {
+		e2k_qreg_t qword = { .lo = dw, .hi = dw };
+		long qtag = (tag & 0xf);
+		qtag = qtag | (qtag << 4);
+
+		if (n == 8)
+			ret |= __put_user_tagged_8(dw, tag, to);
 		if (n >= 16)
-			ret = ASM_USER_STRD_16(to, dw, tag, AW(opc));
+			ret |= __put_user_tagged_16(qword, qtag, to);
+		if (n == 24)
+			ret |= __put_user_tagged_8(dw, tag, to + 16);
 		if (n >= 32)
-			ret |= ASM_USER_STRD_16(to, dw, tag, AW(opc) | 16);
+			ret |= __put_user_tagged_16(qword, qtag, to + 16);
+		if (n == 40)
+			ret |= __put_user_tagged_8(dw, tag, to + 32);
 		if (n >= 48)
-			ret |= ASM_USER_STRD_16(to, dw, tag, AW(opc) | 32);
+			ret |= __put_user_tagged_16(qword, qtag, to + 32);
+		if (n == 56)
+			ret |= __put_user_tagged_8(dw, tag, to + 48);
 		if (n == 64)
-			ret |= ASM_USER_STRD_16(to, dw, tag, AW(opc) | 48);
+			ret |= __put_user_tagged_16(qword, qtag, to + 48);
 		return ret ? n : 0;
 	}
 
-	return __fill_user_with_tags(to, n, tag, dw, opc);
+	return __fill_user_with_tags(to, n, tag, dw);
 }
 
 static inline __must_check unsigned long
@@ -885,6 +1118,19 @@ clear_user_with_tags(void __user *ptr, unsigned long length, unsigned long tag)
 /* native kernel with virtualization support */
 /* native kernel without virtualization support */
 
+#define	__get_priv(x, ptr) \
+({ \
+	const __typeof__(*(ptr)) __priv *___ptr_gpu = (ptr); \
+	int ___ret_gpu;	\
+	/* Allow page faults on user privileged area */ \
+	unsigned long __ts_flag_gpu = set_ts_flag(TS_KERNEL_SYSCALL); \
+	uaccess_enable(); \
+	___ret_gpu = userspace_ldrd(x, (const __typeof__(*(ptr)) __user __force *) ___ptr_gpu, 1); \
+	uaccess_disable(); \
+	clear_ts_flag(__ts_flag_gpu); \
+	(int) builtin_expect_wrapper(___ret_gpu, 0); \
+})
+
 /**
  * get_priv - load value (1, 2, 4 or 8 bytes) from __priv area
  * @x: where to save loaded value
@@ -894,15 +1140,12 @@ clear_user_with_tags(void __user *ptr, unsigned long length, unsigned long tag)
 ({ \
 	const __typeof__(*(ptr)) __priv *__ptr_gpu = (ptr); \
 	int __ret_gpu;	\
-	/* Allow page faults on user privileged area */ \
-	unsigned long __ts_flag_gpu = set_ts_flag(TS_KERNEL_SYSCALL); \
 	if (likely(access_priv_ok(__ptr_gpu, sizeof(*__ptr_gpu)))) { \
-		__ret_gpu = __get_user(x, (const __typeof__(*(ptr)) __user __force *) __ptr_gpu); \
+		__ret_gpu = __get_priv(x, (const __typeof__(*(ptr)) __user __force *) __ptr_gpu); \
 	} else { \
 		(x) = (__typeof__(x)) 0; \
 		__ret_gpu = -EFAULT; \
 	} \
-	clear_ts_flag(__ts_flag_gpu); \
 	(int) builtin_expect_wrapper(__ret_gpu, 0); \
 })
 
@@ -914,8 +1157,8 @@ clear_user_with_tags(void __user *ptr, unsigned long length, unsigned long tag)
 	/* Allow page faults on user privileged area */ \
 	unsigned long __ts_flag_gpu = set_ti_status_flag(ti, TS_KERNEL_SYSCALL); \
 	if (likely(access_priv_ok(__ptr_gpu, sizeof(*__ptr_gpu)))) { \
-		__ret_gpu = __get_user_switched_pt(x, \
-				(const __typeof__(*(ptr)) __user __force *) __ptr_gpu); \
+		__ret_gpu = userspace_ldrd(x, \
+				(const __typeof__(*(ptr)) __user __force *) __ptr_gpu, 1); \
 	} else { \
 		(x) = (__typeof__(x)) 0; \
 		__ret_gpu = -EFAULT; \
@@ -932,7 +1175,7 @@ clear_user_with_tags(void __user *ptr, unsigned long length, unsigned long tag)
 	unsigned long __ts_flag_gpu = set_ts_flag(TS_KERNEL_SYSCALL); \
 	GET_USER_VAL_AND_TAGQ(___x_gu.lo, ___x_gu.hi, (tag), \
 			(const __typeof__(*(ptr)) __user __force *) ____ptr_gpu, \
-			____ret_gpu, (offset)); \
+			____ret_gpu, (offset), 1); \
 	clear_ts_flag(__ts_flag_gpu); \
 	(x) = ___x_gu; \
 	(int) builtin_expect_wrapper(____ret_gpu, 0); \
@@ -961,6 +1204,18 @@ clear_user_with_tags(void __user *ptr, unsigned long length, unsigned long tag)
 	(int) builtin_expect_wrapper(__ret_gpu, 0); \
 })
 
+#define	__put_priv(x, ptr) \
+({ \
+	__typeof__(*(ptr)) __priv *___ptr_ppu = (ptr); \
+	int ___ret_ppu;	\
+	unsigned long __ts_flag_ppu = set_ts_flag(TS_KERNEL_SYSCALL); \
+	uaccess_enable(); \
+	___ret_ppu = userspace_strd((x), (__typeof__(*(ptr)) __user __force *) ___ptr_ppu, 1);\
+	uaccess_disable(); \
+	clear_ts_flag(__ts_flag_ppu); \
+	(int) builtin_expect_wrapper(___ret_ppu, 0); \
+})
+
 /**
  * put_priv - store value (1, 2, 4 or 8 bytes) to __priv area
  * @x: value to store
@@ -971,14 +1226,11 @@ clear_user_with_tags(void __user *ptr, unsigned long length, unsigned long tag)
 	__typeof__(*(ptr)) __priv *__ptr_ppu = (ptr); \
 	__typeof__(x) __x_ppu = (x); \
 	int __ret_ppu;	\
-	unsigned long __ts_flag_ppu = set_ts_flag(TS_KERNEL_SYSCALL); \
 	if (likely(access_priv_ok(__ptr_ppu, sizeof(*__ptr_ppu)))) { \
-		__ret_ppu = __put_user(__x_ppu, \
-				(__typeof__(*(ptr)) __user __force *) __ptr_ppu); \
+		__ret_ppu = __put_priv(__x_ppu, (__typeof__(*(ptr)) __user __force *) __ptr_ppu); \
 	} else { \
 		__ret_ppu = -EFAULT; \
 	} \
-	clear_ts_flag(__ts_flag_ppu); \
 	(int) builtin_expect_wrapper(__ret_ppu, 0); \
 })
 
@@ -990,8 +1242,8 @@ clear_user_with_tags(void __user *ptr, unsigned long length, unsigned long tag)
 	int __ret_ppu;	\
 	unsigned long __ts_flag_ppu = set_ti_status_flag(ti, TS_KERNEL_SYSCALL); \
 	if (likely(access_priv_ok(__ptr_ppu, sizeof(*__ptr_ppu)))) { \
-		__ret_ppu = __put_user_switched_pt(__x_ppu, \
-				(__typeof__(*(ptr)) __user __force *) __ptr_ppu); \
+		__ret_ppu = userspace_strd(__x_ppu, \
+				(__typeof__(*(ptr)) __user __force *) __ptr_ppu, 1); \
 	} else { \
 		__ret_ppu = -EFAULT; \
 	} \
@@ -1006,7 +1258,7 @@ raw_put_priv_tagged_8(u64 x, u32 tag, void __priv *ptr)
 
 	if (likely(access_priv_ok(ptr, 8))) {
 		unsigned long ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
-		PUT_USER_VAL_AND_TAGD(x, tag, (void __user __force *) ptr, ret);
+		PUT_USER_VAL_AND_TAGD(x, tag, (void __user __force *) ptr, ret, 1);
 		clear_ts_flag(ts_flag);
 	} else {
 		ret = -EFAULT;
@@ -1041,7 +1293,7 @@ raw_put_priv_tagged_16_offset(e2k_qreg_t x, u32 tag, void __priv *ptr, size_t of
 	if (likely(access_priv_ok(ptr, offset + 8))) {
 		unsigned long ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
 		PUT_USER_VAL_AND_TAGQ(x.lo, x.hi, tag, \
-				(__typeof__(*(ptr)) __user __force *)  ptr, ret, offset);
+				(__typeof__(*(ptr)) __user __force *)  ptr, ret, offset, 1);
 		clear_ts_flag(ts_flag);
 	} else {
 		ret = -EFAULT;
@@ -1070,6 +1322,28 @@ raw_put_priv_tagged_16_offset(e2k_qreg_t x, u32 tag, void __priv *ptr, size_t of
 		raw_put_priv_tagged_16_offset(__x_ppu, __tag_ppu, __ptr_ppu, __offset_ppu); \
 })
 
+static inline __must_check unsigned long raw_copy_to_priv(void __priv *to,
+		const void *from, unsigned long size)
+{
+	unsigned long left = size;
+
+	if (__builtin_constant_p(size) &&
+			(size == 1 || size == 2 || size == 4 || size == 8)) {
+		if (unlikely(size == 1 && __put_priv(*(const u8 *) from, (u8 __priv *) to) ||
+			     size == 2 && __put_priv(*(const u16 *) from, (u16 __priv *) to) ||
+			     size == 4 && __put_priv(*(const u32 *) from, (u32 __priv *) to) ||
+			     size == 8 && __put_priv(*(const u64 *) from, (u64 __priv *) to)))
+			return size;
+		return 0;
+	}
+
+	if (unlikely(__UACCESS_FN_CALL(copy_to_userspace_fn,
+			(void __user __force *) to, from, size, &left, true)))
+		return left;
+
+	return 0;
+}
+
 /**
  * copy_to_priv - untagged copy to __priv area
  * @to: __priv destination
@@ -1079,16 +1353,35 @@ raw_put_priv_tagged_16_offset(e2k_qreg_t x, u32 tag, void __priv *ptr, size_t of
 static inline __must_check unsigned long
 copy_to_priv(void __priv *to, const void *from, unsigned long n)
 {
-	unsigned long left, ts_flag;
+	if (likely(access_priv_ok(to, n))) {
+		/* Allow page faults on user privileged area */
+		unsigned long ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
+		n = raw_copy_to_priv(to, from, n);
+		clear_ts_flag(ts_flag);
+	}
+	return n;
+}
 
-	if (unlikely(!access_priv_ok(to, n)))
-		return n;
+static inline __must_check unsigned long raw_copy_from_priv(void *to,
+		const void __priv *from, unsigned long size)
+{
+	unsigned long left = size;
 
-	/* Allow page faults on user privileged area */
-	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
-	left = raw_copy_to_user((void __force __user *) to, from, n);
-	clear_ts_flag(ts_flag);
-	return left;
+	if (__builtin_constant_p(size) &&
+			(size == 1 || size == 2 || size == 4 || size == 8)) {
+		if (unlikely(size == 1 && __get_priv(*(u8 *) to, (const u8 __priv *) from) ||
+			     size == 2 && __get_priv(*(u16 *) to, (const u16 __priv *) from) ||
+			     size == 4 && __get_priv(*(u32 *) to, (const u32 __priv *) from) ||
+			     size == 8 && __get_priv(*(u64 *) to, (const u64 __priv *) from)))
+			return size;
+		return 0;
+	}
+
+	if (unlikely(__UACCESS_FN_CALL(copy_from_userspace_fn,
+			to, (const void __user __force *) from, size, &left, true)))
+		return left;
+
+	return 0;
 }
 
 /**
@@ -1100,15 +1393,23 @@ copy_to_priv(void __priv *to, const void *from, unsigned long n)
 static inline __must_check unsigned long
 copy_from_priv(void *to, const void __priv *from, unsigned long n)
 {
-	unsigned long left, ts_flag;
+	if (likely(access_priv_ok(from, n))) {
+		unsigned long ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
+		n = raw_copy_from_priv(to, from, n);
+		clear_ts_flag(ts_flag);
+	}
+	return n;
+}
 
-	if (unlikely(!access_priv_ok(from, n)))
-		return n;
+static inline __must_check unsigned long raw_copy_in_priv(void __priv *to,
+		const void __priv *from, unsigned long size)
+{
+	unsigned long left = size;
 
-	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
-	left = raw_copy_from_user(to, (const void __force __user *) from, n);
-	clear_ts_flag(ts_flag);
-	return left;
+	if (unlikely(__UACCESS_FN_CALL(copy_in_userspace_fn, to, from, size, &left, true, true)))
+		return left;
+
+	return 0;
 }
 
 /**
@@ -1120,16 +1421,12 @@ copy_from_priv(void *to, const void __priv *from, unsigned long n)
 static inline __must_check unsigned long
 copy_in_priv(void __priv *to, const void __priv *from, unsigned long n)
 {
-	unsigned long left, ts_flag;
-
-	if (unlikely(!access_priv_ok(from, n) || !access_priv_ok(to, n)))
-		return n;
-
-	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
-	left = raw_copy_in_user((void __force __user *) to,
-			(const void __force __user *) from, n);
-	clear_ts_flag(ts_flag);
-	return left;
+	if (likely(access_priv_ok(from, n) && access_priv_ok(to, n))) {
+		unsigned long ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
+		n = raw_copy_in_priv(to, from, n);
+		clear_ts_flag(ts_flag);
+	}
+	return n;
 }
 
 /**
@@ -1141,16 +1438,13 @@ copy_in_priv(void __priv *to, const void __priv *from, unsigned long n)
 static inline __must_check unsigned long
 copy_in_priv_tagged(volatile void __priv *to, const volatile void __priv *from, unsigned long n)
 {
-	unsigned long left, ts_flag;
-
-	if (unlikely(!access_priv_ok(from, n) || !access_priv_ok(to, n)))
-		return n;
-
-	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
-	left = raw_copy_in_user_with_tags((volatile void __force __user *) to,
-			(const volatile void __force __user *) from, n);
-	clear_ts_flag(ts_flag);
-	return left;
+	if (likely(access_priv_ok(from, n) && access_priv_ok(to, n))) {
+		unsigned long ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
+		n = raw_copy_in_userspace_with_tags((volatile void __force __user *) to,
+				(const volatile void __force __user *) from, n, true, true);
+		clear_ts_flag(ts_flag);
+	}
+	return n;
 }
 
 /**
@@ -1162,15 +1456,13 @@ copy_in_priv_tagged(volatile void __priv *to, const volatile void __priv *from, 
 static inline __must_check unsigned long
 copy_to_priv_tagged(volatile void __priv *to, const volatile void *from, unsigned long n)
 {
-	unsigned long left, ts_flag;
-
-	if (unlikely(!access_priv_ok(to, n)))
-		return n;
-
-	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
-	left = raw_copy_to_user_with_tags((volatile void __force __user *) to, from, n);
-	clear_ts_flag(ts_flag);
-	return left;
+	if (likely(access_priv_ok(to, n))) {
+		unsigned long ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
+		n = raw_copy_to_userspace_with_tags(
+				(volatile void __force __user *) to, from, n, true);
+		clear_ts_flag(ts_flag);
+	}
+	return n;
 }
 
 /**
@@ -1182,15 +1474,13 @@ copy_to_priv_tagged(volatile void __priv *to, const volatile void *from, unsigne
 static inline __must_check unsigned long
 copy_from_priv_tagged(volatile void *to, const volatile void __priv *from, unsigned long n)
 {
-	unsigned long left, ts_flag;
-
-	if (unlikely(!access_priv_ok(from, n)))
-		return n;
-
-	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
-	left = raw_copy_from_user_with_tags(to, (const void __force __user *) from, n);
-	clear_ts_flag(ts_flag);
-	return left;
+	if (likely(access_priv_ok(from, n))) {
+		unsigned long ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
+		n = raw_copy_from_userspace_with_tags(
+				to, (const void __force __user *) from, n, true);
+		clear_ts_flag(ts_flag);
+	}
+	return n;
 }
 
 /**
@@ -1203,15 +1493,13 @@ static inline __must_check unsigned long
 copy_priv_to_user_tagged(volatile void __user *to,
 			 const volatile void __priv *from, unsigned long n)
 {
-	unsigned long left, ts_flag;
-
-	if (unlikely(!access_priv_ok(from, n) || !access_ok(to, n)))
-		return n;
-
-	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
-	left = raw_copy_in_user_with_tags(to, (const volatile void __force __user *) from, n);
-	clear_ts_flag(ts_flag);
-	return left;
+	if (likely(access_priv_ok(from, n) && access_ok(to, n))) {
+		unsigned long ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
+		n = raw_copy_in_userspace_with_tags(to, (const volatile void __force __user *) from,
+				n, false, true);
+		clear_ts_flag(ts_flag);
+	}
+	return n;
 }
 
 /**
@@ -1223,15 +1511,13 @@ copy_priv_to_user_tagged(volatile void __user *to,
 static inline __must_check unsigned long
 copy_user_to_priv_tagged(void __priv *to, const void __user *from, unsigned long n)
 {
-	unsigned long left, ts_flag;
-
-	if (unlikely(!access_priv_ok(to, n) || !access_ok(from, n)))
-		return n;
-
-	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
-	left = raw_copy_in_user_with_tags((void __force __user *) to, from, n);
-	clear_ts_flag(ts_flag);
-	return left;
+	if (unlikely(access_priv_ok(to, n) && access_ok(from, n))) {
+		unsigned long ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
+		n = raw_copy_in_userspace_with_tags((void __force __user *) to, from, n,
+				true, false);
+		clear_ts_flag(ts_flag);
+	}
+	return n;
 }
 
 /**
@@ -1242,15 +1528,12 @@ copy_user_to_priv_tagged(void __priv *to, const void __user *from, unsigned long
 static inline __must_check unsigned long
 clear_priv(void __priv *to, unsigned long n)
 {
-	unsigned long left, ts_flag;
-
-	if (unlikely(!access_priv_ok(to, n)))
-		return n;
-
-	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
-	left = __clear_user((void __force __user *) to, n);
-	clear_ts_flag(ts_flag);
-	return left;
+	if (likely(access_priv_ok(to, n))) {
+		unsigned long ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
+		n = __fill_userspace((void __force __user *) to, n, 0, true);
+		clear_ts_flag(ts_flag);
+	}
+	return n;
 }
 
 #endif	/* CONFIG_KVM_GUEST_KERNEL */
@@ -1351,11 +1634,16 @@ static inline __must_check int PUT_USER_PL(e2k_pl_t __user *plp, u64 entry, u32 
 
 #endif /* CONFIG_PROTECTED_MODE */
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline __must_check size_t native_fast_tagged_memory_copy_to_user(
 		void __user *dst, const void *src, size_t len,
-		const struct pt_regs *regs, ldst_rec_op_t strd_opcode,
-		ldst_rec_op_t ldrd_opcode, int prefetch)
+		const struct pt_regs *regs, int prefetch, bool priv)
 {
+	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT, .prot = 1 };
+	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) {
+		.fmt = LDST_QWORD_FMT,
+		.mas = MAS_FILL_OPERATION(CACHE_BYPASS_L1, 0),
+	};
 	size_t copied;
 
 	/* native kernel does not support any guests */
@@ -1382,24 +1670,20 @@ static inline __must_check size_t native_fast_tagged_memory_copy_from_user(
 
 	return copied;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline size_t fast_tagged_memory_copy_from_priv(volatile void *dst,
-						       const volatile void __priv *src, size_t len,
-						       int prefetch)
+		const volatile void __priv *src, size_t len, int prefetch)
 {
 	size_t copied;
-	ldst_rec_op_t strd_opcode = ldst_rec_qword();
-	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) {
-		.fmt = LDST_QWORD_FMT,
-		.mas = MAS_FILL_OPERATION(CACHE_BYPASS_L1, 0),
-		.prot = 1,
-	};
+	ldst_rec_op_t st_opc = ldst_rec_qword();
+	ldst_rec_op_t ld_opc = ldst_rec_userspace_tagged_load_8(CACHE_BYPASS_L1, true);
 
 	unsigned long ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
 
 	SET_USR_PFAULT("$recovery_memcpy_fault", false);
 	copied = native_fast_tagged_memory_copy((void __force *)dst, (const void __force *)src, len,
-						 strd_opcode, ldrd_opcode, prefetch);
+						 st_opc, ld_opc, prefetch);
 	RESTORE_USR_PFAULT(false);
 
 	clear_ts_flag(ts_flag);
@@ -1407,22 +1691,18 @@ static inline size_t fast_tagged_memory_copy_from_priv(volatile void *dst,
 	return copied;
 }
 
-static inline size_t fast_memory_copy_from_priv(void *dst, const void __priv *src, size_t len,
-						       int prefetch)
+static inline size_t fast_memory_copy_from_priv(void *dst,
+		const void __priv *src, size_t len, int prefetch)
 {
 	size_t copied;
-	ldst_rec_op_t strd_opcode = ldst_rec_qword();
-	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) {
-		.fmt = LDST_QWORD_FMT,
-		.mas = MAS_FILL_OPERATION(CACHE_BYPASS_L1, 0),
-		.prot = 1,
-	};
+	ldst_rec_op_t st_opc = ldst_rec_dword();
+	ldst_rec_op_t ld_opc = ldst_rec_userspace_access(LDST_DWORD_FMT, true);
 
 	unsigned long ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
 
 	SET_USR_PFAULT("$recovery_memcpy_fault", false);
 	copied = native_fast_tagged_memory_copy(dst, (const void __force *)src, len,
-						 strd_opcode, ldrd_opcode, prefetch);
+						st_opc, ld_opc, prefetch);
 	RESTORE_USR_PFAULT(false);
 
 	clear_ts_flag(ts_flag);

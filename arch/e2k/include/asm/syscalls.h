@@ -491,13 +491,9 @@ extern long protected_sys_rt_tgsigqueueinfo(const long	tgid,	/* a1 */
 				     const unsigned long unused5,
 				     const unsigned long unused6,
 				     const struct pt_regs *regs);
-extern long protected_sys_waitid(const long	which,		/* a1 */
-			  const long		pid,		/* a2 */
-			  void		__user *infop,		/* a3 */
-			  const long		options,	/* a4 */
-			  void		__user *ru,		/* a5 */
-			  const unsigned long unused6,
-			  const struct pt_regs *regs);
+extern long protected_sys_waitid(int which, pid_t pid,
+		struct prot_siginfo __user *infop, int options, struct rusage __user *ru,
+		unsigned long unused, const struct pt_regs *regs);
 extern long protected_sys_io_submit(const aio_context_t	ctx_id,		/* a1 */
 				    const long		nr,		/* a2 */
 				    const struct iocb __user * __user *iocbpp,	/* a3 */

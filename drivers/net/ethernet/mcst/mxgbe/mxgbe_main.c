@@ -442,7 +442,6 @@ void mxgbe_board_down(mxgbe_priv_t *priv)
 } /* mxgbe_board_down */
 
 #ifdef CONFIG_MXGBE_DCA
-/* E32C HC Handbook, Table 7.2.1 */
 #define HC_CTRL_DCAE	BIT(7) /* Direct Cache Access Enable (default: 0) */
 /* HC_CTRL_WL3STE : WL3 Steering Tag Enable (default: 1) */
 

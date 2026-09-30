@@ -45,7 +45,6 @@ static long snd_hwdep_ioctl_ptr128(struct file *file, unsigned int cmd,
 				   unsigned long arg)
 {
 	struct snd_hwdep *hw = file->private_data;
-	void __user *argp = compat_ptr(arg);
 	switch (cmd) {
 	case SNDRV_HWDEP_IOCTL_PVERSION:
 	case SNDRV_HWDEP_IOCTL_INFO:

@@ -9,6 +9,9 @@
 config E2K
 	bool
 	default y
+	# TODO cannot enable as this conflicts with set_u_border()
+	# See CPU_FEAT_SAFE_UACCESS for details on separate address space
+	# select ALTERNATE_USER_ADDRESS_SPACE if CPU_ISET_MIN >= 7 && !CPU_E8V7
 	select ARCH_BINFMT_ELF_EXTRA_PHDRS
 	select ARCH_CACHES
 	select ARCH_ENABLE_HUGEPAGE_MIGRATION if HUGETLB_PAGE && MIGRATION

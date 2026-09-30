@@ -69,7 +69,7 @@ static int ioapic_service(struct kvm_ioapic *ioapic, unsigned int idx)
 	pent = &ioapic->redirtbl[idx];
 
 	if (!pent->fields.mask) {
-		injected = ioapic_deliver(ioapic, idx);
+		injected = !ioapic_deliver(ioapic, idx);
 		if (injected && pent->fields.trig_mode == IOAPIC_LEVEL_TRIG)
 			pent->fields.remote_irr = 1;
 	}

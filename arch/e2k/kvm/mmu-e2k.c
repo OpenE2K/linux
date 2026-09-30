@@ -1837,7 +1837,7 @@ static hpa_t get_vcpu_context_nonp_gp_pptb(struct kvm_vcpu *vcpu)
 	E2K_KVM_BUG_ON(vcpu->arch.is_hv && !kvm_is_phys_pt_enable(vcpu->kvm));
 #endif
 
-	if (unlikely(current_thread_info()->vcpu != vcpu))
+	if (unlikely(kvm_get_running_vcpu() != vcpu))
 		return vcpu->arch.hw_ctxt.gp_pptb;
 	else
 		return read_GP_PPTB_reg();
@@ -2053,7 +2053,7 @@ static hpa_t get_vcpu_context_tdp_gp_pptb(struct kvm_vcpu *vcpu)
 	if (!VALID_PAGE(get_vcpu_tdp_gp_pptb(vcpu))) {
 		return E2K_INVALID_PAGE;
 	}
-	if (unlikely(current_thread_info()->vcpu != vcpu))
+	if (unlikely(kvm_get_running_vcpu() != vcpu))
 		return vcpu->arch.hw_ctxt.gp_pptb;
 	else
 		return read_GP_PPTB_reg();
@@ -3485,23 +3485,22 @@ void kvm_arch_async_page_present(struct kvm_vcpu *vcpu,
 		vcpu->arch.apf.host_apf_reason = KVM_APF_PAGE_READY;
 		switch (vcpu->arch.apf.irq_controller) {
 		case EPIC_CONTROLLER:
-			kvm_hw_epic_async_pf_wake_deliver(vcpu);
+			if (kvm_hw_epic_async_pf_wake_deliver(vcpu)) {
+				pr_err("kill guest: async_pf, target EPIC is not found\n");
+				force_sig(SIGKILL);
+			}
 			break;
 		case APIC_CONTROLLER:
 			/* TODO: support injecting page ready through APIC */
-			pr_err("%s(): kill guest: Host: async_pf, APIC is not supported\n",
-				__func__);
+			pr_err("kill guest: async_pf, APIC is not supported\n");
 			force_sig(SIGKILL);
 			break;
 		default:
-			pr_err("%s(): kill guest: Host: async_pf, unsupported\n"
-			       "type of irq controller\n", __func__);
+			pr_err("kill guest: async_pf, unsupported type of irq controller\n");
 			force_sig(SIGKILL);
 		}
 	} else {
-		pr_err("%s(): kill guest: Host: async_pf,\n"
-			" error while setting apf_reason and apf_id\n",
-			__func__);
+		pr_err("kill guest: async_pf, error while setting apf_reason and apf_id\n");
 		force_sig(SIGKILL);
 	}
 }

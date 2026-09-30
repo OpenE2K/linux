@@ -240,7 +240,11 @@ int of_irq_parse_raw(const __be32 *addr, struct of_phandle_args *out_irq)
 	/* Now start the actual "proper" walk of the interrupt tree */
 	while (ipar != NULL) {
 		int imaplen, match;
+#ifdef CONFIG_MCST
+		const __be32 *imap, *oldimap = NULL, *imask;
+#else
 		const __be32 *imap, *oldimap, *imask;
+#endif
 		struct device_node *newpar;
 		/*
 		 * Now check if cursor is an interrupt-controller and

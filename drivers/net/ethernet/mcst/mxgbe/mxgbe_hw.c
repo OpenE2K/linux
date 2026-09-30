@@ -180,11 +180,11 @@ int mxgbe_hw_getinfo(mxgbe_priv_t *priv)
 #else /* sparc */
 			 "revision id = %d: R2000+\n", byte);
 #endif
-	} else if (MXGBE_REVISION_ID_E32C == byte) {
+	} else if (MXGBE_REVISION_ID_3 == byte) {
 		priv->revision = byte;
 		priv->pcsaddr = 2;
 		dev_info(&priv->pdev->dev,
-			 "revision id = %d: E32C\n", priv->revision);
+			 "revision id = %d: rev 3\n", priv->revision);
 	} else {
 		dev_info(&priv->pdev->dev,
 			 "revision id = %d: unknown\n", byte);

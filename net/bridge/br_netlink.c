@@ -721,8 +721,11 @@ int br_process_vlan_info(struct net_bridge *br,
 			 bool *changed,
 			 struct netlink_ext_ack *extack)
 {
+#ifdef CONFIG_MCST
+	int err = 0, rtm_cmd;
+#else
 	int err, rtm_cmd;
-
+#endif
 	if (!br_vlan_valid_id(vinfo_curr->vid, extack))
 		return -EINVAL;
 

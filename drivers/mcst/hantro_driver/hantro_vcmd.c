@@ -2540,7 +2540,7 @@ static irqreturn_t hantrovcmd_isr(int irq, void *dev_id)
 			if (!new_cmdbuf_node)
 				break;
 			cmdbuf_obj = (struct cmdbuf_obj *)new_cmdbuf_node->data;
-			if ((cmdbuf_obj->cmdbuf_run_done == 0)) {
+			if (cmdbuf_obj->cmdbuf_run_done == 0) { /* CONFIG_MCST */
 				cmdbuf_obj->cmdbuf_run_done = 1;
 				cmdbuf_obj->executing_status =
 					CMDBUF_EXE_STATUS_OK;
@@ -2704,7 +2704,7 @@ static irqreturn_t hantrovcmd_isr(int irq, void *dev_id)
 			if (!new_cmdbuf_node)
 				break;
 			cmdbuf_obj = (struct cmdbuf_obj *)new_cmdbuf_node->data;
-			if ((cmdbuf_obj->cmdbuf_run_done == 0)) {
+			if (cmdbuf_obj->cmdbuf_run_done == 0) { /* CONFIG_MCST */
 				cmdbuf_obj->cmdbuf_run_done = 1;
 				cmdbuf_obj->executing_status =
 					CMDBUF_EXE_STATUS_OK;

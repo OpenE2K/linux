@@ -70,14 +70,14 @@ enum {
 	[RTCFS_X86_FEATURE_VME]			= "vme",	\
 	[RTCFS_X86_FEATURE_DE]			= "de",		\
 	[RTCFS_X86_FEATURE_PSE]			= "pse",	\
-	[RTCFS_X86_FEATURE_TSC]			= "tcs",	\
+	[RTCFS_X86_FEATURE_TSC]			= "tsc",	\
 	[RTCFS_X86_FEATURE_MSR]			= "msr",	\
 	[RTCFS_X86_FEATURE_PAE]			= "pae",	\
 	[RTCFS_X86_FEATURE_MCE]			= "mce",	\
 	[RTCFS_X86_FEATURE_CX8]			= "cx8",	\
 	[RTCFS_X86_FEATURE_APIC]		= "apic",	\
 	[RTCFS_X86_FEATURE_SEP]			= "sep",	\
-	[RTCFS_X86_FEATURE_MTRR]		= "mttr",	\
+	[RTCFS_X86_FEATURE_MTRR]		= "mtrr",	\
 	[RTCFS_X86_FEATURE_PGE]			= "pge",	\
 	[RTCFS_X86_FEATURE_MCA]			= "mca",	\
 	[RTCFS_X86_FEATURE_CMOV]		= "cmov",	\

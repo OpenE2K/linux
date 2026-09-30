@@ -23,8 +23,6 @@ KBUILD_CFLAGS := $(ORIG_CFLAGS)
 
 RANLIB = $(shell $(CC) -print-prog-name=ranlib)
 
-ROMSCRIPT = $(obj)/aploader.lds
-
 FLAGS_EPIC_EIOH := -DCONFIG_BOOT_EPIC -DCONFIG_EIOH
 
 ifeq ($(CONFIG_E2S),y)
@@ -179,15 +177,17 @@ bios: FORCE
 	$(Q)$(MAKE) $(build)=arch/e2k/boot/bios bios
 
 # piggy is gzipped kernel
-LDFLAGS_zpiggy.o = -r -b binary --oformat elf64-e2k -T $(srctree)/$(src)/vmlinux.bin.lds \
--defsym input_data_noncomp_size=$(shell wc -c < $(objtree)/$(obj)/vmlinux.bin)
-$(obj)/zpiggy.o: $(obj)/vmlinux.bin.gz FORCE
+LDFLAGS_zpiggy.o = -r -b binary --oformat elf64-e2k \
+		   -defsym input_data_noncomp_size=$(shell wc -c < $(objtree)/$(obj)/vmlinux.bin) \
+		   -T
+$(obj)/zpiggy.o: $(srctree)/$(src)/vmlinux.bin.lds $(obj)/vmlinux.bin.gz FORCE
 	$(call if_changed,ld)
 
 # piggy is empty
-LDFLAGS_epiggy.o = -r -b binary --oformat elf64-e2k -T $(srctree)/$(src)/epiggy.lds \
--defsym input_data_noncomp_size=$(shell wc -c < $(objtree)/$(obj)/vmlinux.bin)
-$(obj)/epiggy.o: $(obj)/vmlinux.bin FORCE
+LDFLAGS_epiggy.o = -r -b binary --oformat elf64-e2k \
+		   -defsym input_data_noncomp_size=$(shell wc -c < $(objtree)/$(obj)/vmlinux.bin) \
+		   -T
+$(obj)/epiggy.o: $(srctree)/$(src)/epiggy.lds $(obj)/vmlinux.bin FORCE
 	$(call if_changed,ld)
 
 
@@ -210,8 +210,9 @@ $(obj)/bios/built-in-sym.o: $(obj)/bios/built-in.a
 	@cp $(obj)/bios/built-in.a $(obj)/bios/built-in-sym.o; \
 	$(RANLIB) $(obj)/bios/built-in-sym.o
 
-LDFLAGS_bimage := -e start -T $(TOPDIR)/$(ROMSCRIPT)
-$(obj)/bimage: $(obj)/bios/built-in-sym.o $(START_OBJ) $(PIGGYO) $(INITRDO) FORCE
+LDFLAGS_bimage := -e start -T
+$(obj)/bimage: $(srctree)/$(src)/aploader.lds $(obj)/bios/built-in-sym.o \
+	       $(START_OBJ) $(PIGGYO) $(INITRDO) FORCE
 	$(call if_changed,ld)
 
 $(obj)/image.bios: $(obj)/bimage FORCE
@@ -264,16 +265,16 @@ $(obj)/vmlinux.bin.lzo: $(obj)/vmlinux.bin FORCE
 	@ksize=`ls -l $(obj)/vmlinux.bin.lzo | awk '{print $$5;}'`; \
 	echo "Compressed kernel size:" $$ksize
 
-LDFLAGS_bpiggy.o := -r -b binary --oformat elf64-e2k -T $(srctree)/$(src)/vmlinux.bin.lds
-$(obj)/bpiggy.o: $(obj)/vmlinux.bin FORCE
+LDFLAGS_bpiggy.o := -r -b binary --oformat elf64-e2k -T
+$(obj)/bpiggy.o: $(srctree)/$(src)/vmlinux.bin.lds $(obj)/vmlinux.bin FORCE
 	$(call if_changed,ld)
 
-LDFLAGS_cpiggy.o := -r -b binary --oformat elf64-e2k -T $(srctree)/$(src)/vmlinux.bin.lds
-$(obj)/cpiggy.o: $(obj)/vmlinux.bin$(suffix-y) FORCE
+LDFLAGS_cpiggy.o := -r -b binary --oformat elf64-e2k -T
+$(obj)/cpiggy.o: $(srctree)/$(src)/vmlinux.bin.lds $(obj)/vmlinux.bin$(suffix-y) FORCE
 	$(call if_changed,ld)
 
-LDFLAGS_image = -static -e 0x0 -T $(srctree)/$(src)/boot.lds
-$(obj)/image: $(obj)/bpiggy.o $(obj)/bootblock.o FORCE
+LDFLAGS_image = -static -e 0x0 -T
+$(obj)/image: $(srctree)/$(src)/boot.lds $(obj)/bpiggy.o $(obj)/bootblock.o FORCE
 	$(call if_changed,ld)
 
 ifdef CONFIG_KVM_GUEST_KERNEL
@@ -285,12 +286,13 @@ STRING_GUEST_FPIC_O=
 COMPRESSED_SCRIPT=compressed.lds
 endif
 
-LDFLAGS_cimage = -static -e decompress_kernel -T $(srctree)/$(src)/$(COMPRESSED_SCRIPT) \
- -defsym __orig_kernel_size=$(shell wc -c < $(objtree)/$(obj)/vmlinux.bin)
-$(obj)/cimage: $(obj)/cpiggy.o $(obj)/bootblock.o $(obj)/decompress.o  \
-	       $(obj)/string_fpic.o $(STRING_GUEST_FPIC_O) \
-	       $(obj)/recovery_string_fpic.o $(obj)/recovery_string_v5_fpic.o \
-	       $(obj)/machdep_fpic.o FORCE
+LDFLAGS_cimage = -static -e decompress_kernel \
+		 -defsym __orig_kernel_size=$(shell wc -c < $(objtree)/$(obj)/vmlinux.bin) \
+		 -T
+$(obj)/cimage: $(srctree)/$(src)/$(COMPRESSED_SCRIPT) \
+	       $(obj)/cpiggy.o $(obj)/bootblock.o $(obj)/decompress.o \
+	       $(obj)/string_fpic.o $(STRING_GUEST_FPIC_O) $(obj)/recovery_string_fpic.o \
+	       $(obj)/recovery_string_v5_fpic.o $(obj)/machdep_fpic.o FORCE
 	$(call if_changed,ld)
 
 $(objtree)/image.boot: $(obj)/image FORCE

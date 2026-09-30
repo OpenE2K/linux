@@ -613,7 +613,7 @@ static bool mmu_spte_update(struct kvm *kvm, pgprot_t *sptep, pgprot_t new_spte)
 	if (unlikely(spte_same(old_spte, new_spte))) {
 		/* the new pte is the same as old, probably it need */
 		/* flush TLB address & PT levels entries to clear new value */
-		kvm_make_request(KVM_REQ_ADDR_FLUSH, current_thread_info()->vcpu);
+		kvm_make_request(KVM_REQ_ADDR_FLUSH, kvm_get_running_vcpu());
 	}
 
 	if (!get_spte_accessed_mask(kvm)) {

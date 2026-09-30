@@ -131,10 +131,6 @@ OFFSET(TSK_TMP_G29_EXT, task_struct, thread.tmp_gregs.g[13].v5_ext);
 OFFSET(TSK_TMP_G30_EXT, task_struct, thread.tmp_gregs.g[14].v5_ext);
 OFFSET(TSK_TMP_G31_EXT, task_struct, thread.tmp_gregs.g[15].v5_ext);
 
-#ifdef	CONFIG_VIRTUALIZATION
-OFFSET(TI_VCPU, thread_info, vcpu);
-#endif	/* CONFIG_VIRTUALIZATION */
-
 #ifdef CONFIG_FUNCTION_GRAPH_TRACER
 OFFSET(TSK_CURR_RET_STACK, task_struct, curr_ret_stack);
 #endif
@@ -155,9 +151,11 @@ OFFSET(PT_US_CL_UP, pt_regs, us_cl_up);
 OFFSET(PT_US_CL_B, pt_regs, us_cl_b);
 #endif
 
-#ifdef	CONFIG_VIRTUALIZATION
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 OFFSET(TI_VCPU, thread_info, vcpu);
+#endif	/* CONFIG_VIRTUALIZATION */
 
+#ifdef	CONFIG_VIRTUALIZATION
 OFFSET(GLOB_REG_BASE, e2k_greg, base);
 OFFSET(GLOB_REG_EXT, e2k_greg, v5_ext);
 DEFINE(GLOB_REG_SIZE, sizeof(struct e2k_greg));

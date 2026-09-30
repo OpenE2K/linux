@@ -77,7 +77,7 @@
 #define	SIC_rt_msi	0xb0	/* >= v6 */
 #define	SIC_rt_msi_h	0xb4	/* >= v6 */
 
-#define	SIC_st_ipl	0xe0	/* v7, e32c only */
+#define	SIC_st_ipl	0xe0	/* v7 */
 #define	SIC_st_xmu	0xf0	/* v7 */
 
 #define	SIC_st_core0	0x100
@@ -102,38 +102,38 @@
 #define SIC_rt_pcim0_xmu_l	0x220
 #define SIC_rt_pcim0_xmu_a	0x224
 #define SIC_rt_pcim0_xmu_b	0x228
-#define SIC_rt_pcim0_xmu_c	0x22c /* e32c only */
-#define SIC_rt_pcim0_xmu_d	0x230 /* e32c only */
+#define SIC_rt_pcim0_xmu_c	0x22c
+#define SIC_rt_pcim0_xmu_d	0x230
 
 #define SIC_rt_pciio0_xmu_l	0x240
 #define SIC_rt_pciio0_xmu_a	0x244
 #define SIC_rt_pciio0_xmu_b	0x248
-#define SIC_rt_pciio0_xmu_c	0x24c /* e32c only */
-#define SIC_rt_pciio0_xmu_d	0x250 /* e32c only */
+#define SIC_rt_pciio0_xmu_c	0x24c
+#define SIC_rt_pciio0_xmu_d	0x250
 
 #define SIC_rt_pcimp0_xmu_l_bgn	0x260
 #define SIC_rt_pcimp0_xmu_a_bgn	0x264
 #define SIC_rt_pcimp0_xmu_b_bgn	0x268
-#define SIC_rt_pcimp0_xmu_c_bgn	0x26c /* e32c only */
-#define SIC_rt_pcimp0_xmu_d_bgn	0x270 /* e32c only */
+#define SIC_rt_pcimp0_xmu_c_bgn	0x26c
+#define SIC_rt_pcimp0_xmu_d_bgn	0x270
 
 #define SIC_rt_pcimp0_xmu_l_end	0x280
 #define SIC_rt_pcimp0_xmu_a_end	0x284
 #define SIC_rt_pcimp0_xmu_b_end	0x288
-#define SIC_rt_pcimp0_xmu_c_end	0x28c /* e32c only */
-#define SIC_rt_pcimp0_xmu_d_end	0x290 /* e32c only */
+#define SIC_rt_pcimp0_xmu_c_end	0x28c
+#define SIC_rt_pcimp0_xmu_d_end	0x290
 
 #define SIC_rt_pcimp0_xmu_l_m32_bgn	0x2a0
 #define SIC_rt_pcimp0_xmu_a_m32_bgn	0x2a4
 #define SIC_rt_pcimp0_xmu_b_m32_bgn	0x2a8
-#define SIC_rt_pcimp0_xmu_c_m32_bgn	0x2ac /* e32c only */
-#define SIC_rt_pcimp0_xmu_d_m32_bgn	0x2b0 /* e32c only */
+#define SIC_rt_pcimp0_xmu_c_m32_bgn	0x2ac
+#define SIC_rt_pcimp0_xmu_d_m32_bgn	0x2b0
 
 #define SIC_rt_pcimp0_xmu_l_m32_end	0x2c0
 #define SIC_rt_pcimp0_xmu_a_m32_end	0x2c4
 #define SIC_rt_pcimp0_xmu_b_m32_end	0x2c8
-#define SIC_rt_pcimp0_xmu_c_m32_end	0x2cc /* e32c only */
-#define SIC_rt_pcimp0_xmu_d_m32_end	0x2d0 /* e32c only */
+#define SIC_rt_pcimp0_xmu_c_m32_end	0x2cc
+#define SIC_rt_pcimp0_xmu_d_m32_end	0x2d0
 
 /* end of >= v7 registers */
 
@@ -269,7 +269,7 @@
 #define	SIC_rdma_cs		0x888
 #define	SIC_iol_csr		0x900
 
-/* v7 MHIO_* registers, e32c only */
+/* v7 MHIO_* registers */
 #define SIC_rt_mhio_mc		0x700
 #define SIC_rt_mhio_cxl_a	0x704
 #define SIC_rt_mhio_cxl_b	0x708
@@ -1969,32 +1969,6 @@ typedef union {
 
 
 /* V7 regs */
-
-typedef union {
-	struct {
-		u32 ct0		: 4;
-		u32 ct1		: 4;
-		u32 pbm0	: 2;
-		u32 pbm1	: 2; /* [11 : 10] */
-		u32 rm		: 1;
-		u32 ds3		: 2; /* 3ds */
-		u32 mtad_dsbl	: 1;
-		u32 sf		: 4;
-		u32		: 1; /* [20] */
-		u32 ptrr_mode	: 2;
-		u32 oddpb_crc_calc_alt_dis	: 1;
-		u32 ca_sdr_en	: 1;
-		u32 poison_dsbl	: 1;
-		u32 pbswap	: 1;
-		u32 pda_sel	: 5;
-	};
-	struct {
-		u32		: 8;
-		u32 pbm		: 4;
-	};
-	u32 word;
-} e2k_e48c_mc_cfg_t;
-
 
 typedef union {
 	struct {

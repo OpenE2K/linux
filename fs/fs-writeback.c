@@ -694,7 +694,11 @@ bool cleanup_offline_cgwb(struct bdi_writeback *wb)
 {
 	struct cgroup_subsys_state *memcg_css;
 	struct inode_switch_wbs_context *isw;
+#ifdef CONFIG_MCST
+	struct bdi_writeback *new_wb = NULL;
+#else
 	struct bdi_writeback *new_wb;
+#endif
 	int nr;
 	bool restart = false;
 

@@ -343,16 +343,11 @@ SYM_FUNC_END(ttable_entry18)
 	} \
 	{ \
 		rwd %dr20, %rpr.lo; \
-	} \
-	{ \
-		rwd %dr21, %rpr.hi; \
-		ldd,2 [%dr17 + TI_VCPU], %dr19; \
-	} \
-	{ \
 		puttagd,2 %dr0, 0, %dr0; \
 		puttagd,5 %dr1, 0, %dr1; \
 	} \
 	{ \
+		rwd %dr21, %rpr.hi; \
 		puttagd,2 %dr2, 0, %dr2; \
 		puttagd,5 %dr3, 0, %dr3; \
 	} \

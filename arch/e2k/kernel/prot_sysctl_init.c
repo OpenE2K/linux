@@ -18,7 +18,9 @@
 #include "protected_error_messages.in"
 
 
-struct scm_controls_struct scm_controls;
+struct scm_controls_struct scm_controls = {
+	.prot_malloc_mode_control = -1,
+};
 
 static struct ctl_table e2k_SCM_table[] = {
 	{
@@ -329,9 +331,6 @@ long protected_mode_check_env_malloc_mode(mm_context_t *context)
 		rv = -1;
 		pr_alert("Wrong value of the env var PM_MALLOC_MODE = \"%s\"\n", env_val);
 		pr_alert("Legal values: 0/1/2/compatible/zeroing/emptying\n");
-	} else if ((rv != PM_MM_MALLOC_MODE_DEFAULT)
-		&& (context->pm_sc_debug_mode & (PM_SC_DBG_MODE_DEBUG | PM_SC_DBG_WARNINGS))) {
-		pr_info("PM_MALLOC_MODE = \"%s\"\n", env_val);
 	}
 
 	kvfree(env_val);
@@ -416,7 +415,7 @@ void arch_init_secure_computing_mode(void *context_ptr)
 		pr_alert("Legal values: 1/2/3\n");
 	}
 	ival = get_sysctld_prot_malloc_mode_control();
-	if ((ival >= 0) && (ival <= PM_MALLOC_MODE_EMPTYING)) {
+	if ((ival >= 0) && (ival <= MAX_PM_MALLOC_MODE)) {
 		context->pm_sc_debug_mode |= ival << PM_MM_MALLOC_MODE_MASK_SHIFT;
 	} else if (e2k_scm_sysctld_controls_enabled()) {
 		pr_alert("Wrong value in sysctl.d: \"prot_malloc_mode_control = %d\"\n", ival);
@@ -574,6 +573,12 @@ out:
 			pr_info("\tpm_sc_check4tags_max_size = %d\n",
 					context->pm_sc_check4tags_max_size);
 	}
+
+	env_pm_malloc_mode = (context->pm_sc_debug_mode & PM_MM_MALLOC_MODE_MASK)
+					>> PM_MM_MALLOC_MODE_MASK_SHIFT;
+	if ((env_pm_malloc_mode != PM_MM_MALLOC_MODE_DEFAULT) &&
+			(context->pm_sc_debug_mode & (PM_SC_DBG_MODE_DEBUG | PM_SC_DBG_WARNINGS)))
+		pr_info("PM_MALLOC_MODE = \"%ld\"\n", env_pm_malloc_mode);
 
 #if IS_ENABLED(CONFIG_SOFT_PM)
 	if (soft_pm_initer)

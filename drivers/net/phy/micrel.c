@@ -1537,8 +1537,11 @@ static int ksz9x31_cable_test_get_status(struct phy_device *phydev,
 	struct kszphy_priv *priv = phydev->priv;
 	unsigned long pair_mask = 0xf;
 	int retries = 20;
+#ifdef CONFIG_MCST
+	int pair, ret = 0, rv;
+#else
 	int pair, ret, rv;
-
+#endif
 	*finished = false;
 
 	/* Try harder if link partner is active */

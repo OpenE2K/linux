@@ -187,7 +187,11 @@ int vcpu_mmio_read(struct kvm_vcpu *vcpu, gpa_t addr, int len, void *v)
 static void complete_intc_info_io_write(struct kvm_vcpu *vcpu,
 					intc_info_mu_t *intc_info_mu)
 {
-	/* For stores - delete this entry from INTC_INFO_MU */
+	/*
+	 * For stores - delete this entry from INTC_INFO_MU.
+	 *
+	 * For qword/qword_qp handling see restore_intc_info_mu().
+	 */
 	kvm_delete_intc_info_mu(vcpu, intc_info_mu);
 	trace_complete_intc_info_io_write(intc_info_mu->gpa,
 		intc_info_mu->data, intc_info_mu->data_ext);
@@ -196,8 +200,12 @@ static void complete_intc_info_io_write(struct kvm_vcpu *vcpu,
 static void complete_intc_info_io_read(struct kvm_vcpu *vcpu,
 					intc_info_mu_t *intc_info_mu)
 {
-	/* For loads - change the event_code to MMU reg read. */
-	/* Data will be read from the INTC_INFO_MU */
+	/*
+	 * For loads - change the event_code to MMU reg read.
+	 * Data will be read from the INTC_INFO_MU.
+	 *
+	 * For qword/qword_qp handling see restore_intc_info_mu().
+	 */
 	intc_info_mu->hdr.event_code = IME_READ_MU;
 	kvm_set_intc_info_mu_is_updated(vcpu);
 	trace_complete_intc_info_io_read(intc_info_mu->gpa,

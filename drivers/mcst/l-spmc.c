@@ -28,6 +28,7 @@
 #include <linux/cpufreq.h>
 #include <linux/sched/signal.h>
 #include <linux/input.h>
+#include <linux/power_supply.h>
 
 #include <asm/bootinfo.h>
 #include <asm/hw_prefetchers.h>
@@ -42,9 +43,6 @@
 #include <asm/e2k_sic.h>
 #endif
 
-/* Offsets from BAR for ACPI-MCST registers */
-#define ACPI_SPMC_DEVICE_ID	0x00
-
 /* Sleep types: */
 #define SLP_TYP_S0	0x0
 #define SLP_TYP_S3	0x3
@@ -56,223 +54,125 @@
 #define ACPI_SPMC_USB_CNTRL_WAKEUP_EN	(3 << 2)
 #define ACPI_SPMC_USB_ISOL_CNTRL	(3 << 0)
 
-#define DRV_NAME "acpi-spmc"
+#define DRV_NAME "l-spmc"
 
-struct acpi_spmc_data {
+struct spmc_data {
 	struct pci_dev *pdev;
 	struct input_dev *input;
 	raw_spinlock_t lock;
+	bool s3_supported;
+	struct power_supply *psy_ac;
+	struct power_supply *psy_battery;
+	bool ac_online;
+	bool battery_low;
+	struct work_struct psy_work;
+	bool ac_notify;
+	bool battery_notify;
 };
 
-static struct acpi_spmc_data *gdata;
+#define BUTTON_DEVICE_NAME_POWER	"Power Button"
+#define BUTTON_TYPE_POWER		0x01
 
-/* ACPI tainted interfaces and variables */
-
-static struct kobject *acpi_kobj;
-
-#define ACPI_BUS_FILE_ROOT      "acpi"
-static struct proc_dir_entry   *acpi_root_dir;
-#define ACPI_MAX_STRING		80
-
-/* Global vars for handling event proc entry */
-static DEFINE_SPINLOCK(acpi_system_event_lock);
-static int event_is_open = 0;
-static DEFINE_SPINLOCK(acpi_bus_event_lock);
-
-static LIST_HEAD(acpi_bus_event_list);
-static DECLARE_WAIT_QUEUE_HEAD(acpi_bus_event_queue);
-
-typedef char acpi_bus_id[8];
-typedef char acpi_device_name[40];
-typedef char acpi_device_class[20];
-
-struct acpi_bus_event {
-	struct list_head node;
-	acpi_device_class device_class;
-	acpi_bus_id bus_id;
-	u32 type;
-	u32 data;
+/* Power Supply Interface for AC adapter */
+static enum power_supply_property ac_props[] = {
+	POWER_SUPPLY_PROP_ONLINE,
 };
 
-/* Event related staff */
-#define ACPI_AC_EVENT		0x1
-#define ACPI_BATTERY_EVENT	0x2
-#define ACPI_BUTTON_EVENT	0x3
-#define ACPI_PMTIMER_EVENT	0x4
-#define ACPI_UNKNOWN_EVENT	0xff
-
-#define ACPI_AC_CLASS		"ac_adapter"
-#define ACPI_BATTERY_CLASS	"battery"
-#define ACPI_BUTTON_CLASS	"button/power"
-#define ACPI_PMTIMER_CLASS	"pmtimer"
-
-#define ACPI_BUSID_CLASS	"spmc"
-
-#define ACPI_BUTTON_DEVICE_NAME_POWER	"Power Button"
-#define ACPI_BUTTON_TYPE_POWER		0x01
-
-
-#define ACPI_FIXED_HARDWARE_EVENT	0x00
-
-static int acpi_bus_generate_proc_event(const char *device_class, const char *bus_id, u8 type, int data)
+static int ac_get_property(struct power_supply *psy, enum power_supply_property psp,
+							union power_supply_propval *val)
 {
-	struct acpi_bus_event *event;
-	unsigned long flags = 0;
+	struct spmc_data *data = power_supply_get_drvdata(psy);
+	unsigned long flags;
+	int ret = 0;
 
-	/* drop event on the floor if no one's listening */
-	if (!event_is_open)
-		return 0;
-
-	event = kmalloc(sizeof(struct acpi_bus_event), GFP_ATOMIC);
-	if (!event)
-		return -ENOMEM;
-
-	strscpy(event->device_class, device_class, sizeof(event->device_class));
-	strscpy(event->bus_id, bus_id, sizeof(event->bus_id));
-	event->type = type;
-	event->data = data;
-
-	spin_lock_irqsave(&acpi_bus_event_lock, flags);
-	list_add_tail(&event->node, &acpi_bus_event_list);
-	spin_unlock_irqrestore(&acpi_bus_event_lock, flags);
-
-	wake_up_interruptible(&acpi_bus_event_queue);
-
-	return 0;
-}
-
-static int acpi_bus_receive_event(struct acpi_bus_event *event)
-{
-	unsigned long flags = 0;
-	struct acpi_bus_event *entry = NULL;
-
-	DECLARE_WAITQUEUE(wait, current);
-
-	if (!event)
-		return -EINVAL;
-
-	if (list_empty(&acpi_bus_event_list)) {
-
-		set_current_state(TASK_INTERRUPTIBLE);
-		add_wait_queue(&acpi_bus_event_queue, &wait);
-
-		if (list_empty(&acpi_bus_event_list))
-			schedule();
-
-		remove_wait_queue(&acpi_bus_event_queue, &wait);
-		set_current_state(TASK_RUNNING);
-
-		if (signal_pending(current))
-			return -ERESTARTSYS;
+	raw_spin_lock_irqsave(&data->lock, flags);
+	switch (psp) {
+	case POWER_SUPPLY_PROP_ONLINE:
+		val->intval = data->ac_online;
+		break;
+	default:
+		ret = -EINVAL;
 	}
-
-	spin_lock_irqsave(&acpi_bus_event_lock, flags);
-	if (!list_empty(&acpi_bus_event_list)) {
-		entry = list_entry(acpi_bus_event_list.next,
-				   struct acpi_bus_event, node);
-		list_del(&entry->node);
-	}
-	spin_unlock_irqrestore(&acpi_bus_event_lock, flags);
-
-	if (!entry)
-		return -ENODEV;
-
-	memcpy(event, entry, sizeof(struct acpi_bus_event));
-
-	kfree(entry);
-
-	return 0;
+	raw_spin_unlock_irqrestore(&data->lock, flags);
+	return ret;
 }
 
-static int acpi_system_open_event(struct inode *inode, struct file *file)
-{
-	spin_lock_irq(&acpi_system_event_lock);
-
-	if (event_is_open)
-		goto out_busy;
-
-	event_is_open = 1;
-
-	spin_unlock_irq(&acpi_system_event_lock);
-	return 0;
-
- out_busy:
-	spin_unlock_irq(&acpi_system_event_lock);
-	return -EBUSY;
-}
-
-static ssize_t
-acpi_system_read_event(struct file *file, char __user * buffer, size_t count,
-			loff_t * ppos)
-{
-	int result = 0;
-	struct acpi_bus_event event;
-	static char str[ACPI_MAX_STRING];
-	static int chars_remaining = 0;
-	static char *ptr;
-
-	if (!chars_remaining) {
-		memset(&event, 0, sizeof(struct acpi_bus_event));
-
-		if ((file->f_flags & O_NONBLOCK)
-		    && (list_empty(&acpi_bus_event_list)))
-			return -EAGAIN;
-
-		result = acpi_bus_receive_event(&event);
-		if (result)
-			return result;
-
-		chars_remaining = sprintf(str, "%s %s %08x %08x\n",
-					  event.device_class, event.bus_id,
-					  event.type, event.data);
-		ptr = str;
-	}
-
-	if (chars_remaining < count) {
-		count = chars_remaining;
-	}
-
-	if (copy_to_user(buffer, ptr, count))
-		return -EFAULT;
-
-	*ppos += count;
-	chars_remaining -= count;
-	ptr += count;
-
-	return count;
-}
-
-static int acpi_system_close_event(struct inode *inode, struct file *file)
-{
-	spin_lock_irq(&acpi_system_event_lock);
-	event_is_open = 0;
-	spin_unlock_irq(&acpi_system_event_lock);
-	return 0;
-}
-
-static __poll_t acpi_system_poll_event(struct file *file, poll_table * wait)
-{
-	poll_wait(file, &acpi_bus_event_queue, wait);
-	if (!list_empty(&acpi_bus_event_list))
-		return EPOLLIN | EPOLLRDNORM;
-	return (__poll_t)0;
-}
-
-static const struct proc_ops acpi_system_event_ops = {
-	.proc_open = acpi_system_open_event,
-	.proc_read = acpi_system_read_event,
-	.proc_release = acpi_system_close_event,
-	.proc_poll = acpi_system_poll_event,
+static const struct power_supply_desc ac_psy_desc = {
+	.name = "mcst-ac",
+	.type = POWER_SUPPLY_TYPE_MAINS,
+	.properties = ac_props,
+	.num_properties = ARRAY_SIZE(ac_props),
+	.get_property = ac_get_property,
 };
 
-/* handler for irq line 1 (acpi-spmc) */
-static irqreturn_t acpi_spmc_irq_handler(int irq, void *dev_id)
+/* Power Supply Interface for Battery status */
+static enum power_supply_property battery_props[] = {
+	POWER_SUPPLY_PROP_CAPACITY_LEVEL,
+};
+
+static int battery_get_property(struct power_supply *psy, enum power_supply_property psp,
+								union power_supply_propval *val)
+{
+	struct spmc_data *data = power_supply_get_drvdata(psy);
+	unsigned long flags;
+	int ret = 0;
+
+	raw_spin_lock_irqsave(&data->lock, flags);
+	switch (psp) {
+	case POWER_SUPPLY_PROP_CAPACITY_LEVEL:
+		if (data->ac_online) /* AC power */
+			val->intval = POWER_SUPPLY_CAPACITY_LEVEL_UNKNOWN;
+		else if (data->battery_low)
+			val->intval = POWER_SUPPLY_CAPACITY_LEVEL_LOW;
+		else
+			val->intval = POWER_SUPPLY_CAPACITY_LEVEL_NORMAL;
+		break;
+	default:
+		ret = -EINVAL;
+	}
+	raw_spin_unlock_irqrestore(&data->lock, flags);
+	return ret;
+}
+
+static const struct power_supply_desc battery_psy_desc = {
+	.name = "mcst-battery",
+	.type = POWER_SUPPLY_TYPE_BATTERY,
+	.properties = battery_props,
+	.num_properties = ARRAY_SIZE(battery_props),
+	.get_property = battery_get_property,
+};
+
+static void psy_worker(struct work_struct *work)
+{
+	struct spmc_data *data = container_of(work, struct spmc_data, psy_work);
+	unsigned long flags;
+	bool ac_notify = false;
+	bool battery_notify = false;
+
+	raw_spin_lock_irqsave(&data->lock, flags);
+	if (data->ac_notify) {
+		ac_notify = true;
+		data->ac_notify = false;
+	}
+	if (data->battery_notify) {
+		battery_notify = true;
+		data->battery_notify = false;
+	}
+	raw_spin_unlock_irqrestore(&data->lock, flags);
+
+	if (ac_notify && data->psy_ac)
+		power_supply_changed(data->psy_ac);
+	if (battery_notify && data->psy_battery)
+		power_supply_changed(data->psy_battery);
+}
+
+/* handler for irq line 1 (spmc) */
+static irqreturn_t spmc_irq_handler(int irq, void *dev_id)
 {
 	unsigned long flags;
 	spmc_pm1_sts_t pm1_sts;
-	unsigned int event_id = ACPI_UNKNOWN_EVENT;
-	unsigned int event_data = 0;
-	struct acpi_spmc_data *c = (struct acpi_spmc_data *) dev_id;
+	struct spmc_data *c = (struct spmc_data *) dev_id;
+	bool psy_need_update = false;
 
 	raw_spin_lock_irqsave(&c->lock, flags);
 	pci_read_config_dword(c->pdev, ACPI_SPMC_PM1_STS, &pm1_sts.reg);
@@ -282,36 +182,41 @@ static irqreturn_t acpi_spmc_irq_handler(int irq, void *dev_id)
 		/* SCI interrupt form PM timer */
 		/* handle it here */
 		/* printk(KERN_ERR "SCI interrupt from PM timer.\n"); */
-		event_id = ACPI_PMTIMER_EVENT;
 	} else if (pm1_sts.ac_power_sts) {
 		/* SCI interrupt due change of ac_power_psnt */
 		/* handle it here */
 		/* printk(KERN_ERR "SCI interrupt from ac_power_psnt.\n"); */
 		/* 1) check power source ac or battery */
-		event_id = ACPI_AC_EVENT;
-		if (pm1_sts.ac_power_state) {
-			event_data = 1; /* ac on */
+		bool new_ac_state = pm1_sts.ac_power_state;
+
+		psy_need_update = true;
+		c->ac_notify = true;
+		c->ac_online = new_ac_state;
 #ifdef CONFIG_CPU_FREQ_GOV_PSTATES
+		if (new_ac_state)
 			set_cpu_pwr_limit(battery_pwr);
-#endif
-		} else {
-			event_data = 0; /* ac off */
-#ifdef CONFIG_CPU_FREQ_GOV_PSTATES
+		else
 			set_cpu_pwr_limit(init_cpu_pwr_limit);
 #endif
-		}
 	} else if (pm1_sts.batlow_sts) {
 		/* SCI interrupt due change of ac_power_psnt */
 		/* handle it here */
 		/* printk(KERN_ERR "SCI interrupt from batlow.\n"); */
-		event_id = ACPI_BATTERY_EVENT;
-		/* battery low or ok */
-		event_data = pm1_sts.batlow_state;
+		bool is_low = pm1_sts.batlow_state;
+
+		psy_need_update = true;
+		c->battery_notify = true;
+		c->battery_low = is_low;
 	} else if (pm1_sts.pwrbtn_sts) {
 		/* SCI interrupt due to power button */
 		/* handle it here */
 		/* printk(KERN_ERR "SCI interrupt from power button.\n"); */
-		event_id = ACPI_BUTTON_EVENT;
+		if (c->input != NULL) {
+			input_report_key(c->input, KEY_POWER, 1);
+			input_sync(c->input);
+			input_report_key(c->input, KEY_POWER, 0);
+			input_sync(c->input);
+		}
 	} else if (pm1_sts.wak_sts) {
 		/* SCI interrupt due to wakeup event */
 		/* handle it here */
@@ -321,35 +226,8 @@ static irqreturn_t acpi_spmc_irq_handler(int irq, void *dev_id)
 	pci_write_config_dword(c->pdev, ACPI_SPMC_PM1_STS, pm1_sts.reg);
 	raw_spin_unlock_irqrestore(&c->lock, flags);
 
-
-	/* notify acpid on event */
-	if (event_id == ACPI_PMTIMER_EVENT) {
-		acpi_bus_generate_proc_event(ACPI_PMTIMER_CLASS,
-					ACPI_BUSID_CLASS,
-					ACPI_FIXED_HARDWARE_EVENT,
-					1);
-	} else if (event_id == ACPI_BUTTON_EVENT) {
-		acpi_bus_generate_proc_event(ACPI_BUTTON_CLASS,
-					ACPI_BUSID_CLASS,
-					ACPI_FIXED_HARDWARE_EVENT,
-					1);
-		if (c->input != NULL) {
-			input_report_key(c->input, KEY_POWER, 1);
-			input_sync(c->input);
-			input_report_key(c->input, KEY_POWER, 0);
-			input_sync(c->input);
-		}
-	} else if (event_id == ACPI_AC_EVENT) {
-		acpi_bus_generate_proc_event(ACPI_AC_CLASS,
-					ACPI_BUSID_CLASS,
-					ACPI_FIXED_HARDWARE_EVENT,
-					event_data);
-	} else if (event_id == ACPI_BATTERY_EVENT) {
-		acpi_bus_generate_proc_event(ACPI_BATTERY_CLASS,
-					ACPI_BUSID_CLASS,
-					ACPI_FIXED_HARDWARE_EVENT,
-					event_data);
-	}
+	if (psy_need_update)
+		schedule_work(&c->psy_work);
 
 	return IRQ_HANDLED;
 }
@@ -361,7 +239,7 @@ static ssize_t spmc_show_sci(struct device *dev,
 {
 	unsigned long flags;
 	spmc_pm1_cnt_t pm1_cnt;
-	struct acpi_spmc_data *c = gdata;
+	struct spmc_data *c = dev_get_drvdata(dev);
 
 	raw_spin_lock_irqsave(&c->lock, flags);
 	pci_read_config_dword(c->pdev, ACPI_SPMC_PM1_CNT, &pm1_cnt.reg);
@@ -376,7 +254,7 @@ static ssize_t spmc_store_sci(struct device *dev,
 {
 	unsigned long flags, val;
 	spmc_pm1_cnt_t pm1_cnt;
-	struct acpi_spmc_data *c = gdata;
+	struct spmc_data *c = dev_get_drvdata(dev);
 
 	if ((kstrtoul(buf, 10, &val) < 0) || (val > 1))
 		return -EINVAL;
@@ -397,7 +275,7 @@ static ssize_t spmc_store_tmr(struct device *dev,
 {
 	unsigned long flags, val;
 	spmc_pm1_en_t pm1_en;
-	struct acpi_spmc_data *c = gdata;
+	struct spmc_data *c = dev_get_drvdata(dev);
 
 	if ((kstrtoul(buf, 10, &val) < 0) || (val > 1))
 		return -EINVAL;
@@ -418,7 +296,7 @@ static ssize_t spmc_show_tmr32(struct device *dev,
 
 	unsigned long flags;
 	spmc_pm1_en_t pm1_en;
-	struct acpi_spmc_data *c = gdata;
+	struct spmc_data *c = dev_get_drvdata(dev);
 
 	raw_spin_lock_irqsave(&c->lock, flags);
 	pci_read_config_dword(c->pdev, ACPI_SPMC_PM1_EN, &pm1_en.reg);
@@ -433,7 +311,7 @@ static ssize_t spmc_store_tmr32(struct device *dev,
 {
 	unsigned long flags, val;
 	spmc_pm1_en_t pm1_en;
-	struct acpi_spmc_data *c = gdata;
+	struct spmc_data *c = dev_get_drvdata(dev);
 
 	if ((kstrtoul(buf, 10, &val) < 0) || (val > 1))
 		return -EINVAL;
@@ -454,7 +332,7 @@ static ssize_t spmc_store_ac_pwr(struct device *dev,
 {
 	unsigned long flags, val;
 	spmc_pm1_en_t pm1_en;
-	struct acpi_spmc_data *c = gdata;
+	struct spmc_data *c = dev_get_drvdata(dev);
 
 	if ((kstrtoul(buf, 10, &val) < 0) || (val > 1))
 		return -EINVAL;
@@ -475,7 +353,7 @@ static ssize_t spmc_store_batlow(struct device *dev,
 {
 	unsigned long flags, val;
 	spmc_pm1_en_t pm1_en;
-	struct acpi_spmc_data *c = gdata;
+	struct spmc_data *c = dev_get_drvdata(dev);
 
 	if ((kstrtoul(buf, 10, &val) < 0) || (val > 1))
 		return -EINVAL;
@@ -496,7 +374,7 @@ static ssize_t spmc_store_pwrbtn(struct device *dev,
 {
 	unsigned long flags, val;
 	spmc_pm1_en_t pm1_en;
-	struct acpi_spmc_data *c = gdata;
+	struct spmc_data *c = dev_get_drvdata(dev);
 
 	if ((kstrtoul(buf, 10, &val) < 0) || (val > 1))
 		return -EINVAL;
@@ -516,7 +394,7 @@ static ssize_t spmc_show_slptyp(struct device *dev,
 {
 	unsigned long flags;
 	spmc_pm1_cnt_t pm1_cnt;
-	struct acpi_spmc_data *c = gdata;
+	struct spmc_data *c = dev_get_drvdata(dev);
 
 	raw_spin_lock_irqsave(&c->lock, flags);
 	pci_read_config_dword(c->pdev, ACPI_SPMC_PM1_CNT, &pm1_cnt.reg);
@@ -531,15 +409,12 @@ static ssize_t spmc_store_slptyp(struct device *dev,
 {
 	unsigned long flags, val;
 	spmc_pm1_cnt_t pm1_cnt;
-	struct acpi_spmc_data *c = gdata;
+	struct spmc_data *c = dev_get_drvdata(dev);
 	int ret;
 
 	ret = kstrtoul(buf, 10, &val);
 	if (ret < 0)
 		return ret;
-
-	if (val < SLP_TYP_S0 || val > SLP_TYP_S5)
-		return -EINVAL;
 
 	if (val != SLP_TYP_S0 &&
 		val != SLP_TYP_S3 &&
@@ -563,7 +438,7 @@ static ssize_t spmc_show_pm_tmr(struct device *dev,
 {
 	unsigned long flags;
 	unsigned int x;
-	struct acpi_spmc_data *c = gdata;
+	struct spmc_data *c = dev_get_drvdata(dev);
 
 	raw_spin_lock_irqsave(&c->lock, flags);
 	pci_read_config_dword(c->pdev, ACPI_SPMC_PM_TMR, &x);
@@ -578,7 +453,7 @@ static ssize_t spmc_show_pm1_sts(struct device *dev,
 {
 	unsigned long flags;
 	unsigned int x;
-	struct acpi_spmc_data *c = gdata;
+	struct spmc_data *c = dev_get_drvdata(dev);
 
 	raw_spin_lock_irqsave(&c->lock, flags);
 	pci_read_config_dword(c->pdev, ACPI_SPMC_PM1_STS, &x);
@@ -593,7 +468,7 @@ static ssize_t spmc_show_pm1_en(struct device *dev,
 {
 	unsigned long flags;
 	unsigned int x;
-	struct acpi_spmc_data *c = gdata;
+	struct spmc_data *c = dev_get_drvdata(dev);
 
 	raw_spin_lock_irqsave(&c->lock, flags);
 	pci_read_config_dword(c->pdev, ACPI_SPMC_PM1_EN, &x);
@@ -608,7 +483,7 @@ static ssize_t spmc_show_pm1_cnt(struct device *dev,
 {
 	unsigned long flags;
 	unsigned int x;
-	struct acpi_spmc_data *c = gdata;
+	struct spmc_data *c = dev_get_drvdata(dev);
 
 	raw_spin_lock_irqsave(&c->lock, flags);
 	pci_read_config_dword(c->pdev, ACPI_SPMC_PM1_CNT, &x);
@@ -631,7 +506,7 @@ static DEVICE_ATTR(pm1_sts, S_IRUGO, spmc_show_pm1_sts, NULL);
 static DEVICE_ATTR(pm1_en, S_IRUGO, spmc_show_pm1_en, NULL);
 static DEVICE_ATTR(pm1_cnt, S_IRUGO, spmc_show_pm1_cnt, NULL);
 
-static struct attribute *acpi_spmc_attributes[] = {
+static struct attribute *spmc_attributes[] = {
 	&dev_attr_sci.attr,
 	&dev_attr_tmr.attr,
 	&dev_attr_tmr32.attr,
@@ -646,9 +521,11 @@ static struct attribute *acpi_spmc_attributes[] = {
 	NULL
 };
 
-static const struct attribute_group acpi_spmc_attr_group = {
-	.attrs = acpi_spmc_attributes,
+static const struct attribute_group spmc_attr_group = {
+	.attrs = spmc_attributes,
 };
+
+static struct pci_dev *l_spmc_pdev;
 
 #ifdef CONFIG_SUSPEND
 /* S3 (suspend to RAM support) */
@@ -702,15 +579,22 @@ static void __exit mtd_s3_exit(void)
 module_exit(mtd_s3_exit);
 
 
-static struct pci_dev *l_spmc_pdev;
-
 static int l_spmc_suspend_valid(suspend_state_t state)
 {
 	/* Since v6 secondary CPUs must be stopped in C3 so that they won't
 	 * issue any memory accesses that can interfere with entering S3
 	 * (see SPMC_EIOH documentation) */
+	struct spmc_data *data = NULL;
+
 	if (cpu_has(CPU_FEAT_ISET_V6) && state == PM_SUSPEND_MEM && cpu_has(CPU_HWBUG_C3))
 		return false;
+
+	if (state == PM_SUSPEND_MEM) {
+		if (l_spmc_pdev)
+			data = dev_get_drvdata(&l_spmc_pdev->dev);
+		if (!data || !READ_ONCE(data->s3_supported))
+			return false;
+	}
 
 	return state == PM_SUSPEND_TO_IDLE || state == PM_SUSPEND_MEM;
 }
@@ -819,6 +703,17 @@ static void l_spmc_s3_enter(void *arg)
 static int l_spmc_suspend_enter(suspend_state_t state)
 {
 	/* S3 powers off CPUs so save/restore their state */
+	struct spmc_data *data = NULL;
+
+	if (state == PM_SUSPEND_MEM) {
+		if (l_spmc_pdev)
+			data = dev_get_drvdata(&l_spmc_pdev->dev);
+		if (!data || !READ_ONCE(data->s3_supported)) {
+			dev_err(&l_spmc_pdev->dev, "L-SPMC: S3 entry is not supported on this board\n");
+			return -EOPNOTSUPP;
+		}
+	}
+
 	save_processor_state();
 
 	restart_system(l_spmc_s3_enter, l_spmc_pdev);
@@ -913,7 +808,12 @@ static struct notifier_block l_power_notifier = {
 void do_spmc_halt(void)
 {
 	spmc_pm1_cnt_t pm1_cnt;
-	struct acpi_spmc_data *c = gdata;
+	struct spmc_data *c;
+
+	if (!l_spmc_pdev)
+		return;
+
+	c = dev_get_drvdata(&l_spmc_pdev->dev);
 	if (!c)
 		return;
 
@@ -937,7 +837,7 @@ void do_spmc_halt(void)
 EXPORT_SYMBOL(do_spmc_halt);
 
 static int input_button_register(struct pci_dev *pdev,
-				  struct acpi_spmc_data *c)
+				  struct spmc_data *c)
 {
 	struct input_dev *input;
 	int error;
@@ -945,14 +845,14 @@ static int input_button_register(struct pci_dev *pdev,
 	input = input_allocate_device();
 	if (!input) {
 		error = -ENOMEM;
-		dev_err(&pdev->dev, "ACPI-SPMC: Not enough memory\n");
+		dev_err(&pdev->dev, "L-SPMC: Not enough memory\n");
 		goto fail;
 	}
 
-	input->name = ACPI_BUTTON_DEVICE_NAME_POWER;
+	input->name = BUTTON_DEVICE_NAME_POWER;
 	input->phys = "LNXPWRBN/button/input0";
 	input->id.bustype = BUS_HOST;
-	input->id.product = ACPI_BUTTON_TYPE_POWER;
+	input->id.product = BUTTON_TYPE_POWER;
 	input->dev.parent = &pdev->dev;
 	c->input = input;
 
@@ -967,25 +867,52 @@ static int input_button_register(struct pci_dev *pdev,
 
 fail:
 	input_free_device(input);
+	c->input = NULL;
 	return error;
 }
 
-static int acpi_spmc_probe(struct pci_dev *pdev,
-				  struct acpi_spmc_data *c)
+static int spmc_probe(struct pci_dev *pdev,
+				  struct spmc_data *c)
 {
 	struct device_node *np;
-	int err, ret;
+	int err;
 	char *dsc = "SCI";
 	unsigned x;
-	u32 prop;
+	struct power_supply_config psy_cfg = {};
+	spmc_pm1_sts_t pm1_sts;
+	spmc_pm1_en_t pm1_en;
 
-	err = pci_enable_device(pdev);
+	err = pcim_enable_device(pdev);
 	if (err)
 		return err;
 
 	c->pdev = pdev;
 
 	raw_spin_lock_init(&(c->lock));
+
+	pci_read_config_dword(pdev, ACPI_SPMC_PM1_STS, &pm1_sts.reg);
+	c->ac_online = pm1_sts.ac_power_state;
+	c->battery_low = pm1_sts.batlow_state;
+
+	INIT_WORK(&c->psy_work, psy_worker);
+
+	psy_cfg.drv_data = c;
+
+	/* Register AC Adapter */
+	c->psy_ac = devm_power_supply_register(&pdev->dev, &ac_psy_desc, &psy_cfg);
+	if (IS_ERR(c->psy_ac)) {
+		err = PTR_ERR(c->psy_ac);
+		dev_err(&pdev->dev, "Failed to register AC adapter! Error: %d\n", err);
+		goto done;
+	}
+
+	/* Register Battery */
+	c->psy_battery = devm_power_supply_register(&pdev->dev, &battery_psy_desc, &psy_cfg);
+	if (IS_ERR(c->psy_battery)) {
+		err = PTR_ERR(c->psy_battery);
+		dev_err(&pdev->dev, "Failed to register Battery! Error: %d\n", err);
+		goto done;
+	}
 
 	/* Default settings: */
 	/* 1) ACPI (SCI enable or disable) & force S0 state */
@@ -1005,53 +932,31 @@ static int acpi_spmc_probe(struct pci_dev *pdev,
 	pci_write_config_dword(pdev, ACPI_SPMC_USB_CNTRL,
 				x | ACPI_SPMC_USB_CNTRL_WAKEUP_EN);
 
-	np = of_find_node_by_name(NULL, "acpi-spmc");
-	if (np) {
-		/* 5) SCI value from device tree (enable or disable) */
-		ret = of_property_read_u32(np, "sci", &prop);
-		if ((!ret) && (prop < 2)) {
-			spmc_pm1_cnt_t pm1_cnt;
-			pci_read_config_dword(c->pdev, ACPI_SPMC_PM1_CNT, &pm1_cnt.reg);
-			pm1_cnt.sci_en = !!prop;
-			pci_write_config_dword(c->pdev, ACPI_SPMC_PM1_CNT, pm1_cnt.reg);
-		}
-		/* 6) PWRBTN value from device tree (enable or disable) */
-		ret = of_property_read_u32(np, "pwrbtn", &prop);
-		if ((!ret) && (prop < 2)) {
-			spmc_pm1_en_t pm1_en;
-			pci_read_config_dword(c->pdev, ACPI_SPMC_PM1_EN, &pm1_en.reg);
-			pm1_en.pwrbtn_en = !!prop;
-			pci_write_config_dword(c->pdev, ACPI_SPMC_PM1_EN, pm1_en.reg);
-		}
-		/* 7) SLPTYP value from device tree (0-5) */
-		ret = of_property_read_u32(np, "slptyp", &prop);
-		if ((!ret) && (prop <= SLP_TYP_S5)) {
-			spmc_pm1_cnt_t pm1_cnt;
-			pci_read_config_dword(c->pdev, ACPI_SPMC_PM1_CNT, &pm1_cnt.reg);
-			pm1_cnt.slp_typx = prop;
-			pm1_cnt.slp_en = 1;
-			pci_write_config_dword(c->pdev, ACPI_SPMC_PM1_CNT, pm1_cnt.reg);
-		}
-	} else {
-		/* 8) PWRBTN enable without device tree */
-		spmc_pm1_en_t pm1_en;
-		pci_read_config_dword(c->pdev, ACPI_SPMC_PM1_EN, &pm1_en.reg);
-		pm1_en.pwrbtn_en = 1;
-		pci_write_config_dword(c->pdev, ACPI_SPMC_PM1_EN, pm1_en.reg);
-	}
+	/* 4) PWRBTN enable */
+	pci_read_config_dword(c->pdev, ACPI_SPMC_PM1_EN, &pm1_en.reg);
+	pm1_en.pwrbtn_en = 1;
+	pci_write_config_dword(c->pdev, ACPI_SPMC_PM1_EN, pm1_en.reg);
 
+	np = pdev->dev.of_node;
+	if (np) {
+		/* S3 support enable if flag present in device tree */
+		c->s3_supported = of_property_read_bool(np, "s3_support");
+	} else {
+		/* S3 support disable without device tree */
+		c->s3_supported = false;
+	}
 	/* register sysfs entries */
-	err = sysfs_create_group(&pdev->dev.kobj, &acpi_spmc_attr_group);
+	err = sysfs_create_group(&pdev->dev.kobj, &spmc_attr_group);
 	if (err)
 		goto done;
 
 	/* SCI IRQ, Line 1: */
-	err = request_irq(pdev->irq, acpi_spmc_irq_handler,
+	err = request_irq(pdev->irq, spmc_irq_handler,
 				IRQF_ONESHOT | IRQF_SHARED,
 				dsc, c);
 	if (err) {
 		dev_err(&pdev->dev,
-				"ACPI-SPMC: unable to claim irq %d; err %d\n",
+				"L-SPMC: unable to claim irq %d; err %d\n",
 				pdev->irq, err);
 		goto cleanup;
 	}
@@ -1059,95 +964,84 @@ static int acpi_spmc_probe(struct pci_dev *pdev,
 	err = input_button_register(pdev, c);
 	if (err)
 		dev_err(&pdev->dev,
-			"ACPI-SPMC: Failed input_button_register err %d\n", err);
+			"L-SPMC: Failed input_button_register err %d\n", err);
 
 	dev_info(&pdev->dev,
-		 DRV_NAME ": ACPI-SPMC support successfully loaded.\n");
+		 DRV_NAME ": L-SPMC support successfully loaded.\n");
 
 #ifdef CONFIG_SUSPEND
 	suspend_set_ops(&l_spmc_suspend_ops);
-	l_spmc_pdev = pdev;
 #endif
 
 	return 0;
 
 cleanup:
-	sysfs_remove_group(&pdev->dev.kobj, &acpi_spmc_attr_group);
+	sysfs_remove_group(&pdev->dev.kobj, &spmc_attr_group);
 
 done:
 	return err;
 }
 
-static void __exit acpi_spmc_remove(struct acpi_spmc_data *p)
+static void spmc_remove(struct spmc_data *p)
 {
 	struct pci_dev *pdev = p->pdev;
 
+	cancel_work_sync(&p->psy_work);
 	free_irq(pdev->irq, p);
-	sysfs_remove_group(&pdev->dev.kobj, &acpi_spmc_attr_group);
+	sysfs_remove_group(&pdev->dev.kobj, &spmc_attr_group);
+
+	if (p->input != NULL)
+		input_unregister_device(p->input);
 }
 
 static int l_spmc_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
 	int err = -ENODEV;
-	struct acpi_spmc_data *idata;
-	struct proc_dir_entry *entry;
+	struct spmc_data *idata;
 
-	/* Implementation for single IOHUB-2 on board (no domains) */
-	if (gdata)
+	if (l_spmc_pdev)
 		return 0;
+
+	idata = devm_kzalloc(&pdev->dev, sizeof(*idata), GFP_KERNEL);
+	if (!idata)
+		return -ENOMEM;
+	dev_set_drvdata(&pdev->dev, idata);
+	l_spmc_pdev = pdev;
+
+	err = spmc_probe(pdev, idata);
+	if (err) {
+		l_spmc_pdev = NULL;
+		dev_set_drvdata(&pdev->dev, NULL);
+		return err;
+	}
 
 #ifdef CONFIG_SUSPEND
 	err = register_pm_notifier(&l_power_notifier);
-	if (err)
-		return err;
-#endif
-
-	if (!(idata = kzalloc(sizeof(*idata), GFP_KERNEL)))
-		return -ENOMEM;
-
-	err = acpi_spmc_probe(pdev, idata);
 	if (err) {
-		pci_dev_put(pdev);
+		l_spmc_pdev = NULL;
+		spmc_remove(idata);
+		dev_set_drvdata(&pdev->dev, NULL);
 		return err;
 	}
-
-	gdata = idata;
-
-	/* Long initialization process of ACPI tainted interfaces */
-
-	/* ACPI sysfs top dir */
-	acpi_kobj = kobject_create_and_add("acpi", firmware_kobj);
-	if (!acpi_kobj) {
-		printk(KERN_WARNING "%s: kset create error\n", __func__);
-		acpi_kobj = NULL;
-	}
-
-	/* Create the top ACPI proc directory */
-	acpi_root_dir = proc_mkdir(ACPI_BUS_FILE_ROOT, NULL);
-
-	/* /proc/acpi/event [R] */
-	entry = proc_create("event", S_IRUSR, acpi_root_dir,
-			    &acpi_system_event_ops);
-	if (!entry) {
-
-		pci_dev_put(pdev);
-		gdata = NULL;
-		return -ENODEV;
-	}
+#endif
 	return err;
 }
 
 static void __exit l_spmc_pci_remove(struct pci_dev *pdev)
 {
-	if (gdata->input != NULL) {
-		input_unregister_device(gdata->input);
-	}
-	proc_remove(acpi_root_dir);
-	kobject_put(acpi_kobj);
-	acpi_spmc_remove(gdata);
-	pci_dev_put(gdata->pdev);
-	kfree(gdata);
-	gdata = NULL;
+	struct spmc_data *c = dev_get_drvdata(&pdev->dev);
+
+#ifdef CONFIG_SUSPEND
+	unregister_pm_notifier(&l_power_notifier);
+#endif
+
+	l_spmc_pdev = NULL;
+
+	if (!c)
+		return;
+
+	spmc_remove(c);
+	dev_set_drvdata(&pdev->dev, NULL);
 }
 
 static const struct pci_device_id l_spmc_pci_id_list[] = {

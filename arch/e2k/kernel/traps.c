@@ -113,7 +113,7 @@ static void do_kernel_coredump(struct pt_regs *regs);
 static void do_data_debug(struct pt_regs *regs);
 static void do_data_page(struct pt_regs *regs);
 static void do_macp(struct pt_regs *regs);
-void do_nm_interrupt(struct pt_regs *regs);
+static void do_nm_interrupt(struct pt_regs *regs, u32 nmi_reason);
 static void do_division(struct pt_regs *regs);
 static void do_fp(struct pt_regs *regs);
 static void do_mem_lock(struct pt_regs *regs);
@@ -499,7 +499,7 @@ native_TIR0_clear_false_exceptions(e2k_tir_t TIR, int nr_TIRs)
 # define INCREASE_TRAP_NUM(trap_times)
 #endif
 
-#define HANDLE_TIR_EXCEPTION(regs, exc_num, func, pass_func, tir) \
+#define HANDLE_TIR_EXCEPTION(regs, exc_num, func, pass_func, tir, args...) \
 do { \
 	unsigned long handled = 0; \
 \
@@ -509,14 +509,14 @@ do { \
 	if (pass_func) \
 		handled = pass_func(regs, tir, exc_num); \
 	if (!handled) \
-		(func)(regs); \
+		(func)(regs ,##args); \
 \
 	add_info_interrupt(exc_num, start_tick); \
 	INCREASE_TRAP_NUM(trap_times); \
 } while (0)
 
 static __always_inline void
-handle_nm_exceptions(struct pt_regs *regs, e2k_tir_t *TIRS, u64 nmi)
+handle_nm_exceptions(struct pt_regs *regs, e2k_tir_t *TIRS, u64 nmi, u32 nmi_reason)
 {
 	/*
 	 * Handle NMIs from TIR0
@@ -538,7 +538,7 @@ handle_nm_exceptions(struct pt_regs *regs, e2k_tir_t *TIRS, u64 nmi)
 	if (nmi & exc_nm_interrupt_mask)
 		HANDLE_TIR_EXCEPTION(regs, exc_nm_interrupt_num,
 				     do_nm_interrupt,
-				     pass_nm_interrupt_to_guest, TIRS[0]);
+				     pass_nm_interrupt_to_guest, TIRS[0], nmi_reason);
 	if (nmi & exc_mem_lock_as_mask)
 		HANDLE_TIR_EXCEPTION(regs, exc_mem_lock_as_num, do_mem_lock_as,
 				     pass_the_trap_to_guest, TIRS[0]);
@@ -619,6 +619,12 @@ notrace void parse_TIR_registers(struct pt_regs *regs, u64 exceptions)
 	TIR = TIRs[0];
 	trap->TIR = TIR;
 
+	/* Read PNMIRR before touching %psr.  Avoid doing this
+	 * unconditionally or we will lose NMIs. */
+	u32 nmi_reason;
+	if (unlikely(nmi))
+		nmi_reason = pic_save_and_clear_nmi();
+
 	/*
 	 * 1) Open non-maskable interrupts if `from_user`.
 	 *
@@ -638,7 +644,7 @@ notrace void parse_TIR_registers(struct pt_regs *regs, u64 exceptions)
 	 */
 
 	if (unlikely(nmi))
-		handle_nm_exceptions(regs, TIRs, nmi);
+		handle_nm_exceptions(regs, TIRs, nmi, nmi_reason);
 
 
 	/*
@@ -1793,13 +1799,13 @@ irqreturn_t native_do_interrupt(struct pt_regs *regs)
 	return IRQ_HANDLED;
 }
 
-noinline notrace void do_nm_interrupt(struct pt_regs *regs)
+noinline notrace void do_nm_interrupt(struct pt_regs *regs, u32 nmi_reason)
 {
 	bool from_user = user_mode(regs);
 	if (!from_user)
 		nmi_enter();
 
-	do_nmi(regs);
+	do_nmi(nmi_reason);
 
 	if (!from_user)
 		nmi_exit();

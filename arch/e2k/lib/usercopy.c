@@ -16,13 +16,12 @@ EXPORT_SYMBOL(__uaccess_start);
 EXPORT_SYMBOL(__uaccess_end);
 #endif
 
-UACCESS_FN_DEFINE3(fill_user_fn, void __user *, to, unsigned long, n, u64, b)
+UACCESS_FN_DEFINE4(fill_userspace_fn, void __user *, to, unsigned long, n, u64, b, bool, priv)
 {
 	unsigned long i, align, head, tail, head1, head2, head3, head4, head7,
 			head8, tail1, tail2, tail4, tail8, tail12, tail14, n_aligned;
 	void __user *to_aligned = PTR_ALIGN((void __user *) to, 16);
-	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT,
-			.mas = MAS_BYPASS_L1_CACHE, .prot = 1 };
+	ldst_rec_op_t opc = USER_LDST_OPC();
 	size_t cleared;
 
 	align = (unsigned long) to & 0xf;
@@ -30,7 +29,7 @@ UACCESS_FN_DEFINE3(fill_user_fn, void __user *, to, unsigned long, n, u64, b)
 
 	if (unlikely(n < 16)) {
 		for (i = 0; i < n; i++)
-			USER_ST(b, &((u8 __user *) to)[i]);
+			USER_ST(b, &((u8 __user *) to)[i], opc);
 
 		return 0;
 	}
@@ -46,19 +45,19 @@ UACCESS_FN_DEFINE3(fill_user_fn, void __user *, to, unsigned long, n, u64, b)
 	head8 = head & 8;
 
 	if (head1)
-		USER_ST(b, (u8 __user *) to);
+		USER_ST(b, (u8 __user *) to, opc);
 	if (head2)
-		USER_ST(b, (u16 __user *) (to + head1));
+		USER_ST(b, (u16 __user *) (to + head1), opc);
 	if (head4)
-		USER_ST(b, (u32 __user *) (to + head3));
+		USER_ST(b, (u32 __user *) (to + head3), opc);
 	if (head8)
-		USER_ST(b, (u64 __user *) (to + head7));
+		USER_ST(b, (u64 __user *) (to + head7), opc);
 
 
 	n_aligned = round_down(n, 16);
 	SET_USR_PFAULT("$recovery_memset_fault", true);
 	cleared = fast_tagged_memory_set_user(to_aligned, b, ETAGNVQ,
-			n_aligned, &cleared, strd_opcode);
+			n_aligned, &cleared, priv);
 	RESTORE_USR_PFAULT(true);
 	if (unlikely(cleared != n_aligned))
 		return n - cleared;
@@ -75,24 +74,26 @@ UACCESS_FN_DEFINE3(fill_user_fn, void __user *, to, unsigned long, n, u64, b)
 	tail14 = tail & 14;
 
 	if (tail8)
-		USER_ST(b, (u64 __user *) to_aligned);
+		USER_ST(b, (u64 __user *) to_aligned, opc);
 	if (tail4)
-		USER_ST(b, (u32 __user *) (to_aligned + tail8));
+		USER_ST(b, (u32 __user *) (to_aligned + tail8), opc);
 	if (tail2)
-		USER_ST(b, (u16 __user *) (to_aligned + tail12));
+		USER_ST(b, (u16 __user *) (to_aligned + tail12), opc);
 	if (tail1)
-		USER_ST(b, (u8 __user *) (to_aligned + tail14));
+		USER_ST(b, (u8 __user *) (to_aligned + tail14), opc);
 
 	return 0;
 }
 
 /* Fallback function - fills as much as possible */
-UACCESS_FN_DEFINE3(fill_user_fn_fallback, void __user *, to, unsigned long *, n, u64, b)
+UACCESS_FN_DEFINE4(fill_userspace_fn_fallback, void __user *, to, unsigned long *, n,
+		u64, b, bool, priv)
 {
 	unsigned long i, orig_n = *n;
+	ldst_rec_op_t opc = (priv) ? PRIV_LDST_OPC() : USER_LDST_OPC();
 
 	for (i = 0; i < orig_n; i++) {
-		USER_ST(b, &((u8 __user *) to)[i]);
+		USER_ST(b, &((u8 __user *) to)[i], opc);
 		E2K_CMD_SEPARATOR;
 		WRITE_ONCE(*n, *n - 1);
 	}
@@ -111,28 +112,29 @@ UACCESS_FN_DEFINE3(fill_user_fn_fallback, void __user *, to, unsigned long *, n,
  * Returns number of bytes that could not be filled.
  * On success, this will be zero.
  */
-unsigned long __fill_user(void __user *to, unsigned long n, u8 c)
+unsigned long __fill_userspace(void __user *to, unsigned long n, u8 c, bool priv)
 {
 	u64 b = __builtin_e2k_pshufb(c, c, 0);
 
-	if (unlikely(__UACCESS_FN_CALL(fill_user_fn, to, n, b))) {
-		__UACCESS_FN_CALL(fill_user_fn_fallback, to, &n, b);
+	if (unlikely(__UACCESS_FN_CALL(fill_userspace_fn, to, n, b, priv))) {
+		__UACCESS_FN_CALL(fill_userspace_fn_fallback, to, &n, b, priv);
 		return n;
 	}
 
 	return 0;
 }
-EXPORT_SYMBOL(__fill_user);
+EXPORT_SYMBOL(__fill_userspace);
 
 
 UACCESS_FN_DEFINE3(strncpy_from_user_fn, char *__restrict, dst,
 		const char __user *__restrict, src, long, count)
 {
+	ldst_rec_op_t opc = USER_LDST_OPC();
 	long i;
 
 	for (i = 0; i < count; i++) {
 		char c;
-		USER_LD(c, &src[i]);
+		USER_LD(c, &src[i], opc);
 		if (unlikely((dst[i] = c) == 0))
 			break;
 	}
@@ -146,7 +148,7 @@ UACCESS_FN_DEFINE3(strncpy_from_user_fn, char *__restrict, dst,
  *         least @count bytes long.
  * @src:   Source address, in user space.
  * @count: Maximum number of bytes to copy, including the trailing NUL.
- * 
+ *
  * Copies a NUL-terminated string from userspace to kernel space.
  *
  * On success, returns the length of the string (not including the trailing
@@ -191,6 +193,7 @@ UACCESS_FN_DEFINE3(strnlen_user_fn, const char __user *, src,
 		unsigned long, count, unsigned long, max)
 {
 	const struct word_at_a_time constants = WORD_AT_A_TIME_CONSTANTS;
+	ldst_rec_op_t opc = USER_LDST_OPC();
 	long align, res = 0;
 	unsigned long c;
 
@@ -203,7 +206,7 @@ UACCESS_FN_DEFINE3(strnlen_user_fn, const char __user *, src,
 	/* Cannot overflow - max is already limited by PAGE_OFFSET */
 	max += align;
 
-	USER_LD(c, (unsigned long __user *) src);
+	USER_LD(c, (unsigned long __user *) src, opc);
 	c |= aligned_byte_mask(align);
 
 #pragma vector aligned
@@ -221,7 +224,7 @@ UACCESS_FN_DEFINE3(strnlen_user_fn, const char __user *, src,
 		if (unlikely(max <= sizeof(unsigned long)))
 			break;
 		max -= sizeof(unsigned long);
-		USER_LD(c, (unsigned long __user *) (src + res));
+		USER_LD(c, (unsigned long __user *) (src + res), opc);
 	}
 	res -= align;
 
@@ -274,9 +277,10 @@ long strnlen_user(const char __user *str, long count)
 }
 EXPORT_SYMBOL(strnlen_user);
 
-UACCESS_GLOBEXP_FN_DEFINE4(copy_from_user_fn, void *, to, const void __user *, from,
-		unsigned long, size, unsigned long *, left)
+UACCESS_GLOBEXP_FN_DEFINE5(copy_from_userspace_fn, void *, to, const void __user *, from,
+		unsigned long, size, unsigned long *, left, bool, priv)
 {
+	ldst_rec_op_t opc = (priv) ? PRIV_LDST_OPC() : USER_LDST_OPC();
 	unsigned long n = size;
 	unsigned long head, tail, head1, head3, head7, tail8, tail12, tail14;
 	void *dst = to, *orig_dst = to;
@@ -298,13 +302,13 @@ UACCESS_GLOBEXP_FN_DEFINE4(copy_from_user_fn, void *, to, const void __user *, f
 	head7 = head & 7;
 
 	if (head & 1)
-		USER_LD(tmp1, (u8 __user *) src);
+		USER_LD(tmp1, (u8 __user *) src, opc);
 	if (head & 2)
-		USER_LD(tmp2, (u16 __user *) (src + head1));
+		USER_LD(tmp2, (u16 __user *) (src + head1), opc);
 	if (head & 4)
-		USER_LD(tmp4, (u32 __user *) (src + head3));
+		USER_LD(tmp4, (u32 __user *) (src + head3), opc);
 	if (head & 8)
-		USER_LD(tmp8, (u64 __user *) (src + head7));
+		USER_LD(tmp8, (u64 __user *) (src + head7), opc);
 
 	src += head & 0xf;
 	dst = PTR_ALIGN(dst, 16);
@@ -317,7 +321,7 @@ UACCESS_GLOBEXP_FN_DEFINE4(copy_from_user_fn, void *, to, const void __user *, f
 		if (likely(length)) {
 			SET_USR_PFAULT("$recovery_memcpy_fault", true);
 			copied = fast_tagged_memory_copy_from_user(dst, src,
-					length, &copied, true);
+					length, &copied, true, priv);
 			RESTORE_USR_PFAULT(true);
 			WRITE_ONCE(*left, n - copied);
 		}
@@ -369,13 +373,13 @@ copy_tail:
 	tail14 = tail & 14;
 
 	if (tail & 8)
-		USER_LD(tmp8, (u64 __user *) src);
+		USER_LD(tmp8, (u64 __user *) src, opc);
 	if (tail & 4)
-		USER_LD(tmp4, (u32 __user *) (src + tail8));
+		USER_LD(tmp4, (u32 __user *) (src + tail8), opc);
 	if (tail & 2)
-		USER_LD(tmp2, (u16 __user *) (src + tail12));
+		USER_LD(tmp2, (u16 __user *) (src + tail12), opc);
 	if (tail & 1)
-		USER_LD(tmp1, (u8 __user *) (src + tail14));
+		USER_LD(tmp1, (u8 __user *) (src + tail14), opc);
 
 	if (tail & 8)
 		*(u64 *) dst = tmp8;
@@ -389,9 +393,10 @@ copy_tail:
 	return 0;
 }
 
-UACCESS_GLOBEXP_FN_DEFINE4(copy_to_user_fn, void __user *, to, const void *, from,
-		unsigned long, size, unsigned long *, left)
+UACCESS_GLOBEXP_FN_DEFINE5(copy_to_userspace_fn, void __user *, to, const void *, from,
+		unsigned long, size, unsigned long *, left, bool, priv)
 {
+	ldst_rec_op_t opc = (priv) ? PRIV_LDST_OPC() : USER_LDST_OPC();
 	unsigned long n = size;
 	unsigned long head, tail, head1, head3, head7, tail8, tail12, tail14;
 	void __user *dst = to;
@@ -422,13 +427,13 @@ UACCESS_GLOBEXP_FN_DEFINE4(copy_to_user_fn, void __user *, to, const void *, fro
 		tmp8 = *(u64 *) (src + head7);
 
 	if (head & 1)
-		USER_ST(tmp1, (u8 __user *) dst);
+		USER_ST(tmp1, (u8 __user *) dst, opc);
 	if (head & 2)
-		USER_ST(tmp2, (u16 __user *) (dst + head1));
+		USER_ST(tmp2, (u16 __user *) (dst + head1), opc);
 	if (head & 4)
-		USER_ST(tmp4, (u32 __user *) (dst + head3));
+		USER_ST(tmp4, (u32 __user *) (dst + head3), opc);
 	if (head & 8)
-		USER_ST(tmp8, (u64 __user *) (dst + head7));
+		USER_ST(tmp8, (u64 __user *) (dst + head7), opc);
 
 	src += head & 0xf;
 	dst = PTR_ALIGN(dst, 16);
@@ -441,7 +446,7 @@ UACCESS_GLOBEXP_FN_DEFINE4(copy_to_user_fn, void __user *, to, const void *, fro
 		if (likely(length)) {
 			SET_USR_PFAULT("$recovery_memcpy_fault", true);
 			copied = fast_tagged_memory_copy_to_user(dst, src,
-					length, &copied, true);
+					length, &copied, true, priv);
 			RESTORE_USR_PFAULT(true);
 			WRITE_ONCE(*left, n - copied);
 		}
@@ -475,20 +480,22 @@ copy_tail:
 		tmp1 = *(u8 *) (src + tail14);
 
 	if (tail & 8)
-		USER_ST(tmp8, (u64 __user *) dst);
+		USER_ST(tmp8, (u64 __user *) dst, opc);
 	if (tail & 4)
-		USER_ST(tmp4, (u32 __user *) (dst + tail8));
+		USER_ST(tmp4, (u32 __user *) (dst + tail8), opc);
 	if (tail & 2)
-		USER_ST(tmp2, (u16 __user *) (dst + tail12));
+		USER_ST(tmp2, (u16 __user *) (dst + tail12), opc);
 	if (tail & 1)
-		USER_ST(tmp1, (u8 __user *) (dst + tail14));
+		USER_ST(tmp1, (u8 __user *) (dst + tail14), opc);
 
 	return 0;
 }
 
-UACCESS_GLOBEXP_FN_DEFINE4(copy_in_user_fn, void __user *, to, const void __user *, from,
-		unsigned long, size, unsigned long *, left)
+UACCESS_GLOBEXP_FN_DEFINE6(copy_in_userspace_fn, void __user *, to, const void __user *, from,
+		unsigned long, size, unsigned long *, left, bool, priv_from, bool, priv_to)
 {
+	ldst_rec_op_t opc_from = (priv_from) ? PRIV_LDST_OPC() : USER_LDST_OPC();
+	ldst_rec_op_t opc_to = (priv_to) ? PRIV_LDST_OPC() : USER_LDST_OPC();
 	unsigned long n = size;
 	unsigned long head, tail, head1, head3, head7, tail8, tail12, tail14;
 	void __user *dst = to;
@@ -510,22 +517,22 @@ UACCESS_GLOBEXP_FN_DEFINE4(copy_in_user_fn, void __user *, to, const void __user
 	head7 = head & 7;
 
 	if (head & 1)
-		USER_LD(tmp1, (u8 __user *) src);
+		USER_LD(tmp1, (u8 __user *) src, opc_from);
 	if (head & 2)
-		USER_LD(tmp2, (u16 __user *) (src + head1));
+		USER_LD(tmp2, (u16 __user *) (src + head1), opc_from);
 	if (head & 4)
-		USER_LD(tmp4, (u32 __user *) (src + head3));
+		USER_LD(tmp4, (u32 __user *) (src + head3), opc_from);
 	if (head & 8)
-		USER_LD(tmp8, (u64 __user *) (src + head7));
+		USER_LD(tmp8, (u64 __user *) (src + head7), opc_from);
 
 	if (head & 1)
-		USER_ST(tmp1, (u8 __user *) dst);
+		USER_ST(tmp1, (u8 __user *) dst, opc_to);
 	if (head & 2)
-		USER_ST(tmp2, (u16 __user *) (dst + head1));
+		USER_ST(tmp2, (u16 __user *) (dst + head1), opc_to);
 	if (head & 4)
-		USER_ST(tmp4, (u32 __user *) (dst + head3));
+		USER_ST(tmp4, (u32 __user *) (dst + head3), opc_to);
 	if (head & 8)
-		USER_ST(tmp8, (u64 __user *) (dst + head7));
+		USER_ST(tmp8, (u64 __user *) (dst + head7), opc_to);
 
 	/* Make sure "n" is changed *after* the actual
 	 * user accesses have been issued */
@@ -542,7 +549,7 @@ UACCESS_GLOBEXP_FN_DEFINE4(copy_in_user_fn, void __user *, to, const void __user
 		if (likely(length)) {
 			SET_USR_PFAULT("$recovery_memcpy_fault", true);
 			copied = fast_tagged_memory_copy_in_user(dst, src,
-					length, &copied, true);
+					length, &copied, true, priv_to, priv_from);
 			RESTORE_USR_PFAULT(true);
 			WRITE_ONCE(*left, n - copied);
 		}
@@ -567,22 +574,22 @@ copy_tail:
 	tail14 = tail & 14;
 
 	if (tail & 8)
-		USER_LD(tmp8, (u64 __user *) src);
+		USER_LD(tmp8, (u64 __user *) src, opc_from);
 	if (tail & 4)
-		USER_LD(tmp4, (u32 __user *) (src + tail8));
+		USER_LD(tmp4, (u32 __user *) (src + tail8), opc_from);
 	if (tail & 2)
-		USER_LD(tmp2, (u16 __user *) (src + tail12));
+		USER_LD(tmp2, (u16 __user *) (src + tail12), opc_from);
 	if (tail & 1)
-		USER_LD(tmp1, (u8 __user *) (src + tail14));
+		USER_LD(tmp1, (u8 __user *) (src + tail14), opc_from);
 
 	if (tail & 8)
-		USER_ST(tmp8, (u64 __user *) dst);
+		USER_ST(tmp8, (u64 __user *) dst, opc_to);
 	if (tail & 4)
-		USER_ST(tmp4, (u32 __user *) (dst + tail8));
+		USER_ST(tmp4, (u32 __user *) (dst + tail8), opc_to);
 	if (tail & 2)
-		USER_ST(tmp2, (u16 __user *) (dst + tail12));
+		USER_ST(tmp2, (u16 __user *) (dst + tail12), opc_to);
 	if (tail & 1)
-		USER_ST(tmp1, (u8 __user *) (dst + tail14));
+		USER_ST(tmp1, (u8 __user *) (dst + tail14), opc_to);
 
 	return 0;
 }
@@ -590,8 +597,8 @@ copy_tail:
 /*
  * All arguments must be aligned
  */
-unsigned long raw_copy_in_user_with_tags(volatile void __user *to,
-					 const volatile void __user *from, unsigned long n)
+unsigned long raw_copy_in_userspace_with_tags(volatile void __user *to,
+		const volatile void __user *from, unsigned long n, bool priv_to, bool priv_from)
 {
 	volatile void __user *dst = to;
 	volatile const void __user *src = from;
@@ -607,7 +614,7 @@ unsigned long raw_copy_in_user_with_tags(volatile void __user *to,
 
 		SET_USR_PFAULT("$recovery_memcpy_fault", false);
 		copied = fast_tagged_memory_copy_in_user(dst, src, length,
-				&copied, true);
+				&copied, true, priv_to, priv_from);
 		RESTORE_USR_PFAULT(false);
 
 		n -= copied;
@@ -625,8 +632,8 @@ unsigned long raw_copy_in_user_with_tags(volatile void __user *to,
 /*
  * All arguments must be aligned
  */
-unsigned long raw_copy_from_user_with_tags(volatile void *to, const volatile void __user *from,
-		unsigned long n)
+unsigned long raw_copy_from_userspace_with_tags(volatile void *to, const volatile void __user *from,
+		unsigned long n, bool priv)
 {
 	volatile void *dst = to;
 	volatile void __user *src = ( volatile void __user * __force)from;
@@ -642,7 +649,7 @@ unsigned long raw_copy_from_user_with_tags(volatile void *to, const volatile voi
 
 		SET_USR_PFAULT("$recovery_memcpy_fault", false);
 		copied = fast_tagged_memory_copy_from_user(dst, src, length,
-				&copied, true);
+				&copied, true, priv);
 		RESTORE_USR_PFAULT(false);
 
 		n -= copied;
@@ -661,8 +668,8 @@ unsigned long raw_copy_from_user_with_tags(volatile void *to, const volatile voi
  * All arguments must be aligned
  * NB> This is "copy-to-user" action.
  */
-unsigned long raw_copy_to_user_with_tags(volatile void __user *to, const volatile void *from,
-		unsigned long n)
+unsigned long raw_copy_to_userspace_with_tags(volatile void __user *to, const volatile void *from,
+		unsigned long n, bool priv)
 {
 	volatile void __user *dst = to;
 	const volatile void *src = from;
@@ -679,7 +686,7 @@ unsigned long raw_copy_to_user_with_tags(volatile void __user *to, const volatil
 
 		SET_USR_PFAULT("$recovery_memcpy_fault", false);
 		copied = fast_tagged_memory_copy_to_user(dst, src, length,
-				&copied, true);
+				&copied, true, priv);
 		RESTORE_USR_PFAULT(false);
 
 		n -= copied;
@@ -698,7 +705,7 @@ unsigned long raw_copy_to_user_with_tags(volatile void __user *to, const volatil
  * All arguments must be aligned
  */
 unsigned long __fill_user_with_tags(void __user *to, unsigned long n,
-		unsigned long tag, unsigned long dw, ldst_rec_op_t strd_opcode)
+		unsigned long tag, unsigned long dw)
 {
 	size_t cleared;
 
@@ -706,7 +713,7 @@ unsigned long __fill_user_with_tags(void __user *to, unsigned long n,
 		return n;
 
 	SET_USR_PFAULT("$recovery_memset_fault", false);
-	cleared = fast_tagged_memory_set_user(to, dw, tag, n, &cleared, strd_opcode);
+	cleared = fast_tagged_memory_set_user(to, dw, tag, n, &cleared, false);
 	RESTORE_USR_PFAULT(false);
 
 	return n - cleared;

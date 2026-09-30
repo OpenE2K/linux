@@ -267,6 +267,7 @@ static inline int copy_user_buf_to_current_proc_stack(volatile void *dst,
 						      unsigned long size)
 {
 	u64 counter;
+	unsigned long flags;
 #ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (likely(!host_test_intc_emul_mode(regs)) && !access_ok(src, size))
 		return -EFAULT;
@@ -277,7 +278,9 @@ static inline int copy_user_buf_to_current_proc_stack(volatile void *dst,
 	 */
 	do {
 		counter = READ_ONCE(current->thread.traps_count);
+		all_irq_save(flags);
 		NATIVE_FLUSHR;
+		all_irq_restore(flags);
 #ifdef CONFIG_KVM_PARAVIRTUALIZATION
 		unsigned long ts_flag;
 		size_t copied;

@@ -83,14 +83,10 @@ config E2K_STACKS_TRACER
 	  is disabled.
 
 	  To enable the stack tracer on bootup, pass in 'stacktrace'
-	  on the kernel command line.  You can pass 'stacktrace=kernel'
-	  to trace only kernel part of hardware stacks.
+	  on the kernel command line.
 
 	  The stack tracer can also be enabled or disabled via the
 	  sysctl kernel.stack_tracer_enabled
-
-	  There is also sysctl kernel.stack_tracer_kernel_only knob
-	  for controlling which threads to trace.
 
 	  Pass stacktrace_filter= to the kernel command line to set
 	  specific functions to check the stacks on.

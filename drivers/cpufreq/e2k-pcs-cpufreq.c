@@ -515,7 +515,13 @@ static int pcs_l_cpufreq_init(struct cpufreq_policy *policy)
 	policy->freq_table = data->table;
 
 	if (IS_MACHINE_E8C2) {
-		cpumask_copy(policy->cpus, topology_core_cpumask(policy->cpu));
+		int i;
+
+		cpumask_clear(policy->cpus);
+		for_each_possible_cpu(i) {
+			if (cpu_to_node(i) == node)
+				cpumask_set_cpu(i, policy->cpus);
+		}
 		policy->cpuinfo.transition_latency =
 					DIVF_STEPS_LENGTH_NS_V5(divf_steps);
 	} else {

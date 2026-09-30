@@ -126,29 +126,8 @@ static inline u32 kvm_get_sci_timer_max_mask(struct kvm_spmc *spmc)
 	return ~0U;
 }
 
-static inline struct kvm_spmc *kvm_get_spmc(struct kvm *kvm, int node_id)
-{
-	ASSERT(node_id < KVM_MAX_EIOHUB_NUM);
-	return kvm->arch.spmc[node_id];
-}
-
-static inline void kvm_set_spmc(struct kvm *kvm, int node_id,
-				struct kvm_spmc *spmc)
-{
-	ASSERT(node_id < KVM_MAX_EIOHUB_NUM);
-	kvm->arch.spmc[node_id] = spmc;
-}
-
-static inline bool kvm_spmc_in_kernel(struct kvm *kvm, int node_id)
-{
-	return kvm_get_spmc(kvm, node_id) != NULL;
-}
 extern int kvm_spmc_set_base(struct kvm *kvm, int node_id,
 					unsigned long conf_base);
-
-extern struct kvm_spmc *kvm_create_spmc(struct kvm *kvm, int node_id,
-					u32 ticks_per_sec, u32 spmc_timer_freq);
-extern void kvm_free_spmc(struct kvm *kvm, int node_id);
 extern void kvm_free_all_spmc(struct kvm *kvm);
 
 #endif	/* __KVM_SPMC_H */

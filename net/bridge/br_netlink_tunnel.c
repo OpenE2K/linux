@@ -286,7 +286,11 @@ int br_process_vlan_tunnel_info(const struct net_bridge *br,
 				struct vtunnel_info *tinfo_last,
 				bool *changed)
 {
+#ifdef CONFIG_MCST
+	int err = 0;
+#else
 	int err;
+#endif
 
 	if (tinfo_curr->flags & BRIDGE_VLAN_INFO_RANGE_BEGIN) {
 		if (tinfo_last->flags & BRIDGE_VLAN_INFO_RANGE_BEGIN)

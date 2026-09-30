@@ -41,7 +41,7 @@ typedef	struct kvm_lt_regs {
 } kvm_lt_regs_t;
 
 typedef struct kvm_lt {
-	u64 base_address;
+	gpa_t base_address;
 	kvm_lt_regs_t regs;
 	struct kvm_timer sys_timer;
 	struct kvm_timer wd_timer;
@@ -57,27 +57,7 @@ typedef struct kvm_lt {
 	struct mutex lock;
 } kvm_lt_t;
 
-static inline struct kvm_lt *kvm_get_lt(struct kvm *kvm, int node_id)
-{
-	ASSERT(node_id < KVM_MAX_EIOHUB_NUM);
-	return kvm->arch.lt[node_id];
-}
-
-static inline void kvm_set_lt(struct kvm *kvm, int node_id, struct kvm_lt *lt)
-{
-	ASSERT(node_id < KVM_MAX_EIOHUB_NUM);
-	kvm->arch.lt[node_id] = lt;
-}
-
-static inline bool kvm_lt_in_kernel(struct kvm *kvm, int node_id)
-{
-	return kvm_get_lt(kvm, node_id) != NULL;
-}
-extern int kvm_lt_set_base(struct kvm *kvm, int node_id,
-				unsigned long new_base);
-
-extern struct kvm_lt *kvm_create_lt(struct kvm *kvm, int node_id, u32 sys_timer_freq);
-extern void kvm_free_lt(struct kvm *kvm, int node_id);
+extern int kvm_lt_set_base(struct kvm *kvm, int node_id, gpa_t new_base);
 extern void kvm_free_all_lt(struct kvm *kvm);
 
 #endif	/* __KVM_L_TIMER_H */

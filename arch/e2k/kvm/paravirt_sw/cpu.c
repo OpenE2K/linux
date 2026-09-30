@@ -970,7 +970,7 @@ static int setup_pv_vcpu_trap_stack(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 		local_gregs_t l_gregs;
 
 		ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
-		ret = raw_copy_from_user_with_tags(&l_gregs, &context->l_gregs,
+		ret = raw_copy_from_userspace_with_tags(&l_gregs, &context->l_gregs,
 						 sizeof(l_gregs));
 		clear_ts_flag(ts_flag);
 		if (ret) {
@@ -1470,7 +1470,7 @@ static int copy_k_gregs_from_sig_context(kernel_gregs_t *k_gregs,
 	int ret;
 
 	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
-	ret = raw_copy_from_user_with_tags(k_gregs, &context->l_gregs, sizeof(*k_gregs));
+	ret = raw_copy_from_userspace_with_tags(k_gregs, &context->l_gregs, sizeof(*k_gregs));
 	clear_ts_flag(ts_flag);
 
 	return (ret) ? -EFAULT : 0;
@@ -1496,7 +1496,7 @@ static int copy_local_gregs_from_sig_context(local_gregs_t *l_gregs,
 	int ret;
 
 	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
-	ret = raw_copy_from_user_with_tags(l_gregs, &context->l_gregs, sizeof(*l_gregs));
+	ret = raw_copy_from_userspace_with_tags(l_gregs, &context->l_gregs, sizeof(*l_gregs));
 	clear_ts_flag(ts_flag);
 
 	return (ret) ? -EFAULT : 0;

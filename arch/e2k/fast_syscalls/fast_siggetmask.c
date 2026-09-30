@@ -23,5 +23,5 @@ int fast_sys_siggetmask(u64 __user *oset, size_t sigsetsize)
 	if (unlikely((unsigned long) oset + sizeof(sigset_t) > user_addr_max()))
 		return -EFAULT;
 
-	return __put_user_switched_pt(set, oset);
+	return put_user_switched_pt(set, oset);
 }

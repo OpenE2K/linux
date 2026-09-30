@@ -2621,8 +2621,8 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 
 #ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	init_completion(&vcpu->arch.released);
-#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	mutex_init(&vcpu->arch.lock);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	vcpu->arch.ioport_data = get_ioport_data_pointer(vcpu->run);
 #ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	vcpu->arch.ioport_data_size = get_ioport_data_size(vcpu->run);
@@ -3544,6 +3544,7 @@ int kvm_arch_vcpu_ioctl_set_guest_debug(struct kvm_vcpu *vcpu,
 	return -EINVAL;
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 void kvm_halt_host_vcpu_thread(struct kvm_vcpu *vcpu)
 {
 	DebugKVMSH("%s (%d) started to terminate VCPU #%d thread\n",
@@ -3555,9 +3556,7 @@ void kvm_halt_host_vcpu_thread(struct kvm_vcpu *vcpu)
 	vcpu->arch.host_task = NULL;
 	mutex_unlock(&vcpu->arch.lock);
 
-#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	kvm_arch_vcpu_release(vcpu);
-#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 }
 
 static void kvm_halt_all_host_vcpus(struct kvm *kvm)
@@ -3572,10 +3571,8 @@ static void kvm_halt_all_host_vcpus(struct kvm *kvm)
 		if (vcpu != NULL) {
 			if (vcpu->arch.host_task != NULL) {
 				kvm_halt_host_vcpu_thread(vcpu);
-#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 			} else {
 				free_vcpu_state(vcpu);
-#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 			}
 		}
 	}
@@ -3589,19 +3586,16 @@ static void kvm_wait_for_vcpu_release(struct kvm_vcpu *vcpu)
 
 	if (vcpu->arch.host_task != NULL) {
 		kvm_halt_host_vcpu_thread(vcpu);
-#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	} else {
 		kvm_arch_vcpu_release(vcpu);
-#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	}
 
-#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (!vcpu->arch.is_hv) {
 		wait_for_completion(&vcpu->arch.released);
 	}
-#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	DebugKVMSH("VCPU #%d released\n", vcpu->vcpu_id);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 void kvm_arch_vcpu_destroy(struct kvm_vcpu *vcpu)
 {
@@ -3635,7 +3629,6 @@ static void kvm_arch_free_all_vcpus_virqs(struct kvm *kvm)
 	}
 	mutex_unlock(&kvm->lock);
 }
-#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static void kvm_arch_release_all_vcpus(struct kvm *kvm)
 {
@@ -3651,6 +3644,7 @@ static void kvm_arch_release_all_vcpus(struct kvm *kvm)
 	}
 	mutex_unlock(&kvm->lock);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static void kvm_arch_free_all_vcpus(struct kvm *kvm)
 {
@@ -3838,10 +3832,8 @@ void kvm_arch_destroy_vm(struct kvm *kvm)
 	if (kvm->arch.is_pv && !kvm->arch.is_hv) {
 		kvm_guest_pv_mm_destroy(kvm);
 	}
-#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	kvm_arch_release_all_vcpus(kvm);
 	kvm_halt_all_host_vcpus(kvm);
-#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	kvm_free_host_info(kvm);
 #endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	kvm_nbsr_destroy(kvm);
@@ -3900,6 +3892,7 @@ void kvm_arch_vcpu_put(struct kvm_vcpu *vcpu, bool schedule)
 #endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	local_irq_restore(flags);
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	/* remember that this thread is thread of the kvm vcpu */
 	/* and only scheduled from cpu or switched to vcpu-qemu mode */
 	if (current_thread_info()->vcpu) {
@@ -3908,6 +3901,7 @@ void kvm_arch_vcpu_put(struct kvm_vcpu *vcpu, bool schedule)
 	} else {
 		E2K_KVM_BUG_ON(current_thread_info()->is_vcpu != NULL);
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 }
 
 static DEFINE_PER_CPU(struct kvm_vcpu *, last_vcpu) = NULL;
@@ -3919,10 +3913,12 @@ void kvm_arch_vcpu_load(struct kvm_vcpu *vcpu, int cpu, bool schedule)
 
 	DebugKVMRUN("started on VCPU %d CPU %d\n", vcpu->vcpu_id, cpu);
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (current_thread_info()->is_vcpu) {
 		E2K_KVM_BUG_ON(vcpu != current_thread_info()->is_vcpu);
 		current_thread_info()->vcpu = vcpu;
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	vcpu->cpu = cpu;
 	trace_vcpu_load(vcpu->vcpu_id, last_cpu, cpu, schedule);

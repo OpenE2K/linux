@@ -1123,6 +1123,10 @@ int SM768_setOverlay(
             uvPitch = 0;
             VideoFormat = FORMAT_RGB888;
             break;
+#ifdef CONFIG_MCST
+	case FFT_INVALID:
+	    break;
+#endif
     }
     videoSetupEx(
                dispControl,

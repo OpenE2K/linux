@@ -203,7 +203,7 @@ const char *regs_query_register_name(unsigned int offset)
  *
  * regs_get_register returns the value of a register. The @offset is the
  * offset of the register in struct pt_regs address which specified by @regs.
- * If @offset is bigger than MAX_REG_OFFSET, this returns 0.
+ * If @offset is invalid, return 0xdead.
  */
 unsigned long regs_get_register(const struct pt_regs *regs, unsigned int offset)
 {
@@ -1149,9 +1149,6 @@ static int check_permissions(const struct user_regs_struct *user_regs)
 	e2k_ddmcr_t ddmcr, ddmcr1;
 	e2k_aasr_t aasr;
 	int i, ret;
-
-	if (capable(CAP_SYS_ADMIN))
-		return 0;
 
 	AW(dibcr) = user_regs->dibcr;
 	AW(dimcr) = user_regs->dimcr;
@@ -2205,9 +2202,6 @@ static int check_permissions_for_debug_regs(const struct e2k_debug_regs *debug_r
 	e2k_dibcr_t dibcr;
 	e2k_dimcr_t dimcr, dimcr1;
 	e2k_ddmcr_t ddmcr, ddmcr1;
-
-	if (capable(CAP_SYS_ADMIN))
-		return 0;
 
 	AW(dibcr) = debug_regs->dibcr;
 	AW(dimcr) = debug_regs->dimcr;

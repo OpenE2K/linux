@@ -80,14 +80,14 @@ do { \
  */
 static inline void copy_page_pa(phys_addr_t to, phys_addr_t from)
 {
-	ldst_rec_op_t strd_opcode = ldst_rec_disabled_translation(CACHE_BYPASS_NONE);
-	ldst_rec_op_t ldrd_opcode = ldst_rec_disabled_translation(CACHE_BYPASS_L1);
+	ldst_rec_op_t st_opc = ldst_rec_disabled_translation(CACHE_BYPASS_NONE);
+	ldst_rec_op_t ld_opc = ldst_rec_disabled_translation(CACHE_BYPASS_L1);
 	if (cpu_has(CPU_FEAT_ISET_V5)) {
 		__recovery_memcpy_16((void *) to, (void *) from, PAGE_SIZE,
-				strd_opcode, ldrd_opcode, 0);
+				st_opc, ld_opc, 0);
 	} else {
 		__recovery_memcpy_8((void *) to, (void *) from, PAGE_SIZE,
-				strd_opcode, ldrd_opcode, 0);
+				st_opc, ld_opc, 0);
 	}
 }
 
